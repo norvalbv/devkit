@@ -1,20 +1,16 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
-import { scriptPath } from './_ship-branch-fixture.mts';
 
 const reshipPath = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
+const originBasePath = fileURLToPath(new URL('../lib/ship/origin-base.sh', import.meta.url));
 const REWRITE_FN_RE = /^rewrite_remote\(\) \{[\s\S]*?^\}/m;
 // A detached auto-gc/maintenance inherits the supervisor's ownership token and is reaped as a leaked
 // tree, turning a finished fetch into 124 (sc-3761). Every supervised remote git call carries this.
 const NO_AUTO_GC = '-c gc.auto=0 -c maintenance.auto=false';
-
-// The published package carries only the compiled `.mjs` next to the ship scripts; the `.mts`
-// exists in a source checkout alone. ship-branch.sh runs from both trees.
-const FN_RE = /^bounded_remote_git\(\) \{[\s\S]*?^\}/m;
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -33,17 +29,20 @@ function shipTree(ext: 'mts' | 'mjs') {
   return dir;
 }
 
+/** bounded_remote_git finds the supervisor beside its own file, so run a copy placed in the tree. */
 function runBoundedRemoteGit(scriptDir: string) {
-  const fn = FN_RE.exec(readFileSync(scriptPath, 'utf8'))?.[0];
-  if (!fn) throw new Error('bounded_remote_git not found in ship-branch.sh');
+  const lib = join(scriptDir, 'origin-base.sh');
+  copyFileSync(originBasePath, lib);
   return spawnSync(
     '/bin/bash',
-    ['-c', `set -eu; SCRIPT_DIR=${JSON.stringify(scriptDir)}; ${fn}; bounded_remote_git ls-remote`],
+    ['-c', `set -eu; . ${JSON.stringify(lib)}; bounded_remote_git ls-remote`],
     { encoding: 'utf8' },
   );
 }
 
-describe('ship-branch.sh — bounded_remote_git resolves the packaged supervisor', () => {
+// The published package carries only the compiled `.mjs` next to the ship scripts; the `.mts`
+// exists in a source checkout alone. origin-base.sh is sourced from both trees.
+describe('origin-base.sh — bounded_remote_git resolves the packaged supervisor', () => {
   for (const ext of ['mts', 'mjs'] as const) {
     it(`runs the .${ext} supervisor when that is the one on disk`, () => {
       const r = runBoundedRemoteGit(shipTree(ext));

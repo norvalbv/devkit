@@ -208,6 +208,7 @@ rewrite_remote() {
   node "$REWRITE_REMOTE_SUPERVISOR" 60 -- "$@"
 }
 . "$SCRIPT_DIR/closed-pr-remedy.sh"
+. "$SCRIPT_DIR/origin-base.sh"
 # An append onto a MERGED or CLOSED PR's branch reaches no base, so it must never report success.
 # Fail-open when gh cannot answer: the append path has always treated gh as best-effort.
 # usage: reship_refuse_closed_pr <when> <outcome>
@@ -587,10 +588,8 @@ if [ "$REWRITE" -eq 1 ]; then
     fi
   done
 else
-  git fetch origin "$BR" 2>/dev/null || {
-    echo "no remote branch origin/$BR to re-push to — open the PR first (ship without --pr)" >&2; exit 1
-  }
-  BASE=$(git rev-parse FETCH_HEAD)
+  BASE=$(ship_pin_origin_base "$ROOT" "$BR" "ship --pr" \
+    "no remote branch origin/$BR to re-push to — open the PR first (ship without --pr)") || exit 1
   # Before the intent write too: no later push can reach a non-open PR, so nothing is worth resuming.
   [ -n "${SHIP_DRY_RUN:-}" ] || reship_refuse_closed_pr "" "nothing pushed" || exit 1
 fi
