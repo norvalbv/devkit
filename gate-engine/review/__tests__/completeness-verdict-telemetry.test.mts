@@ -86,6 +86,25 @@ describe('completeness verdict telemetry', () => {
     expect(verdicts()[0].secs).toBeTypeOf('number');
   });
 
+  it('a multi-gap FAIL prints every gap and records the verdict reason, not the first gap line', async () => {
+    const repo = consumerRepo({ backend: true });
+    const raw = [
+      'CRITICAL: reauth drops the provider | src/auth.ts | nimbus reauths into stellar',
+      'IMPORTANT: the test locks the providerless shape | src/__tests__/auth.test.ts',
+      'ISSUES: 1 critical, 1 important, 0 low',
+      'VERDICT: FAIL — reauth drops the provider; 2 gaps',
+    ].join('\n');
+    const exec = mkExec(async () => raw);
+
+    expect(await runCompleteness(messageFile(repo, 'feat: reauth'), repo, { exec })).toBe(1);
+    expect(verdicts()[0]).toMatchObject({
+      status: 'fail',
+      detail: 'reauth drops the provider; 2 gaps',
+    });
+    const printed = vi.mocked(console.error).mock.calls.flat().join('\n');
+    expect(printed).toContain('IMPORTANT: the test locks the providerless shape');
+  });
+
   it('still emits the fail row when GUARD_COMPLETENESS_HARD=0 softens the exit to 0', async () => {
     // The softened run is precisely the one whose reader has nothing else to go on: it exits 0, so
     // no remediation is printed and no exit code carries the finding.
