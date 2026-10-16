@@ -101,6 +101,53 @@ describe.each(['standalone', 'overlay'])('%s hook, global bins', (builder) => {
   });
 });
 
+describe('overlay hook, review baselines defer to the finalizer', () => {
+  const REVIEW_ONLY = { biome: false, guards: ['review'] };
+  const overlay = (extra) =>
+    runHook(review({ REVIEW_RC: '1', ...extra }), REVIEW_ONLY, {
+      builder: 'overlay',
+      fallow: true,
+    });
+  const summaries = (stdout) => stdout.split('\n').filter((l) => l.includes('failed gates:'));
+
+  it('a failing fallow baseline is named alongside the reviewer finding', () => {
+    const r = overlay({ FALLOW_BASELINE_RC: '1' });
+    expect(summaries(r.stdout)).toEqual([
+      '✗ review: failed gates: guard-review fallow (findings above).',
+    ]);
+    expect(r.status).toBe(1);
+  });
+
+  it('a failing eslint baseline still runs the fallow baseline, then names both failures', () => {
+    const r = overlay({ ESLINT_BASELINE_RC: '1' });
+    expect(r.calls).toMatch(/^baseline \S+ fallow /m);
+    expect(summaries(r.stdout)).toEqual([
+      '✗ review: failed gates: guard-review eslint-overlay (findings above).',
+    ]);
+    expect(r.status).toBe(1);
+  });
+
+  // The baselines no longer exit themselves, so a lone baseline failure blocks only via the finalizer.
+  it.each(['', 'pkg/a'])('a baseline failing alone still blocks (pkgRel %j)', (pkgRel) => {
+    const r = runHook(review({ FALLOW_BASELINE_RC: '1' }), REVIEW_ONLY, {
+      builder: 'overlay',
+      fallow: true,
+      pkgRel,
+    });
+    expect(summaries(r.stdout)).toEqual(['✗ review: failed gates: fallow (findings above).']);
+    expect(r.status).toBe(1);
+  });
+
+  it('a missing baseline runtime prints its remedy and still reaches the finalizer', () => {
+    const r = overlay({ DEVKIT_REVIEW_BASELINE_DIR: '' });
+    expect(r.stderr).toContain('merge-base baseline runtime is missing');
+    expect(summaries(r.stdout)).toEqual([
+      '✗ review: failed gates: guard-review eslint-overlay fallow (findings above).',
+    ]);
+    expect(r.status).toBe(1);
+  });
+});
+
 describe.each(BUILDERS)('%s hook, commit and dry-gates keep their policy', (builder) => {
   it('a commit stops at the comment-budget block', () => {
     const r = runHook({ DET_RC: '1' }, AI_CHAIN, { builder });

@@ -254,13 +254,23 @@ esac
 
   // Overlay review always runs its merge-base lint diagnostic after the selected guards. Give the
   // generated helper a minimal packaged-runtime shape and a node stub that records the call.
+  // ESLINT_BASELINE_RC / FALLOW_BASELINE_RC fail only the baseline helper, never staged eslint.
   const packageRoot = join(home, 'runtime');
   const baselineDir = join(home, 'baseline');
   mkdirSync(join(packageRoot, 'gate-engine', 'review'), { recursive: true });
   mkdirSync(baselineDir);
   writeFileSync(join(packageRoot, 'gate-engine', 'review', 'baseline-gate.mts'), '// test stub\n');
   if (builder === 'overlay') {
-    writeFileSync(join(bin, 'node'), '#!/bin/sh\necho "baseline $*" >> "$HOME/calls.log"\n');
+    writeFileSync(
+      join(bin, 'node'),
+      `#!/bin/sh
+echo "baseline $*" >> "$HOME/calls.log"
+case "$1" in */baseline-gate.m*s) case "$2" in
+    eslint) exit \${ESLINT_BASELINE_RC:-0};;
+    fallow) exit \${FALLOW_BASELINE_RC:-0};;
+esac;; esac
+`,
+    );
     chmodSync(join(bin, 'node'), 0o755);
   }
 
