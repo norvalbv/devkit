@@ -160,6 +160,9 @@ export const SHIP_QUEUE_ENV = [
   'DEVKIT_SHIP_SLOT',
   'DEVKIT_SHIP_SLOT_DIR',
   'DEVKIT_SHIP_SLOT_RELEASE',
+  // The dispatcher's queue timing (commands/ship.mts): inherited, a fixture reports the outer wait.
+  'DEVKIT_SHIP_QUEUED_S',
+  'DEVKIT_SHIP_GRANTED_AT',
 ];
 
 export const SCRUBBED_ENV = [

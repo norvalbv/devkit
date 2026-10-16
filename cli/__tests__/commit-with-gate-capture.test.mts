@@ -562,3 +562,87 @@ describe('_ship_sh_word — quoting round-trips any argument', () => {
     expect(r.stdout).toBe(input);
   });
 });
+
+// A "sat idle for an hour" report must be checkable from the attempt itself: queue wait, setup and
+// gate time are split on one line, which both retained logs keep.
+describe('commit_with_gate_capture — every attempt prints its timing line', () => {
+  const sinkRows = (root: string) =>
+    readFileSync(join(root, 'telemetry/gate-events.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+  const attemptLine = (stderr: string) =>
+    stderr.split('\n').find((line) => line.startsWith('attempt sc1537-test feat/sc1537: '));
+  const queuedEnv = () => ({
+    DEVKIT_SHIP_QUEUED_S: '90',
+    DEVKIT_SHIP_GRANTED_AT: String(Math.floor(Date.now() / 1000) - 100),
+  });
+
+  it('a green attempt splits queued, setup and gates and keeps the line in both logs', () => {
+    const { root, wt, base } = fixture(true);
+
+    const result = runCommit(root, wt, base, false, false, '', queuedEnv());
+
+    expect(result.status, result.stderr).toBe(0);
+    const line = attemptLine(result.stderr);
+    expect(line).toMatch(
+      /^attempt sc1537-test feat\/sc1537: queued 90s · setup 1\d\ds · gates \d+s · \S+Z → \S+Z · outcome=pass · log /,
+    );
+    // The per-attempt archive, not the per-branch log every retry overwrites.
+    expect(line?.endsWith(` · log ${join(root, 'telemetry/logs/sc1537-test.log')}`)).toBe(true);
+    for (const log of [
+      join(root, '.devkit/last-ship-gates-feat-sc1537.log'),
+      join(root, 'telemetry/logs/sc1537-test.log'),
+    ]) {
+      expect(readFileSync(log, 'utf8'), log).toContain(`${line}\n`);
+    }
+    expect(sinkRows(root).find((e) => e.type === 'ship_attempt')).toMatchObject({ queued_s: 90 });
+  });
+
+  it('a blocked attempt names the blocking gate, above the digest', () => {
+    const hook =
+      "echo 'REAL_PRE_COMMIT_RAN' >&2\n" +
+      `printf '%s\\n' '{"ship_id":"sc1537-test","type":"review_result","reviewer":"correctness","status":"fail","reason":"x"}' >> "$DEVKIT_GATE_EVENTS"\n` +
+      "echo 'guard-review: correctness — FAILED' >&2\nexit 1\n";
+    const { root, wt, base } = fixture(true, hook);
+
+    const result = runCommit(root, wt, base, false, false, '', queuedEnv());
+
+    expect(result.status).not.toBe(0);
+    expect(attemptLine(result.stderr)).toContain('· outcome=review ·');
+    expect(result.stderr.indexOf('attempt sc1537-test')).toBeLessThan(
+      result.stderr.indexOf('Gate findings this run'),
+    );
+  });
+
+  it('without the queue env (a direct shell run) it prints gates only and records no queued_s', () => {
+    const { root, wt, base } = fixture(true);
+
+    const result = runCommit(root, wt, base);
+
+    expect(attemptLine(result.stderr)).toMatch(/^attempt sc1537-test feat\/sc1537: gates \d+s · /);
+    expect(sinkRows(root).find((e) => e.type === 'ship_attempt')).not.toHaveProperty('queued_s');
+  });
+
+  it('a --dry-gates rehearsal prints the line but writes no ship_attempt row', () => {
+    const { root, wt, base } = fixture(true);
+
+    const result = runCommit(root, wt, base, false, true, '', queuedEnv());
+
+    expect(attemptLine(result.stderr)).toContain('queued 90s');
+    const sink = join(root, 'telemetry/gate-events.jsonl');
+    expect(existsSync(sink) && sinkRows(root).some((e) => e.type === 'ship_attempt')).toBe(false);
+  });
+
+  it('ignores a non-numeric queue env, so the sink row can never tear', () => {
+    const { root, wt, base } = fixture(true);
+
+    const result = runCommit(root, wt, base, false, false, '', {
+      DEVKIT_SHIP_QUEUED_S: '9"x',
+      DEVKIT_SHIP_GRANTED_AT: '1',
+    });
+
+    expect(attemptLine(result.stderr)).not.toContain('queued');
+    expect(sinkRows(root).find((e) => e.type === 'ship_attempt')).not.toHaveProperty('queued_s');
+  });
+});
