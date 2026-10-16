@@ -38,6 +38,14 @@ describe('gate.yml required job', () => {
     expect(job).toContain('RESULTS: ${{ toJSON(needs) }}');
   });
 
+  it('posts its check run as `required`, the context main ruleset names, with no name or matrix', () => {
+    expect(requiredJob()).not.toMatch(/^ {4}(name|strategy):/m);
+  });
+
+  it('runs on every pull request, so no PR waits forever on a check that never reports', () => {
+    expect(text).toMatch(/^ {2}pull_request:\n(?!(?:[ \t]*(?:#.*)?\n)* {3})/m);
+  });
+
   it.each([
     [{ gate: { result: 'success' } }, 0],
     [{ gate: { result: 'failure' } }, 1],
