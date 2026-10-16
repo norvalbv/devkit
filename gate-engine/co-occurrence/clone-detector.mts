@@ -22,6 +22,7 @@
  * Usage:
  *   guard-clone scan [--min-tokens 50] [--paths "src/renderer src/main"]
  *   guard-clone json   # machine-readable clones
+ *   guard-clone reconcile [--apply]   # drop clone approvals the scan no longer produces
  *   guard-clone scan --changed --gate
  *       # commit gate: clones touching a staged file (--changed, set via
  *       # MATCHER_CHANGED_FILES or git), not covered by a live allowlist clone.
@@ -36,7 +37,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mts';
 import { exitGate, failLine } from '../deterministic/reason.mts';
-import { ALLOWLIST_CLI, loadAllowlist } from './allowlist-io.mts';
+import { ALLOWLIST_CLI, loadAllowlist, saveAllowlist } from './allowlist-io.mts';
 import { flagReader } from './argv.mts';
 import { loadChangedSet } from './changed-files.mts';
 import { isExpired } from './decay.mts';
@@ -270,12 +271,76 @@ const argv = process.argv.slice(2);
 const mode = argv[0] ?? 'scan';
 const flag = flagReader(argv);
 
+// Flags that would narrow the scan below the gate's scope, so reconcile would read every
+// out-of-scope approval as dead and delete it.
+export const RECONCILE_REFUSED_FLAGS = [
+  '--paths',
+  '--min-tokens',
+  '--include-same-file',
+  '--changed',
+  '--gate',
+];
+
+function refuseReconcile(msg: string): never {
+  console.error(`guard-clone reconcile: ${msg} Nothing removed.`);
+  process.exit(1);
+}
+
+// Clone half of `guard-dup reconcile`: drop approvals the gate's own full scan no longer produces.
+// Reason: flat refuse → scan → partition → report → dry-run-vs-apply steps; a dev-only burn-down command covered end-to-end by spawned tests, which CRAP's coverage estimate cannot see
+// fallow-ignore-next-line complexity
+function runCloneReconcile(): void {
+  const refused = argv.filter((a) => RECONCILE_REFUSED_FLAGS.includes(a));
+  if (refused.length > 0)
+    refuseReconcile(`${refused.join(' ')} not allowed — it scans the gate's scope.`);
+  if (allowlistPath == null) refuseReconcile('no allowlist path configured (allowlistPath).');
+  let scanned: Clone[];
+  try {
+    scanned = detectClones();
+  } catch (e: unknown) {
+    refuseReconcile(e instanceof Error ? e.message : String(e));
+  }
+  // Loaded after the scan so an add-clone landing mid-scan is not lost; a corrupt file exits 2.
+  const { pairs, clones } = loadAllowlist(allowlistPath, 'clone-detector');
+  if (scanned.length === 0 && clones.length > 0) {
+    refuseReconcile(
+      `scan returned no clones; refusing to drop ${clones.length} entries. If all are resolved, retire them with ${CO_SCRIPT} remove-clone.`,
+    );
+  }
+  const live = new Set(scanned.map((c) => c.fragmentHash));
+  const kept = clones.filter((c) => live.has(c.fragmentHash));
+  const dropped = clones.filter((c) => !live.has(c.fragmentHash));
+  console.log(
+    `Reconcile: ${clones.length} clone(s) → keep ${kept.length}, drop ${dropped.length} (no longer produced by the scan).`,
+  );
+  for (const c of dropped) {
+    const age = `${Math.floor((Date.now() - Date.parse(c.date)) / 86_400_000)}d`;
+    console.log(
+      `  drop  ${c.fragmentHash}  ${age}  (${c.fileA ?? '?'} / ${c.fileB ?? '?'})  ${c.description ?? ''}`,
+    );
+  }
+  if (!argv.includes('--apply')) {
+    console.log('\nDry run — no write. Re-run with --apply (on a clean tree) to prune.');
+  } else if (dropped.length === 0) {
+    console.log('Nothing to reconcile — allowlist unchanged.');
+  } else {
+    saveAllowlist(allowlistPath, { pairs, clones: kept });
+    console.log(`Wrote ${kept.length} clone(s) → ${allowlistPath}`);
+  }
+}
+
 // Run-as-main guard, in the form every other gate module uses: realpath BOTH sides. A raw
 // `argv[1] === fileURLToPath(import.meta.url)` compares the BIN SHIM path (node_modules/.bin or a
 // global install's bin dir, both symlinks) against the real module path, so it is false whenever
 // the gate is invoked by its published name — `guard-clone scan --gate` printed nothing and exited
 // 0, a silently dead gate. Only `node <real path>` (how guard-deterministic spawns it) worked.
-if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+const isMain =
+  Boolean(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+if (isMain && mode === 'reconcile') {
+  runCloneReconcile();
+  process.exit(0);
+}
+if (isMain) {
   const minTokens = Number(flag('--min-tokens', DEFAULTS.minTokens));
   const pathsArg = flag('--paths', null);
   const paths = pathsArg ? pathsArg.split(/\s+/) : DEFAULTS.paths;

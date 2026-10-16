@@ -70,19 +70,20 @@ Some pairs are **intentional deploy artifacts**, not real dups: one path is a *g
 | `guard-dup-allowlist list` | List entries | Picking a burn-down target. |
 | `guard-dup scan --new --changed` | **Pre-flight check** (this commit's dups vs the allowlist) | Before declaring a dup-fix done. |
 | `guard-dup reconcile [--apply]` | **Detection-based**: drops entries `detect()` no longer produces (dead) | After bulk refactors; periodic sweep. Dry-run by default. |
+| `guard-clone reconcile [--apply]` | **Detection-based, clones**: drops clone approvals whose hash the current scan no longer produces | Same, on a clean tree. Dry-run by default; refuses if jscpd fails or the scan is empty. |
 | `guard-dup baseline` | Freeze every current candidate | One-shot freeze-the-past (already done). |
 
 `reconcile` vs `prune` — easy to confuse:
 
 - `prune` asks "is this entry past its expiry?" (calendar). Drops 7-day `add` entries. **Doesn't hit baseline** (decayDays 3650).
-- `reconcile` asks "does this dup still exist?" (detection). Drops dead baseline entries. **Doesn't care about expiry.**
+- `reconcile` (`guard-dup reconcile` for pairs, `guard-clone reconcile` for clones) asks "does this dup still exist?" (detection). Drops dead baseline entries. **Doesn't care about expiry.**
 
 ## Burning down the baseline
 
 1. `guard-dup-allowlist list` — pick a target. **Skip `src/shared ↔ _shared` mirrors** (gotcha above).
 2. `guard-dup-allowlist remove …` the entry.
 3. Next commit touching that code → gate re-surfaces it → refactor (use the workflow above).
-4. Periodically `guard-dup reconcile --apply` to sweep entries that died incidentally (someone else's refactor killed the dup without removing the entry).
+4. Periodically `guard-dup reconcile --apply` and `guard-clone reconcile --apply` to sweep entries that died incidentally (someone else's refactor killed the dup without removing the entry).
 
 ## Common mistakes
 
