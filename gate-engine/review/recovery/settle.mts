@@ -23,7 +23,7 @@
  */
 
 import { reportRetrievalDegraded, verdictToken } from '../contracts/checklist.mts';
-import { parseAdvisories } from '../contracts/response.mts';
+import { verdictAdvisories } from '../contracts/response.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mts';
 import { savePasses } from '../cache.mts';
@@ -87,7 +87,7 @@ export function settleReviewOutcome(
   // Only a PASS can be degraded: asset re-verification may have voided the verdict since.
   const degraded = res.status === 'pass' ? res.degraded : undefined;
   const mcpDegraded = res.status === 'pass' ? res.mcpDegraded : undefined;
-  const advisories = res.status === 'pass' ? parseAdvisories(res.transcript ?? '') : [];
+  const advisories = verdictAdvisories(res);
   // A retrieval-DEGRADED PASS describes the environment, not the diff: never cached, so a retry
   // re-attempts retrieval instead of replaying the outage.
   if (res.status === 'pass' && !degraded)
