@@ -522,6 +522,39 @@ describe('compareConventions', () => {
     expect(cmp.regressed).toBe(false);
     expect(cmp.lines.join(' ')).toContain('gate code');
   });
+  it('a floor breach still regresses when a stale baseline skips the comparison', () => {
+    const cur = { ...base, gateHash: 'aaa', blockingAuthorityRecall: FLOOR_GAP_RECALL - 0.01 };
+    const cmp = compareConventions(cur, { ...base, gateHash: 'bbb' });
+    expect(cmp.regressed).toBe(true);
+    expect(cmp.lines.join(' ')).toContain('FLOOR BREACH — blocking-authority recall');
+    expect(cmp.lines.join(' ')).toContain('comparison skipped');
+  });
+  it('a ceiling breach regresses with no baseline at all', () => {
+    const cmp = compareConventions(
+      { ...base, falseFlagRate: CEILING_FALSE_FLAG + 0.01 },
+      undefined,
+    );
+    expect(cmp.regressed).toBe(true);
+    expect(cmp.lines.join(' ')).toContain('CEILING BREACH');
+  });
+  it('a floor breach regresses even when outages skip the comparison', () => {
+    const cur = { ...base, outages: 1, gapRecall: FLOOR_GAP_RECALL - 0.01 };
+    const cmp = compareConventions(cur, base);
+    expect(cmp.regressed).toBe(true);
+    expect(cmp.lines.join(' ')).toContain('outage(s) this run');
+  });
+  it('a recall floor with no gold slots measured is not a breach', () => {
+    const cur = {
+      ...base,
+      gold: { total: 0, hit: 0 },
+      blockingGold: { total: 0, hit: 0 },
+      gapRecall: 0,
+      blockingAuthorityRecall: 0,
+    };
+    const cmp = compareConventions(cur, undefined);
+    expect(cmp.regressed).toBe(false);
+    expect(cmp.lines.join(' ')).not.toContain('FLOOR BREACH');
+  });
   it('a judge model or strict-mode mismatch skips the comparison', () => {
     const prev = { ...base, judgeModel: 'gpt-5.6-terra@high', strict: false };
     expect(baselineMismatch({ ...prev, judgeModel: 'haiku' }, prev)).toContain('judgeModel');

@@ -1,10 +1,11 @@
-import { mcnemarMidP, wilson } from '../../decisions/eval/bench.mts';
+import { wilson } from '../../decisions/eval/bench.mts';
 import { MATCH_MODEL, MATCH_RUNS } from './benchmark-config.mts';
 import { consistentReviewerModel, type CaseResult } from './case-runner.mts';
 import type { CompletenessCase } from './cases.mts';
 import {
   accumulateFindingMetrics,
   accumulateVerdictMetric,
+  compareCaseFlips,
   finalizeOpenEndedSummary,
   measuredCaseMetrics,
   openEndedSummary,
@@ -140,53 +141,5 @@ export function compareCompleteness(summary: BenchSummary, base: BenchSummary | 
     return skip('matcher changed since the baseline');
   if (base.corpusHash && summary.corpusHash && base.corpusHash !== summary.corpusHash)
     return skip('corpus changed since the baseline');
-  const signed = (n: number) => `${n > 0 ? '+' : ''}${n.toFixed(3)}`;
-  lines.push(`  gap recall Δ ${signed(summary.gapRecall - base.gapRecall)}  (informational)`);
-  lines.push(
-    `  false-flag rate Δ ${signed(summary.falseFlagRate - base.falseFlagRate)}  (informational)`,
-  );
-
-  // The gate: CASE-level flips (slots within a case share one transcript — clustered unit).
-  const b: string[] = [];
-  const c: string[] = [];
-  const unstable: string[] = [];
-  for (const [id, cur] of Object.entries(summary.rows)) {
-    const prev = base.rows?.[id];
-    if (!prev) continue;
-    if (prev.ok && !cur.ok) (cur.stable ? b : unstable).push(id);
-    else if (!prev.ok && cur.ok) c.push(id);
-  }
-  const midP = mcnemarMidP(b.length, c.length);
-  if (b.length + c.length > 0) {
-    const n = Object.keys(summary.rows).length;
-    const mde = 2.802 * Math.sqrt((b.length + c.length) / n / n);
-    lines.push(
-      `  case flips vs baseline — regressed [${b.join(', ') || '—'}] improved [${c.join(', ') || '—'}] (mid-p ${midP.toFixed(3)})`,
-    );
-    lines.push(
-      `  this bench cannot distinguish deltas below ~${(mde * 100).toFixed(0)}pp from judge noise at n=${n} cases`,
-    );
-  }
-  if (unstable.length)
-    lines.push(
-      `  unstable cases (unconfirmed flips — instability, not regression): [${unstable.join(', ')}]`,
-    );
-  // Slot-level flips print informationally — finer-grained diagnosis, never the gate.
-  const slotB = Object.entries(summary.slots)
-    .filter(([k, cur]) => base.slots?.[k]?.ok && !cur.ok && cur.stable)
-    .map(([k]) => k);
-  const slotC = Object.entries(summary.slots)
-    .filter(([k, cur]) => base.slots?.[k] && !base.slots[k].ok && cur.ok)
-    .map(([k]) => k);
-  if (slotB.length + slotC.length > 0)
-    lines.push(
-      `  slot flips (informational) — regressed [${slotB.join(', ') || '—'}] improved [${slotC.join(', ') || '—'}]`,
-    );
-  if (midP < 0.05 && b.length > c.length) {
-    regressed = true;
-    lines.push(
-      `  REGRESSION — one-directional case flips are significant (mid-p ${midP.toFixed(3)} < 0.05)`,
-    );
-  }
-  return { regressed, lines };
+  return { regressed: compareCaseFlips(summary, base, lines) || regressed, lines };
 }

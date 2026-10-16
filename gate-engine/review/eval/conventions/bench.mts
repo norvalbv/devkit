@@ -75,7 +75,6 @@ import {
   BenchAbort,
   cleanBenchEnv,
   materializeFixture,
-  mcnemarMidP,
   parseCasesText,
   wilson,
 } from '../../../decisions/eval/bench.mts';
@@ -94,6 +93,7 @@ import {
   accumulateFindingMetrics,
   accumulateVerdictMetric,
   blockingAuthorityByGoldSlot,
+  compareCaseFlips,
   finalizeOpenEndedSummary,
   measuredCaseMetrics,
   openEndedSummary,
@@ -510,37 +510,18 @@ export function baselineMismatch(cur: Partial<BenchSummary>, base?: BenchSummary
   return null;
 }
 
-/**
- * Statistically honest at small n, decisions-eval/completeness-eval order of evaluation:
- * (1) comparability preconditions (config, gateHash, matcherHash, corpusHash, outages) skip rather
- * than lie; (2) hard floors on the safety metrics; (3) the paired CASE-level flip table under
- * mid-p McNemar, stable flips only; (4) informational deltas + slot-level flips + the MDE line.
- */
+/** Hard floors first — absolute, so a missing or incomparable baseline cannot silence them — then the
+ * comparability skips (config, hashes, outages), then the paired case flip table. */
 export function compareConventions(summary: BenchSummary, base: BenchSummary | undefined) {
-  if (!base) return { regressed: false, lines: ['  no baseline — skipped'] };
-  const skip = (why: string) => ({
-    regressed: false,
-    lines: [`  ${why} — regenerate with --baseline; comparison skipped`],
-  });
-  const mismatch = baselineMismatch(summary, base);
-  if (mismatch) return skip(mismatch);
-  if (summary.outages > 0) return skip(`${summary.outages} outage(s) this run — score is suspect`);
-
   const lines: string[] = [];
   let regressed = false;
-  const signed = (n: number) => `${n > 0 ? '+' : ''}${n.toFixed(3)}`;
-  lines.push(`  gap recall Δ ${signed(summary.gapRecall - base.gapRecall)}  (informational)`);
-  lines.push(
-    `  false-flag rate Δ ${signed(summary.falseFlagRate - base.falseFlagRate)}  (informational)`,
-  );
-
-  if (summary.gapRecall < FLOOR_GAP_RECALL) {
+  if (summary.gold.total && summary.gapRecall < FLOOR_GAP_RECALL) {
     regressed = true;
     lines.push(
       `  FLOOR BREACH — gap recall ${summary.gapRecall.toFixed(2)} < ${FLOOR_GAP_RECALL} (catastrophic; fails regardless of flip statistics)`,
     );
   }
-  if (summary.blockingAuthorityRecall < FLOOR_GAP_RECALL) {
+  if (summary.blockingGold.total && summary.blockingAuthorityRecall < FLOOR_GAP_RECALL) {
     regressed = true;
     lines.push(
       `  FLOOR BREACH — blocking-authority recall ${summary.blockingAuthorityRecall.toFixed(2)} < ${FLOOR_GAP_RECALL} (production parser dropped real findings)`,
@@ -552,48 +533,16 @@ export function compareConventions(summary: BenchSummary, base: BenchSummary | u
       `  CEILING BREACH — false-flag rate ${summary.falseFlagRate.toFixed(2)} > ${CEILING_FALSE_FLAG} (catastrophic; fails regardless of flip statistics)`,
     );
   }
+  if (!base) return { regressed, lines: [...lines, '  no baseline — skipped'] };
+  const skip = (why: string) => ({
+    regressed,
+    lines: [...lines, `  ${why} — regenerate with --baseline; comparison skipped`],
+  });
+  const mismatch = baselineMismatch(summary, base);
+  if (mismatch) return skip(mismatch);
+  if (summary.outages > 0) return skip(`${summary.outages} outage(s) this run — score is suspect`);
 
-  const b: string[] = [];
-  const c: string[] = [];
-  const unstable: string[] = [];
-  for (const [id, cur] of Object.entries(summary.rows)) {
-    const prev = base.rows?.[id];
-    if (!prev) continue;
-    if (prev.ok && !cur.ok) (cur.stable ? b : unstable).push(id);
-    else if (!prev.ok && cur.ok) c.push(id);
-  }
-  const midP = mcnemarMidP(b.length, c.length);
-  if (b.length + c.length > 0) {
-    const n = Object.keys(summary.rows).length;
-    const mde = 2.802 * Math.sqrt((b.length + c.length) / n / n);
-    lines.push(
-      `  case flips vs baseline — regressed [${b.join(', ') || '—'}] improved [${c.join(', ') || '—'}] (mid-p ${midP.toFixed(3)})`,
-    );
-    lines.push(
-      `  this bench cannot distinguish deltas below ~${(mde * 100).toFixed(0)}pp from judge noise at n=${n} cases`,
-    );
-  }
-  if (unstable.length)
-    lines.push(
-      `  unstable cases (unconfirmed flips — instability, not regression): [${unstable.join(', ')}]`,
-    );
-  const slotB = Object.entries(summary.slots)
-    .filter(([k, cur]) => base.slots?.[k]?.ok && !cur.ok && cur.stable)
-    .map(([k]) => k);
-  const slotC = Object.entries(summary.slots)
-    .filter(([k, cur]) => base.slots?.[k] && !base.slots[k].ok && cur.ok)
-    .map(([k]) => k);
-  if (slotB.length + slotC.length > 0)
-    lines.push(
-      `  slot flips (informational) — regressed [${slotB.join(', ') || '—'}] improved [${slotC.join(', ') || '—'}]`,
-    );
-  if (midP < 0.05 && b.length > c.length) {
-    regressed = true;
-    lines.push(
-      `  REGRESSION — one-directional case flips are significant (mid-p ${midP.toFixed(3)} < 0.05)`,
-    );
-  }
-  return { regressed, lines };
+  return { regressed: compareCaseFlips(summary, base, lines) || regressed, lines };
 }
 
 // ─── validate / coverage (0 LLM calls) ─────────────────────────────────────────────
