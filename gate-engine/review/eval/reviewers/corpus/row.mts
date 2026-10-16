@@ -61,9 +61,20 @@ export function unscoredResult(row, finalStatus, subcause) {
     escalated: false,
     escalateLive: false,
     reasonClass: null,
+    symbols: null,
     subcause,
     ms: { first: 0, escalate: 0 },
   };
+}
+
+/** How many of a FAIL row's expected duplicated symbols the failing items' issues name. Whole
+ * identifiers only: `canonicalPath` does not credit `canonical`. */
+export function symbolsNamed(issues, symbols) {
+  const text = issues.join('\n');
+  const named = symbols.filter((s) =>
+    new RegExp(`(?<![\\w$])${s.replaceAll('$', '\\$')}(?![\\w$])`).test(text),
+  );
+  return { named: named.length, expected: symbols.length };
 }
 
 export function scoreRow(row, capture, cas) {
@@ -76,10 +87,18 @@ export function scoreRow(row, capture, cas) {
   const okFirst = firstVerdict === row.expected;
   const okFinal = cas.status === (row.expected === 'FAIL' ? 'fail' : 'pass');
   let reasonClass = null;
+  let symbols = null;
   if (row.expected === 'FAIL' && cas.status === 'fail') {
     const snap = (esc && !esc.synthetic ? esc.snapshot : null) ?? first?.snapshot ?? null;
-    const items = Array.isArray(snap?.items) ? snap.items : [];
-    const failedItems = items.filter((i) => i.status === 'fail').map((i) => i.name);
+    // Domain reviewers write items[].name; commit-guard writes one files[].path entry per file.
+    const listed = snap?.items ?? snap?.files;
+    const items = Array.isArray(listed) ? listed : [];
+    const failedItems = items.filter((i) => i.status === 'fail').map((i) => i.name ?? i.path);
+    if (row.expectSymbols)
+      symbols = symbolsNamed(
+        items.filter((i) => i.status === 'fail').flatMap((i) => i.issues ?? []),
+        row.expectSymbols,
+      );
     const want = row.expectItems ?? [];
     if (want.length > 0 && want.every((n) => failedItems.includes(n))) reasonClass = 'right-item';
     else {
@@ -109,6 +128,7 @@ export function scoreRow(row, capture, cas) {
     escalated: !!cas.escalated,
     escalateLive: !!esc && !esc.synthetic,
     reasonClass,
+    symbols,
     subcause: cas.status === 'inconclusive' ? subcause(cas.reason) : null,
     ms: { first: first?.ms ?? 0, escalate: esc?.ms ?? 0 },
   };

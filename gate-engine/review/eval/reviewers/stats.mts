@@ -116,6 +116,10 @@ export function printSummary(name, s, { cascade }) {
     .map(([k, v]) => `${k}:${v}`)
     .join(' ');
   if (inc) console.log(`  inconclusive             ${inc}`);
+  if (s.symbols.length)
+    console.log(
+      `  symbols named per FAIL   ${s.symbols.map((r) => `${r.id} ${r.named}/${r.expected}`).join('  ')}`,
+    );
 }
 
 // Comment-leakage heuristics (non-fatal — see validateRow docstring in bench.mts): a mined/adapted
@@ -235,6 +239,8 @@ export function summarize(results, { cascade } = {}) {
       : 0,
     reasons,
     inconclusive,
+    // Per blocked row, not pooled: a row's expected symbols are correlated findings in one diff.
+    symbols: blocked.filter((r) => r.symbols).map((r) => ({ id: r.id, ...r.symbols })),
   };
 }
 

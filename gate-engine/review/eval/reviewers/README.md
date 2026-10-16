@@ -10,9 +10,15 @@ answer two questions with numbers instead of vibes:
 It drives the **real gate** (`runCascade` from `../../run-review.mts`) over disposable fixture
 repos, so bench and gate cannot drift. The **correctness reviewer** (`cases-correctness.jsonl`,
 domain `all`, PINNED single-pass sonnet — `reviewers.mts` `model: 'sonnet'`; it ignores
-`BENCH_MODEL`) is in the cohort. commit-guard is out of scope (its allowlist
-needs the consumer's semantic-search MCP tool, unresolvable in a bare fixture); a further reviewer
-joins by adding its `cases-<skill>.jsonl` + REVIEWERS entry.
+`BENCH_MODEL`) is in the cohort. So is **commit-guard** (`cases-commit-guard.jsonl`), with one
+limit: a bare fixture has no semantic search index, so every commit-guard row runs with retrieval
+unavailable. Its fixtures are built by
+[`context.mjs`](../../../../docs/benchmarks/experiments/2026-10-16-commit-guard-seed/README.md),
+which puts a duplicate's original in view only when the copy keeps the original's name. The suite
+measures the brief with the counterpart in reach, not production retrieval recall. Its FAIL rows
+carry `expectSymbols`, and the summary prints how many of them each blocked FAIL names. An
+unscoped `run` (target `all`) now includes commit-guard. A further reviewer joins by adding its
+`cases-<skill>.jsonl` + REVIEWERS entry.
 
 **Bench-only, never shipped.** This directory is excluded from tsc and the build
 (`**/eval/**`), and the package publishes `dist/` only. `mine-bots.mts` calls the GitHub API on
