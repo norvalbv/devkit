@@ -14,6 +14,7 @@ import {
   symlinkSync,
   unlinkSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { digest } from '../fs-helpers.mts';
 import { reviewRepositorySnapshotFingerprint } from '../ship/review/repository/state.mts';
@@ -48,6 +49,18 @@ export interface RegressionReportArtifact {
 }
 
 export class RegressionUsageError extends Error {}
+
+export function regressionTempBase(callerRoot: string): string {
+  const base = realpathSync(tmpdir());
+  const fromCaller = relative(callerRoot, base);
+  if (
+    fromCaller === '' ||
+    (fromCaller !== '..' && !fromCaller.startsWith(`..${sep}`) && !isAbsolute(fromCaller))
+  ) {
+    throw new RegressionUsageError('temporary directory must be outside the caller repository');
+  }
+  return base;
+}
 
 function git(root: string, args: string[]): string {
   const result = spawnSync('git', ['-c', 'core.hooksPath=/dev/null', '-C', root, ...args], {
