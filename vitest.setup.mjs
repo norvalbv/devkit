@@ -113,9 +113,6 @@ export const SHIP_EXPORTED_ENV = [
   'DEVKIT_SHIP_REPO',
   'DEVKIT_SHIP_RESUMED',
   'DEVKIT_SHIP_ROOT',
-  // A version label rather than authority, but wait-ci and ship telemetry read it: inherited, a test
-  // would report the OUTER ship's version.
-  'DEVKIT_TELEMETRY_VERSION',
 ];
 
 // FRINK_AI_STRICT is the legacy alias gate-engine reads alongside GUARD_AI_STRICT; no devkit path

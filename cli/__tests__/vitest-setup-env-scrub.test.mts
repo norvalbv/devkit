@@ -77,7 +77,6 @@ const SHIP_ENV = {
   DEVKIT_SHIP_RESUMED: '0',
   DEVKIT_SHIP_ROOT: '/outer/ship/worktree',
   DEVKIT_SHIP_SOURCE_HEAD: 'b'.repeat(40),
-  DEVKIT_TELEMETRY_VERSION: '9.9.9',
   FRINK_AI_STRICT: '1',
   GUARD_AI_STRICT: '1',
   GUARD_DECISIONS_DIR: '/elsewhere/docs/decisions',
@@ -141,12 +140,10 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
   });
 
   it('reads the real inline and sourced-library exports, not only synthetic ones', () => {
-    // reship.sh exports its PR base only inside `then`, and telemetry.sh is sourced, never listed:
-    // a parser or script-set regression that drops either still passes on the other scripts' names.
+    // reship.sh exports its PR base only inside `then`, and run-gates-with-capture.sh is sourced, never
+    // listed: a parser or script-set regression that drops either still passes on the other names.
     expect(exportedNames(read('cli/lib/ship/reship.sh'))).toContain('DEVKIT_SHIP_PR_BASE_SHA');
-    expect(SHIP_SCRIPTS.flatMap((f) => exportedNames(read(f)))).toContain(
-      'DEVKIT_TELEMETRY_VERSION',
-    );
+    expect(SHIP_SCRIPTS.flatMap((f) => exportedNames(read(f)))).toContain('DEVKIT_GATE_LOG');
   });
 
   it('leaves no scrubbed name in a process launched from a ship environment', () => {

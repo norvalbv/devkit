@@ -312,8 +312,7 @@ describe('ship-branch.sh — resume a commit that deleted briefed paths', () => 
 });
 
 describe('ship-branch.sh — resume scope edge cases', () => {
-  // A resume skips commit_with_gate_capture, so telemetry.sh must be sourced at the ship_pr emit
-  // itself — without it the line aborted (bash >= 4) or went out malformed (3.2).
+  // A resume skips commit_with_gate_capture, so the ship_pr emit must not depend on anything it set.
   it('emits a well-formed ship_pr line when a resumed ship opens its PR', () => {
     const { dir, env, git } = seedShipRepoLocalRemote();
     const { publishEnv } = publishEnvFor(dir, env);

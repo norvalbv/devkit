@@ -1,13 +1,10 @@
 import { spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parentSessionId } from '../../gate-engine/judge/run-context.mts';
 import { PARENT_SESSION_SH_FN } from '../lib/husky/commit-terminal.mts';
 
-// The same predicate lives in node (run-context.mts), bash (ship telemetry) and POSIX sh (the
-// commit hook). One fixture table through all three keeps a shell row from disagreeing with a node row.
-const TELEMETRY_SH = resolve(import.meta.dirname, '../lib/ship/telemetry.sh');
-
+// The same predicate lives in node (run-context.mts) and POSIX sh (the commit hook). One fixture
+// table through both keeps a hook row from disagreeing with a node row.
 const VALUES = [
   'd323ae68-c68f-4457-b340-e8a7a0a18e80',
   'ok.id_1-2',
@@ -39,14 +36,12 @@ function viaShell(shell: string, script: string, session: SessionEnv, locale: st
 function expectParity(session: SessionEnv, locale: string): void {
   const id = parentSessionId(session);
   const expected = id === undefined ? '' : `,"parent_session_id":"${id}"`;
-  const bash = `. "${TELEMETRY_SH}"; devkit_parent_session_json`;
-  expect(viaShell('/bin/bash', bash, session, locale)).toBe(expected);
   expect(viaShell('sh', `${PARENT_SESSION_SH_FN}\n__dk_parent_session`, session, locale)).toBe(
     expected,
   );
 }
 
-describe('parent_session_id predicate parity (node · bash · sh)', () => {
+describe('parent_session_id predicate parity (node · sh)', () => {
   for (const locale of ['C', 'en_US.UTF-8']) {
     for (const key of ['CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID'] as const) {
       it.each(VALUES)(`agrees on ${key}=%j under LC_ALL=${locale}`, (value) => {
