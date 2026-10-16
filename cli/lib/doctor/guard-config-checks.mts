@@ -31,6 +31,7 @@ import { usableChunkCount } from '../../../gate-engine/co-occurrence/chunk-index
 import {
   inspectIndexFreshness,
   missingIndexMessage,
+  primaryIndexFallback,
   staleIndexMessage,
 } from '../../../gate-engine/co-occurrence/index-refresh.mts';
 import { isCodexModel, parseModelSpec } from '../../../gate-engine/judge/codex/result.mts';
@@ -121,13 +122,15 @@ export function checkSearchIndex(
   searchCodeSelected: boolean,
 ): CheckResult {
   if (resolved) {
-    const indexPath = resolve(cwd, resolved);
+    const local = resolve(cwd, resolved);
+    const indexPath = primaryIndexFallback(local, cwd) ?? local;
+    const reads = indexPath === local ? resolved : `${indexPath} (the primary checkout's)`;
     if (!existsSync(indexPath)) {
       return check(
         SEARCH_INDEX_CHECK,
         'MISSING',
-        missingIndexMessage(indexPath, { cwd, indexPath: resolved }),
-        'build the configured index, or link the primary checkout index as shown above',
+        missingIndexMessage(indexPath, { cwd }),
+        'build the configured index; linked worktrees then read the primary checkout index',
         false,
         true,
       );
@@ -150,7 +153,7 @@ export function checkSearchIndex(
         return check(
           SEARCH_INDEX_CHECK,
           'DRIFT',
-          `matcher reads ${resolved}, but it holds no embedded chunks with a symbol_name — the duplication gate compares nothing and opts out on every commit`,
+          `matcher reads ${reads}, but it holds no embedded chunks with a symbol_name — the duplication gate compares nothing and opts out on every commit`,
           'populate it with `search-code index` (a --phase0-only or interrupted run leaves embeddings empty)',
           false,
           true,
@@ -160,20 +163,20 @@ export function checkSearchIndex(
         return check(
           SEARCH_INDEX_CHECK,
           'OK',
-          `matcher reads ${resolved}; freshness unavailable (${freshness.reason ?? 'unknown index schema'}), so scan-time body verification remains the fallback`,
+          `matcher reads ${reads}; freshness unavailable (${freshness.reason ?? 'unknown index schema'}), so scan-time body verification remains the fallback`,
         );
       }
       return check(
         SEARCH_INDEX_CHECK,
         'OK',
-        `matcher reads ${resolved}; ${freshness.checkedFiles} indexed file(s) match the source checkout`,
+        `matcher reads ${reads}; ${freshness.checkedFiles} indexed file(s) match the source checkout`,
       );
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       return check(
         SEARCH_INDEX_CHECK,
         'DRIFT',
-        `matcher reads ${resolved}, but the index cannot be inspected: ${msg}`,
+        `matcher reads ${reads}, but the index cannot be inspected: ${msg}`,
         'rebuild the search-code index and retry',
         false,
         true,

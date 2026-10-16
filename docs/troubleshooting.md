@@ -169,10 +169,11 @@ can still happen for exactly those, so open the named file and re-index if the s
 
 These index-freshness findings are advisory: they keep their warning glyph but do not make doctor exit
 nonzero. `DRIFT` means the owned index has file stamps behind the checkout; force-refresh the named files
-with `touch <files> && search-code index --seed-files "<files>"`. `MISSING` is common in a clone or linked
-worktree because the index is gitignored: build it locally, or link the primary checkout's `.search-code`
-directory (`devkit ship` does this automatically). Scan-time body verification remains the gate's source
-of truth while the index is stale or its freshness metadata cannot be inspected.
+with `touch <files> && search-code index --seed-files "<files>"`. The index is gitignored, so a linked
+worktree has none of its own: guard-dup and doctor read the primary checkout's index instead, the same one
+`devkit ship` links into its gate worktree. `MISSING` therefore means no checkout has a usable index: build
+it with your indexer (in the primary checkout, for a linked worktree). Scan-time body verification remains
+the gate's source of truth while the index is stale or its freshness metadata cannot be inspected.
 
 ## Commit blocked because I'm on a protected branch
 
