@@ -155,10 +155,15 @@ export interface ReviewItem {
   /** The waiver rationale, capped for the event (attachItems), when `disposition` is 'waived' —
    * present so a consumer reads it off the lens directly, no join against top-level `waivers[]`. */
   rationale?: string;
+  /** Issues past the per-lens cap that `issues` does not carry; absent when none were dropped. */
+  issues_omitted?: number;
 }
 
 /** Private terminal artifact snapshot; original positions and strings never ride the event. */
-export interface ReviewCaptureItem extends Omit<ReviewItem, 'issues' | 'rationale'> {
+export interface ReviewCaptureItem extends Omit<
+  ReviewItem,
+  'issues' | 'rationale' | 'issues_omitted'
+> {
   itemIndex: number;
   issues: string[];
 }
