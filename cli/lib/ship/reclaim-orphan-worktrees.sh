@@ -303,15 +303,18 @@ _ship_orphan_report_self() {
   # so this half is deliberately left OUTSIDE the quoting the source branch gets.
   tip=$(git -C "$repo" rev-parse --short --verify --quiet "refs/heads/$br") || tip=
   freed="devkit-freed-${tip:-nohead}-\$\$"
-  # Judged against the branch being freed, not live HEAD: this runs before ship pins CALLER_HEAD, and
-  # in the self case $br IS what HEAD is on — so this is the same commit ship_suggest_base is later
-  # handed, and the two lines cannot name different bases (sc-3409).
-  work=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$br^{commit}") || work=
-  # An unreadable tip stays EMPTY — cannot-tell skips the ancestor tier rather than reading live HEAD.
-  # Memoised per pin, so every print of this remedy in one refusal names the same base.
-  ship_suggested_base_memo "$repo" "$work"
-  base=
-  [ -z "$SHIP_SUGGESTED_ANSWER" ] || base=${SHIP_SUGGESTED_ANSWER#* }
+  # The caller's own --base is echoed first; ship_suggest_base stays silent whenever one was given,
+  # so only a flagless ship consults the resolver, and the two lines still cannot disagree (sc-3409).
+  base=${BASE_FLAG:-}
+  base=${base#origin/}
+  if [ -z "$base" ]; then
+    # Judged against the branch being freed, not live HEAD: in the self case $br IS what HEAD is on.
+    # An unreadable tip stays EMPTY — cannot-tell skips the ancestor tier rather than reading HEAD.
+    work=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$br^{commit}") || work=
+    # Memoised per pin, so every print of this remedy in one refusal names the same base.
+    ship_suggested_base_memo "$repo" "$work"
+    [ -z "$SHIP_SUGGESTED_ANSWER" ] || base=${SHIP_SUGGESTED_ANSWER#* }
+  fi
   # Every ref name in a copyable line goes through ship_shell_quote. These are meant to be pasted
   # into a shell, and a branch name is not a safe literal in either direction: `$`, backticks and
   # parentheses are legal, so a bare name could execute as the operator, and an apostrophe is legal
