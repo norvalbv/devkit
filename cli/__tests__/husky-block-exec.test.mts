@@ -714,13 +714,14 @@ describe('commit-terminal telemetry (real temp git repo)', () => {
   });
 
   it.each([
-    ['hook-sess-1', 'hook-sess-1'],
-    ['', undefined],
-    ['x"y z', undefined],
+    [{ CLAUDE_CODE_SESSION_ID: 'hook-sess-1' }, 'hook-sess-1'],
+    [{ CLAUDE_CODE_SESSION_ID: '' }, undefined],
+    [{ CLAUDE_CODE_SESSION_ID: 'x"y z' }, undefined],
+    [{ CLAUDE_CODE_SESSION_ID: '', CODEX_THREAD_ID: 'codex-1' }, 'codex-1'],
   ])(
     'commit_result parent_session_id for %j (a malformed id never tears the line)',
-    (value, expected) => {
-      const r = runHookInRepo({ CLAUDE_CODE_SESSION_ID: value });
+    (env, expected) => {
+      const r = runHookInRepo(env);
       expect(r.status).toBe(0);
       const terminal = r.events.find((e) => e.type === 'commit_result');
       expect(terminal.parent_session_id).toBe(expected);

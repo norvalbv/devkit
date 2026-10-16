@@ -190,6 +190,12 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
     expect(INHERITED_RUN_ENV).not.toContain('DEVKIT_RUN_ORIGIN');
   });
 
+  it('scrubs the launching agent session ids parent_session_id falls back through', () => {
+    const env = envAfterSetup({ CLAUDE_CODE_SESSION_ID: 'claude-x', CODEX_THREAD_ID: 'codex-x' });
+    expect(env.CLAUDE_CODE_SESSION_ID).toBeUndefined();
+    expect(env.CODEX_THREAD_ID).toBeUndefined();
+  });
+
   it('covers every one-run bypass `devkit ship --help` documents, in both envFlag spellings', () => {
     const envBlock = meta.help.split('\nEnv:\n')[1]?.split('\n\n')[0] ?? '';
     const flags = [...envBlock.matchAll(/\bGUARD_([A-Z_]+)=1/g)].map((m) => m[1]);
