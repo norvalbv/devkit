@@ -198,6 +198,7 @@ describe('init --yes (all recommended)', () => {
     expect(cfg.stack).toBe('generic');
     expect(cfg.components.biome).toBeUndefined();
     expect(cfg.components.guards).toEqual([
+      'whitespace',
       'size',
       'fanout',
       'dup',
