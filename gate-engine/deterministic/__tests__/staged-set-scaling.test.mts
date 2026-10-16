@@ -20,14 +20,6 @@ const EXCLUDED = new Map([
     'runs only the Checks linked to decision Targets, which a fixture has none of',
   ],
 ]);
-// Git spawns per in-scope staged file today. Lower one when a gate gets cheaper; never raise it.
-const IN_SCOPE_SLOPE = {
-  'rename-in-scope': new Map([['size', 2]]),
-  'codemod-in-scope': new Map([
-    ['size', 2],
-    ['comments', 6],
-  ]),
-};
 const MEASURED = DETERMINISTIC.filter((gate) => !EXCLUDED.has(gate.id));
 
 const dirs: string[] = [];
@@ -133,19 +125,13 @@ describe('deterministic gate cost against the staged-set size', () => {
     for (const id of EXCLUDED.keys()) expect(DETERMINISTIC.map((gate) => gate.id)).toContain(id);
   });
 
-  it.each(['delete-out-of-scope', 'rename-out-of-scope', 'modify-out-of-scope'] as const)(
-    'starts no git process per staged file outside scanRoots (%s)',
-    (change) => {
-      expect(slopes(change)).toEqual(Object.fromEntries(MEASURED.map((gate) => [gate.id, 0])));
-    },
-  );
-
-  it.each(['rename-in-scope', 'codemod-in-scope'] as const)(
-    'starts at most the pinned git processes per staged file inside scanRoots (%s)',
-    (change) => {
-      for (const [id, slope] of Object.entries(slopes(change))) {
-        expect(slope, id).toBeLessThanOrEqual(IN_SCOPE_SLOPE[change].get(id) ?? 0);
-      }
-    },
-  );
+  it.each([
+    'delete-out-of-scope',
+    'rename-out-of-scope',
+    'modify-out-of-scope',
+    'rename-in-scope',
+    'codemod-in-scope',
+  ] as const)('starts no git process per staged file (%s)', (change) => {
+    expect(slopes(change)).toEqual(Object.fromEntries(MEASURED.map((gate) => [gate.id, 0])));
+  });
 });

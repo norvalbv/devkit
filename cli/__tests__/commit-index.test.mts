@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import {
   copyFileSync,
   existsSync,
+  mkdirSync,
   readFileSync,
   realpathSync,
   symlinkSync,
@@ -15,6 +16,7 @@ import {
   commitIndexKind,
   resetCommitIndexCache,
 } from '../../gate-engine/ratchets/commit-index.mts';
+import { detectChangedComments } from '../../gate-engine/comment-firewall/detect.mts';
 import { computeKey } from '../../gate-engine/prefix-cache/prefix-cache.mts';
 import {
   partialCommitRemedy,
@@ -218,6 +220,16 @@ describe('index snapshots read the commit index', () => {
     const committed = withCarrier(alt, join(root, '.git'), () => computeKey(root));
     expect(plain).not.toBeNull();
     expect(committed).not.toBe(plain);
+  });
+
+  it('guard-comments reads the paths, hunks and blobs that `commit -a` commits', () => {
+    const root = seedRepo();
+    mkdirSync(join(root, 'src'));
+    const doc = '// one\n// two\n// three\nexport {};\n';
+    const lock = commitIndex(root, 'index.lock', 'src/a.ts', doc);
+    expect(detectChangedComments(root).findings).toEqual([]);
+    const committed = withCarrier(lock, join(root, '.git'), () => detectChangedComments(root));
+    expect(committed.findings.map((finding) => finding.path)).toEqual(['src/a.ts']);
   });
 
   it('anti-slop stabilises the commit index without contending for the lock git holds', () => {

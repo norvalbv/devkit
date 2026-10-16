@@ -174,7 +174,7 @@ export function splitNul(out: string): string[] {
   return out.split('\0').filter((line) => line.length > 0);
 }
 
-function mergeInProgress(root: string): boolean {
+export function mergeInProgress(root: string): boolean {
   return (
     spawnSync('git', ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'], {
       cwd: root,
