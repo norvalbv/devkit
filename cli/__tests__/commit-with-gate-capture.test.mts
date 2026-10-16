@@ -230,12 +230,13 @@ describe('commit_with_gate_capture — executable hook proof', () => {
   });
 
   it.each([
-    ['cap-root-1', 'cap-root-1'],
-    ['', undefined],
-    ['bad"id', undefined],
-  ])('ship_attempt/ship_result parent_session_id for %j', (value, expected) => {
+    [{ CLAUDE_CODE_SESSION_ID: 'cap-root-1' }, 'cap-root-1'],
+    [{ CLAUDE_CODE_SESSION_ID: '' }, undefined],
+    [{ CLAUDE_CODE_SESSION_ID: 'bad"id' }, undefined],
+    [{ CLAUDE_CODE_SESSION_ID: '', CODEX_THREAD_ID: 'codex-1' }, 'codex-1'],
+  ])('ship_attempt/ship_result parent_session_id for %j', (env, expected) => {
     const { root, wt, base } = fixture(false);
-    runCommit(root, wt, base, false, false, '', { CLAUDE_CODE_SESSION_ID: value });
+    runCommit(root, wt, base, false, false, '', env);
     // Parsing every line proves a hostile id can never tear the JSON.
     const events = readFileSync(join(root, 'telemetry/gate-events.jsonl'), 'utf8')
       .trim()
