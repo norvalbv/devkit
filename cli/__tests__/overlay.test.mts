@@ -760,6 +760,8 @@ describe('overlay (local-only) install', () => {
     const logged = console.log.mock.calls.flat().join('\n');
     expect(logged).toContain('.cursor/hooks.json is git-tracked');
     expect(logged).toContain('.codex/hooks.json is git-tracked');
+    // A skipped tracked file is an advisory, not drift --fix could never repair.
+    expect(await doctorRun([], root)).toBe(0);
     // Claude side still wired into the (untracked) local-override file
     expect(existsSync(join(root, '.claude', 'settings.local.json'))).toBe(true);
     expect(
@@ -1114,25 +1116,63 @@ describe('overlay (local-only) install', () => {
     expect(existsSync(join(root, '.codex', 'hooks.json'))).toBe(true);
   });
 
-  it('clean never deletes a git-tracked settings.local.json, even once its hooks are empty', async () => {
+  it('never edits a git-tracked settings.local.json; doctor only advises on it', async () => {
     const root = workRepo();
     seedLocalSettings(root, { hooks: {} });
     execFileSync('git', ['add', '-f', '.claude/settings.local.json'], { cwd: root });
     execFileSync('git', ['commit', '-qm', 'track local settings'], { cwd: root });
+    const local = join(root, '.claude', 'settings.local.json');
+    const before = readFileSync(local, 'utf8');
     await applyInit(root, {
       stack: 'react-app',
       selection: overlayOnly({ fallow: true }),
       overlay: true,
       devkitRef: 'v0.21.0',
     });
+    expect(readFileSync(local, 'utf8')).toBe(before);
+    expect(readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8')).not.toContain(
+      '.claude/settings.local.json',
+    );
+    const log = vi.mocked(console.log);
+    expect(log.mock.calls.flat().join('\n')).toContain('settings.local.json is git-tracked');
+
+    log.mockClear();
+    expect(await doctorRun([], root)).toBe(0);
+    expect(log.mock.calls.flat().join('\n')).toMatch(
+      /hook registrations: committed, so overlay never edits it .*claude:tracked:\.claude\/settings\.local\.json[\s\S]*git rm --cached/,
+    );
+    // --fix re-runs the install's agent step, which must skip the tracked file too.
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    expect(readFileSync(local, 'utf8')).toBe(before);
+
     const cleanRun = (await import('../commands/clean.mts')).default;
     await cleanRun(['--yes'], root);
+    expect(readFileSync(local, 'utf8')).toBe(before);
+    expect(
+      execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
+    ).toBe('');
+  });
 
-    // Overlay deliberately edits a tracked Claude settings.local.json (skipProvider exempts claude),
-    // so the round-trip may reformat it; what clean owes is that the file survives, hook-free.
-    const local = join(root, '.claude', 'settings.local.json');
-    expect(existsSync(local)).toBe(true);
-    expect(readFileSync(local, 'utf8')).not.toContain('.claude/hooks/');
+  it("the tracked settings.local.json advisory's remedy registers the hooks", async () => {
+    const root = workRepo();
+    seedLocalSettings(root, { hooks: {} });
+    execFileSync('git', ['add', '-f', '.claude/settings.local.json'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'track local settings'], { cwd: root });
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayAll(),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+    execFileSync('git', ['rm', '-q', '--cached', '.claude/settings.local.json'], { cwd: root });
+
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    const local = readFileSync(join(root, '.claude', 'settings.local.json'), 'utf8');
+    expect(local).toContain('.claude/hooks/');
+    // The now-untracked file must be hidden like any overlay file, not left showing as `??`.
+    expect(readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8')).toContain(
+      '.claude/settings.local.json',
+    );
   });
 
   it('isTracked: true for a committed file, false for an untracked one', () => {

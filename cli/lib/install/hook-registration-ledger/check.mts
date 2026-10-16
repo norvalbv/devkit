@@ -1,4 +1,5 @@
 import { AGENT_TARGETS } from '../../components.mts';
+import { isTracked } from '../../git-tracked.mts';
 import { isSafeAgentAssetPath } from '../agent-asset-manifest/lifecycle.mts';
 import { requireAgentProviders } from '../agent-assets/agent-providers.mts';
 import { type HookInstallScope, hookRegistrationDestination } from './codec.mts';
@@ -33,6 +34,11 @@ export function checkHookRegistrations(
   const advisories: string[] = [];
   for (const provider of requireAgentProviders(targets)) {
     const rel = hookRegistrationDestination(provider, scope);
+    // Mirrors skipProvider: install never registers into a tracked overlay file, so this can't be fixed.
+    if (overlay && isTracked(root, rel)) {
+      advisories.push(`${provider}:tracked:${rel}`);
+      continue;
+    }
     if (!isSafeAgentAssetPath(root, rel, true)) {
       missing.push(`${provider}:unsafe-config`);
       continue;
