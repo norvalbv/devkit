@@ -1119,7 +1119,14 @@ describe('overlay (local-only) install', () => {
   it('never edits a git-tracked settings.local.json; doctor only advises on it', async () => {
     const root = workRepo();
     seedLocalSettings(root, { hooks: {} });
-    execFileSync('git', ['add', '-f', '.claude/settings.local.json'], { cwd: root });
+    // A retired hook in the team's settings.json must still be reported alongside the tracked file.
+    const command =
+      'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"';
+    const hooks = { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command }] }] };
+    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify({ hooks }));
+    execFileSync('git', ['add', '-f', '.claude/settings.local.json', '.claude/settings.json'], {
+      cwd: root,
+    });
     execFileSync('git', ['commit', '-qm', 'track local settings'], { cwd: root });
     const local = join(root, '.claude', 'settings.local.json');
     const before = readFileSync(local, 'utf8');
@@ -1139,7 +1146,7 @@ describe('overlay (local-only) install', () => {
     log.mockClear();
     expect(await doctorRun([], root)).toBe(0);
     expect(log.mock.calls.flat().join('\n')).toMatch(
-      /hook registrations: committed, so overlay never edits it .*claude:tracked:\.claude\/settings\.local\.json[\s\S]*git rm --cached/,
+      /hook registrations: committed, so overlay never edits it .*claude:tracked:\.claude\/settings\.local\.json.*git rm --cached.*retired hook in a committed file: claude:retired-registration:\.claude\/settings\.json/,
     );
     // --fix re-runs the install's agent step, which must skip the tracked file too.
     expect(await doctorRun(['--fix'], root)).toBe(0);

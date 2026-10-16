@@ -339,22 +339,21 @@ export function checkRegistrations(
   }
   const { ok, missing, advisories } = result;
   const tracked = advisories.filter((advisory) => advisory.includes(':tracked:'));
-  if (ok && tracked.length)
-    return check(
-      'hook registrations',
-      'DRIFT',
-      `committed, so overlay never edits it — hooks not registered: ${tracked.join(', ')}; ` +
-        'to register them, untrack it (`git rm --cached <file>`) and run `devkit doctor --fix`',
-      '',
-      false,
-      true,
-    );
+  const retired = advisories.filter((advisory) => !tracked.includes(advisory));
+  const trackedDetail =
+    `committed, so overlay never edits it or manages devkit's hooks in it: ${tracked.join(', ')}; ` +
+    'to let devkit register them, untrack it (`git rm --cached <file>`) and run `devkit doctor --fix`';
+  const retiredDetail = `retired hook in a committed file: ${retired.join(', ')}`;
   if (ok && advisories.length)
     return check(
       'hook registrations',
       'DRIFT',
-      `retired hook in a committed file: ${advisories.join(', ')}`,
-      'remove the fallow-gate.sh hook from that file (overlay never edits a committed file)',
+      [tracked.length ? trackedDetail : '', retired.length ? retiredDetail : '']
+        .filter(Boolean)
+        .join('; '),
+      retired.length
+        ? 'remove the fallow-gate.sh hook from that file (overlay never edits a committed file)'
+        : '',
       false,
       true,
     );
