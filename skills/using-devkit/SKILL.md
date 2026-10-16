@@ -210,7 +210,9 @@ devkit command.
 - **Coverage gate in diff scope (`"scope": "diff"` in `guard.config.json`): run only your tests.**
   `devkit coverage-run <your test files>` takes seconds and is all the gate needs; it blocks on
   added lines that ran under none of them, and on a source file those tests never loaded. Re-run it
-  after your last source edit. A full run is never required in this mode.
+  after your last source edit. A full run is never required in this mode. In this mode
+  `devkit coverage-diff` also prints the gate's verdict and exits 1 when the ship would block —
+  read the exit code, not just the table.
 - **`devkit help <command>` is the source of truth for flags.** This skill routes you to the command;
   it deliberately does not restate usage.
 
