@@ -321,6 +321,23 @@ describe('the routing predicate', () => {
   });
 });
 
+describe('the background-ship guidance using-devkit documents', () => {
+  // A ship piped through tail leaves the polled file empty until exit, hiding every heartbeat.
+  const skill = readFileSync(join(SKILLS_DIR, 'using-devkit', 'SKILL.md'), 'utf8');
+  const bullet = skill
+    .slice(skill.indexOf('**Run `devkit ship` in the BACKGROUND**'))
+    .split('\n- ')[0]
+    .replace(/\s+/g, ' ');
+
+  it('forbids piping ship through tail or head', () => {
+    expect(bullet).toContain('Never pipe ship through `tail` or `head`');
+  });
+
+  it('gives each concurrent ship its own redirect file', () => {
+    expect(bullet).toMatch(/> \/tmp\/ship-<[^>]+>\.log 2>&1/);
+  });
+});
+
 describe('the coverage-run stop pattern using-devkit documents', () => {
   // A renamed flag or run directory would make the documented pkill match nothing, and an empty
   // result is exactly what tempts an agent to widen the kill to every worktree's run.
