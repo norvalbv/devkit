@@ -198,10 +198,11 @@ describe('freezeIndex + frozenTouchedSet', () => {
     expect(frozenTouchedSet(root, frozen!)).toEqual(new Set(['first.txt']));
   });
 
-  it('returns null — never a live fallback — while another git process holds index.lock', () => {
+  it('freezes the same snapshot while another git process holds index.lock', () => {
     const root = seed();
+    const unlocked = freezeIndex(root);
     writeFileSync(join(root, '.git', 'index.lock'), '');
-    expect(freezeIndex(root)).toBeNull();
+    expect(freezeIndex(root)).toEqual(unlocked);
   });
 
   it('returns null outside a repository', () => {
