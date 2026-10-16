@@ -74,6 +74,7 @@ export interface SpawnDenials {
 const DENIED_SHOWN = 3;
 const FAILED_SHOWN = 3;
 
+/** ` [lens]` for a split lens part, so its log lines match its completion line; '' otherwise. */
 const lensTag = (reviewer: Reviewer): string =>
   reviewer.lens?.length ? ` [${lensGroupId(reviewer.lens)}]` : '';
 
@@ -93,10 +94,6 @@ export function reportFailedItems(reviewer: Reviewer, state: ChecklistState | nu
       `⚠️  guard-review: ${reviewer.name}${lensTag(reviewer)} — (+${failed.length - FAILED_SHOWN} more)`,
     );
 }
-
-/** ` [lens]` for a split lens part, so its log lines match its completion line; '' otherwise. */
-const lensTag = (reviewer: Reviewer): string =>
-  reviewer.lens?.length ? ` [${lensGroupId(reviewer.lens)}]` : '';
 
 /** Name the refused tool calls beside a non-pass outcome; a PASS that lost a test run stays quiet. */
 export function reportDeniedCalls(
