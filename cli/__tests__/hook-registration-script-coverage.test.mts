@@ -68,6 +68,7 @@ describe('hook registrations resolve to installable scripts', () => {
       priorArtGate: true,
       baseDrift: true,
       antiSlop: true,
+      comments: true,
     });
     const dangling = Object.values(HOOK_REGISTRATIONS)
       .flat()

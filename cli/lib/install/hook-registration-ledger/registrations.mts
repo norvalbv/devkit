@@ -227,6 +227,15 @@ export const HOOK_REGISTRATIONS: Record<string, HookRegistration[]> = {
       command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/anti-slop-preflight.sh"',
     },
   ],
+  // comments: the edit-time preview of guard-comments, owned by that guard. Advisory only.
+  comments: [
+    {
+      registrationId: 'comments:preflight',
+      event: 'PostToolUse',
+      matcher: 'Edit|Write|MultiEdit',
+      command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/comment-budget-preflight.mjs"',
+    },
+  ],
   // fallow: devkit's staged-scope wrapper. Bound to the FALLOW component, not agentHooks — a repo
   // can adopt fallow without opting into the agent-hook bundle (the primary consumer does exactly
   // that). Bare runner + path so the Cursor mirror reduces cleanly.

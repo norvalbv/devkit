@@ -212,17 +212,23 @@ describe('doctor decisions hook completeness', () => {
 describe('doctor provider hook ownership', () => {
   it('accepts an exact pre-ledger configuration and migrates it on re-init', () => {
     const root = tmpRepo();
-    expect(
-      devkit(root, 'init', '--stack', 'generic', '--yes', '--agent-hooks', '--no-codex').status,
-    ).toBe(0);
+    // comments:preflight postdates the ledger, so no pre-ledger configuration can carry it.
+    const init = [
+      'init',
+      '--stack',
+      'generic',
+      '--yes',
+      '--agent-hooks',
+      '--no-codex',
+      '--no-comments',
+    ];
+    expect(devkit(root, ...init).status).toBe(0);
     const ledger = join(root, '.devkit/agent-hook-registrations-manifest.json');
     rmSync(ledger);
     expect(devkit(root, 'doctor').status).toBe(0);
     expect(existsSync(ledger)).toBe(false);
 
-    expect(
-      devkit(root, 'init', '--stack', 'generic', '--yes', '--agent-hooks', '--no-codex').status,
-    ).toBe(0);
+    expect(devkit(root, ...init).status).toBe(0);
     expect(existsSync(ledger)).toBe(true);
   });
 });

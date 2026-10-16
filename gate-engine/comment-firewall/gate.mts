@@ -19,7 +19,7 @@ const defaults: FirewallDeps = {
   emit: emitCommentBudget,
 };
 
-function findingLocation(finding: CommentFinding): string {
+export function findingLocation(finding: CommentFinding): string {
   return `${finding.path}:${finding.startLine}${
     finding.endLine === finding.startLine ? '' : `-${finding.endLine}`
   }`;
@@ -30,14 +30,18 @@ function printFinding(finding: CommentFinding): void {
   console.error(`  • [${finding.id}] ${findingLocation(finding)} — ${summary}`);
 }
 
-const PARAGRAPH_REMEDY = [
-  '',
+export const PARAGRAPH_ADVICE = [
   'Each paragraph has 3+ changed text lines. Shorten the comment where possible.',
   'If you need a paragraph-long comment to justify a workaround, the code is wrong — fix the code.',
+];
+
+const PARAGRAPH_REMEDY = [
+  '',
+  ...PARAGRAPH_ADVICE,
   'If every line states something the code cannot, retry unchanged: a paragraph blocks only once.',
 ].join('\n');
 
-const REF_REMEDY = [
+export const REF_REMEDY = [
   '',
   'Comments outlive tickets and internal docs. State the fact the reference stands for, or drop it:',
   'the ticket belongs in the commit message or PR body, and a decision record reaches readers',
