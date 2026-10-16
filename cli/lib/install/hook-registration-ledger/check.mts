@@ -1,7 +1,7 @@
 import { AGENT_TARGETS } from '../../components.mts';
 import { isTracked } from '../../git-tracked.mts';
 import { isSafeAgentAssetPath } from '../agent-asset-manifest/lifecycle.mts';
-import { type AgentProvider, requireAgentProviders } from '../agent-assets/agent-providers.mts';
+import { requireAgentProviders } from '../agent-assets/agent-providers.mts';
 import { type HookInstallScope, hookRegistrationDestination } from './codec.mts';
 import {
   adoptExactLegacy,
@@ -17,19 +17,6 @@ import {
   projectHookRegistrations,
   readHookRegistrationLedger,
 } from './lifecycle.mts';
-
-/** Install skips a tracked overlay destination before reclaiming, so everything found is report-only. */
-function trackedAdvisories(
-  root: string,
-  provider: AgentProvider,
-  scope: HookInstallScope,
-  rel: string,
-): string[] {
-  const advisories = [`${provider}:tracked:${rel}`];
-  const elsewhere = retiredElsewhere(root, provider, scope);
-  if (elsewhere) advisories.push(`${provider}:retired-registration:${elsewhere.rel}`);
-  return advisories;
-}
 
 /** Doctor's read-only view of hook registrations. `advisories` are findings devkit must not repair. */
 export function checkHookRegistrations(
@@ -47,9 +34,15 @@ export function checkHookRegistrations(
   const advisories: string[] = [];
   for (const provider of requireAgentProviders(targets)) {
     const rel = hookRegistrationDestination(provider, scope);
+    // Install reclaims this before skipping a destination, so it is judged for every provider.
+    const elsewhere = retiredElsewhere(root, provider, scope);
+    if (elsewhere)
+      (elsewhere.repairable ? missing : advisories).push(
+        `${provider}:retired-registration:${elsewhere.rel}`,
+      );
     // Mirrors skipProvider: install never registers into a tracked overlay file, so this can't be fixed.
     if (overlay && isTracked(root, rel)) {
-      advisories.push(...trackedAdvisories(root, provider, scope, rel));
+      advisories.push(`${provider}:tracked:${rel}`);
       continue;
     }
     if (!isSafeAgentAssetPath(root, rel, true)) {
@@ -62,11 +55,6 @@ export function checkHookRegistrations(
     const legacy = reconcileLegacyHookCommands(ledger?.entries ?? [], provider, rel);
     if (stripReclaimedCommands(document, provider).changed)
       missing.push(`${provider}:retired-registration`);
-    const elsewhere = retiredElsewhere(root, provider, scope);
-    if (elsewhere)
-      (elsewhere.repairable ? missing : advisories).push(
-        `${provider}:retired-registration:${elsewhere.rel}`,
-      );
     if (legacy.ledgerChanged) missing.push(`${provider}:superseded-registration`);
     const effectiveLedger = legacyOwnedComponentIds?.length
       ? ledgerOf(

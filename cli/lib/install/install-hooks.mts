@@ -329,9 +329,9 @@ export function installHookRegistrations(
     const obsoleteIds = Object.keys(HOOK_REGISTRATIONS).filter((id) => !componentIds.includes(id));
     for (const provider of requireAgentProviders(targets)) {
       const rel = hookRegistrationDestination(provider, scope);
-      if (skipProvider(root, provider, rel, overlay)) continue;
       // Not added to `wrote`: overlay git-excludes those paths, and this file is the user's.
       reclaimRetiredElsewhere(root, provider, scope, dryRun);
+      if (skipProvider(root, provider, rel, overlay)) continue;
       let document = providerDocument(root, provider, rel);
       const legacy = reconcileLegacyHookCommands(entries, provider, rel);
       const retired = stripReclaimedCommands(document, provider, legacy.stripped);

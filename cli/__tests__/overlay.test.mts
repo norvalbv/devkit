@@ -1160,6 +1160,27 @@ describe('overlay (local-only) install', () => {
     ).toBe('');
   });
 
+  it('still strips a retired hook from an untracked settings.json when settings.local.json is tracked', async () => {
+    const root = workRepo();
+    seedLocalSettings(root, { hooks: {} });
+    execFileSync('git', ['add', '-f', '.claude/settings.local.json'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'track local settings'], { cwd: root });
+    const shared = join(root, '.claude', 'settings.json');
+    const command =
+      'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"';
+    const hooks = { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command }] }] };
+    writeFileSync(shared, JSON.stringify({ hooks }));
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayAll(),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+
+    expect(readFileSync(shared, 'utf8')).not.toContain('fallow-gate.sh');
+    expect(await doctorRun([], root)).toBe(0);
+  });
+
   it("the tracked settings.local.json advisory's remedy registers the hooks", async () => {
     const root = workRepo();
     seedLocalSettings(root, { hooks: {} });
