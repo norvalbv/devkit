@@ -78,6 +78,9 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   base, so `git show HEAD:<file>`, `grep` and `git diff --stat` in your own checkout can all agree
   with each other and still describe a different tree. Waive on evidence read from the reviewed
   base, and pass the `--base` the block note prints so the record says which tree you checked.
+  A failing reviewer also prints `reviewed diff: guard-review transcript <ref>`: that transcript
+  holds the staged diff of the files the reviewer was given, and it outlives the ship's worktree. A
+  path missing from it may sit outside that reviewer's files rather than be unstaged.
   When a correctness or conventions finding names a concrete input and running that input against
   the reviewed code gives the correct result, waive it with the command and its output as the
   rationale. Do not add tests or edits only to change the diff and re-sample the judge: any real

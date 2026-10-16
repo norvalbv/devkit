@@ -304,6 +304,12 @@ export function reportAdvisories(
   emitAdvisoryResult(`review:${name}`, 'finding', advisories.join(' | '));
 }
 
+/** A non-PASS verdict's evidence: its stored transcript holds the diff the reviewer judged. */
+export function reportVerdictTranscript(name: string, status: string, ref?: string | null): void {
+  if (status !== 'pass' && ref)
+    console.error(`guard-review: ${name} — reviewed diff: guard-review transcript ${ref}`);
+}
+
 /** A cached PASS line (`tail` = its provenance), marked and reported when it replays MCP-degraded. */
 export function printCachedPass(name: string, meta: VerdictMeta, tail: string): void {
   const cause = cachedMcpDegradation(meta);

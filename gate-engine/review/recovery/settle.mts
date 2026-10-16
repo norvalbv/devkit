@@ -30,6 +30,7 @@ import { savePasses } from '../cache.mts';
 import {
   reportAdvisories,
   reportMcpDegraded,
+  reportVerdictTranscript,
   RETRIEVAL_REVIEWER,
   reviewBaseContext,
 } from '../evidence/base-context.mts';
@@ -168,6 +169,7 @@ export function settleReviewOutcome(
   console.error(
     `guard-review: ${res.name} — ${verdictToken({ status: res.status, degraded, mcpDegraded })}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' && !degraded ? ' (checkpointed)' : ''}${tail}`,
   );
+  reportVerdictTranscript(res.name, res.status, transcriptRef);
   // commit-guard never lens-splits (only correctness does), so the split branch above needs no
   // retrieval report; an MCP-degraded split reviewer is reported once at its merge (lens/split.mts).
   if (degraded) reportRetrievalDegraded(res.name, degraded.cause);
