@@ -172,6 +172,27 @@ describe('antiSlopFailRemedy', () => {
     expect(plenty).toContain('3 of these finding(s)');
   });
 
+  it('shares one baselined unit across new findings in different files, never double counting', () => {
+    const [line] = antiSlopFailRemedy(
+      [newError('src/dest1.ts', CAST), newError('src/dest2.ts', CAST)],
+      baselineOf(debt('src/a.ts', CAST)),
+      false,
+    );
+    expect(line).toContain('1 of these finding(s)');
+    expect(line).toContain('baselined in src/a.ts.');
+  });
+
+  it('names only the sources whose debt the count drew on', () => {
+    const [line] = antiSlopFailRemedy(
+      [newError('src/c.ts', CAST)],
+      baselineOf(debt('src/b.ts', CAST), debt('src/a.ts', CAST, 2)),
+      false,
+    );
+    expect(line).toContain('1 of these finding(s)');
+    expect(line).toContain('baselined in src/a.ts.');
+    expect(line).not.toContain('src/b.ts');
+  });
+
   it('drops the baseline-staging step in overlay and carries the base ref when given one', () => {
     const errors = [newError('src/dest.ts', CAST)];
     const baseline = baselineOf(debt('src/source.ts', CAST));

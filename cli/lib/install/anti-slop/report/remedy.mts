@@ -1,10 +1,16 @@
 /** What a blocked anti-slop run tells its author to do next (sc-3469). Hints never go in a rule
  * message: the diagnostic is part of the baseline fingerprint (see oxc-toolchain-migration). */
 
-import type { AntiSlopBaseline, BaselineEntry } from '../baseline.mts';
+import type { AntiSlopBaseline } from '../baseline.mts';
 import { ANTI_SLOP_BASELINE_REL } from '../constants.mts';
 import type { FindingGroup } from '../diagnostics.mts';
-import { formatSources, relocationKey, relocationRemedy } from '../relocations.mts';
+import {
+  classifyRelocations,
+  formatSources,
+  relocationKey,
+  relocationRemedy,
+  type SourceCredit,
+} from '../relocations.mts';
 
 type NewErrorGroup = FindingGroup & { additionalCount: number };
 
@@ -50,22 +56,19 @@ export function relocationHint(
   overlay: boolean,
   baseRef?: string,
 ): string[] {
-  const entriesByKey = new Map<string, BaselineEntry[]>();
-  for (const entry of baseline.entries) {
-    const key = relocationKey(entry);
-    entriesByKey.set(key, [...(entriesByKey.get(key) ?? []), entry]);
+  const baselinedCredit = new Map<string, SourceCredit[]>();
+  const ordered = [...baseline.entries].sort(
+    (a, b) => a.file.localeCompare(b.file) || a.fingerprint.localeCompare(b.fingerprint),
+  );
+  for (const { file, fingerprint, count, ...identity } of ordered) {
+    const key = relocationKey(identity);
+    const credit = { source: file, fingerprint, count };
+    baselinedCredit.set(key, [...(baselinedCredit.get(key) ?? []), credit]);
   }
-  let matched = 0;
-  const sources: string[] = [];
-  for (const group of errors) {
-    const entries = entriesByKey.get(relocationKey(group)) ?? [];
-    const elsewhere = entries.filter((entry) => entry.file !== group.file);
-    const units = elsewhere.reduce((sum, entry) => sum + entry.count, 0);
-    if (units === 0) continue;
-    matched += Math.min(group.additionalCount, units);
-    sources.push(...elsewhere.map((entry) => entry.file));
-  }
+  const { relocated } = classifyRelocations(errors, baselinedCredit);
+  const matched = relocated.reduce((sum, group) => sum + group.relocatedCount, 0);
   if (matched === 0) return [];
+  const sources = relocated.flatMap((group) => group.from.map((credit) => credit.source));
   const stage = overlay ? '' : `, then stage ${ANTI_SLOP_BASELINE_REL}`;
   return [
     `anti-slop: ${matched} of these finding(s) are identical (rule and source line) to debt already baselined in ${formatSources(sources)}. If you moved this code from there, do not rewrite it: delete it there, git add both files, run \`${relocationRemedy(baseRef)}\`${stage}. New or copied code is not a move: fix it as below`,
