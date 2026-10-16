@@ -213,7 +213,7 @@ export function adoptExactLegacy(
 }
 
 export function skipProvider(root: string, provider: AgentProvider, rel: string, overlay: boolean) {
-  if (overlay && provider !== 'claude' && isTracked(root, rel)) {
+  if (overlay && isTracked(root, rel)) {
     console.log(`  ! ${rel} is git-tracked — skipping (can't hide a tracked edit)`);
     return true;
   }

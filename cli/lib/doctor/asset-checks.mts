@@ -338,6 +338,17 @@ export function checkRegistrations(
     );
   }
   const { ok, missing, advisories } = result;
+  const tracked = advisories.filter((advisory) => advisory.includes(':tracked:'));
+  if (ok && tracked.length)
+    return check(
+      'hook registrations',
+      'DRIFT',
+      `committed, so overlay never edits it — hooks not registered: ${tracked.join(', ')}; ` +
+        'to register them, untrack it (`git rm --cached <file>`) and run `devkit doctor --fix`',
+      '',
+      false,
+      true,
+    );
   if (ok && advisories.length)
     return check(
       'hook registrations',
