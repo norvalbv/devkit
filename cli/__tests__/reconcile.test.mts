@@ -576,6 +576,53 @@ describe('reconcile — base refs the manifest can actually carry', () => {
     expect(g('for-each-ref', '--format=%(refname)', 'refs/devkit/')).toBe('');
   });
 
+  it("a peer's lock on the stale tracking ref cannot fail the fetch, which leaves that ref alone", () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    const entry = entryFor(root, g, base, [{ path: 'foo.ts' }]);
+    // A stale tracking ref is what makes git take its lock: an up-to-date one is never rewritten.
+    g('update-ref', 'refs/remotes/origin/0.0.9', base);
+    writeFileSync(join(root, g('rev-parse', '--git-path', 'refs/remotes/origin/0.0.9.lock')), '');
+
+    const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+    expect(res.warnings).toEqual([]);
+    expect(res.restored).toEqual(['foo.ts']);
+    expect(g('rev-parse', 'refs/remotes/origin/0.0.9')).toBe(base);
+    expect(g('for-each-ref', '--format=%(refname)', 'refs/devkit/')).toBe('');
+  });
+
+  it("a peer's lock on a tag at the fetched tip cannot fail the fetch, which creates no tag", () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    const entry = entryFor(root, g, base, [{ path: 'foo.ts' }]);
+    const origin = g('remote', 'get-url', 'origin');
+    G(origin)('tag', 't1', 'refs/heads/0.0.9'); // published upstream only, so a fetch would auto-follow it
+    writeFileSync(join(root, g('rev-parse', '--git-path', 'refs/tags/t1.lock')), '');
+
+    const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+    expect(res.warnings).toEqual([]);
+    expect(res.restored).toEqual(['foo.ts']);
+    const probe = spawnSync('git', ['-C', root, 'rev-parse', '--verify', 'refs/tags/t1'], {
+      env: GENV,
+    });
+    expect(probe.status).not.toBe(0);
+  });
+
+  it("leaves .git/FETCH_HEAD alone: a peer's ship reads it straight after its own fetch", () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    const entry = entryFor(root, g, base, [{ path: 'foo.ts' }]);
+    const peerFetch = `${base}\t\tbranch 'peer' of origin\n`;
+    writeFileSync(join(root, '.git', 'FETCH_HEAD'), peerFetch);
+
+    const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+    expect(res.restored).toEqual(['foo.ts']);
+    expect(readFileSync(join(root, '.git', 'FETCH_HEAD'), 'utf8')).toBe(peerFetch);
+  });
+
   it('a baseRef that exists only as a TAG is refused with a warning, never reconciled', () => {
     const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n', 'bar.ts': 'OLD-BAR\n' });
     mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n', 'bar.ts': 'NEW-BAR\n' });
