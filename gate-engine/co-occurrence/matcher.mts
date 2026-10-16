@@ -72,7 +72,7 @@ import {
 } from './chunk-index.mts';
 import { classifyPair } from './classify.mts';
 import { isExpired } from './decay.mts';
-import { missingIndexMessage, refreshIndex } from './index-refresh.mts';
+import { cleanLine, missingIndexMessage, refreshIndex, reportUnindexed } from './index-refresh.mts';
 
 // ── Types ── the row shape, blob decode and freshness live in chunk-index.mts (index-read boundary).
 // Tier + size thresholds (mirrors resolveGuardConfig().thresholds + --flag overrides).
@@ -113,16 +113,14 @@ interface Label {
 // Hoisted per useTopLevelRegex — this runs once per index row in the normalize loop.
 const BACKSLASH_RE = /\\/g;
 
-// Package-relative ONLY for labels.json (engine-shipped bench fixtures). Every
-// CONSUMER path is resolved from cfg.cwd below, never from here.
+// Package-relative ONLY for labels.json (bench fixtures); CONSUMER paths resolve from cfg.cwd.
 const here = dirname(fileURLToPath(import.meta.url));
 const labelsPath = resolve(here, 'labels.json');
 
 // Resolve config against the consumer cwd (W-3). All thresholds + paths flow from here.
 const cfg = resolveGuardConfig(process.cwd());
 
-// Index path: SEARCH_CODE_DB env (fixtures/tests) wins; else config.indexPath
-// resolved to the consumer cwd. null => no index configured => matcher opt-out.
+// Index path: SEARCH_CODE_DB (fixtures/tests) wins; else config.indexPath. null => matcher opt-out.
 const dbPath = process.env.SEARCH_CODE_DB ?? resolveFromCwd(cfg, 'indexPath');
 // Allowlist: CO_OCCURRENCE_ALLOWLIST env (fixtures/tests) wins; else config.allowlistPath.
 const allowlistPathRaw =
@@ -137,8 +135,7 @@ const CO_SCRIPT = process.env.GUARD_ALLOWLIST_CLI || ALLOWLIST_CLI;
 const argv = process.argv.slice(2);
 const mode = argv[0] ?? 'scan';
 const flag = flagReader(argv);
-// Knob defaults come from the resolved config thresholds (consumer-tunable), with
-// per-run --flag overrides on top.
+// Knob defaults come from the resolved config thresholds, with per-run --flag overrides on top.
 const KNOBS = {
   nearCode: Number(flag('--near-code', cfg.thresholds.nearCode)),
   driftCode: Number(flag('--drift-code', cfg.thresholds.driftCode)),
@@ -153,8 +150,7 @@ const ONLY_NEW = argv.includes('--new');
 // 2 = could-not-run (no index / read error). The pre-commit hook blocks ONLY on
 // 1 and fails OPEN on 2, so an infra failure (or no index) never bricks a commit.
 const GATE = argv.includes('--gate');
-// scan --changed: restrict to pairs touching a staged file — the dups THIS commit
-// introduces, not pre-existing drift.
+// scan --changed: only pairs touching a staged file — the dups THIS commit introduces.
 const CHANGED = argv.includes('--changed');
 // reconcile --apply: actually write the pruned allowlist. Default is dry-run.
 const APPLY = argv.includes('--apply');
@@ -181,6 +177,7 @@ if (!existsSync(dbPath)) cannotRun(missingIndexMessage(dbPath, cfg));
 // Judge the code being COMMITTED, not the last indexed state. Silently no-ops unless refreshing
 // is safe here — index-refresh.mts documents the two ways an unconditional refresh goes wrong.
 refreshIndex(dbPath, cfg);
+const unindexedScope = { ...cfg, includeTests: INCLUDE_TESTS, indexPath: dbPath };
 
 // allowlistPath resolves from DEFAULTS (a non-null string) so this never fires at
 // runtime, but resolveFromCwd's contract is string|null — guard it (fail-open, like
@@ -331,8 +328,9 @@ function runScan() {
   // "nothing there" when it really means "the index disagrees with the disk".
   for (const l of freshnessNotice(dropped, { verified: verifier.enabled, blocking: false }))
     console.log(l);
+  const skipped = reportUnindexed(changedSet, rows, unindexedScope);
   if (ONLY_NEW && pairs.length === 0) {
-    console.log('No new duplication since the last baseline. ✓');
+    console.log(cleanLine(skipped));
     if (GATE) process.exit(0);
     return;
   }

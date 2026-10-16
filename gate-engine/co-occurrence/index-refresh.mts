@@ -16,11 +16,23 @@
  */
 
 import { execFileSync, execSync } from 'node:child_process';
-import { realpathSync, statSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { sourceMatchers } from '../config.mts';
+import { reasonDetail } from '../deterministic/reason.mts';
+import { emitGateEvent } from '../judge/gate-events.mts';
+import { underRoot } from '../review/scope/policy.mts';
 
 const MTIME_TOLERANCE_MS = 1;
 const BACKSLASH_RE = /\\/g;
+const SAMPLE = 6;
+const TESTS_DIR = '__tests__/';
+
+/** The first SAMPLE paths, comma-joined, with a `(+k more)` tail. */
+const sampleFiles = (files: readonly string[]) => {
+  const more = files.length - SAMPLE;
+  return `${files.slice(0, SAMPLE).join(', ')}${more > 0 ? ` (+${more} more)` : ''}`;
+};
 
 export interface IndexFreshnessDb {
   prepare(sql: string): {
@@ -198,9 +210,7 @@ export function inspectIndexFreshness(
 }
 
 export function staleIndexMessage(freshness: IndexFreshness): string {
-  const sample = freshness.staleFiles.slice(0, 6);
-  const more = freshness.staleFiles.length - sample.length;
-  const files = `${sample.join(', ')}${more > 0 ? ` (+${more} more)` : ''}`;
+  const files = sampleFiles(freshness.staleFiles);
   return (
     `search-code index is STALE — ${freshness.staleFiles.length}/${freshness.checkedFiles} indexed file(s) changed or disappeared in ${freshness.sourceRoot ?? 'its source checkout'}.\n` +
     `  ${files}\n` +
@@ -248,4 +258,62 @@ export function refreshIndex(
   } catch {
     // Timeout, missing binary, a concurrent writer holding the DB — all non-fatal by design.
   }
+}
+
+// Staged files the dup matcher could not compare (no usable chunk), named so a clean pass is honest.
+export interface UnindexedScope {
+  cwd: string;
+  scanRoots: readonly string[];
+  sourceExtensions: string[];
+  includeTests: boolean;
+}
+
+/** Staged scan-root source files present on disk with no usable chunk in the index, sorted. */
+export function unindexedStaged(
+  changed: ReadonlySet<string>,
+  indexed: ReadonlySet<string>,
+  scope: UnindexedScope,
+): string[] {
+  const { isSource, isTest } = sourceMatchers(scope.sourceExtensions);
+  return [...changed]
+    .filter(
+      (f) =>
+        !indexed.has(f) &&
+        isSource(f) &&
+        (scope.includeTests || !(isTest(f) || f.includes(TESTS_DIR))) &&
+        scope.scanRoots.some((root) => underRoot(f, root)) &&
+        existsSync(resolve(scope.cwd, f)),
+    )
+    .sort();
+}
+
+/** The lines naming the uncompared files, with a remedy that depends on who owns the index. */
+export function unindexedNotice(files: readonly string[], ownsIndex: boolean): string[] {
+  if (files.length === 0) return [];
+  return [
+    `${files.length} staged file(s) have no usable (embedded) chunks in the index — not compared: ${sampleFiles(files)}`,
+    ownsIndex
+      ? '  Run `search-code index` to embed them; a file the indexer excludes or cannot chunk stays uncompared.'
+      : '  The index is shared from another checkout and cannot cover files new on this branch.',
+  ];
+}
+
+/** The clean-run line: honest about scope when some staged files were not compared. */
+export const cleanLine = (skipped: readonly string[]) =>
+  `No new duplication ${skipped.length ? 'among the compared files' : 'since the last baseline'}. ✓`;
+
+/** Name the staged files `rows` cannot compare, as a degraded run; advisory, the gate still exits 0. */
+export function reportUnindexed(
+  changed: ReadonlySet<string> | null,
+  rows: readonly { file_path: string }[],
+  scope: UnindexedScope & { indexPath: string },
+): string[] {
+  if (!changed) return [];
+  const files = unindexedStaged(changed, new Set(rows.map((r) => r.file_path)), scope);
+  const notice = unindexedNotice(files, indexIsInThisCheckout(scope.indexPath, scope.cwd));
+  if (notice.length === 0) return notice;
+  for (const line of notice) console.log(line);
+  const detail = reasonDetail('dup', notice);
+  emitGateEvent({ type: 'gate_degraded', judge: 'dup', cause: 'unindexed_staged', detail });
+  return notice;
 }

@@ -4,6 +4,8 @@
   "fanoutCap": 12,
   "extraGates": { "git-pathspec": "node scripts/git-pathspec-check.mts" },
   "indexPath": ".search-code/index.db",
+  "//indexCommand": "Refreshes the index before the dup gate in the checkout that owns it, bounded under the 60s refresh timeout; a ship worktree's linked index is never refreshed.",
+  "indexCommand": "search-code index --timeout 45s --no-wait",
   "//generated": "Paths ship's three-way staging abort points at a generator instead of a hand-merge (sc-2770). .devkit/*-manifest.json are built-in defaults.",
   "generated": [{ "glob": "dist/**", "command": "bun run build" }],
   "//extraGates": "related-tests runs the tests vitest relates to the staged paths, so a test the change breaks blocks before any AI judge runs.",
