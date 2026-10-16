@@ -22,11 +22,12 @@ interface Run {
   stderr: string;
 }
 // Run the CLI with the allowlist pinned to `al` via the CO_OCCURRENCE_ALLOWLIST seam.
-function run(al: string, args: string[]): Run {
+function run(al: string, args: string[], input?: string): Run {
   try {
     const stdout = execFileSync('node', [CLI, ...args], {
       env: { ...process.env, CO_OCCURRENCE_ALLOWLIST: al },
       encoding: 'utf8',
+      input,
     });
     return { status: 0, stdout, stderr: '' };
   } catch (e) {
@@ -234,17 +235,57 @@ describe('guard-dup-allowlist prune + baseline guard', () => {
     expect(read(al).pairs).toEqual([baseline]);
   });
 
-  it('add / add-clone reject a decay of < 1 day (would be instantly expired) — exit 1, no write', () => {
+  it('add / add-clone reject a decay < 1 day or not a whole number — exit 1, no write', () => {
     for (const args of [
       ['add', 'symA', 'a.ts', 'symB', 'b.ts', '--description', 'x', '--decay-days', '0'],
       ['add', 'symA', 'a.ts', 'symB', 'b.ts', '--description', 'x', '--decay-days', '-1'],
+      ['add', 'symA', 'a.ts', 'symB', 'b.ts', '--description', 'x', '--decay-days', '1.5'],
       ['add-clone', 'deadbeef', 'a.ts', 'b.ts', '--description', 'x', '--decay-days', '0'],
+      ['add-clone', 'deadbeef', 'a.ts', 'b.ts', '--description', 'x', '--decay-days', '2.5'],
+      // A malformed value must refuse, not fall through to the default decay.
+      ['add-clone', 'deadbeef', 'a.ts', 'b.ts', '--description', 'x', '--decay-days', '30d'],
+      ['add-clone', 'deadbeef', 'a.ts', 'b.ts', '--description', 'x', '--decay-days', 'Infinity'],
+      ['add-clone', 'deadbeef', 'a.ts', 'b.ts', '--description', 'x', '--decay-days'],
+      // A script passing an unset variable (`--decay-days "$DAYS"`).
+      ['add-clone', 'deadbeef', 'a.ts', 'b.ts', '--description', 'x', '--decay-days', ''],
     ]) {
       const al = freshPath();
-      expect(run(al, args).status).toBe(1);
+      const r = run(al, args);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('--decay-days must be an integer');
       // Rejected before any write — no allowlist file is created.
       expect(existsSync(al)).toBe(false);
     }
+  });
+
+  const SCANNED = JSON.stringify([{ fragmentHash: 'h', fileA: 'a.ts', fileB: 'b.ts' }]);
+
+  it('baseline-clones rejects a malformed --decay-days instead of freezing for the default', () => {
+    const al = freshPath();
+    const r = run(al, ['baseline-clones', '--decay-days', '30d'], SCANNED);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('--decay-days must be an integer');
+    expect(existsSync(al)).toBe(false);
+  });
+
+  // Validating after the stdin read would mask the flag error behind a JSON one (and block on a TTY).
+  it('baseline-clones reports a bad --decay-days before it reads stdin', () => {
+    const r = run(freshPath(), ['baseline-clones', '--decay-days', '0'], '');
+    expect(r.stderr).toContain('--decay-days must be an integer');
+    expect(r.stderr).not.toContain('stdin');
+  });
+
+  it('a valid --decay-days is stored as that number; baseline-clones defaults to 3650', () => {
+    const al = freshPath();
+    run(al, ['add', 'symA', 'a.ts', 'symB', 'b.ts', '--description', 'x', '--decay-days', '30']);
+    run(al, ['add-clone', 'kept', 'a.ts', 'b.ts', '--description', 'x', '--decay-days', '14']);
+    expect(read(al).pairs[0].decayDays).toBe(30);
+    expect(run(al, ['baseline-clones', '--decay-days', '90'], SCANNED).status).toBe(0);
+    const decays = (p: string) => read(p).clones.map((c: { decayDays: number }) => c.decayDays);
+    expect(decays(al)).toEqual([14, 90]);
+    const fresh = freshPath();
+    expect(run(fresh, ['baseline-clones'], SCANNED).status).toBe(0);
+    expect(decays(fresh)).toEqual([3650]);
   });
 
   it('similarity 0 and lines 0 are preserved, not dropped as falsy', () => {
