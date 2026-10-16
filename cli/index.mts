@@ -7,7 +7,7 @@
  *   devkit doctor [--fix]
  *   devkit review [--target <path>] [--base <ref>]
  *   devkit sync-skills [--dry-run]
- *   devkit sync-hooks [--only <a.sh,b.mjs>] [--targets <claude,cursor>] [--dry-run] [--force]
+ *   devkit sync-hooks [--targets <claude,cursor>] [--dry-run] [--force]
  *   devkit sync-hook-runner [--dry-run]
  *   devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes]   (maintainer-only)
  *   devkit --version

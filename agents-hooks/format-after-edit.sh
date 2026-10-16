@@ -36,7 +36,7 @@ cd "${CLAUDE_PROJECT_DIR:-$HOOK_DIR/../..}" 2>/dev/null || { echo '{}'; exit 0; 
 
 # Record this edit in the per-session ledger (repo-relative path) so the Stop hooks
 # (lint-check/knip-check/decision-stop-check) can scope their reports to files THIS session
-# touched. Best-effort: a missing lib (sync-hooks --only) or unwritable $TMPDIR never blocks.
+# touched. Best-effort: a missing lib or unwritable $TMPDIR never blocks.
 # Strip the prefix from the same UNRESOLVED root the guard above compared against — `pwd -P`
 # would resolve symlinks (/tmp → /private/tmp) and the strip would silently miss.
 source "$HOOK_DIR/session-edits-lib.sh" 2>/dev/null || true

@@ -8,8 +8,8 @@
 # it and filter their tool output down to ledger files. The commit/ship gate chain stays
 # repo-wide — this scoping applies to in-flight chats only.
 #
-# Callers source this best-effort and FAIL-OPEN when it is absent (`sync-hooks --only` can
-# install a hook without this lib): `declare -F session_edits_file &>/dev/null || exit 0`.
+# Callers source this best-effort and FAIL-OPEN when it is absent:
+# `declare -F session_edits_file &>/dev/null || exit 0`.
 # Pure bash + awk, bash-3.2 compatible (no mapfile). Only js_eval reaches a JS runtime.
 
 # Echo the ledger path for the session in the hook payload ($1 = raw stdin JSON).
@@ -78,8 +78,6 @@ filter_output_to_session_files() {
 # ---- Package-manager runner (sc-1054) ----------------------------------------------------------
 # The Stop hooks run the consumer's OWN npm-scripts, so they must run them with the consumer's own
 # package manager — a hard bun requirement silently skipped every npm/pnpm/yarn repo without bun.
-# Hooks synced by `sync-hooks --only` can meet an older copy of this lib that predates these
-# helpers; each hook defines bun-only fallbacks for that case.
 
 # Evaluate JS ($1) for a package.json probe. bun FIRST, node only when bun is absent: sc-1043 found a
 # bare node probe silently skipping a bun-only toolchain. Returns 1 when neither runtime exists.
