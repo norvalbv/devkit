@@ -72,6 +72,7 @@ import { buildCappedDiffEvidence } from './diff-evidence.mts';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { headTreeish } from '../ratchets/git-index.mts';
 import { stagedTreeHash } from './evidence/staged-git.mts';
+import { type FindingTally, findingTally } from './contracts/response.mts';
 import {
   cacheKey,
   parseReviewVerdict,
@@ -247,7 +248,7 @@ export async function runCompleteness(
   // structurally incomplete rather than merely terse. The decisions judge sets the precedent that
   // an LLM verdict rides gate_result. `family` names the blocked_gate token the ship script
   // publishes for this gate's chain, which is what lets a reader join the two vocabularies.
-  const emitVerdict = (status: 'pass' | 'fail', detail: string) =>
+  const emitVerdict = (status: 'pass' | 'fail', detail: string, tally?: FindingTally) =>
     emitGateEvent({
       type: 'gate_result',
       gate: 'completeness',
@@ -260,6 +261,7 @@ export async function runCompleteness(
       // unbounded verdict line would corrupt a CONCURRENT judge's row, not merely its own — and
       // this gate runs in parallel with the reviewer fleet by design.
       detail: detail.slice(0, DETAIL_CAP),
+      tally,
     });
   // A gate that could not reach a verdict produced no outcome, so it takes its OWN event type
   // rather than a status on gate_result — the 2026-08-05 note's ruling, for its stated reason.
@@ -485,7 +487,7 @@ export async function runCompleteness(
   }
   // Above the hard/soft split below: a GUARD_COMPLETENESS_HARD=0 soften still MADE this finding,
   // and a run that exits 0 on it is exactly the run whose reader has nothing else to go on.
-  emitVerdict('fail', reason || 'see transcript');
+  emitVerdict('fail', reason || 'see transcript', findingTally(raw));
   console.error(`guard-review: completeness finding — ${reason || 'see transcript'}`);
   console.error(raw.trim());
   // Hard unless explicitly softened for this one commit (GUARD_COMPLETENESS_HARD=0); unset → block.

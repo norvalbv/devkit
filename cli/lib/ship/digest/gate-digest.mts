@@ -9,7 +9,7 @@
  * blocked: the shell settled that and published it on this ship's ship_result row, which this
  * reader consumes, so the two can never disagree.
  */
-import { blockingFindings } from './blocking.mts';
+import { blockingFindings, judgeFinding } from './blocking.mts';
 import { count, oneLine, textOf } from './fields.mts';
 import { scanBackward } from './tail.mts';
 import { readBranchHistory, renderTrend, summariseTrend } from './trend.mts';
@@ -66,6 +66,8 @@ export interface GateEvent {
   blocking_base?: string;
   /** review_result only: the per-lens checklist vector; absent when it spilled or was never kept. */
   items?: unknown[];
+  /** completeness gate_result FAIL only: its CRITICAL and IMPORTANT finding counts. */
+  tally?: { critical?: number; important?: number };
 }
 
 /** One gate's contribution to this attempt. `gate` is the event's own label, never parsed prose.
@@ -244,12 +246,7 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
       const gate = e.gate ?? 'unknown';
       // A row without its own family IS its family — only the deterministic chain reports finer
       // than the blocked_gate vocabulary.
-      attributable.push({
-        gate,
-        family: e.family ?? gate,
-        detail: oneLine(e.detail),
-        state: 'finding',
-      });
+      attributable.push({ gate, family: e.family ?? gate, state: 'finding', ...judgeFinding(e) });
     } else if (
       e.type === 'gate_result' &&
       (e.status === 'could_not_run' || e.status === 'bypassed')
