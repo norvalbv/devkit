@@ -15,6 +15,8 @@ export const UNREADABLE_EVIDENCE = '(unreadable-evidence)';
 // Fixed run order; each runs as `node <sibling module> <args>`, so every install mode resolves it.
 // Exit contract: 0 clean, 1 violation, 2 fail-open (could-not-run) unless `failOpen2` says otherwise.
 export const DETERMINISTIC = [
+  // First: the cheapest gate, one `git diff --check` over the commit's index.
+  { id: 'whitespace', module: './whitespace.mjs', args: ['gate'] },
   { id: 'size', module: '../ratchets/size-disable.mjs', args: ['gate'] },
   { id: 'fanout', module: '../ratchets/folder-fanout.mjs', args: ['gate'] },
   {
