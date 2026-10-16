@@ -378,9 +378,8 @@ gate_dependency_install_remedy() {
   fi
 }
 
-# Pick the first available install that satisfies the BASE package.json in the ephemeral worktree.
-# "Populated" is only a fast preference: a real but stale install can miss a dependency added by the
-# base after that checkout last installed. Try the linked root first, then the main worktree fallback.
+# Pick the first install that satisfies the BASE package.json in the ephemeral worktree: the linked
+# root's, then the main worktree's, then a frozen install of the base's own lockfile in the worktree.
 gate_node_modules_source() {
   local wt=$1 root=$2 main_root=$3 tool candidate missing rc remedy
   local candidates=("$root/node_modules")
@@ -418,6 +417,24 @@ gate_node_modules_source() {
   # No install existed before this change either: preserve the old "nothing to link" result so
   # non-JS repos and hermetic ship fixtures continue without a new precondition.
   [ "${#rejected[@]}" -gt 0 ] || return 1
+  remedy=$(gate_dependency_install_remedy "$wt")
+  local attempted=0
+  local -a cmd
+  case $remedy in
+    'install dependencies'*) ;;
+    *)
+      # A checkout that predates the base cannot install what only the base declares, so install the
+      # base's own lockfile here. HUSKY=0 keeps a root `prepare: husky` off the shared hook config.
+      echo "  ↳ no existing install satisfies the ship base — running \`$remedy\` in the gate worktree" >&2
+      read -ra cmd <<<"$remedy"
+      if (cd "$wt" && HUSKY=0 "${cmd[@]}") >&2 &&
+        node "$tool" "$wt/package.json" "$wt/node_modules" >/dev/null; then
+        printf '%s\n' "$wt/node_modules"
+        return 0
+      fi
+      attempted=1
+      ;;
+  esac
   echo "devkit ship: no node_modules satisfies the ship base package.json:" >&2
   local rejection path packages
   for rejection in "${rejected[@]}"; do
@@ -425,8 +442,11 @@ gate_node_modules_source() {
     packages=${rejection#*$'\t'}
     echo "  - $path (missing: $packages)" >&2
   done
-  remedy=$(gate_dependency_install_remedy "$wt")
-  echo "run \`$remedy\` in the checkout, then retry the same ship command." >&2
+  if [ "$attempted" -eq 1 ]; then
+    echo "\`$remedy\` in the gate worktree did not supply them (output above) — fix that, then retry the same ship command." >&2
+  else
+    echo "run \`$remedy\` in the checkout, then retry the same ship command." >&2
+  fi
   return 2
 }
 
