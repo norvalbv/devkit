@@ -5,7 +5,8 @@ import type { resolveGuardConfig } from '../config.mts';
 import { sourceMatchers } from '../config.mts';
 import { LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mts';
 import { fanoutSplitHints } from './folder-fanout.mts';
-import { mergeBaseRef, treeTextAtRef } from './git-index.mts';
+import { gitPrefix, mergeBaseRef, treeTextAtRef } from './git-index.mts';
+import { catBlobs } from './tree-blobs.mts';
 import { SIZE_SKIP_DIRS } from './size-policy.mts';
 
 export type LineCountVersion = 1 | 2;
@@ -273,16 +274,37 @@ export function effectiveLineCeiling(baseline: LinesBaseline, file: string, cap:
   return Math.max(cap, baseline.files[file] ?? 0);
 }
 
+/** Line counts of `files` in `snapshot` from one `cat-file --batch`: null per unreadable file, and
+ * null overall when git cannot answer, so no caller mistakes a failed read for deleted files. */
+function linesAtRef(
+  root: string,
+  snapshot: Snapshot,
+  files: string[],
+): Map<string, number | null> | null {
+  if (!files.length) return new Map();
+  const prefix = gitPrefix(root);
+  const blobs = catBlobs(
+    root,
+    files.map((file) => `${snapshot}:${prefix}${file}`),
+  );
+  if (!blobs) return null;
+  return new Map(
+    files.map((file, index) => {
+      const blob = blobs[index];
+      return [file, blob ? countLines(blob.toString('utf8')) : null];
+    }),
+  );
+}
+
 export function lineCountsAtRef(
   root: string,
   snapshot: Snapshot,
   files: Iterable<string>,
   cfg: GuardConfig,
 ): LineCount[] {
+  const governedFiles = [...files].filter((file) => governed(file, cfg));
   const counts: LineCount[] = [];
-  for (const file of files) {
-    if (!governed(file, cfg)) continue;
-    const lines = sourceLines(root, snapshot, file);
+  for (const [file, lines] of linesAtRef(root, snapshot, governedFiles) ?? []) {
     if (lines !== null) counts.push({ file, lines });
   }
   return counts;
@@ -423,9 +445,12 @@ export function tightenLineBaseline(
 ): LineTightening {
   const files = { ...grandfathered.files };
   let tightened = false;
-  for (const file of new Set([...staged, ...raisedEntries(root, grandfathered, cap)])) {
-    if (!(file in grandfathered.files)) continue;
-    const lines = sourceLines(root, snapshot, file);
+  const recorded = [...new Set([...staged, ...raisedEntries(root, grandfathered, cap)])].filter(
+    (file) => file in grandfathered.files,
+  );
+  const measured = linesAtRef(root, snapshot, recorded);
+  if (!measured) return { files, lineCountVersion: grandfathered.lineCountVersion, tightened };
+  for (const [file, lines] of measured) {
     if (lines === null || lines <= cap(file)) {
       delete files[file];
       tightened = true;
