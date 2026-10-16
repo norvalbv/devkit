@@ -77,7 +77,9 @@ commit_with_gate_capture() {
   local log="$root/.devkit/last-ship-gates-$branch_safe.log"
   local progress="$root/.devkit/review-progress-$branch_safe.json"
   . "$(dirname "${BASH_SOURCE[0]}")/run-gates-with-capture.sh"
-  . "$(dirname "${BASH_SOURCE[0]}")/telemetry.sh"
+  # Synchronous, never `&`: the digest reads back to ship_attempt, and a ship's stdout is the PR URL.
+  local ship_event; ship_event="$(dirname "${BASH_SOURCE[0]}")/ship-intent-event.mts"
+  [ -f "$ship_event" ] || ship_event="$(dirname "${BASH_SOURCE[0]}")/ship-intent-event.mjs"
   . "$(dirname "${BASH_SOURCE[0]}")/prepare-gate-worktree.sh"
   # Both callers already source this, but the object probe below is this function's own evidence —
   # don't inherit it by luck of call order.
@@ -88,7 +90,7 @@ commit_with_gate_capture() {
   # deterministic/decisions/review events (emitted from the node gates via gate-events.mts) and the
   # ship_attempt/ship_result lines below all carry the same ship_id and correlate. Off-ship the env
   # is unset and nothing is emitted. A downstream reader (the usage tracker's collector) tail-ingests
-  # it; every write is `>> … || true` so telemetry can never fail the ship.
+  # it; every write ends `|| true` so telemetry can never fail the ship.
   export DEVKIT_GATE_EVENTS="${DEVKIT_GATE_EVENTS:-$HOME/.devkit/telemetry/gate-events.jsonl}"
   export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${br//\//-}-$$-$(date +%s)")}"
   mkdir -p "$(dirname "$DEVKIT_GATE_EVENTS")" 2>/dev/null || true
@@ -134,20 +136,14 @@ commit_with_gate_capture() {
 
   # Start the attempt before hook resolution so a fail-closed setup error still has a terminal
   # ship_result row instead of disappearing from telemetry.
-  # resumed/body_bytes: the shell-safe fields of the retry-cost story (bare JSON bool/number — no
-  # escaping needed). The body ITSELF rides the node-side ship_intent event, which can JSON-escape
-  # arbitrary bytes; a printf %s of the body here could tear the line on a quote.
+  # The PR body itself rides the node-side ship_intent event; this row carries only its byte count.
   local dur_start resumed_json body_bytes
   dur_start=$(date +%s)
   resumed_json=false; [ "${DEVKIT_SHIP_RESUMED:-0}" = "1" ] && resumed_json=true
   body_bytes=$(printf '%s' "$body" | wc -c | tr -d ' ')
   if [ "$ship_dry_gates" -eq 0 ]; then
-    printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s"%s,"mode":"%s","resumed":%s,"body_bytes":%d,"log_path":"%s","ts":"%s"}\n' \
-      "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
-      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$(devkit_parent_session_json)" \
-      "$(devkit_json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$resumed_json" "$body_bytes" \
-      "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
+    node "$ship_event" attempt "mode=${DEVKIT_SHIP_MODE:-ship}" "resumed=$resumed_json" \
+      "body_bytes=$body_bytes" "log_path=$ship_log" >/dev/null 2>&1 || true
   fi
 
   mkdir -p "$(dirname "$log")" 2>/dev/null || true
@@ -354,11 +350,8 @@ SHIP_HOOK_WRAPPER
   else blocked_json='"unknown"'; timed_out=false
   fi
   if [ "$ship_dry_gates" -eq 0 ]; then
-    printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s"%s,"exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
-      "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
-      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$(devkit_parent_session_json)" "$rc" "$timed_out" "$blocked_json" \
-      "$(( $(date +%s) - dur_start ))" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
+    node "$ship_event" result "exit_code=$rc" "timed_out=$timed_out" "blocked_gate=${blocked_json//\"/}" \
+      "duration_s=$(( $(date +%s) - dur_start ))" "log_path=$ship_log" >/dev/null 2>&1 || true
   fi
 
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then

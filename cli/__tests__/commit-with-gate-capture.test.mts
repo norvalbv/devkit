@@ -78,7 +78,7 @@ function runCommit(
   inheritedDryGates = '',
   extraEnv: Record<string, string> = {},
 ) {
-  const telemetry = join(root, 'telemetry', 'gate-events.jsonl');
+  const telemetry = join(root, extraEnv.DK_TEST_SINK_DIR ?? 'telemetry', 'gate-events.jsonl');
   const script = `
 set -e
 . "$1"
@@ -99,7 +99,7 @@ export DEVKIT_SHIP_ID=sc1537-test
 export SHIP_COMMIT_TIMEOUT=10
 # The ship caller's own BASE_FLAG / PATHS, which the helper reads by dynamic scope (sc-3443).
 eval "\${DK_TEST_CALLER_VARS:-}"
-commit_with_gate_capture "$4" "$5" feat/sc1537 "test title" "test body"
+commit_with_gate_capture "$4" "$5" "\${DK_TEST_BRANCH:-feat/sc1537}" "test title" "test body"
 `;
   // Supervised: this runs the shipped script and dispatches real hooks (suite-hangs-bound-at-the-spawn-site).
   return testSpawnSync(
@@ -244,6 +244,39 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     const rows = events.filter((e) => e.type === 'ship_attempt' || e.type === 'ship_result');
     expect(rows).toHaveLength(2);
     for (const row of rows) expect(row.parent_session_id).toBe(expected);
+  });
+
+  it('writes a ship row longer than the 1,024-byte bash append split whole, typed, untruncated', () => {
+    const { root, wt, base } = fixture(true);
+    const branch = `feat/${'b'.repeat(195)}`;
+    const sinkDir = join('d'.repeat(200), 'e'.repeat(200), 'f'.repeat(200));
+    const result = runCommit(root, wt, base, false, false, '', {
+      DK_TEST_BRANCH: branch,
+      DK_TEST_SINK_DIR: sinkDir,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const lines = readFileSync(join(root, sinkDir, 'gate-events.jsonl'), 'utf8')
+      .trim()
+      .split('\n');
+    const rows = lines.map((line) => JSON.parse(line));
+    const [attempt, outcome] = ['ship_attempt', 'ship_result'].map((t) =>
+      rows.find((e) => e.type === t),
+    );
+    expect(Buffer.byteLength(lines[rows.indexOf(attempt)])).toBeGreaterThan(1024);
+    for (const row of [attempt, outcome]) {
+      expect(row).toMatchObject({ branch, ship_id: 'sc1537-test' });
+      expect(row.log_path).toBe(join(root, sinkDir, 'logs', 'sc1537-test.log'));
+      // Only the node envelope stamps `source`: a bash-built row never carried it.
+      expect(row).toHaveProperty('source');
+    }
+    expect(attempt).toMatchObject({ mode: 'ship', resumed: false, body_bytes: expect.any(Number) });
+    expect(outcome).toMatchObject({
+      exit_code: 0,
+      timed_out: false,
+      blocked_gate: null,
+      duration_s: expect.any(Number),
+    });
   });
 
   // Values must stay free of single quotes: the row is spliced into a single-quoted printf argument.
