@@ -4,7 +4,15 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +25,7 @@ import {
   referencedRepoPathCandidates,
   resolvesCaseExact,
 } from '../../gate-engine/markdown/referenced-paths.mts';
+import { CONSUMER_FORMATTER } from '../lib/husky/format-fragment.mts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -171,6 +180,17 @@ describe('CLAUDE.md routes and AGENTS.md carries the working rules', () => {
     const paragraph = claudeMd.split('\n').find((line) => line.trim().length >= 40) ?? '';
     const copy = `${read('AGENTS.md')}\n## Orientation\n${paragraph}\n`;
     expect(restatedLines(claudeMd, copy)).toEqual([paragraph.trim()]);
+  });
+
+  it("AGENTS.md names the formatter devkit's own format script runs", () => {
+    const formatter = JSON.parse(read('package.json')).scripts.format.split(' ')[0];
+    expect(read('AGENTS.md')).toContain('`bun run format`');
+    expect(read('AGENTS.md')).toContain(`(${formatter})`);
+  });
+
+  it("AGENTS.md's 'no root biome config' claim still holds", () => {
+    expect(read('AGENTS.md')).toContain('no root config');
+    expect(CONSUMER_FORMATTER.configProbes.filter((f) => existsSync(join(ROOT, f)))).toEqual([]);
   });
 
   it('CLAUDE.md fits inside the judge segment cap, uncut', () => {
