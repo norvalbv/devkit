@@ -767,7 +767,7 @@ describe('ship-branch.sh — worktree integration', () => {
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).not.toBe(0); // bounded — the timed-out commit aborts the ship
-    // Ship's own expiry banner: the harness's deadline also returns 124, but prints no banner.
+    // Ship's own expiry banner: the harness's linger reap also returns 124, but prints no banner.
     expect(r.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
     expect(r.stderr).toMatch(/devkit ship --resume .+ to converge/); // resume hint
     expect(r.stderr).toMatch(/export SHIP_COMMIT_TIMEOUT/); // the knob, with the exported-env caveat
