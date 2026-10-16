@@ -108,17 +108,17 @@ For each staged file under `scanRoots`:
   then the existing symbol and its file:line, then `verbatim` or the concrete difference. Never
   restate one duplicate twice.
 
-## 3b. Token clones (sub-chunk + molecule dupes the semantic search misses)
+## 3b. Clones (sub-chunk, molecule and renamed-helper dupes the semantic search misses)
 In HEADLESS COMMIT GATE mode, the deterministic matcher and clone gates already ran before this
 reviewer; skip this section there. Interactive/pre-commit review runs it as an early surface.
 
 The embedding search above is symbol-level; it can't see a block duplicated *inside* a larger symbol,
-or repeated inline JSX. The jscpd-backed clone detector catches those (verbatim, boundary-free).
-- Run once: `guard-clone json > /tmp/clones.json`.
-- Focus on clones touching a STAGED file (a clone between two untouched files isn't introduced by this commit).
-- For each: `guard-dup-allowlist check-clone <fragmentHash>` — skip (exit 0) if allowlisted. Pre-existing clones are baseline-frozen, so only NEW clones surface.
-- Surface unapproved clones to root with fileA, fileB, lines — root asks the human to approve (intentional) or refactor.
-- If approved: `guard-dup-allowlist add-clone <fragmentHash> <fileA> <fileB> --description "<reason>" --lines <N> --range-a <startA-endA> --range-b <startB-endB>` (ranges from the detector output — findability metadata).
+or repeated inline JSX. The jscpd-backed clone detector catches those, plus whole functions copied
+under new names (same structure, names and literals ignored).
+- Run once: `guard-clone scan --changed --gate`. It lists only this commit's clones: touching a
+  staged file, absent from HEAD, and not allowlisted.
+- Surface each listed clone to root with fileA, fileB, lines — root asks the human to approve (intentional) or refactor.
+- If approved: paste the `guard-dup-allowlist add-clone …` command the scan printed for it (it carries the key, lines and ranges).
 
 ## 4. Finalize
 ```bash
