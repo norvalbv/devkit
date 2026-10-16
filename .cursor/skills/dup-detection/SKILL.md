@@ -9,6 +9,8 @@ description: Use when working with `.co-occurrence-allowlist.json` — fixing a 
 
 Frink catches code duplication at commit via two detectors writing one allowlist (`.co-occurrence-allowlist.json` at repo root): the **embedding matcher** (semantic, symbol-level) and the **clone detector** (verbatim, jscpd, token-level). Entries are keyed by `symFileKey` (pairs) or `fragmentHash` (clones); ranges/similarity/lines are findability metadata only.
 
+The clone detector's `min-tokens` floor counts code tokens only: imports and comments never enter the token stream, so a comment pasted into a copy neither splits the clone nor pads it over the floor.
+
 ## When to use
 
 - An allowlist entry was handed to you with "fix this dup."
