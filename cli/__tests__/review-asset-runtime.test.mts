@@ -14,6 +14,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../gate-engine/config.mts';
+import { localModuleClosureFiles } from '../../gate-engine/review/eval/module-closure-hash.mts';
 import { REVIEWERS, type ReviewerSelection } from '../../gate-engine/review/reviewers.mts';
 import {
   PACKAGED_REVIEW_ASSET_PATHS,
@@ -114,6 +115,17 @@ describe('packaged reviewer asset runtime', () => {
     expect(PACKAGED_REVIEW_RUNTIME_ENTRYPOINT).toBe('gate-engine/review/baseline-gate');
     expect(PACKAGED_REVIEW_ASSET_PATHS).not.toContain('agents/frontend-accessibility-reviewer.md');
     expect(PACKAGED_REVIEW_ASSET_PATHS).not.toContain('skills/brainstorming/SKILL.md');
+  });
+
+  it('keeps the real entrypoint import closure inside the packaged runtime modules', () => {
+    const root = join(HERE, '../..');
+    const stems = localModuleClosureFiles([join(root, `${PACKAGED_REVIEW_RUNTIME_ENTRYPOINT}.mts`)])
+      .map((file) => relative(root, file).replace(/\.mts$/, ''))
+      .sort();
+    expect(
+      stems,
+      `${PACKAGED_REVIEW_RUNTIME_ENTRYPOINT}.mts is copied as a frozen runtime; every relative import (type-only included) must be listed in PACKAGED_REVIEW_RUNTIME_MODULE_STEMS (gate-engine/review/runtime.mts)`,
+    ).toEqual(PACKAGED_REVIEW_RUNTIME_MODULE_STEMS);
   });
 
   it('makes commit-guard script discovery portable across agent providers', () => {

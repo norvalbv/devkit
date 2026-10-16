@@ -1,3 +1,4 @@
+// Frozen review runtime: local imports must be listed in PACKAGED_REVIEW_RUNTIME_MODULE_STEMS.
 export interface DiffHunk {
   oldStart: number;
   oldCount: number;
