@@ -13,6 +13,35 @@ export function issueLocations(issue: string): { file: string; line: number }[] 
   }));
 }
 
+// A completeness finding line, through markdown dressing (`**CRITICAL**:`, `- IMPORTANT:`). The
+// colon is required, so a severity word in prose ("this is a CRITICAL gap") starts no finding.
+export const FINDING_LINE_RE = /^[\s>*#-]*\**(CRITICAL|IMPORTANT|LOW)\**\s*:\s*(.+)$/;
+export const ISSUES_LINE_RE =
+  /^[\s>*#-]*\**ISSUES\**\s*:\s*(\d+)\s*critical\D+(\d+)\s*important\D+(\d+)\s*low/i;
+
+/** The CRITICAL and IMPORTANT findings a completeness transcript holds. LOW can be deferred. */
+export interface FindingTally {
+  critical: number;
+  important: number;
+}
+
+/** Per severity, the larger of the prefixed lines and the judge's own ISSUES tally: the gate prompt
+ *  requires neither, so a model that drops one still gets counted by the other. */
+export function findingTally(raw: string): FindingTally {
+  const lines = normalizeLineEndings(raw).split('\n');
+  const tally = lines
+    .map((line) => line.match(ISSUES_LINE_RE))
+    .filter(Boolean)
+    .at(-1);
+  return {
+    critical: Math.max(linesOf(lines, 'CRITICAL'), Number(tally?.[1] ?? 0)),
+    important: Math.max(linesOf(lines, 'IMPORTANT'), Number(tally?.[2] ?? 0)),
+  };
+}
+
+const linesOf = (lines: string[], severity: string): number =>
+  lines.filter((line) => line.match(FINDING_LINE_RE)?.[1] === severity).length;
+
 /** `rate-limited` is split out of `outage` because its remedy inverts the generic one: re-running
  *  is exactly what cannot succeed until the provider's window resets (sc-2538). `engine` is the
  *  gate's own failure — a throw no judge answered for — which no auth/quota check can clear (sc-3400). */

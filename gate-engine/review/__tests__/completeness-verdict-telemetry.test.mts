@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readShipEvents, render, summarise } from '../../../cli/lib/ship/digest/gate-digest.mts';
 import { runCompleteness } from '../completeness.mts';
 import {
   cleanupReviewFixtures,
@@ -53,6 +54,7 @@ interface WireEvent {
   cause?: string;
   ship_id?: string;
   secs?: number;
+  tally?: { critical: number; important: number };
 }
 
 const events = (): WireEvent[] => {
@@ -61,6 +63,17 @@ const events = (): WireEvent[] => {
   // than a throw, and the assertions below name the fields each one requires.
   return lines.map((l) => JSON.parse(l) as WireEvent);
 };
+
+/** A two-finding FAIL: the verdict reason names the CRITICAL finding, never the IMPORTANT one. */
+const twoFindings = mkExec(async () =>
+  [
+    'CRITICAL: moving an importer does not enforce aliases | cli/move.mts | breaks imports',
+    'IMPORTANT: guidance still says every import is rewritten | skills/using-devkit/SKILL.md:59',
+    'LOW: a nicer error message | cli/move.mts',
+    'ISSUES: 1 critical, 1 important, 1 low',
+    'VERDICT: FAIL — moving an importer does not enforce aliases',
+  ].join('\n'),
+);
 
 const verdicts = () => events().filter((e) => e.type === 'gate_result');
 const nonRuns = () => events().filter((e) => e.type === 'gate_infra_failure');
@@ -98,6 +111,36 @@ describe('completeness verdict telemetry', () => {
       status: 'fail',
       detail: 'the rollback path is untested',
     });
+  });
+
+  it('tallies every CRITICAL and IMPORTANT finding, since the reason names only one', async () => {
+    process.env.GUARD_COMPLETENESS_HARD = '0';
+    const repo = consumerRepo({ backend: true });
+
+    expect(
+      await runCompleteness(messageFile(repo, 'feat: move'), repo, { exec: twoFindings }),
+    ).toBe(0);
+    expect(verdicts()[0]).toMatchObject({ status: 'fail', tally: { critical: 1, important: 1 } });
+  });
+
+  // Each side is tested alone; this pins the field name the emitter writes to the one the digest reads.
+  it('reaches the ship digest as a counted row through the real sink', async () => {
+    const repo = consumerRepo({ backend: true });
+    expect(
+      await runCompleteness(messageFile(repo, 'feat: move'), repo, { exec: twoFindings }),
+    ).toBe(1);
+
+    const ship = 'ship-completeness-verdict';
+    const rows = summarise(
+      [
+        ...readShipEvents(sink, ship),
+        { ship_id: ship, type: 'ship_result', blocked_gate: 'review' },
+      ],
+      ship,
+    );
+    expect(render(rows)).toContain(
+      '✗ completeness — BLOCKED this run: moving an importer does not enforce aliases · 2 findings (1 critical, 1 important)',
+    );
   });
 
   it('emits one inconclusive row naming the machine cause on a judge timeout', async () => {
