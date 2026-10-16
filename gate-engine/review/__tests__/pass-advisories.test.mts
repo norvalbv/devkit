@@ -28,7 +28,7 @@ const ADVISED =
   'ADVISORY: `src/a.ts:1` — mobile passes the display status, unlike desktop\n' +
   'VERDICT: PASS — no finding blocks this commit; the divergence is the item to resolve before merge.';
 
-const outcome = (status: 'pass' | 'fail', transcript: string): ReviewOutcome => ({
+const outcome = (status: ReviewOutcome['status'], transcript: string): ReviewOutcome => ({
   name: REVIEWER,
   status,
   reason: 'r',
@@ -66,15 +66,16 @@ afterEach(() => {
 });
 
 const printed = () => vi.mocked(console.error).mock.calls.map((c) => String(c[0]));
-const advisoryRows = () => {
+const rowsOf = (type: string) => {
   const file = join(cwd, 'events.jsonl');
   if (!existsSync(file)) return [];
   return readFileSync(file, 'utf8')
     .split('\n')
     .filter(Boolean)
     .map((l) => JSON.parse(l))
-    .filter((e) => e.type === 'advisory_result');
+    .filter((e) => e.type === type);
 };
+const advisoryRows = () => rowsOf('advisory_result');
 
 describe('parseAdvisories', () => {
   it('reads marker lines through markdown dressing and CRLF, never a mention inside prose', () => {
@@ -158,12 +159,6 @@ describe('outcomes that carry no advisory', () => {
     expect(advisoryRows()).toEqual([]);
   });
 
-  it('a FAIL never reports its advisory lines as advisories', () => {
-    settleReviewOutcome(ctx(cwd), plan(cwd).tasks[0], outcome('fail', ADVISED), 1);
-    expect(printed().some((l) => l.includes('advisory'))).toBe(false);
-    expect(advisoryRows()).toEqual([]);
-  });
-
   it('a malformed cached field reads as none; parts dedupe and cap like a live PASS', () => {
     expect(cachedAdvisories({ advisories: 'not-an-array' })).toBeUndefined();
     expect(cachedAdvisories({ advisories: [] })).toBeUndefined();
@@ -183,5 +178,76 @@ describe('a lens-split reviewer', () => {
     emitMergedLensResults(new Map([[REVIEWER, parts]]), 'sonnet');
     expect(advisoryRows()).toHaveLength(1);
     expect(advisoryRows()[0].detail).toContain('c.ts:3 — third');
+  });
+});
+
+const FAIL_ADVISED =
+  'ADVISORY: `src/b.ts:9` — the buffer cap reads the whole staged set\n' +
+  'VERDICT: FAIL — `src/a.ts:1` duplicates an existing helper.';
+const FAIL_LINE =
+  'guard-review: commit-guard — advisory (non-blocking): `src/b.ts:9` — the buffer cap reads the whole staged set';
+
+describe('a FAIL carrying advisories', () => {
+  it('reports them like a PASS does, but caches nothing', () => {
+    settleReviewOutcome(ctx(cwd), plan(cwd).tasks[0], outcome('fail', FAIL_ADVISED), 1);
+    expect(printed()).toContain(FAIL_LINE);
+    expect(advisoryRows()).toEqual([
+      expect.objectContaining({ gate: 'review:commit-guard', status: 'finding' }),
+    ]);
+    expect(advisoryRows()[0]).not.toHaveProperty('family');
+    expect(plan(cwd).tasks).toHaveLength(1);
+  });
+
+  it('a clean FAIL, or one whose marker names no location, reports no advisory', () => {
+    for (const transcript of ['VERDICT: FAIL — x', 'ADVISORY: none\nVERDICT: FAIL — x'])
+      settleReviewOutcome(ctx(cwd), plan(cwd).tasks[0], outcome('fail', transcript), 1);
+    expect(printed().some((l) => l.includes('advisory'))).toBe(false);
+    expect(advisoryRows()).toEqual([]);
+  });
+
+  it('an INCONCLUSIVE outcome judged nothing, so its advisory lines stay unreported', () => {
+    settleReviewOutcome(ctx(cwd), plan(cwd).tasks[0], outcome('inconclusive', ADVISED), 1);
+    expect(advisoryRows()).toEqual([]);
+  });
+});
+
+describe('a lens-split reviewer whose merge FAILs', () => {
+  const task = () => ({ ...plan(cwd).tasks[0], splitOf: REVIEWER, group: 'g' });
+  // SAFETY: merge reads only res/secs/task, which these literals supply.
+  const part = (res: ReviewOutcome): LensPart => ({ res, secs: 1, task: task() }) as LensPart;
+
+  it('reports the failing lens and the passing lens advisories in one row', () => {
+    const parts = [part(outcome('fail', FAIL_ADVISED)), part(outcome('pass', ADVISED))];
+    emitMergedLensResults(new Map([[REVIEWER, parts]]), 'sonnet');
+    expect(rowsOf('review_result')).toEqual([expect.objectContaining({ status: 'fail' })]);
+    expect(advisoryRows()).toHaveLength(1);
+    expect(advisoryRows()[0].detail).toContain('src/b.ts:9');
+    expect(advisoryRows()[0].detail).toContain('mobile passes the display status');
+  });
+
+  it('dedupes advisories the lenses share and holds the live cap across parts', () => {
+    const lines = (from: number) =>
+      [0, 1, 2, 3].map((i) => `ADVISORY: c.ts:${from + i} — finding`).join('\n');
+    const parts = [part(outcome('fail', lines(1))), part(outcome('pass', lines(3)))];
+    emitMergedLensResults(new Map([[REVIEWER, parts]]), 'sonnet');
+    expect(advisoryRows()[0].detail.split(' | ')).toEqual(
+      [1, 2, 3, 4, 5].map((i) => `c.ts:${i} — finding`),
+    );
+  });
+
+  // A cache-seeded part carries no live transcript; its advisories replay on its own cache line.
+  it.each([
+    ['a cached PASS', outcome('pass', '')],
+    ['an INCONCLUSIVE', outcome('inconclusive', ADVISED)],
+    ['an errored', outcome('error', ADVISED)],
+  ])('reports only the judged parts beside %s part', (_name, other) => {
+    emitMergedLensResults(
+      new Map([[REVIEWER, [part(outcome('fail', FAIL_ADVISED)), part(other)]]]),
+      'sonnet',
+    );
+    expect(advisoryRows()).toHaveLength(1);
+    expect(advisoryRows()[0].detail).toBe(
+      '`src/b.ts:9` — the buffer cap reads the whole staged set',
+    );
   });
 });

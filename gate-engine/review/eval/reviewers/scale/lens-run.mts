@@ -22,7 +22,7 @@ import { execJudgeAsync } from '../../../../judge/run-judge.mts';
 import { readTranscript } from '../../../../judge/transcript-store.mts';
 import type { GuardConfig } from '../../../../config.mts';
 import { runCascade } from '../../../cascade/reviewer.mts';
-import { parseAdvisories } from '../../../contracts/response.mts';
+import { verdictAdvisories } from '../../../contracts/response.mts';
 import { reviewCaptureItemSchema } from '../../../evidence/items.mts';
 import { identityBytesByPath, packDiffIntoChunks } from '../../../lens/chunk.mts';
 import { deriveLensReviewer, lensGroupId, resolveLensGroups } from '../../../lens/split.mts';
@@ -401,13 +401,10 @@ export async function runLensWave(
         status: res.status,
         reason: (res.reason ?? '').slice(0, 400),
         issues: capture.items.flatMap((it) => it.issues.map((text) => ({ lens: it.lens, text }))),
-        advisories:
-          res.status === 'pass'
-            ? parseAdvisories(res.transcript ?? '', Infinity).map((text) => ({
-                lens: lensGroupId(t.group),
-                text,
-              }))
-            : [],
+        advisories: verdictAdvisories(res, Infinity).map((text) => ({
+          lens: lensGroupId(t.group),
+          text,
+        })),
         ms: Date.now() - started,
         at: new Date().toISOString(),
         identity: o.identity,

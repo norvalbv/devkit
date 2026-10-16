@@ -72,6 +72,31 @@ describe('a blocking ID whose lens recorded several issues', () => {
   });
 });
 
+describe('a blocked reviewer that also wrote an advisory', () => {
+  it('shows the block first and the advisory as not blocking, counted under the same gate', () => {
+    const advised = ev({
+      type: 'advisory_result',
+      gate: `review:${REVIEWER}`,
+      status: 'finding',
+      detail: '`src/b.ts:9` — the buffer cap reads the whole staged set',
+    });
+    const both = digest([
+      ev({ type: 'ship_attempt' }),
+      fail([item(1)]),
+      advised,
+      shipResult('review'),
+    ]);
+    expect(both).toContain('Gate findings this run (1 gate(s) / 2 finding(s))');
+    const blocked = both.indexOf(`✗ review:${REVIEWER} — BLOCKED this run`);
+    const advisory = both.indexOf(
+      `⚠ review:${REVIEWER} — advisory, did NOT block this run: \`src/b.ts:9\``,
+    );
+    expect(blocked).toBeGreaterThan(-1);
+    expect(advisory).toBeGreaterThan(blocked);
+    expect(both).not.toContain(`review:${REVIEWER} — BLOCKED this run: \`src/b.ts:9\``);
+  });
+});
+
 describe('an ID that cannot be matched to one item shows no count', () => {
   it('two IDs under one lens, whether both chunk items are inline or one spilled', () => {
     const chunked = [ONE_ID[0], { lens: LENS, fp: 'a5421e88403c' }];
