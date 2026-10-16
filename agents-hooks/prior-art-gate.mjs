@@ -116,6 +116,13 @@ export function loadShellWrites(root, env = process.env) {
   return null;
 }
 
+/** The calls the gate can deny: file writes, plan exit, a feature-critique dispatch, and Bash. */
+function gatedTool(input) {
+  const tool = input?.tool_name;
+  if (tool === "ExitPlanMode" || tool === "Bash" || EDIT_TOOLS.has(tool)) return true;
+  return SUBAGENT_TOOLS.has(tool) && input?.tool_input?.subagent_type === GATED_SUBAGENT;
+}
+
 /** A Bash call claims the session's deny only when the classifier says its command writes files. */
 function bashWrites(input, root, markers, shellWrites) {
   if (existsSync(markers.snoozed)) return false;
@@ -135,17 +142,10 @@ export function decide(
 ) {
   try {
     if (input?.agent_id) return null; // subagent / in-process teammate: the lead is gated
-    const tool = input?.tool_name;
-    const gated =
-      tool === "ExitPlanMode" ||
-      tool === "Bash" ||
-      EDIT_TOOLS.has(tool) ||
-      (SUBAGENT_TOOLS.has(tool) &&
-        input?.tool_input?.subagent_type === GATED_SUBAGENT);
-    if (!gated) return null; // incl. the Task call that spawns prior-art itself
+    if (!gatedTool(input)) return null; // incl. the Task call that spawns prior-art itself
     const markers = markerPaths(root, input?.session_id, tmp);
     if (existsSync(markers.ran)) return null;
-    if (tool === "Bash" && !bashWrites(input, root, markers, shellWrites)) return null;
+    if (input.tool_name === "Bash" && !bashWrites(input, root, markers, shellWrites)) return null;
     // The marker means "acknowledged or already-reminded" — sticky either way. Exclusive create
     // (throws EEXIST → the catch allows) so one call of a parallel batch claims the session's deny.
     mkdirSync(markers.dir, { recursive: true });
