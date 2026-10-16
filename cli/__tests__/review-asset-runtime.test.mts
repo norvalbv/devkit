@@ -147,6 +147,26 @@ describe('packaged reviewer asset runtime', () => {
     expect(reference).toContain('guard-dup-allowlist');
   });
 
+  it('never tells a reviewer to prune the tracked allowlist', () => {
+    const prescribed = [
+      'agents/commit-guard.md',
+      'skills/commit-guard/SKILL.md',
+      'skills/commit-guard/references/co-occurrence.md',
+      'skills/dup-detection/SKILL.md',
+    ];
+    const pruneLines = prescribed.flatMap((path) =>
+      readFileSync(join(HERE, '../..', path), 'utf8')
+        .split('\n')
+        .filter((text) => text.includes('prune'))
+        .map((text) => ({ path, text })),
+    );
+
+    expect(pruneLines.length).toBeGreaterThan(0);
+    for (const { name } of REVIEWERS) {
+      expect(pruneLines.filter(({ text }) => text.includes(name))).toEqual([]);
+    }
+  });
+
   it('makes correctness checklist discovery portable across agent providers', () => {
     const sources = [
       readFileSync(join(HERE, '../../agents/correctness-reviewer.md'), 'utf8'),
