@@ -488,24 +488,47 @@ ship_suggest_base() {
   esac
 }
 
-# usage: ship_pin_origin_base <root> <base> <label> — print origin's <base> oid. The fetch writes no ref,
-# so a sibling fetch holding refs/remotes/origin/<base>.lock cannot fail it. Needs bounded_remote_git.
+# Bound remote git: the shared supervisor terminates the whole git/helper process group on expiry.
+bounded_remote_git() {
+  # .mts in source, built .mjs in an installed consumer (the gate-config-paths dual-ext idiom).
+  local dir supervisor
+  dir="$(dirname "${BASH_SOURCE[0]}")/review/process"
+  supervisor="$dir/gate-supervisor.mts"
+  [ -f "$supervisor" ] || supervisor="$dir/gate-supervisor.mjs"
+  # -c: a detached auto-gc/maintenance inherits the supervisor's ownership token and is reaped as a
+  # leaked tree, turning a finished fetch into 124 (sc-3761). Remote git never needs maintenance.
+  node "$supervisor" "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git -c gc.auto=0 -c maintenance.auto=false "$@"
+}
+
+# usage: ship_pin_origin_base_failed <message> <git-cmd> <status> <errfile>
+# Name a failed remote step with git's own reason, so a lock or timeout never reads as a missing branch.
+ship_pin_origin_base_failed() {
+  local why=
+  [ "$3" -ne 124 ] || why=": did not finish cleanly within ${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}s"
+  echo "$1 ($2 exit $3$why)" >&2
+  sed 's/^/  /' "$4" >&2
+}
+
+# usage: ship_pin_origin_base <root> <ref> <label> [absent-msg] — print origin's <ref> oid. The fetch
+# writes no ref, so a sibling fetch holding refs/remotes/origin/<ref>.lock cannot fail it.
 ship_pin_origin_base() {
-  local root=$1 base_ref=$2 label=$3 advert pinned="" attempt=0 status oid ref extra lines
+  local root=$1 base_ref=$2 label=$3 advert err pinned="" attempt=0 status oid ref extra lines
+  local absent=${4:-"--base: no branch origin/$2 (a PR base must be a remote branch — not a sha or a tag)"}
   local candidate_oid candidate_ref candidate_extra
   advert=$(mktemp "${TMPDIR:-/tmp}/ship-base-advertisement.XXXXXX") || return 1
+  err=$(mktemp "${TMPDIR:-/tmp}/ship-base-pin-err.XXXXXX") || { rm -f "$advert"; return 1; }
   # A force-update between ls-remote and fetch can make the advertised object unavailable; retry once.
   while [ "$attempt" -lt 2 ] && [ -z "$pinned" ]; do
     attempt=$((attempt + 1))
     status=0
-    bounded_remote_git -C "$root" ls-remote --exit-code --heads origin "refs/heads/$base_ref" > "$advert" 2>/dev/null || status=$?
+    bounded_remote_git -C "$root" ls-remote --exit-code --heads origin "refs/heads/$base_ref" > "$advert" 2>"$err" || status=$?
     case "$status" in
       0) ;;
-      2) rm -f "$advert"
-         echo "--base: no branch origin/$base_ref (a PR base must be a remote branch — not a sha or a tag)" >&2
+      2) rm -f "$advert" "$err"
+         echo "$absent" >&2
          return 1 ;;
-      *) rm -f "$advert"
-         echo "$label: could not verify origin/$base_ref (ls-remote exit $status)" >&2
+      *) ship_pin_origin_base_failed "$label: could not verify origin/$base_ref" ls-remote "$status" "$err"
+         rm -f "$advert" "$err"
          return 1 ;;
     esac
     oid="" ref="" extra="" lines=0
@@ -514,18 +537,20 @@ ship_pin_origin_base() {
       oid=$candidate_oid ref=$candidate_ref extra=$candidate_extra
     done < "$advert"
     if [ "$lines" -ne 1 ] || [ "$ref" != "refs/heads/$base_ref" ] || [ -n "$extra" ]; then
-      rm -f "$advert"
+      rm -f "$advert" "$err"
       echo "$label: origin/$base_ref returned an invalid advertised identity; refusing to guess" >&2
       return 1
     fi
-    bounded_remote_git -C "$root" fetch -q --no-tags --no-write-fetch-head --refmap= origin "refs/heads/$base_ref" 2>/dev/null || {
-      rm -f "$advert"
-      echo "$label: could not fetch the advertised origin/$base_ref commit" >&2
+    status=0
+    bounded_remote_git -C "$root" fetch -q --no-tags --no-write-fetch-head --refmap= origin "refs/heads/$base_ref" 2>"$err" || status=$?
+    if [ "$status" -ne 0 ]; then
+      ship_pin_origin_base_failed "$label: could not fetch the advertised origin/$base_ref commit" fetch "$status" "$err"
+      rm -f "$advert" "$err"
       return 1
-    }
+    fi
     if git -C "$root" cat-file -e "$oid^{commit}" 2>/dev/null; then pinned=$oid; fi
   done
-  rm -f "$advert"
+  rm -f "$advert" "$err"
   [ -n "$pinned" ] || {
     echo "$label: origin/$base_ref moved incompatibly during both pin attempts; retry" >&2
     return 1
