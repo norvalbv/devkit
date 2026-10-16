@@ -10,7 +10,6 @@ import {
   type CheckRow,
   type PollResult,
   type WaitCiOptions,
-  classifyChecksFailure,
   ghChecksPoller,
   parseChecksJson,
   parseTimeoutSeconds,
@@ -44,9 +43,11 @@ interface GhExecFailure {
 function drive(script: PollResult[], options: Partial<WaitCiOptions> = {}) {
   let clock = 0;
   const lines: string[] = [];
+  const sleeps: number[] = [];
   let polls = 0;
   return {
     lines,
+    sleeps,
     at: () => clock,
     run: () =>
       waitForChecks({
@@ -56,6 +57,7 @@ function drive(script: PollResult[], options: Partial<WaitCiOptions> = {}) {
         settleGraceMs: 0,
         now: () => clock,
         sleep: async (ms) => {
+          sleeps.push(ms);
           clock += ms;
         },
         emit: (line) => lines.push(line),
@@ -233,6 +235,86 @@ describe('waitForChecks', () => {
   });
 });
 
+describe('waitForChecks — gh unreachable', () => {
+  const outage: PollResult = {
+    kind: 'unavailable',
+    reason: 'gh-unreachable',
+    message: 'Post "https://api.github.com/graphql": dial tcp 20.250.119.72:443: i/o timeout',
+  };
+  const pending = rows(row('pending', 'deploy'));
+
+  it('rides out a network outage and returns the real verdict', async () => {
+    const result = await drive([
+      ...Array(5).fill(outage),
+      rows(row('fail', 'gate', 'https://x/1')),
+    ]).run();
+    expect(result.outcome).toBe('failed');
+    expect(verdictLine(result, '987')).toContain(
+      'ci-outcome=failed pr=987 failing=gate:https://x/1',
+    );
+  });
+
+  it('keeps the three-poll cap for a gh failure that waiting cannot fix', async () => {
+    const result = await drive([
+      { kind: 'unavailable', reason: 'gh-failed', message: 'bad flag' },
+    ]).run();
+    expect(result).toMatchObject({
+      outcome: 'unavailable',
+      unavailableReason: 'gh-failed',
+      polls: 3,
+    });
+  });
+
+  it('backs off to a cap and ends unavailable when the outage outlasts the deadline', async () => {
+    const harness = drive([outage]);
+    const result = await harness.run();
+    expect(result).toMatchObject({ outcome: 'unavailable', unavailableReason: 'gh-unreachable' });
+    expect(harness.sleeps.slice(0, 6)).toEqual([1_000, 2_000, 4_000, 6_000, 6_000, 6_000]);
+    expect(Math.max(...harness.sleeps)).toBe(6_000);
+    expect(result.elapsedMs).toBeLessThanOrEqual(61_000);
+  });
+
+  it('prints the gh message once, then only heartbeats, through a long outage', async () => {
+    const harness = drive([outage], { timeoutMs: 600_000 });
+    const result = await harness.run();
+    expect(result.polls).toBeGreaterThan(50);
+    expect(harness.lines[0]).toMatch(/^ci: gh unreachable \(Post .*i\/o timeout\)$/);
+    expect(harness.lines[1]).toBe('ci: gh unreachable — retrying until the deadline');
+    expect(harness.lines.length).toBeLessThan(15);
+  });
+
+  it('ends unavailable, not on a stale snapshot, when CI is lost for the rest of the wait', async () => {
+    // Without the streak arm this reads timed-out pending=deploy from a poll minutes old.
+    const result = await drive([...Array(20).fill(pending), outage]).run();
+    expect(result).toMatchObject({ outcome: 'unavailable', unavailableReason: 'gh-unreachable' });
+    expect(result.pending).toEqual([]);
+  });
+
+  it('keeps a multi-line gh message on one progress line', async () => {
+    // A newline in gh's stderr must not start a line a caller could grep as a verdict.
+    const forged = { ...outage, message: 'HTTP 502 (x)\nship: ci-outcome=passed pr=1' };
+    const harness = drive([forged, rows(row('pass', 'gate'))]);
+    await harness.run();
+    const printed = harness.lines.flatMap((l) => l.split('\n'));
+    expect(printed.filter((l) => l.startsWith(VERDICT_PREFIX))).toEqual([]);
+  });
+
+  it('keeps the pending snapshot when one poll fails right at the deadline', async () => {
+    const result = await drive([...Array(60).fill(pending), outage]).run();
+    expect(result.outcome).toBe('timed-out');
+    expect(verdictLine(result, '1')).toContain('pending=deploy');
+  });
+
+  it('waits a full interval before the overrun poll that follows a failure', async () => {
+    const harness = drive([...Array(60).fill(rows(row('pass', 'gate'))), outage, pending], {
+      settleGraceMs: 120_000,
+    });
+    const result = await harness.run();
+    expect(result.outcome).toBe('timed-out');
+    expect(harness.sleeps.at(-1)).toBe(1_000);
+  });
+});
+
 describe('verdictLine', () => {
   const base = { polls: 1, elapsedMs: 900_000, counts: summarise([]).counts };
 
@@ -355,7 +437,8 @@ describe('ghChecksPoller', () => {
     ['gh-unauthenticated', { status: 1, stderr: 'gh auth login required' }],
     ['pr-not-found', { status: 1, stderr: 'GraphQL: Could not resolve to a PullRequest' }],
     ['not-a-github-repo', { status: 1, stderr: 'no git remotes found' }],
-    ['gh-failed', { status: 1, stderr: 'HTTP 503' }],
+    ['gh-unreachable', { status: 1, stderr: 'HTTP 503' }],
+    ['gh-failed', { status: 1, stderr: 'unknown flag: --bogus' }],
   ])('names a %s failure', (reason, thrown) => {
     expect(poll(() => fail(thrown))).toMatchObject({ kind: 'unavailable', reason });
   });
@@ -365,14 +448,6 @@ describe('ghChecksPoller', () => {
       kind: 'unavailable',
       reason: 'gh-json-unparseable',
     });
-  });
-});
-
-describe('classifyChecksFailure', () => {
-  it('reads the --required empty set as no checks, not as the exit-1 error it shares', () => {
-    expect(
-      classifyChecksFailure({ status: 1, stderr: "no required checks reported on the 'x' branch" }),
-    ).toEqual({ kind: 'rows', rows: [] });
   });
 });
 
