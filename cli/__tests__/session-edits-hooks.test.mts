@@ -17,6 +17,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { hasAnyCommand, repoKey, rootRegistry, seedSessionLedger } from './_helpers.mts';
+import { mainWithWorktree } from './_worktree-fixture.mts';
 
 const AGENTS_HOOKS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'agents-hooks');
 const LIB = join(AGENTS_HOOKS, 'session-edits-lib.sh');
@@ -135,6 +136,50 @@ describe('format-after-edit.sh — session-edits ledger writer', () => {
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe('{}');
     expect(existsSync(join(tmp, 'devkit-session-edits', `${repoKey(root)}-s1`))).toBe(false);
+  });
+
+  it('records a worktree edit when CLAUDE_PROJECT_DIR is the main checkout and cwd the worktree', () => {
+    const { main, worktree } = mainWithWorktree(mkTmp);
+    write(worktree, 'src/mine.ts');
+    const tmp = seedSessionLedger(main, 's1', null);
+    const edit = { session_id: 's1', file_path: join(worktree, 'src/mine.ts') };
+    const ledger = join(tmp, 'devkit-session-edits', `${repoKey(worktree)}-s1`);
+
+    // No cwd: the worktree file is outside CLAUDE_PROJECT_DIR, so nothing is recorded, as before.
+    expect(runHook(FORMAT_HOOK, main, edit, tmp).status).toBe(0);
+    expect(existsSync(ledger)).toBe(false);
+
+    expect(runHook(FORMAT_HOOK, main, { ...edit, cwd: join(worktree, 'src') }, tmp).status).toBe(0);
+    expect(readFileSync(ledger, 'utf8')).toBe('src/mine.ts\n');
+  });
+});
+
+describe('hook_workspace — the checkout a hook acts on', () => {
+  const workspace = (payload: { cwd?: string; session_id?: string }, project: string) =>
+    spawnSync(
+      'bash',
+      ['-c', `source "${LIB}" && hook_workspace "$1" "$2"`, '_', JSON.stringify(payload), project],
+      { encoding: 'utf8' },
+    ).stdout.trim();
+
+  it('moves to the top of a linked worktree of the same repository', () => {
+    const { main, worktree } = mainWithWorktree(mkTmp);
+    write(worktree, 'src/a.ts');
+    expect(workspace({ cwd: worktree }, main)).toBe(worktree);
+    expect(workspace({ cwd: join(worktree, 'src') }, main)).toBe(worktree);
+  });
+
+  it('keeps the project root for no cwd, the same checkout, another repository or a missing dir', () => {
+    const { main, worktree } = mainWithWorktree(mkTmp);
+    const other = mainWithWorktree(mkTmp).main;
+    write(main, 'src/a.ts');
+    expect(workspace({ session_id: 's1' }, main)).toBe(main);
+    expect(workspace({ cwd: join(main, 'src') }, main)).toBe(main);
+    expect(workspace({ cwd: other }, main)).toBe(main);
+    expect(workspace({ cwd: join(worktree, 'gone') }, main)).toBe(main);
+    // A project root outside git has no worktrees to move between.
+    const plain = mkTmp('sesw-plain-');
+    expect(workspace({ cwd: worktree }, plain)).toBe(plain);
   });
 });
 
@@ -277,6 +322,25 @@ describe.skipIf(!HAS_BUN)('lint-check.sh — session scoping', () => {
     expect(r.status).toBe(2);
     expect(r.stderr).toContain('MINE_ROW');
   });
+
+  it('REPO_KEY parity holds in a worktree session whose CLAUDE_PROJECT_DIR is the main checkout', () => {
+    const { main, worktree } = mainWithWorktree(mkTmp);
+    write(worktree, 'src/mine.ts');
+    write(worktree, 'src/other.ts');
+    write(worktree, 'structure-stub.sh', structureStub(worktree));
+    write(
+      worktree,
+      'package.json',
+      JSON.stringify({ name: 'fx', scripts: { 'lint:structure': 'bash structure-stub.sh' } }),
+    );
+    const tmp = seedSessionLedger(main, 's1', null);
+    const session = { session_id: 's1', cwd: worktree };
+    runHook(FORMAT_HOOK, main, { ...session, file_path: join(worktree, 'src/mine.ts') }, tmp);
+    const r = runHook(LINT_HOOK, main, session, tmp);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('MINE_ROW');
+    expect(r.stderr).not.toContain('OTHER_ROW');
+  });
 });
 
 describe('filter_output_to_session_files — matching edge cases', () => {
@@ -345,6 +409,21 @@ describe('decision-stop-check.sh — nudge scoped to session edits', () => {
     expect(r.status).toBe(2);
     expect(r.stderr).toContain('retry-policy');
     expect(r.stderr).not.toContain('caching');
+  });
+
+  it("nudges from the worktree the payload cwd names, not CLAUDE_PROJECT_DIR's checkout", () => {
+    const { main, worktree } = mainWithWorktree(mkTmp);
+    write(worktree, 'src/mine.ts');
+    writeExec(
+      worktree,
+      'node_modules/.bin/guard-decisions',
+      '#!/bin/sh\nprintf "retry-policy\\tsrc/mine.ts\\n"\n',
+    );
+    const tmp = seedSessionLedger(worktree, 's1', ['src/mine.ts']);
+    expect(runHook(DECISION_HOOK, main, { session_id: 's1' }, tmp).status).toBe(0);
+    const r = runHook(DECISION_HOOK, main, { session_id: 's1', cwd: worktree }, tmp);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('retry-policy');
   });
 
   it('stays silent for a session with no recorded edits', () => {

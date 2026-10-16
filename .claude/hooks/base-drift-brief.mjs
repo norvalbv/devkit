@@ -59,7 +59,7 @@ export function main() {
     if (files.length === 0) return;
     // cachedOk: the pre-edit path takes the shared TTL window, so a burst of edits costs at most one
     // fetch per window per clone rather than one per edit.
-    const report = fetchReport(projectRoot(), { paths: files, cachedOk: true });
+    const report = fetchReport(projectRoot(input), { paths: files, cachedOk: true });
     if (!report) return;
     const advisory = report.rendered?.edit;
     if (!advisory) return;

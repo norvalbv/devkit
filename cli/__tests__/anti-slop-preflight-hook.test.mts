@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { rootRegistry } from './_helpers.mts';
+import { mainWithWorktree } from './_worktree-fixture.mts';
 
 const HOOK = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -39,8 +40,11 @@ const FAIL_OUTPUT = {
 type StubMode = 'fail' | 'pass' | 'crash';
 
 /** An installed-anti-slop repo whose devkit bin logs its argv (one arg per line) and acts per mode. */
-function repo(mode: StubMode = 'fail', options: { manifest?: boolean; bin?: boolean } = {}) {
-  const root = mkTmp('anti-slop-preflight-');
+function repo(
+  mode: StubMode = 'fail',
+  options: { manifest?: boolean; bin?: boolean; root?: string } = {},
+) {
+  const root = options.root ?? mkTmp('anti-slop-preflight-');
   if (options.manifest !== false) {
     mkdirSync(join(root, '.devkit', 'anti-slop'), { recursive: true });
     writeFileSync(join(root, '.devkit', 'anti-slop', 'manifest.json'), '{}\n');
@@ -187,6 +191,19 @@ describe('anti-slop-preflight.sh', () => {
     const sibling = mkTmp('anti-slop-preflight-sibling-');
     expect(run(root, claudePayload(write(sibling, 'src/a.ts'))).status).toBe(0);
     expect(argv(log)).toEqual([]);
+  });
+
+  it('checks a linked-worktree file when CLAUDE_PROJECT_DIR is the main checkout and cwd the worktree', () => {
+    const { main, worktree } = mainWithWorktree(mkTmp);
+    const { log } = repo('fail', { root: worktree });
+    const file = write(worktree, 'src/a.ts');
+    // No cwd: the worktree file sits outside CLAUDE_PROJECT_DIR, so nothing runs, as before.
+    expect(run(main, claudePayload(file)).status).toBe(0);
+    expect(argv(log)).toEqual([]);
+
+    const withCwd = JSON.stringify({ ...JSON.parse(claudePayload(file)), cwd: worktree });
+    expect(run(main, withCwd).status).toBe(2);
+    expect(argv(log)).toEqual(['anti-slop', 'check', '--', 'src/a.ts']);
   });
 
   it('ignores a path that merely shares the project prefix (/repo-other vs /repo)', () => {

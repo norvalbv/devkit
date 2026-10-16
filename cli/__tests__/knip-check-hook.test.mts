@@ -24,6 +24,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { hasAnyCommand, rootRegistry, seedSessionLedger, testSpawnSync } from './_helpers.mts';
+import { mainWithWorktree } from './_worktree-fixture.mts';
 
 const AGENTS_HOOKS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'agents-hooks');
 const KNIP_HOOK = join(AGENTS_HOOKS, 'knip-check.sh');
@@ -112,6 +113,27 @@ describe.skipIf(!HAS_BUN)('knip-check.sh gate behaviour', () => {
     });
     expect(r.status).toBe(0);
     expect(r.stderr).toBe('');
+  });
+
+  it('runs knip in the linked worktree the payload cwd names, not the CLAUDE_PROJECT_DIR checkout', () => {
+    const { main, worktree } = mainWithWorktree(mkTmp);
+    writeFileSync(join(worktree, 'KNIP_RAN.ts'), 'export {};\n');
+    writeFileSync(join(worktree, '.knip.json'), '{}');
+    writeFileSync(join(worktree, 'package.json'), withKnipScript());
+    const stop = (payload) =>
+      testSpawnSync('bash', [KNIP_HOOK], {
+        input: JSON.stringify({ session_id: 'test-sid', ...payload }),
+        env: {
+          ...process.env,
+          CLAUDE_PROJECT_DIR: main,
+          TMPDIR: seedSessionLedger(worktree, 'test-sid', ['KNIP_RAN.ts']),
+        },
+        encoding: 'utf8',
+      });
+    expect(stop({}).stderr).not.toContain('KNIP_RAN');
+    const r = stop({ cwd: worktree });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('KNIP_RAN');
   });
 
   it("session scoping: findings only in ANOTHER session's files are filtered out", () => {

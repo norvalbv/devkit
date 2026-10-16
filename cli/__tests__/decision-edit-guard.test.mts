@@ -1,8 +1,13 @@
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { decide, renderOutput } from '../../agents-hooks/decision-edit-guard.mjs';
+import { mainWithWorktree } from './_worktree-fixture.mts';
+
+const HOOK = fileURLToPath(new URL('../../agents-hooks/decision-edit-guard.mjs', import.meta.url));
 
 let root: string;
 
@@ -89,6 +94,35 @@ describe('decision-edit-guard path policy', () => {
     expect(decide(payload('Write', 'docs/decisions/axis.md'), root)).toBeNull();
     expect(decide({ tool_name: 'Write', tool_input: {}, cwd: root }, root)).toBeNull();
     expect(decide(payload('Read', 'docs/decisions/axis.md'), root)).toBeNull();
+  });
+});
+
+describe('decision-edit-guard in a project-config-root session', () => {
+  it('guards the decisions directory of the worktree the payload cwd names', () => {
+    // CLAUDE_PROJECT_DIR stays on the main checkout while the agent works in a linked worktree.
+    const { main, worktree } = mainWithWorktree((prefix) => mkdtempSync(join(root, prefix)));
+    const guard = (input: { tool_name: string; tool_input: object; cwd?: string }) =>
+      spawnSync(process.execPath, [HOOK], {
+        cwd: main,
+        encoding: 'utf8',
+        env: { ...process.env, CLAUDE_PROJECT_DIR: main },
+        input: JSON.stringify(input),
+      }).stdout.trim();
+
+    const out = guard({
+      ...payload('Write', join(worktree, 'docs/decisions/a.md')),
+      cwd: worktree,
+    });
+    expect(JSON.parse(out).hookSpecificOutput.permissionDecision).toBe('deny');
+    // No cwd: the main checkout's own decisions directory stays protected, as before.
+    const noCwd = {
+      tool_name: 'Write',
+      tool_input: { file_path: join(main, 'docs/decisions/a.md') },
+    };
+    expect(JSON.parse(guard(noCwd)).hookSpecificOutput.permissionDecision).toBe('deny');
+    // From the worktree, the main checkout's decisions directory stays protected too.
+    const mainFromWorktree = { ...noCwd, cwd: worktree };
+    expect(JSON.parse(guard(mainFromWorktree)).hookSpecificOutput.permissionDecision).toBe('deny');
   });
 });
 

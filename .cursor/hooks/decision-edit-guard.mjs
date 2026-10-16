@@ -8,6 +8,7 @@
  * file-mutation tools; shell/MCP/OS writes are outside the v1 boundary.
  */
 
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -69,25 +70,56 @@ function canonicalizeAvailableParent(target) {
   return resolve(realpathSync(existing), ...missing);
 }
 
+/** `git rev-parse` output lines for `dir`, or [] when it is not inside a git work tree. */
+function revParse(dir, ...args) {
+  const run = spawnSync("git", ["-C", dir, "rev-parse", ...args], {
+    encoding: "utf8",
+  });
+  return run.status === 0 ? run.stdout.split("\n") : [];
+}
+
+/**
+ * The checkout to guard. The payload cwd follows the agent into a linked worktree while
+ * CLAUDE_PROJECT_DIR stays put; a cwd in the same checkout or an unrelated repository keeps the root.
+ */
+function workspaceRoot(input) {
+  const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  if (!input?.cwd?.trim?.()) return root;
+  const at = ["--path-format=absolute", "--show-toplevel", "--git-common-dir"];
+  const [cdup, top, common] = revParse(input.cwd, "--show-cdup", ...at);
+  const [rootTop, rootCommon] = revParse(root, ...at);
+  return common && top !== rootTop && common === rootCommon
+    ? resolve(input.cwd, cdup)
+    : root;
+}
+
+/** The worktree the agent works in and the project root: an edit may reach either decision log. */
+function guardedRoots(input) {
+  const project = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  return [...new Set([workspaceRoot(input), project])];
+}
+
+/** The decision log under `root` that one of `paths` would change, or null. */
+function blockedLog(root, paths, env) {
+  const configured = configuredDir(root, env);
+  if (!configured) return null;
+  const protectedDir = canonicalizeAvailableParent(resolve(root, configured));
+  const blocked = paths.some((filePath) =>
+    inside(canonicalizeAvailableParent(resolve(root, filePath)), protectedDir),
+  );
+  return blocked ? relative(root, protectedDir) || configured : null;
+}
+
 /** Return the denial reason for a known in-scope mutation, otherwise null (fail-open). */
-export function decide(
-  input,
-  root = process.env.CLAUDE_PROJECT_DIR || process.cwd(),
-  env = process.env,
-) {
+export function decide(input, roots = guardedRoots(input), env = process.env) {
   try {
     const toolName = input?.tool_name;
     if (!MUTATING_TOOLS.has(toolName)) return null;
-    const configured = configuredDir(root, env);
-    if (!configured) return null;
-    const protectedDir = canonicalizeAvailableParent(resolve(root, configured));
     const paths = collectPaths(input?.tool_input);
-    const blocked = paths.find((filePath) =>
-      inside(canonicalizeAvailableParent(resolve(root, filePath)), protectedDir),
-    );
-    if (!blocked) return null;
+    const log = [roots].flat().map((root) => blockedLog(root, paths, env)).find(Boolean);
+    if (!log) return null;
     return (
-      `Blocked: direct agent edits under ${relative(root, protectedDir) || configured} are disabled ` +
+      `Blocked: direct agent edits under ${log} are disabled ` +
       "because decision history is append-only. Use `guard-decisions add …` to record an entry or " +
       "`guard-decisions amend …` to correct an uncommitted entry — the newest note, or the newest " +
       'Target with its trailing notes kept as written.'
@@ -114,8 +146,7 @@ export function renderOutput(input, reason) {
 export function main() {
   try {
     const input = JSON.parse(readFileSync(0, "utf8"));
-    const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-    const reason = decide(input, root);
+    const reason = decide(input);
     if (reason)
       process.stdout.write(`${JSON.stringify(renderOutput(input, reason))}\n`);
   } catch {

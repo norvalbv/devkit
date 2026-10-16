@@ -23,7 +23,7 @@ import { claimed, commitClaim, emit, fetchReport, projectRoot, readInput } from 
 export function main() {
   try {
     const input = readInput();
-    const root = projectRoot();
+    const root = projectRoot(input);
     // maxAgeMs 0: once per session, at the one moment worth paying the network for unconditionally.
     const report = fetchReport(root, { maxAgeMs: 0 });
     if (!report) return;

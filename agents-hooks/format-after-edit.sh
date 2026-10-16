@@ -21,27 +21,30 @@ if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
   exit 0
 fi
 
-# Only act on files INSIDE this project. An agent may edit a sibling checkout (e.g. another repo it
-# is working on in the same session) whose files live outside CLAUDE_PROJECT_DIR and have their own
+# Absolute hook dir BEFORE cd — a relative $0 would dangle after the chdir.
+HOOK_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
+source "$HOOK_DIR/session-edits-lib.sh" 2>/dev/null || true
+WORKSPACE="${CLAUDE_PROJECT_DIR:-$HOOK_DIR/../..}"
+declare -F hook_workspace &>/dev/null && WORKSPACE=$(hook_workspace "$input" "$WORKSPACE")
+cd "$WORKSPACE" 2>/dev/null || { echo '{}'; exit 0; }
+WORKSPACE=$(pwd)
+
+# Only act on files INSIDE this workspace. An agent may edit a sibling checkout (e.g. another repo it
+# is working on in the same session) whose files live outside the workspace and have their own
 # toolchain — running THIS repo's biome/eslint on them errors (eslint resolves its config from the
 # edited file's own tree, not cwd) and spams the conversation. That repo runs its own hooks.
-if [ -n "$CLAUDE_PROJECT_DIR" ] && [[ "$file_path" != "$CLAUDE_PROJECT_DIR"/* ]]; then
+if [ -n "$CLAUDE_PROJECT_DIR" ] && [[ "$file_path" != "$WORKSPACE"/* ]]; then
   echo '{}'
   exit 0
 fi
-
-# Absolute hook dir BEFORE cd — a relative $0 would dangle after the chdir.
-HOOK_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
-cd "${CLAUDE_PROJECT_DIR:-$HOOK_DIR/../..}" 2>/dev/null || { echo '{}'; exit 0; }
 
 # Record this edit in the per-session ledger (repo-relative path) so the Stop hooks
 # (lint-check/knip-check/decision-stop-check) can scope their reports to files THIS session
 # touched. Best-effort: a missing lib or unwritable $TMPDIR never blocks.
 # Strip the prefix from the same UNRESOLVED root the guard above compared against — `pwd -P`
 # would resolve symlinks (/tmp → /private/tmp) and the strip would silently miss.
-source "$HOOK_DIR/session-edits-lib.sh" 2>/dev/null || true
 if declare -F session_edits_file &>/dev/null; then
-  rel_path="${file_path#"${CLAUDE_PROJECT_DIR:-$(pwd)}"/}"
+  rel_path="${file_path#"$WORKSPACE"/}"
   if [ -n "$rel_path" ] && [ "$rel_path" != "$file_path" ]; then
     ledger=$(session_edits_file "$input")
     mkdir -p "$(dirname "$ledger")" 2>/dev/null &&
@@ -84,7 +87,7 @@ if [[ "$file_path" =~ \.(tsx?|css)$ ]] && [ -x "./node_modules/.bin/eslint" ]; t
       while [ "$i" -lt "$n" ]; do joined="$joined/${out[i]}"; i=$((i + 1)); done
       printf '%s' "${joined:-/}"
     }
-    project_root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+    project_root="$WORKSPACE"
     abs_path() { if [[ "$1" == /* ]]; then norm_path "$1"; else norm_path "$project_root/$1"; fi; }
     scope_abs=$(abs_path "$file_path")
     while IFS= read -r root; do
