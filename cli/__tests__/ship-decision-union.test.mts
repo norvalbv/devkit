@@ -172,6 +172,24 @@ describe('ship --base: concurrent decision records under merge=union', () => {
     expect(r.stderr).toContain('could not verify');
   });
 
+  it('fails closed when git cannot list what the merge changed', () => {
+    const { dir, git } = seedAxis();
+    const r = spawnSync(
+      '/bin/bash',
+      [
+        '-c',
+        '. "$1"; _ship_union_guard "$2" no-such-rev HEAD base --worktree "$2"',
+        '_',
+        ANCHOR,
+        dir,
+      ],
+      { encoding: 'utf8', env: { ...process.env, ...GIT_ENV } },
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('could not verify');
+    expect(git(['status', '--porcelain'])).toBe('');
+  });
+
   it('marks axis files union and keeps INDEX.md on the line merge', () => {
     const out = execFileSync(
       'git',

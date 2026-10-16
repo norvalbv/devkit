@@ -496,24 +496,33 @@ ship_apply_text_arm() {
 # Checks a `merge=union` path both sides changed with decision-union/cli, failing closed (0 or 1).
 # The checker refuses with exit 3, so any other failure, such as node unable to load it, is named.
 _ship_union_guard() {
-  local root=$1 base=$2 patch_base=$3 base_ref=$4 mode=$5 target=$6 p attr val rec cli rc=0
+  local root=$1 base=$2 patch_base=$3 base_ref=$4 mode=$5 target=$6 p attr val rec cli io rc=0
   local both=() pairs=() ctx=(git -C "$target")
   [ "$mode" = --index ] && ctx=(env "GIT_INDEX_FILE=$target" git -C "$root")
-  while IFS= read -r -d '' p; do
-    git -C "$root" diff --quiet "$patch_base" "$base" -- ":(top,literal)$p" 2>/dev/null || both+=("$p")
-  done < <("${ctx[@]}" diff --cached --name-only -z --diff-filter=M "$base" 2>/dev/null || true)
-  [ "${#both[@]}" -gt 0 ] || return 0
-  while IFS= read -r -d '' p && IFS= read -r -d '' attr && IFS= read -r -d '' val; do
-    [ "$val" = union ] || continue
-    rec=$("${ctx[@]}" ls-files -s -z -- ":(top,literal)$p" | tr -d '\0')
-    rec=${rec#* }
-    pairs+=("$p" "${rec%% *}")
-  done < <(printf '%s\0' "${both[@]}" | "${ctx[@]}" check-attr -z --stdin merge 2>/dev/null || true)
-  [ "${#pairs[@]}" -gt 0 ] || return 0
-  cli="$SCRIPT_DIR/decision-union/cli.mts"
-  [ -f "$cli" ] || cli="$SCRIPT_DIR/decision-union/cli.mjs"
-  printf '%s\0' "${pairs[@]}" |
-    node "$cli" --root "$root" --base "$base" --patch-base "$patch_base" --base-ref "$base_ref" || rc=$?
+  # Via a file, not process substitution, so a git failure is seen rather than read as "no paths".
+  io=$(mktemp "${TMPDIR:-/tmp}/ship-union.XXXXXX") || return 1
+  if "${ctx[@]}" diff --cached --name-only -z --diff-filter=M "$base" > "$io" 2>/dev/null; then
+    while IFS= read -r -d '' p; do
+      git -C "$root" diff --quiet "$patch_base" "$base" -- ":(top,literal)$p" 2>/dev/null || both+=("$p")
+    done < "$io"
+  else rc=2; fi
+  if [ "$rc" -eq 0 ] && [ "${#both[@]}" -gt 0 ]; then
+    if printf '%s\0' "${both[@]}" | "${ctx[@]}" check-attr -z --stdin merge > "$io" 2>/dev/null; then
+      while IFS= read -r -d '' p && IFS= read -r -d '' attr && IFS= read -r -d '' val; do
+        [ "$val" = union ] || continue
+        rec=$("${ctx[@]}" ls-files -s -z -- ":(top,literal)$p" | tr -d '\0')
+        rec=${rec#* }
+        pairs+=("$p" "${rec%% *}")
+      done < "$io"
+    else rc=2; fi
+  fi
+  rm -f "$io"
+  if [ "$rc" -eq 0 ] && [ "${#pairs[@]}" -gt 0 ]; then
+    cli="$SCRIPT_DIR/decision-union/cli.mts"
+    [ -f "$cli" ] || cli="$SCRIPT_DIR/decision-union/cli.mjs"
+    printf '%s\0' "${pairs[@]}" |
+      node "$cli" --root "$root" --base "$base" --patch-base "$patch_base" --base-ref "$base_ref" || rc=$?
+  fi
   [ "$rc" -eq 0 ] && return 0
   [ "$rc" -eq 3 ] || echo "  ship refuses rather than commit a union merge it could not verify." >&2
   return 1

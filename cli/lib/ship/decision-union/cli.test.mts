@@ -102,6 +102,11 @@ describe('refusals', () => {
     expect(out[0]).toContain('git checkout origin/main -- ax.md');
   });
 
+  it('throws on an unreadable revision instead of reading it as an empty file', () => {
+    const { args, oid } = axisRepo(FORK, `${FORK}- 2026-01-03 — base note\n`, FORK);
+    expect(() => refusals({ ...args, base: 'no-such-rev' }, ['ax.md', oid])).toThrow();
+  });
+
   it('passes a note-on-note merge', () => {
     const base = `${FORK}- 2026-01-03 — base note\n`;
     const { args, oid } = axisRepo(FORK, base, `${base}- 2026-01-04 — caller note\n`);
