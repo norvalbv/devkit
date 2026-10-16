@@ -18,3 +18,4 @@ created: 2026-08-02
 **Revisit-when:** jscpd ships native import-statement exclusion (drop the hand-rolled patterns), or corpus/telemetry evidence shows real duplications recurring sub-floor behind import blocks (lower min-tokens or revisit the exclusion)
 **Scope:** gate-engine/co-occurrence/**
 **Source:** collab · https://github.com/norvalbv/devkit/pull/308
+- 2026-10-16 — jscpd ignore markers (ignore-start/end) are blocked as gate violations, not honoured: jscpd v4 and v5 drop marked regions in every mode with no off-switch, and --ignore-pattern cannot neutralise them (both produce the same ignore token). The gate scans gated files' raw text for the start marker, scoped to --changed when set, so string-literal markers count as jscpd's indexOf does. Residual: a marker in the clone's other, unstaged copy still hides it (the documented disk-vs-index gap); the staged scan is deliberately not widened to the whole disk.
