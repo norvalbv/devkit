@@ -1,4 +1,5 @@
 import { failLine, writeGateReason } from '../deterministic/reason.mts';
+import { lineAnchors } from '../markdown/referenced-paths.mts';
 import { detectChangedComments } from './detect.mts';
 import { emptyInventory } from './inventory.mts';
 import { recordShown, shownAnchors } from './shown.mts';
@@ -55,11 +56,17 @@ function printParagraphs(findings: CommentFinding[]): void {
   );
 }
 
+const ANCHOR_REMEDY =
+  'A file:line anchor rots on the next edit to that file: cite the function or test name instead.';
+
 function printRefs(findings: RefFinding[]): void {
   for (const { path, line, refs, comment } of findings) {
     console.error(`  • ${path}:${line} cites ${refs.join(', ')} — ${comment}`);
   }
   console.error(REF_REMEDY);
+  if (findings.some(({ refs }) => refs.some((ref) => lineAnchors(ref).length > 0))) {
+    console.error(ANCHOR_REMEDY);
+  }
   writeGateReason(
     findings.map(
       ({ path, line, refs }) =>

@@ -1,3 +1,4 @@
+import { lineAnchors } from '../markdown/referenced-paths.mts';
 import { validateCategory } from './recall/categories.mts';
 
 const FM_ORDER = ['slug', 'created'];
@@ -224,6 +225,17 @@ function firstClause(value: string | undefined) {
   return lastSpace > 60 ? capped.slice(0, lastSpace) : capped;
 }
 
+/** Refuse prose citing `<file>:<line>`: the record is append-only, so a rotted anchor is permanent. */
+export function assertNoLineAnchors(text: string) {
+  const anchors = lineAnchors(text);
+  if (anchors.length === 0) return;
+  throw new Error(
+    `line anchor(s) ${anchors.join(', ')}: a line number rots on the next edit and records are ` +
+      'append-only. Cite the function, test or variable name instead; for an upstream source give ' +
+      'its version and a SHA-pinned permalink (…/blob/<sha>/path#L12).',
+  );
+}
+
 export function renderTarget(date: string, options: TargetOptions) {
   warnIfFolded('--title', options.title);
   const lines = [
@@ -259,11 +271,14 @@ export function renderTarget(date: string, options: TargetOptions) {
   // `**Evidence-change:**` line, which parseTargetFields reads back as an empty (not absent) field.
   if (options.evidenceChange?.trim())
     lines.push(`**Evidence-change:** ${options.evidenceChange.trim()}`);
-  return lines.join('\n');
+  const block = lines.join('\n');
+  assertNoLineAnchors(block);
+  return block;
 }
 
 export function renderNote(date: string, text: string) {
   warnIfFolded('--note', text);
+  assertNoLineAnchors(text);
   return `- ${date} — ${foldLines(text)}`;
 }
 

@@ -8,10 +8,11 @@
   "generated": [{ "glob": "dist/**", "command": "bun run build" }],
   "//extraGates": "related-tests runs the tests vitest relates to the staged paths, so a test the change breaks blocks before any AI judge runs.",
   "extraGates": { "related-tests": "node cli/lib/husky/gate-policy/related-tests.mts" },
-  "//comments": "devkit is open source: a comment citing a private Shortcut ticket, an autonomous report id or a decision record means nothing to an outside reader, so guard-comments blocks changed comments that do.",
+  "//comments": "devkit is open source: a comment citing a private Shortcut ticket, an autonomous report id or a decision record means nothing to an outside reader, and a file:line anchor rots on the next edit, so guard-comments blocks changed comments that cite either.",
   "comments": {
     "forbiddenRefs": ["\\bsc-\\d+\\b", "\\breport-[0-9a-f]{6,}\\b"],
-    "forbidDecisionRefs": true
+    "forbidDecisionRefs": true,
+    "forbidLineAnchors": true
   },
   "//evidence": "devkit ship runs a PR's added or changed test files on red (the PR base plus those files) and green (the PR head) after the PR opens, and writes the outcome into the PR body.",
   "evidence": {

@@ -10,6 +10,7 @@ import { runCommentFirewall } from '../gate.mts';
 interface CommentsConfig {
   forbiddenRefs?: string[];
   forbidDecisionRefs?: boolean;
+  forbidLineAnchors?: boolean;
 }
 
 const DEVKIT_REFS: CommentsConfig = {
@@ -252,5 +253,41 @@ describe('forbidden references in changed comments', () => {
     vi.restoreAllMocks();
     expect(exit).toBe(4);
     expect(output).toContain('comments.forbiddenRefs[0]');
+  });
+});
+
+describe('forbidLineAnchors', () => {
+  const ANCHORS: CommentsConfig = { forbidLineAnchors: true };
+
+  function gateOutput(root: string) {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exit = runCommentFirewall(root, { emit: () => {} });
+    const output = vi.mocked(console.error).mock.calls.flat().join('\n');
+    vi.restoreAllMocks();
+    return { exit, output };
+  }
+
+  it('blocks an added file:line anchor and names the symbol remedy', () => {
+    const root = staged('const a = 0;\n', '// see ship-branch.sh:298-303\nconst a = 1;\n', ANCHORS);
+    expect(cited(root)).toEqual(['ship-branch.sh:298-303']);
+    const { exit, output } = gateOutput(root);
+    expect(exit).toBe(1);
+    expect(output).toContain('cite the function or test name instead');
+  });
+
+  it('keeps the anchor remedy out of a ticket-only block', () => {
+    const root = staged('const a = 0;\n', '// see sc-12\nconst a = 1;\n');
+    expect(gateOutput(root).output).not.toContain('file:line anchor');
+  });
+
+  it('excuses a code-only edit beside an unchanged trailing anchor', () => {
+    const before = 'const a = 1; // see ship-branch.sh:298\n';
+    const root = staged(before, before.replace('a = 1', 'a = 2'), ANCHORS);
+    expect(cited(root)).toEqual([]);
+  });
+
+  it('reports no anchor when the key is absent', () => {
+    const root = staged('const a = 0;\n', '// see ship-branch.sh:298\nconst a = 1;\n', null);
+    expect(cited(root)).toEqual([]);
   });
 });
