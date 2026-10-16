@@ -28,6 +28,7 @@ import { fail } from './shared/common.mts';
 import {
   canonicalReviewDirectory,
   canonicalReviewLeaf,
+  reviewPathsOverlap,
   reviewPathWithin,
 } from './runtime-paths.mts';
 
@@ -68,7 +69,7 @@ type LinkScope = { root: string; aliases: DependencyAliases };
 function validateRoots(sourceRoot: string, destinationRoot: string): [string, string] {
   const source = canonicalReviewDirectory(sourceRoot, 'dependency source root');
   const destination = canonicalReviewDirectory(destinationRoot, 'dependency destination root');
-  if (reviewPathWithin(source, destination) || reviewPathWithin(destination, source)) {
+  if (reviewPathsOverlap(source, destination)) {
     return fail('dependency source and destination roots must be separate, non-nested directories');
   }
   return [source, destination];

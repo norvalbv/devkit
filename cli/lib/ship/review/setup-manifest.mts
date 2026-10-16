@@ -25,6 +25,7 @@ import {
 import { reviewSetupStat } from './setup/setup-runtime-copy.mts';
 import {
   REVIEW_SETUP_ABSENT,
+  REVIEW_SETUP_OPTIONAL_PATHS,
   REVIEW_SETUP_VERSION,
   reviewSetupHash,
 } from './setup-manifest-format.mts';
@@ -42,11 +43,6 @@ import { type ReviewSourceResolution, resolveReviewSource } from './source-proje
 const HUSKY_RUNNER_PATHS = [
   ['runner-source', '.husky/_', false],
   ['runner-pre-commit', '.husky/_/pre-commit', true],
-] as const;
-const OPTIONAL_PATHS = [
-  ['correctness-overrides', '.devkit/correctness-overrides.json'],
-  ['biome-runtime', '.devkit/biome'],
-  ['tsconfig-runtime', '.devkit/tsconfig'],
 ] as const;
 const LOCAL_GIT_ENVIRONMENT = [
   'GIT_ALTERNATE_OBJECT_DIRECTORIES',
@@ -288,7 +284,9 @@ function captureSetupPaths(
           pathState('git', gitRoot, id, path, true, executable),
         )),
     pathState('git', gitRoot, 'effective-hook', hookPath, true, true),
-    ...OPTIONAL_PATHS.map(([id, path]) => pathState('target', targetRoot, id, path, false, false)),
+    ...REVIEW_SETUP_OPTIONAL_PATHS.map(([id, path]) =>
+      pathState('target', targetRoot, id, path, false, false),
+    ),
   ];
 }
 

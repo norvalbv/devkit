@@ -6,7 +6,7 @@ import { lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { runDirectReviewCli } from '../run-direct.mts';
-import { reviewPathWithin } from '../runtime-paths.mts';
+import { reviewPathsOverlap, reviewPathWithin } from '../runtime-paths.mts';
 import { errorMessage, fail, gitEnvironment } from '../shared/common.mts';
 
 const REVIEW_CACHE_NAMESPACE = 'devkit-review-cache-v1';
@@ -155,12 +155,8 @@ function cacheIdentity(
   return hash.digest('hex');
 }
 
-function pathsOverlap(first: string, second: string): boolean {
-  return reviewPathWithin(first, second) || reviewPathWithin(second, first);
-}
-
 function overlapsAny(path: string, excludedRoots: readonly string[]): boolean {
-  return excludedRoots.some((root) => pathsOverlap(root, path));
+  return excludedRoots.some((root) => reviewPathsOverlap(root, path));
 }
 
 /** Resolve and create one stable cache namespace for a physical repo + package target. */

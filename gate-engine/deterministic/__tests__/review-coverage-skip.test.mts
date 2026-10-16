@@ -1,7 +1,7 @@
 /** Coverage's exit 2 (NOT MEASURED) is a visible skip only under `devkit review`, and a review that
  * skipped a gate never records a prefix key that would let a later review skip it silently. */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -68,5 +68,22 @@ describe('coverage exit 2 outside review', () => {
     const exec = coverageExits(2);
     expect(runDeterministic(dir, { exec, only: ['coverage'] })).toBe(1);
     expect(err.mock.calls.flat().join('\n')).toContain('guard-coverage(unexpected:2)');
+  });
+});
+
+describe("an opted-out gate on review's verdict line", () => {
+  it('is written to the review notices file, and only inside the review temp root', () => {
+    review();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const notices = join(dir, 'notices');
+    vi.stubEnv('DEVKIT_REVIEW_NOTICES', notices);
+    vi.stubEnv('DEVKIT_REVIEW_TEMP_ROOT', dir);
+    expect(runDeterministic(dir, { exec: coverageExits(2) })).toBe(0);
+    expect(readFileSync(notices, 'utf8')).toBe('gate=guard-coverage opted-out\n');
+
+    rmSync(notices);
+    vi.stubEnv('DEVKIT_REVIEW_TEMP_ROOT', '');
+    expect(runDeterministic(dir, { exec: coverageExits(2) })).toBe(0);
+    expect(existsSync(notices)).toBe(false);
   });
 });
