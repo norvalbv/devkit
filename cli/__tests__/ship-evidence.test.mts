@@ -58,6 +58,10 @@ if (args[1] === 'create') {
   console.log(url);
 }
 else if (args[1] === 'edit') writeFileSync(env.GH_STATE, readFileSync(0, 'utf8'));
+else if (json.startsWith('title,body') && env.GH_VIEW_FAIL && !existsSync(env.GH_VIEW_FAIL)) {
+  if (env.GH_VIEW_FAIL_ONCE) writeFileSync(env.GH_VIEW_FAIL, '');
+  process.exit(1);
+}
 else if (json === 'title,body,headRefOid,baseRefOid') process.stdout.write(JSON.stringify({
   title: existsSync(env.GH_STATE + '.title') ? readFileSync(env.GH_STATE + '.title', 'utf8') : 'fix: value',
   body: existsSync(env.GH_STATE) ? readFileSync(env.GH_STATE, 'utf8') : '',
@@ -233,6 +237,64 @@ describe('devkit ship evidence block', () => {
     expect(shipped.status, shipped.stderr).toBe(0);
     expect(readFileSync(repo.state, 'utf8')).not.toContain(EVIDENCE_BEGIN);
     expect(readFileSync(repo.state, 'utf8')).toContain('mine');
+  }, 240_000);
+
+  it('leaves the PR body alone when it cannot be read, and the same command re-run then writes it', () => {
+    const repo = shipRepo(null, 'feat/keep');
+    write(repo.dir, { 'src/value.mjs': FIXED });
+    const shipped = bash(repo.dir, repo.env, [scriptPath, 'feat/keep', 'fix', 'src/value.mjs']);
+    expect(shipped.status, shipped.stderr).toBe(0);
+    const block = `${EVIDENCE_BEGIN}\nkept\n<!-- devkit:evidence:end -->`;
+    writeFileSync(repo.state, `old\n\n${block}\n`);
+    const before = tipOf(repo.bare, 'feat/keep');
+    write(repo.dir, { 'src/value.mjs': `${FIXED}// again\n` });
+    const argv = [reshipScript, 'feat/keep', 'fix', '--pr', '--body', 'new', '--', 'src/value.mjs'];
+
+    const never = join(dirname(repo.log), 'never');
+    const refused = bash(repo.dir, { ...repo.env, GH_VIEW_FAIL: never }, argv);
+    expect(refused.status).not.toBe(0);
+    expect(refused.stderr).toContain('PR body was not updated');
+    expect(refused.stderr).toContain('re-run the same devkit ship command');
+    expect(tipOf(repo.bare, 'feat/keep')).not.toBe(before);
+    expect(readFileSync(repo.state, 'utf8')).toBe(`old\n\n${block}\n`);
+    expect(readFileSync(repo.log, 'utf8')).not.toContain('pr edit');
+
+    const retried = bash(repo.dir, repo.env, argv);
+    expect(retried.status, retried.stderr).toBe(0);
+    expect(readFileSync(repo.state, 'utf8')).toBe(`new\n\n${block}\n`);
+  }, 240_000);
+
+  it("a refused body update still publishes the pushed commit's evidence, and the re-run carries it", () => {
+    const repo = shipRepo({ command: COMMAND, timeoutSeconds: 120 }, 'feat/fresh');
+    write(repo.dir, { 'src/value.mjs': FIXED });
+    const shipped = bash(repo.dir, repo.env, [scriptPath, 'feat/fresh', 'fix', 'src/value.mjs']);
+    expect(shipped.status, shipped.stderr).toBe(0);
+    write(repo.dir, { 'src/value.mjs': `${FIXED}// again\n` });
+    const argv = [
+      reshipScript,
+      'feat/fresh',
+      'fix',
+      '--pr',
+      '--body',
+      'new',
+      '--',
+      'src/value.mjs',
+    ];
+    const once = { GH_VIEW_FAIL: join(dirname(repo.log), 'view-failed'), GH_VIEW_FAIL_ONCE: '1' };
+
+    const refused = bash(repo.dir, { ...repo.env, ...once }, argv);
+    expect(refused.status).not.toBe(0);
+    expect(refused.stderr).toContain('PR body was not updated');
+    const head = tipOf(repo.bare, 'feat/fresh');
+    expect(readEvidenceBlock(readFileSync(repo.state, 'utf8'), head)).toMatchObject({
+      stale: false,
+    });
+
+    const retried = bash(repo.dir, repo.env, argv);
+    expect(retried.status, retried.stderr).toBe(0);
+    const body = readFileSync(repo.state, 'utf8');
+    expect(body.replace(BLOCK, 'BLOCK')).toBe('new\n\nBLOCK\n');
+    expect(readEvidenceBlock(body, head)).toMatchObject({ stale: false });
   }, 240_000);
 
   it('bounds a hung test run: ship exits 0, the block says so, and no test process survives', () => {

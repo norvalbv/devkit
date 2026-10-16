@@ -18,6 +18,8 @@ export const packagedApiSecurityAgent = fileURLToPath(
 export const packagedApiSecurityChecklist = fileURLToPath(
   new URL('../../skills/api-security/scripts/checklist.mjs', import.meta.url),
 );
+/** gh-stub arm for the current-body read an explicit --body carries the evidence block through. */
+export const GH_BODY_VIEW_ARM = `case " $* " in *" --json title,body,"*) exec node -e 'const fs = require("fs"), f = process.env.GH_BODY; process.stdout.write(JSON.stringify({ body: fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "", headRefOid: "", baseRefOid: "" }))' ;; esac`;
 export const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 export const DETACHED_RE = /detached HEAD/;
 export const DIR_RE = /directory path not allowed/;
@@ -330,7 +332,7 @@ export function ghStub(prBody) {
   dirs.push(stubBin);
   writeFileSync(
     join(stubBin, 'gh'),
-    `#!/bin/sh\ncase "$1" in\n  pr) [ "$2" = edit ] && cat >/dev/null; ${prBody} ;;\n  *) exit 0 ;;\nesac\n`,
+    `#!/bin/sh\n${GH_BODY_VIEW_ARM}\ncase "$1" in\n  pr) [ "$2" = edit ] && cat >/dev/null; ${prBody} ;;\n  *) exit 0 ;;\nesac\n`,
   );
   chmodSync(join(stubBin, 'gh'), 0o755);
   return stubBin;
@@ -407,6 +409,7 @@ export function bodyUpdateRepo({ hookBody = 'exit 0' } = {}) {
       '    printf \'7\\t%s\\tfeat/pr\\t0\\t%s\\tmain\\thttps://github.com/acme/app/pull/7\\n\' "$s" "${GH_PR_HEAD_REPO-acme/app}"',
       '    exit 0',
       '  fi ;; esac',
+      GH_BODY_VIEW_ARM,
       "  printf '%s\\n' 'https://github.com/acme/app/pull/7'",
       '  exit 0',
       'fi',
