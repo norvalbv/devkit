@@ -313,7 +313,7 @@ function check(
       return 1;
     }
     console.log(
-      `anti-slop: PASS — ${comparison.currentCount} current finding(s), ${comparison.resolvedCount} ready to prune${warnings.length ? `, ${warnings.length} warning fingerprint(s)` : ''}${relocatedWarningNote(relocated, baseRef)}`,
+      `anti-slop: PASS — ${comparison.currentCount} current finding(s), ${comparison.resolvedCount} ready to prune${comparison.swappedCount ? `, ${comparison.swappedCount} carried from edited lines` : ''}${warnings.length ? `, ${warnings.length} warning fingerprint(s)` : ''}${relocatedWarningNote(relocated, baseRef)}`,
     );
     reportOverlayContract(cwd);
     return 0;
