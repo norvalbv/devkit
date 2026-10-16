@@ -305,6 +305,40 @@ describe('detectChangedComments', () => {
     );
   });
 
+  it('counts a block comment as one paragraph across its blank continuation lines', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '/** first half one\n * first half two\n *\n * second half one\n * second half two */\nconst x = 1;\n',
+    );
+    git(root, ['add', '.']);
+    const { findings } = detectChangedComments(root);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ startLine: 1, endLine: 5, textLines: 4 });
+  });
+
+  it('judges only the changed lines of a partly edited paragraph, not its whole range', () => {
+    const root = fixture();
+    const note = (edited: string) =>
+      `// one\n// ${edited} two\n// ${edited} three\n// ${edited} four\n// five\nconst x = 1;\n`;
+    writeFileSync(path.join(root, 'src/a.ts'), note('old'));
+    commitAll(root, 'base');
+    writeFileSync(path.join(root, 'src/a.ts'), note('new'));
+    git(root, ['add', 'src/a.ts']);
+    const [finding] = detectChangedComments(root).findings;
+    expect(finding).toMatchObject({ startLine: 1, endLine: 5, textLines: 3 });
+  });
+
+  it('splits a run where the comment style changes, even with no code between', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '// line one\n// line two\n/* block one */\n/* block two */\nconst x = 1;\n',
+    );
+    git(root, ['add', '.']);
+    expect(detectChangedComments(root).findings).toEqual([]);
+  });
+
   it('keeps comment groups separated by code as distinct two-line notes', () => {
     const root = fixture();
     writeFileSync(
