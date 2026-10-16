@@ -278,7 +278,7 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
   });
 
   it('preserves the PR description when neither body flag is supplied, including piped commit text', () => {
-    const { dir, env, ghLog, ghBody } = bodyUpdateRepo();
+    const { bare, dir, env, g, ghLog, ghBody } = bodyUpdateRepo();
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
 
     const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, env, {
@@ -286,6 +286,9 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
     });
 
     expect(r.status, r.stderr).toBe(0);
+    // The help's follow-up remedy: the piped text must become the pushed commit's message.
+    const pushed = g(['--git-dir', bare, 'log', '-1', '--format=%b', 'refs/heads/feat/pr']);
+    expect(pushed).toBe('legacy piped commit body');
     expect(readFileSync(ghLog, 'utf8')).not.toContain('pr edit');
     expect(existsSync(ghBody)).toBe(false);
   });
