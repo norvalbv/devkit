@@ -32,8 +32,8 @@ function truthy(v: string | undefined): boolean {
 }
 
 /** Automatic every-commit capture (transcripts + telemetry). ON by default; DEVKIT_NO_TELEMETRY=1 off. */
-export function telemetryEnabled(): boolean {
-  return !truthy(process.env.DEVKIT_NO_TELEMETRY);
+export function telemetryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !truthy(env.DEVKIT_NO_TELEMETRY);
 }
 
 /**
@@ -67,10 +67,10 @@ export function parentSessionId(env: NodeJS.ProcessEnv = process.env): string | 
 }
 
 /** The telemetry JSONL sink: the ship's DEVKIT_GATE_EVENTS, else the every-commit default, else none. */
-export function telemetrySink(): string | undefined {
+export function telemetrySink(env: NodeJS.ProcessEnv = process.env): string | undefined {
   return (
-    process.env.DEVKIT_GATE_EVENTS ||
-    (telemetryEnabled()
+    env.DEVKIT_GATE_EVENTS ||
+    (telemetryEnabled(env)
       ? path.join(homedir(), '.devkit', 'telemetry', 'gate-events.jsonl')
       : undefined)
   );

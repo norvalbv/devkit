@@ -1,10 +1,11 @@
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GATE_BYPASSES } from '../../../../gate-engine/deterministic/command-gates.mts';
 import { BYPASS_ENV } from '../../../../vitest.setup.mjs';
-import { BYPASS_FLAGS, shipBypasses } from './bypasses.mts';
+import { attemptBypasses, BYPASS_FLAGS, shipBypasses } from './bypasses.mts';
 
 const SHIP = 'ship-1';
 interface RowFields {
@@ -28,8 +29,7 @@ function sink(...lines: string[]): string {
   return file;
 }
 
-const read = (lines: string[], commits = 1) =>
-  shipBypasses({ shipId: SHIP, sink: sink(...lines) }, commits);
+const read = (lines: string[]) => attemptBypasses(sink(...lines), SHIP);
 
 // The repo's documented one-run controls, so a new control cannot ship without the verdict seeing it.
 function documentedControls(): string[] {
@@ -56,32 +56,22 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllEnvs());
 
-describe('shipBypasses', () => {
+describe('attemptBypasses', () => {
   it('reads none from a clean, passing gate run', () => {
     expect(read([ATTEMPT, PASSED])).toEqual([]);
   });
 
-  const NO_RUN = { unknown: 'no devkit ship gate run' };
-  const NO_PASS = { unknown: 'no passing gate run on record for this ship' };
   it.each([
-    ['no ship id', { shipId: undefined, sink: sink(ATTEMPT, PASSED) }, 1, NO_RUN],
-    ['no sink', { shipId: SHIP, sink: undefined }, 1, NO_RUN],
-    ['an unreadable sink', { shipId: SHIP, sink: '/nonexistent/gate-events.jsonl' }, 1, NO_PASS],
-    ['a gate run that did not pass', { shipId: SHIP, sink: sink(ATTEMPT) }, 1, NO_PASS],
-    ['a pass with no attempt row', { shipId: SHIP, sink: sink(PASSED) }, 1, NO_PASS],
-    [
-      'earlier commits gated by earlier ships',
-      { shipId: SHIP, sink: sink(ATTEMPT, PASSED) },
-      2,
-      { unknown: '2 commits since the PR base, only a one-commit run is on record' },
-    ],
-  ])('is unknown with %s', (_name, record, commits, why) => {
-    expect(shipBypasses(record, commits)).toEqual(why);
+    ['an unreadable sink', '/nonexistent/gate-events.jsonl'],
+    ['a gate run that did not pass', sink(ATTEMPT)],
+    ['a pass with no attempt row', sink(PASSED)],
+  ])('has no record with %s', (_name, file) => {
+    expect(attemptBypasses(file, SHIP)).toBeUndefined();
   });
 
-  it('is unknown when only another ship passed', () => {
+  it('has no record when only another ship passed', () => {
     const other = JSON.stringify({ ship_id: 'ship-2', type: 'ship_result', exit_code: 0 });
-    expect(read([ATTEMPT, row({ type: 'ship_result', exit_code: 1 }), other])).toEqual(NO_PASS);
+    expect(read([ATTEMPT, row({ type: 'ship_result', exit_code: 1 }), other])).toBeUndefined();
   });
 
   it('names every bypass flag set in the environment, in either spelling', () => {
@@ -149,5 +139,98 @@ describe('shipBypasses', () => {
   ])('reports the documented control %s', (name) => {
     vi.stubEnv(name, name === 'GUARD_COMPLETENESS_HARD' ? '0' : '1');
     expect(read([ATTEMPT, PASSED])).toEqual([expect.stringContaining(name)]);
+  });
+});
+
+const SHA_A = 'a'.repeat(40);
+const SHA_B = 'b'.repeat(40);
+const NOW = Date.parse('2026-10-14T12:00:00Z');
+const at = (ms: number) => new Date(ms).toISOString();
+const gated = (head: string, bypasses: string[] | string = [], ts = at(NOW)) =>
+  JSON.stringify({ type: 'ship_gated', ship_id: 'any', head, bypasses, ts });
+const commit = (sha: string, committedMs = NOW - 60_000) => ({ sha, committedMs });
+
+describe('shipBypasses', () => {
+  const both = [commit(SHA_B), commit(SHA_A)];
+
+  it('reads a PR shipped as two clean gated commits as clean', () => {
+    expect(shipBypasses(sink(gated(SHA_A), gated(SHA_B)), both)).toEqual([]);
+  });
+
+  it('skips a torn line in the shared sink instead of losing every record', () => {
+    const torn = '{"type":"ship_gated","head":"bbb';
+    expect(shipBypasses(sink(gated(SHA_A), torn, gated(SHA_B)), both)).toEqual([]);
+  });
+
+  it("carries an earlier commit's waived finding", () => {
+    expect(shipBypasses(sink(gated(SHA_A, ['waived:x']), gated(SHA_B)), both)).toEqual([
+      'waived:x',
+    ]);
+  });
+
+  it('adds a control exported for this process', () => {
+    vi.stubEnv('GUARD_SHIP_BASE_OK', '1');
+    expect(shipBypasses(sink(gated(SHA_A), gated(SHA_B)), both)).toEqual(['GUARD_SHIP_BASE_OK']);
+  });
+
+  it.each([
+    ['no record for one commit', [gated(SHA_B)], 'aaaaaaaaaaaa'],
+    ['a record for a commit outside the range', [gated('c'.repeat(40))], 'bbbbbbbbbbbb and 1 more'],
+    ['a record whose bypasses are malformed', [gated(SHA_A, 'none'), gated(SHA_B)], 'aaaaaaaaaaaa'],
+  ])('is unknown with %s, naming the commit', (_name, lines, named) => {
+    expect(shipBypasses(sink(...lines), both)).toEqual({
+      unknown: `no passing devkit ship gate record for ${named}`,
+    });
+  });
+
+  it('stops reading at rows older than the commits, so an older record is not found', () => {
+    const old = at(NOW - 3 * 86_400_000);
+    // The newest chunk ends on an old ship_attempt row, so the scan stops before the chunk that
+    // holds the record: more than one 256 KiB read chunk of filler separates them.
+    const filler = Array<string>(15_000).fill('{"type":"gate_result"}');
+    const file = sink(
+      gated(SHA_A, [], old),
+      ...filler,
+      JSON.stringify({ type: 'ship_attempt', ts: old }),
+    );
+    expect(shipBypasses(file, [commit(SHA_A, NOW)])).toEqual({
+      unknown: 'no passing devkit ship gate record for aaaaaaaaaaaa',
+    });
+    expect(shipBypasses(file, [commit(SHA_A, NOW - 4 * 86_400_000)])).toEqual([]);
+  });
+
+  it('is unknown with no sink or no commits', () => {
+    expect(shipBypasses(undefined, both)).toEqual({ unknown: 'no devkit ship gate run' });
+    expect(shipBypasses(sink(gated(SHA_A)), [])).toEqual({
+      unknown: 'no commits since the PR base',
+    });
+  });
+});
+
+describe('bypasses record CLI', () => {
+  const script = new URL('./bypasses.mts', import.meta.url).pathname;
+  const record = (lines: string[], head: string) => {
+    const file = sink(...lines);
+    const env = { ...process.env, DEVKIT_SHIP_ID: SHIP, DEVKIT_GATE_EVENTS: file };
+    spawnSync(process.execPath, [script, 'record', head], { env, encoding: 'utf8' });
+    return readFileSync(file, 'utf8').trim().split('\n').slice(lines.length);
+  };
+
+  it("appends the passing run's record under the sha it produced", () => {
+    vi.stubEnv('GUARD_COVERAGE_OK', '1');
+    const [line] = record([ATTEMPT, PASSED], SHA_A);
+    expect(JSON.parse(line)).toMatchObject({
+      type: 'ship_gated',
+      ship_id: SHIP,
+      head: SHA_A,
+      bypasses: ['GUARD_COVERAGE_OK'],
+    });
+  });
+
+  it.each([
+    ['a run that did not pass', [ATTEMPT], SHA_A],
+    ['a head that is not a sha', [ATTEMPT, PASSED], 'HEAD'],
+  ])('appends nothing for %s', (_name, lines, head) => {
+    expect(record(lines, head)).toEqual([]);
   });
 });
