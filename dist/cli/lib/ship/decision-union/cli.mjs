@@ -37,14 +37,9 @@ export function unionRefusal(fork, base, merged) {
 function git(root, args) {
     return execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', maxBuffer: 64 << 20 });
 }
-/** A file's text at a revision, or '' when the revision does not carry it. */
-function blobAt(root, rev, path) {
-    try {
-        return git(root, ['show', `${rev}:${path}`]);
-    }
-    catch {
-        return '';
-    }
+/** A file's text at a revision; throws when git cannot read it, so ship refuses rather than guess. */
+function showAt(root, rev, path) {
+    return git(root, ['show', `${rev}:${path}`]);
 }
 export function refusalText(path, reason, baseRef) {
     return [
@@ -93,7 +88,7 @@ export function refusals({ root, base, patchBase, baseRef }, pairs) {
     for (let i = 0; i < pairs.length; i += 2) {
         const path = pairs[i];
         const merged = git(root, ['cat-file', 'blob', pairs[i + 1]]);
-        const reason = unionRefusal(blobAt(root, patchBase, path), blobAt(root, base, path), merged);
+        const reason = unionRefusal(showAt(root, patchBase, path), showAt(root, base, path), merged);
         if (reason)
             out.push(refusalText(path, reason, baseRef));
     }
