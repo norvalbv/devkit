@@ -1202,6 +1202,8 @@ if [ "$UPDATE_PR_BODY" -eq 1 ]; then
   body_receipt_delete
   if [ "$BODY_UPDATE_STATUS" -ne 0 ]; then
     # The commit landed, so its evidence still belongs on the PR; the suggested re-run carries it.
+    # Released first, as on the success path: a long capture must not block a same-branch --pr.
+    rewrite_publish_lock_release
     [[ "${PR_URL##*/}" =~ ^[0-9]+$ ]] && publish_evidence_block "$WT" "${PR_URL##*/}" "$REPO" "$SHIP_COMMIT"
     [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "${PR_NUM:-}" pr-body-publication-failed
     exit "$BODY_UPDATE_STATUS"
