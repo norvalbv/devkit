@@ -14,7 +14,6 @@ import {
   adoptBaselineRuleFindings,
   baselineFromGroups,
   compareBaseline,
-  pruneBaseline,
   readBaseline,
   writeBaseline,
 } from '../../lib/install/anti-slop/baseline.mts';
@@ -51,6 +50,7 @@ import {
   baselineOrExplain,
   capabilityReady,
   count,
+  prune,
 } from './anti-slop-adopt.mts';
 import {
   clearPendingAntiSlopBaselineActivation,
@@ -90,8 +90,9 @@ Configure per-rule off/warn/error and scoped overrides in the repository Oxlint 
 to the repository root. Check and inspect never write. Create refuses an existing baseline unless
 --force is explicit; a whole-repository replacement that removes debt from existing files also requires
 --confirm-baseline-removals. Once a baseline is committed, create refuses any snapshot the commit
-gate would reject against HEAD, so a new finding is fixed, not adopted. Prune refuses to write while
-new error-severity findings exist.
+gate would reject against HEAD, so a new finding is fixed, not adopted. While new error-severity
+findings exist, prune keeps fixed debt; an unscoped prune still drops the debt of deleted files unless
+the same finding reappears elsewhere (adopt that rename or move first).
 
 In an OVERLAY install the baseline is per-clone and git-ignored, so no committed tree carries one to
 compare against: --base is unavailable there, adopt-renames re-keys staged renames only, and
@@ -339,39 +340,6 @@ function inspect(cwd: string, json: boolean): number {
     console.log(`  ${String(findings).padStart(5)}  ${rule}`);
   }
   return 0;
-}
-
-function prune(cwd: string, args: string[]): number {
-  if (!capabilityReady(cwd)) return 2;
-  return withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
-    const baseline = baselineOrExplain(cwd);
-    if (!baseline) return 2;
-    const scope = resolveAntiSlopScope(cwd, args);
-    const groups = collectAntiSlopGroups(cwd, args);
-    const selected: AntiSlopBaseline = {
-      ...baseline,
-      entries: baseline.entries.filter((entry) => scope.includes(entry.file)),
-    };
-    const comparison = compareBaseline(selected, groups);
-    printNewAntiSlopFindings(comparison.newGroups);
-    if (comparison.newGroups.some((group) => group.severity === 'error')) {
-      console.error('anti-slop: prune refused — new error finding(s) exist; baseline unchanged');
-      return 1;
-    }
-    const pruned = pruneBaseline(selected, groups);
-    const next: AntiSlopBaseline = {
-      ...baseline,
-      entries: [
-        ...baseline.entries.filter((entry) => !scope.includes(entry.file)),
-        ...pruned.entries,
-      ].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint)),
-    };
-    writeBaseline(cwd, next);
-    console.log(
-      `anti-slop: pruned ${comparison.resolvedCount} fixed finding(s); ${next.entries.reduce((sum, entry) => sum + entry.count, 0)} remain`,
-    );
-    return 0;
-  });
 }
 
 export default function run(args: string[], cwd: string): number {
