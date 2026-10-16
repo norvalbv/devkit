@@ -7,6 +7,7 @@
  * Preflight reads the tracked index only, so the folder's untracked siblings are named explicitly.
  */
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -48,7 +49,7 @@ function untrackedSiblings(root, dir) {
 
 /** One advisory per (session, folder). Claimed atomically ('wx') and only once it is emitted. */
 function claimed(sessionId, root, dir) {
-  const id = Buffer.from(`${root}\x00${dir}`).toString('base64url').slice(-64);
+  const id = createHash('sha256').update(`${root}\x00${dir}`).digest('hex');
   const session = String(sessionId || 'unknown').replace(/[^\w-]/g, '');
   const stamp = path.join(tmpdir(), 'devkit-fanout-brief', `${session}-${id}`);
   try {

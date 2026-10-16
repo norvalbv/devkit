@@ -118,4 +118,12 @@ describe('fanout-brief', () => {
     expect(run(root, 'src/pile/b.ts', { session: 'one' })).toBe('');
     expect(run(root, 'src/pile/b.ts', { session: 'two' })).not.toBe('');
   });
+
+  // Catches a dedup key built from a path's tail: folders sharing a long suffix claimed one slot.
+  it('warns separately for folders that share a long path suffix', () => {
+    const tail = 'components/forms/inputs/validation/rules/strings';
+    const root = makeRepo({ [`a/${tail}`]: 12, [`b/${tail}`]: 12 });
+    expect(run(root, `src/a/${tail}/new.ts`, { session: 'one' })).not.toBe('');
+    expect(run(root, `src/b/${tail}/new.ts`, { session: 'one' })).not.toBe('');
+  });
 });
