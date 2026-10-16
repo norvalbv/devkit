@@ -359,6 +359,42 @@ describe('readShipEvents', () => {
     expect(readShipEvents(sinkWith([]), SHIP)).toEqual([]);
   });
 
+  // One inherited DEVKIT_SHIP_ID spans attempts, and one read chunk can hold both.
+  it('returns only the newest attempt when an earlier one shares its ship id and chunk', () => {
+    const file = sinkWith([
+      JSON.stringify(ev({ type: 'ship_attempt' })),
+      JSON.stringify(reviewFail('correctness', 'the previous attempt, already fixed')),
+      JSON.stringify(ev({ type: 'ship_result', exit_code: 1 })),
+      JSON.stringify(ev({ type: 'ship_attempt' })),
+      JSON.stringify(completenessFail('this attempt')),
+      JSON.stringify(ev({ type: 'ship_result', exit_code: 0 })),
+    ]);
+    expect(readShipEvents(file, SHIP).map((e) => e.type)).toEqual([
+      'ship_attempt',
+      'gate_result',
+      'ship_result',
+    ]);
+  });
+
+  it('drops the rows this ship wrote before its own ship_attempt', () => {
+    const file = sinkWith([
+      JSON.stringify(ev({ type: 'ship_intent' })),
+      JSON.stringify(ev({ type: 'judge_preflight' })),
+      JSON.stringify(ev({ type: 'ship_attempt' })),
+      JSON.stringify(completenessFail('gap')),
+    ]);
+    expect(readShipEvents(file, SHIP).map((e) => e.type)).toEqual(['ship_attempt', 'gate_result']);
+  });
+
+  it('returns every row of this ship when it wrote no ship_attempt, as a dry-gates run does', () => {
+    const file = sinkWith([
+      JSON.stringify(ev({ type: 'judge_preflight' })),
+      JSON.stringify(completenessFail('gap')),
+      JSON.stringify(shipResult('review')),
+    ]);
+    expect(readShipEvents(file, SHIP)).toHaveLength(3);
+  });
+
   // The default sink is per-MACHINE, so two Frink panes shipping different repos interleave in it.
   // A backward scan must stop at MY ship_attempt — stopping at whichever attempt it meets first
   // silently truncates this run's findings to whatever sat after a stranger's row.

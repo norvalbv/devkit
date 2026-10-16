@@ -2,7 +2,7 @@
 // an unread record must never read as "none".
 import { z } from 'zod';
 import { envBool, envVar } from '../../../../gate-engine/config.mts';
-import { readShipEvents } from '../digest/gate-digest.mts';
+import { ATTEMPT, readShipEvents } from '../digest/gate-digest.mts';
 
 /** Where this ship's gate rows live, captured before the evidence run clears DEVKIT_* from env. */
 export interface ShipRecord {
@@ -97,10 +97,10 @@ export function shipBypasses(
   if (!shipId || !sink) return { unknown: 'no devkit ship gate run' };
   if (commits !== 1)
     return { unknown: `${commits} commits since the PR base, only a one-commit run is on record` };
-  const all = readShipEvents(sink, shipId).map((event) => rowSchema.parse(event));
-  const opened = all.map((row) => row.type).lastIndexOf('ship_attempt');
-  const rows = opened < 0 ? [] : all.slice(opened);
-  if (!rows.some((row) => row.type === 'ship_result' && row.exit_code === 0))
+  const rows = readShipEvents(sink, shipId).map((event) => rowSchema.parse(event));
+  // Rows with no ship_attempt ahead of them cannot be attributed to this run.
+  const passed = rows.some((row) => row.type === 'ship_result' && row.exit_code === 0);
+  if (rows[0]?.type !== ATTEMPT || !passed)
     return { unknown: 'no passing gate run on record for this ship' };
   return [...new Set([...envBypasses(), ...rowBypasses(rows)])];
 }
