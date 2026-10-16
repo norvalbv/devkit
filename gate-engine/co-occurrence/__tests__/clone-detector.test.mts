@@ -387,6 +387,23 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     }
   });
 
+  // An fs error in the marker scan is could-not-run, like a jscpd failure: fail open, never block.
+  it.skipIf(process.getuid?.() === 0)(
+    'exit 2 — an unreadable dir in a clone root fails open',
+    () => {
+      const dir = writeFixture({ 'jscpd-stub': '#!/bin/sh\nexit 0\n', 'src/locked/a.ts': '' });
+      chmodSync(join(dir, 'jscpd-stub'), 0o755);
+      chmodSync(join(dir, 'src', 'locked'), 0o000);
+      try {
+        const args = ['scan', '--gate', '--paths', join(dir, 'src')];
+        expect(run(args, { JSCPD_BIN: join(dir, 'jscpd-stub') }).status).toBe(2);
+      } finally {
+        chmodSync(join(dir, 'src', 'locked'), 0o755);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('exit 0 — a marker in a test file is out of scope, like its clones', () => {
     const dir = writeFixture({ '__tests__/a.ts': `// ${MARK}-start\nexport const A = 1;\n` });
     try {

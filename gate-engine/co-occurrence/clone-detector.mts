@@ -323,19 +323,21 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   const gate = argv.includes('--gate');
   const changed = argv.includes('--changed');
 
+  // --changed: keep only clones touching a staged file — this commit's clones,
+  // not pre-existing ones. Staged set from the hook's staged list / git.
+  const staged = changed ? loadChangedSet(repoRoot) : null;
   let clones: Clone[];
+  let markers: IgnoreMarker[] = [];
   try {
     clones = detectClones({ minTokens, paths, includeSameFile });
+    if (gate) markers = findIgnoreMarkers(paths, staged);
   } catch (e: unknown) {
-    // jscpd missing / errored = "could not run". The gate fails OPEN (exit 2) so
-    // an infra failure never bricks a commit; non-gate callers surface the error.
+    // jscpd missing / errored, or an unreadable file in the marker scan = "could not run". The
+    // gate fails OPEN (exit 2) so an infra failure never bricks a commit; others surface it.
     failLine(e instanceof Error ? e.message : String(e));
     process.exit(gate ? 2 : 1);
   }
 
-  // --changed: keep only clones touching a staged file — this commit's clones,
-  // not pre-existing ones. Staged set from the hook's staged list / git.
-  const staged = changed ? loadChangedSet(repoRoot) : null;
   if (staged) clones = clones.filter((c) => staged.has(c.fileA) || staged.has(c.fileB));
 
   if (gate) {
@@ -343,7 +345,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     // ignore marker, which would otherwise hide a clone from this gate with no approval.
     const allowed = liveAllowlistedHashes();
     const novel = clones.filter((c) => !allowed.has(c.fragmentHash));
-    const markers = findIgnoreMarkers(paths, staged);
     const rows = [
       ...novel.map(
         (c) =>
