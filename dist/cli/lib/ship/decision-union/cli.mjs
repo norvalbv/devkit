@@ -37,9 +37,10 @@ export function unionRefusal(fork, base, merged) {
 function git(root, args) {
     return execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', maxBuffer: 64 << 20 });
 }
-/** A file's text at a revision; throws when git cannot read it, so ship refuses rather than guess. */
+/** A file's text at a revision, '' when it lacks the path (an add/add merge); throws on a bad revision. */
 function showAt(root, rev, path) {
-    return git(root, ['show', `${rev}:${path}`]);
+    const entry = git(root, ['ls-tree', rev, '--', path]);
+    return entry ? git(root, ['show', `${rev}:${path}`]) : '';
 }
 export function refusalText(path, reason, baseRef) {
     return [
