@@ -96,6 +96,7 @@ export default function run(args: string[], cwd: string): number {
   const baseDrift = cfg?.components?.baseDrift ?? false;
   // And for the anti-slop preflight hook, owned by the antiSlop component.
   const antiSlop = cfg?.components?.antiSlop ?? false;
+  const fanout = cfg?.components?.guards?.includes('fanout') ?? false;
   const explicitTargets = listFlag(args, '--targets');
   const targets =
     explicitTargets ??
@@ -129,6 +130,7 @@ export default function run(args: string[], cwd: string): number {
         priorArtGate,
         baseDrift,
         antiSlop,
+        fanout,
       });
   syncHookScripts(gitRoot, {
     dryRun: args.includes('--dry-run'),
