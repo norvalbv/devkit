@@ -125,6 +125,16 @@ source line are intentionally fungible and share one counted fingerprint. The ra
 debt class from growing; it does not assign provenance to otherwise indistinguishable occurrences.
 This keeps unrelated line-number shifts from reclassifying an adopted repository's existing debt.
 
+Editing elsewhere on a line that carries debt (for example, changing only a function's return type
+beside a baselined parameter) changes its source line, so the exact fingerprint misses. A second
+pass then treats the finding as existing debt when an entry in the same file with the same rule and
+diagnostic lost an occurrence in the same run. Pairing is one-to-one in line order, so a second
+offending occurrence is still new, and the PASS line counts the pairs as `carried from edited
+lines`. Fixing one occurrence while adding another of the same rule and diagnostic in the same file
+is indistinguishable from an edit and is accepted; the count never grows. `prune` keeps the entry
+under its original source line until the finding is fixed, and a vanished entry paired this way is
+never also offered as relocation credit.
+
 Each fingerprint is SHA-256 over exactly:
 
 1. the namespaced rule id;

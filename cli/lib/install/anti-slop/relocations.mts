@@ -1,7 +1,12 @@
 /** Relocated anti-slop debt: findings a partial move carried between files Git sees only as edits. */
 
 import { failLine, writeGateReason } from '../../../../gate-engine/deterministic/reason.mts';
-import type { AntiSlopBaseline, BaselineEntry, BaselineIncrease } from './baseline.mts';
+import {
+  type AntiSlopBaseline,
+  type BaselineEntry,
+  type BaselineIncrease,
+  editedLineCredit,
+} from './baseline.mts';
 import { ANTI_SLOP_BASELINE_REL } from './constants.mts';
 import type { FindingGroup } from './diagnostics.mts';
 
@@ -99,6 +104,7 @@ export function vacatedDebt(
 ): VacatedDebt {
   const linted = countsOf(inherited.entries);
   const current = countsOf(candidateGroups);
+  const { consumed } = editedLineCredit(bound.entries, candidateGroups);
   const vacated: VacatedDebt = new Map();
   const ordered = [...bound.entries].sort(
     (a, b) => a.file.localeCompare(b.file) || a.fingerprint.localeCompare(b.fingerprint),
@@ -109,7 +115,9 @@ export function vacatedDebt(
     // An unlinted surviving file proves nothing left it; never assume it did.
     if (!source.deleted && !inLintScope(entry.file)) continue;
     const evidenced = Math.min(entry.count, linted.get(entry.fingerprint) ?? 0);
-    const remaining = source.deleted ? 0 : (current.get(entry.fingerprint) ?? 0);
+    const remaining = source.deleted
+      ? 0
+      : (current.get(entry.fingerprint) ?? 0) + (consumed.get(entry.fingerprint) ?? 0);
     if (evidenced <= remaining) continue;
     const key = relocationKey(entry);
     const credit = {

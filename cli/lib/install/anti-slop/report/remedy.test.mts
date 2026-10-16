@@ -297,6 +297,27 @@ describe('anti-slop check FAIL output (wiring)', () => {
     expect(stderr).toContain(ACCEPT_VIA_OVERRIDE);
   });
 
+  it('carries debt on a line edited elsewhere through the staged gate, but not a second offence', () => {
+    const cwd = repository(false);
+    const debtLine = (tail: string) =>
+      `export function widen(value: object${tail} {\n  return 1;\n}\n`;
+    writeFileSync(join(cwd, 'src', 'a.test.ts'), 'export const clean = 1;\n');
+    writeFileSync(join(cwd, 'src', 'widen.ts'), debtLine('): number'));
+    writeBaseline(cwd, baselineFromGroups(collectAntiSlopGroups(cwd, ['src/widen.ts'])));
+    git(cwd, ['add', '-A']);
+    git(cwd, ['-c', 'user.name=t', '-c', 'user.email=t@test.invalid', 'commit', '-qm', 'debt']);
+
+    writeFileSync(join(cwd, 'src', 'widen.ts'), debtLine('): 1'));
+    git(cwd, ['add', '-A']);
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(0);
+    expect(out.join('\n')).toMatch(/PASS — .*1 carried from edited lines/u);
+
+    writeFileSync(join(cwd, 'src', 'widen.ts'), debtLine(', other: object): 1'));
+    git(cwd, ['add', '-A']);
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
+    expect(err.join('\n')).toMatch(/FAIL — 1 new error finding\(s\)/u);
+  });
+
   it('prints no remedy on a passing check', () => {
     const cwd = repository(false);
     writeFileSync(join(cwd, 'src', 'a.test.ts'), 'export const clean = 1;\n');
