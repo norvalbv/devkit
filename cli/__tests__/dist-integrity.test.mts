@@ -719,6 +719,15 @@ describe('dist-integrity CLI', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('usage: dist-integrity');
   });
+
+  it('refuses a misspelled flag instead of dropping it and judging against the wrong commit', () => {
+    const { base, root } = seedShipRepo();
+
+    const result = preflight(root, ['--root', root, '--base', base, '--targett', base, '--']);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('unknown or incomplete argument: --targett');
+  });
 });
 
 // Ship's hook-dir preflight (sc-3883) runs first; an uninitialised fixture never reaches this one.
