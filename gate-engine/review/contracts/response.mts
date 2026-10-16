@@ -74,6 +74,17 @@ export function parseAdvisories(raw: string, maxChars = ADVISORY_CHARS): string[
   return [...new Set(texts)].slice(0, ADVISORY_CAP);
 }
 
+/** A judged verdict's advisories. A FAIL's count too: the prompt asks for them on every verdict,
+ *  and a fixed blocker's re-ship never shows them again. INCONCLUSIVE/error judged nothing. */
+export function verdictAdvisories(
+  res: { status: string; transcript?: string },
+  maxChars = ADVISORY_CHARS,
+): string[] {
+  return res.status === 'pass' || res.status === 'fail'
+    ? parseAdvisories(res.transcript ?? '', maxChars)
+    : [];
+}
+
 /** Remedy for a cascade that THREW: the gate failed before or around the judge, so pointing the
  *  operator at a judge CLI's auth/quota sends them after a healthy binary (sc-3400). */
 export const ENGINE_ERROR_REMEDY =
