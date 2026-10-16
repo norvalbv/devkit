@@ -11,8 +11,10 @@ import { domainsDisabledByEmptyRoots } from '../evidence/scope.mts';
 import {
   allowedToolsFor,
   cacheKey,
+  checklistScriptAt,
   effectiveReviewConfig,
   escalatePrompt,
+  hasChecklist,
   parseReviewVerdict,
   REVIEWERS,
   rootsFor,
@@ -478,8 +480,7 @@ describe('allowedToolsFor', () => {
   it('domain reviewers get the read-only base + ONLY their own checklist script — no naked Bash, no write tools', () => {
     const tools = allowedToolsFor(REVIEWERS[0], cfg);
     expect(tools).toBe(
-      'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*),' +
-        'Bash(node .claude/skills/api-security/scripts/checklist.mjs:*),' +
+      'Read,Grep,Glob,Bash(node .claude/skills/api-security/scripts/checklist.mjs:*),' +
         'mcp__codebase__*,mcp__context7__*,mcp__autonomous_bugs__*',
     );
     expect(tools).not.toMatch(/(^|,)Bash(,|$)/); // never an unscoped Bash
@@ -502,6 +503,16 @@ describe('allowedToolsFor', () => {
       'Read,Grep,Glob,mcp__codebase__*,mcp__context7__*,mcp__autonomous_bugs__*',
     );
     expect(allowedToolsFor(conv, cfg)).not.toContain('Bash');
+  });
+  it('no reviewer gets a Bash rule beyond its own checklist script — git runs via the read-only set', () => {
+    // An explicit Bash(git diff:*) approves `git diff --output=<file>`, a file write.
+    for (const reviewer of REVIEWERS) {
+      const bash = allowedToolsFor(reviewer, cfg)
+        .split(',')
+        .filter((tool) => tool.startsWith('Bash'));
+      const own = hasChecklist(reviewer) ? [`Bash(node ${checklistScriptAt(reviewer)}:*)`] : [];
+      expect(bash, reviewer.name).toEqual(own);
+    }
   });
 });
 

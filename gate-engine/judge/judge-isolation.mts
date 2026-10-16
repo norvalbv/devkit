@@ -23,6 +23,9 @@ export const JUDGE_ISOLATION = [
   '--no-session-persistence',
 ];
 export const JUDGE_READ_ONLY = ['--disallowedTools', '*'];
+// An explicit Bash(git diff:*) allow overrides Claude Code's read-only validator and approves
+// `git diff --output=<file>` writes; read-only git forms run with no rule, Read covers the rest.
+export const JUDGE_READ_TOOLS = 'Read,Grep,Glob';
 
 // Git's per-repository environment. Git EXPORTS these into a hook's environment, and for a hook run
 // in a LINKED WORKTREE (which is exactly how `devkit ship` commits) the values are ABSOLUTE:

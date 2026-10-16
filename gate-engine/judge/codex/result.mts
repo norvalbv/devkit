@@ -197,7 +197,7 @@ export function parseModelSpec(spec: string): ModelSpec {
 const confinedWorkspace = (parts: ClaudeArgvParts, workspace?: CodexWorkspace) =>
   parts.readOnly ? null : (workspace ?? null);
 
-// Claude judges cannot run tests (BASE_TOOLS); codex judges have a shell, so they are told instead.
+// Claude judges cannot run tests (JUDGE_READ_TOOLS); codex judges have a shell, so are told instead.
 export const NO_TEST_RUNS =
   'Do not run tests, test runners or package-manager scripts (bun run, npm run); review by reading. Test execution belongs to the pre-push suite.';
 
