@@ -442,11 +442,11 @@ export function effectiveHard(
 
 /** Why the gate should bypass judging (env override, no LLM, or trivial type), or null to proceed. */
 export function skipReason(message: string): string | null {
-  if (envVar('NO_SENTRY_JUDGE')) {
-    emitGateBypass('sentry', 'GUARD_NO_SENTRY_JUDGE'); // previously this bypass emitted nothing
-    return '⚠️  Sentry gate BYPASSED for this run (GUARD_NO_SENTRY_JUDGE=1).';
+  const flag = ['NO_SENTRY_JUDGE', 'SENTRY_NO_LLM'].find((name) => envVar(name));
+  if (flag) {
+    emitGateBypass('sentry', `GUARD_${flag}`);
+    return `⚠️  Sentry gate BYPASSED for this run (GUARD_${flag}=1).`;
   }
-  if (envVar('SENTRY_NO_LLM')) return 'sentry-judge: SKIP (GUARD_SENTRY_NO_LLM — not judged)';
   if (!shouldJudge(message)) return 'sentry-judge: SKIP (trivial commit type / empty — not judged)';
   return null;
 }

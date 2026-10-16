@@ -490,7 +490,7 @@ describe('run dispatch (in-process; covers readMessage + skipReason + applyGateR
   it('report mode: a judged commit with the LLM disabled prints + exits 0', () => {
     expect(callRun(false, 'fix(executor): disarm signal', { GUARD_SENTRY_NO_LLM: '1' })).toBe(0);
     expect(printed).toEqual({
-      out: ['sentry-judge: SKIP (GUARD_SENTRY_NO_LLM — not judged)'],
+      out: ['⚠️  Sentry gate BYPASSED for this run (GUARD_SENTRY_NO_LLM=1).'],
       err: [],
     });
   });
@@ -510,7 +510,7 @@ describe('run dispatch (in-process; covers readMessage + skipReason + applyGateR
     [
       { GUARD_SENTRY_NO_LLM: '1' },
       'fix(x): y',
-      'sentry-judge: SKIP (GUARD_SENTRY_NO_LLM — not judged)',
+      '⚠️  Sentry gate BYPASSED for this run (GUARD_SENTRY_NO_LLM=1).',
     ],
   ])('gate mode: an unjudged run prints exactly one stderr line (%o, %s)', (env, msg, line) => {
     expect(callRun(true, msg, env)).toBe(0);
@@ -578,12 +578,9 @@ describe('check-sentry gate — fail-open / bypass / free-skip (one verdict line
   });
 
   it('report mode (no --gate) prints a verdict line and exits 0', () => {
-    const r = spawnSync('node', [SCRIPT, 'chore(x): y'], {
-      env: { ...process.env, GUARD_SENTRY_NO_LLM: '1' },
-      encoding: 'utf8',
-    });
+    const r = spawnSync('node', [SCRIPT, 'chore(x): y'], { encoding: 'utf8' }); // trivial: no judge call
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain('sentry-judge:');
+    expect(r.stdout).toContain('sentry-judge: SKIP (trivial commit type');
   });
 
   it('judged commit + healthy SKIP verdict → exit 0: the judge ran and was parsed (no warning)', () => {

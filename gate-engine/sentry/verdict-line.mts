@@ -10,7 +10,8 @@ export interface SentryVerdictLike {
 /** Report-mode (no --gate) one-liner for a human running the gate by hand. */
 export function reportLine(result: SentryVerdictLike | null): string {
   const verdict = result?.verdict ?? 'no verdict (judge unavailable / ambiguous)';
-  return `sentry-judge: ${verdict}${result?.evidence ? ` — ${result.evidence}` : ''}`;
+  const cached = result?.cached ? ' (cached)' : '';
+  return `sentry-judge: ${verdict}${cached}${result?.evidence ? ` — ${result.evidence}` : ''}`;
 }
 
 /**

@@ -8,6 +8,9 @@ describe('reportLine (report-mode formatting)', () => {
     );
     expect(reportLine({ verdict: 'SKIP', evidence: '' })).toBe('sentry-judge: SKIP'); // no evidence
     expect(reportLine(null)).toContain('no verdict');
+    expect(reportLine({ verdict: 'SKIP', evidence: '', cached: true })).toBe(
+      'sentry-judge: SKIP (cached)',
+    );
   });
 });
 
