@@ -66,7 +66,7 @@ Some pairs are **intentional deploy artifacts**, not real dups: one path is a *g
 | `guard-dup-allowlist remove <symA> <fileA> <symB> <fileB>` | Retire an approval | After refactoring the dup away. |
 | `guard-dup-allowlist remove-clone <hash>` | Retire a clone approval | After refactoring. |
 | `guard-dup-allowlist check <symA> <fileA> <symB> <fileB>` | exit 0 if allowlisted | Before duplicating something — coverage check. |
-| `guard-dup-allowlist prune` | **Time-based**: drops entries past `date + decayDays` | Periodic; commit-guard runs it in step 2 setup. |
+| `guard-dup-allowlist prune` | **Time-based**: drops entries past `date + decayDays` | Deliberate allowlist maintenance, run by hand — no reviewer or gate runs it. |
 | `guard-dup-allowlist list` | List entries | Picking a burn-down target. |
 | `guard-dup scan --new --changed` | **Pre-flight check** (this commit's dups vs the allowlist) | Before declaring a dup-fix done. |
 | `guard-dup reconcile [--apply]` | **Detection-based**: drops entries `detect()` no longer produces (dead) | After bulk refactors; periodic sweep. Dry-run by default. |
