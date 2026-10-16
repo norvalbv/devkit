@@ -31,7 +31,7 @@ import { usableChunkCount } from '../../../gate-engine/co-occurrence/chunk-index
 import {
   inspectIndexFreshness,
   missingIndexMessage,
-  primaryIndexFallback,
+  indexToInspect,
   staleIndexMessage,
 } from '../../../gate-engine/co-occurrence/index-refresh.mts';
 import { isCodexModel, parseModelSpec } from '../../../gate-engine/judge/codex/result.mts';
@@ -122,9 +122,7 @@ export function checkSearchIndex(
   searchCodeSelected: boolean,
 ): CheckResult {
   if (resolved) {
-    const local = resolve(cwd, resolved);
-    const indexPath = primaryIndexFallback(local, cwd) ?? local;
-    const reads = indexPath === local ? resolved : `${indexPath} (the primary checkout's)`;
+    const { indexPath, reads } = indexToInspect(resolved, cwd);
     if (!existsSync(indexPath)) {
       return check(
         SEARCH_INDEX_CHECK,
