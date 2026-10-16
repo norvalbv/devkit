@@ -236,7 +236,7 @@ function addNote(slug: string, o: AddOptions, p: Paths) {
   }
   const date = today();
   const parsed = parseDecision(readFileSync(file, 'utf8'));
-  const note = noteTextWithRelation(o.note, o.supersedes, parsed.body);
+  const note = noteTextWithRelation(o.note, o.supersedes, parsed.body, slug);
   const body = `${parsed.body.replace(TRAILING_WS_RE, '')}\n${renderNote(date, note)}\n`;
   writeFileAtomic(file, renderDecision({ slug, created: parsed.fm.created || date }, body));
   console.log(`Noted on "${slug}" (${date}).`);

@@ -239,7 +239,7 @@ export function axisNoteIds(body: string): Set<string> {
 }
 
 /**
- * The text `add --note` should write, given an optional `--supersedes <id>`.
+ * The text `add --note` or `amend --note` should write, given an optional `--supersedes <id>`.
  *
  * ONE verb, rendered as the right field for the entry kind: `--supersedes` on a `--target` writes
  * `**Supersedes:**` (renderTarget), on a `--note` it writes `**Amends:**` — the note-level marker
@@ -255,6 +255,7 @@ export function noteTextWithRelation(
   text: string,
   supersedes: string | undefined,
   body: string,
+  slug: string,
 ): string {
   const raw = supersedes?.trim();
   if (!raw) return text;
@@ -264,9 +265,9 @@ export function noteTextWithRelation(
       `--supersedes "${raw}" is not a note id. A note amends a NOTE: pass note:<date> (add ~N for ` +
         'the Nth note that day), or <slug>#note:<date> across axes. `guard-decisions show <slug>` lists them.',
     );
-  // Cross-axis pointers are resolved by the corpus-wide scan, which can read the other file; failing
-  // the write here would mean rejecting a valid reference just because this command only loaded one axis.
-  if (!ref.slug && !axisNoteIds(body).has(ref.id))
+  // Cross-axis pointers resolve in the corpus-wide scan, which can read the other file; an id qualified
+  // with this axis's own slug is same-axis, exactly as validateAxisAmends reads it.
+  if ((!ref.slug || ref.slug === slug) && !axisNoteIds(body).has(ref.id))
     throw new Error(
       `--supersedes "${raw}" names no note on this axis. See \`guard-decisions show <slug>\` for its note ids.`,
     );
