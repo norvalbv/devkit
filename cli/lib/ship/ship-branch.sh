@@ -647,15 +647,22 @@ fi
 #
 # --from-branch is skipped outright: it diffs a pinned COMMIT PAIR whose ancestry was already proven
 # above, so its merge base IS BASE and the classification would be pure cost. Everywhere else
-# ship_patch_base echoes BASE unchanged unless the base genuinely moved under this checkout, which
-# keeps the default arm and every in-sync ship byte-identical to before.
+# ship_patch_base echoes BASE unchanged unless the base genuinely moved under this checkout (or no
+# fork point is visible, which refuses below), keeping the default arm and in-sync ships unchanged.
 . "$SCRIPT_DIR/patch-anchor.sh"
 WHOLE_POSITIVES=()
 WHOLE_SELECTORS=()
 WHOLE_EXCLUDES=()
 PATCH_BASE=$BASE
 if [ "$FROM_BRANCH" -eq 0 ]; then
-  PATCH_BASE=$(ship_patch_base "$ROOT" "$BASE")
+  # No fork point (shallow graft or git error): refuse rather than stage base-only work as a revert.
+  if ! PATCH_BASE=$(ship_patch_base "$ROOT" "$BASE"); then
+    echo "ship: cannot find where this checkout forked from origin/$BASE_REF (${BASE:0:7}) — shallow clone or git error." >&2
+    echo "  Staging against the base tip would commit every base-only change in the briefed paths as a revert." >&2
+    echo "  Run \`git fetch --unshallow\` (or \`git fetch --deepen=<n>\` until \`git merge-base ${BASE:0:7} HEAD\` succeeds), then retry." >&2
+    [ -n "$LOCAL_BRANCH_EXISTS" ] || echo "ship: preflight — blocked before creating a branch or worktree; nothing was staged or gated." >&2
+    exit 1
+  fi
   if [ "$PATCH_BASE" != "$BASE" ]; then
     ship_classify_whole_file "$ROOT" "$BASE" "$PATCH_BASE" -- "${GIT_PATHS[@]}"
     echo "ship: origin/$BASE_REF moved to ${BASE:0:7} since this checkout forked at ${PATCH_BASE:0:7} — staging is anchored at the fork point and three-way merged." >&2
