@@ -78,6 +78,10 @@ const FRONTEND_SIGNATURE_RE = /\.(tsx|jsx|vue|svelte|astro|css|scss|sass|less|ht
 // below: an unbounded line on a 400-file diff is a bug, not a long message.
 const EVIDENCE_NAMES = 3;
 
+/** The first EVIDENCE_NAMES paths, comma-joined, with an ellipsis when more were cut. */
+const evidenceNames = (files: string[]): string =>
+  `${files.slice(0, EVIDENCE_NAMES).join(', ')}${files.length > EVIDENCE_NAMES ? ', …' : ''}`;
+
 /** A reviewer the gate never even considered, because its domain roots array is empty. */
 export interface DisabledDomain {
   reviewer: string;
@@ -144,9 +148,10 @@ export function reportNonRuns(
   alreadyReported: Set<string>,
   skip: ReadonlySet<string> = new Set(),
   routing: ReviewerSelection[] = [],
+  readStaged: StagedReader = () => null,
 ): void {
   const disabled = domainsDisabledByEmptyRoots(staged, cfg, skip);
-  reportUnroutedFiles(routing, cfg, new Set(disabled[0]?.evidence));
+  reportUnroutedFiles(routing, cfg, new Set(disabled[0]?.evidence), readStaged);
   for (const d of disabled) {
     console.error(
       `guard-review: ${d.reviewer} skipped (${d.rootsKey} is empty in guard.config.json)`,
@@ -156,10 +161,8 @@ export function reportNonRuns(
   }
   const files = disabled[0]?.evidence ?? [];
   if (files.length > 0) {
-    const more = files.length > EVIDENCE_NAMES ? ', …' : '';
-    const names = `${files.slice(0, EVIDENCE_NAMES).join(', ')}${more}`;
     console.error(
-      `guard-review: ${files.length} staged frontend file(s) went unreviewed (${names}) — ` +
+      `guard-review: ${files.length} staged frontend file(s) went unreviewed (${evidenceNames(files)}) — ` +
         'declare "review": { "frontendRoots": [...] } in guard.config.json, or run `devkit doctor`',
     );
   }
@@ -196,24 +199,70 @@ export function filesRoutedToNoDomain(selection: ReviewerSelection[], cfg: Guard
   return [...received].filter((f) => !routed.has(f) && isRoutableCode(f, cfg));
 }
 
-/** Names code files no security/performance reviewer will see: on stderr and as one advisory row. */
+/** Staged bytes for `paths` from the tree the gate judges; null when git cannot answer. */
+export type StagedReader = (paths: readonly string[]) => Map<string, Buffer | null> | null;
+
+// Next.js's own server markers: a 'use server' directive (file-level or inline) or `server-only`.
+const SERVER_MARKER_RE = /^[\uFEFF \t]*(?:(['"])use server\1|import[ \t]+(['"])server-only\2)/m;
+const ROUTE_HANDLER_RE = /^route\.[jt]s$/;
+const HTTP_METHOD_EXPORT_RE = /^export\b.*\b(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b/m;
+
+/** True when the module declares itself server code by a Next.js convention, never by extension. */
+function isServerModule(file: string, text: string): boolean {
+  if (SERVER_MARKER_RE.test(text)) return true;
+  return ROUTE_HANDLER_RE.test(file.split('/').pop() ?? '') && HTTP_METHOD_EXPORT_RE.test(text);
+}
+
+const filesOfDomain = (selection: ReviewerSelection[], domain: string): Set<string> =>
+  new Set(selection.filter((s) => s.reviewer.domain === domain).flatMap((s) => s.files));
+
+/** Server-marked code a frontend reviewer received and no backend reviewer did. Silent when the
+ * repo declares no backend, so a pure-UI topology never hears it. */
+export function serverFilesSeenOnlyByFrontend(
+  selection: ReviewerSelection[],
+  cfg: GuardConfig,
+  readStaged: StagedReader,
+): string[] {
+  if (cfg.review.backendRoots.length === 0 || envFlag('REVIEW_NO_TOPOLOGY_WARN')) return [];
+  const backend = filesOfDomain(selection, 'backend');
+  const candidates = [...filesOfDomain(selection, 'frontend')].filter(
+    (f) => !backend.has(f) && isRoutableCode(f, cfg),
+  );
+  const blobs = candidates.length > 0 ? readStaged(candidates) : null;
+  if (!blobs) return [];
+  return candidates.filter((f) => {
+    const blob = blobs.get(f);
+    return blob != null && isServerModule(f, blob.toString('utf8'));
+  });
+}
+
+/** Names code that missed its security/performance review: one stderr line per kind, one row. */
 function reportUnroutedFiles(
   selection: ReviewerSelection[],
   cfg: GuardConfig,
   alreadyNamed: ReadonlySet<string>,
+  readStaged: StagedReader,
 ): void {
+  const facts: string[] = [];
+  const server = serverFilesSeenOnlyByFrontend(selection, cfg, readStaged);
+  if (server.length > 0) {
+    const fact = `${server.length} server file(s) reached only the frontend reviewers (${evidenceNames(server)})`;
+    console.error(
+      `guard-review: ${fact} — add each path or its directory to review.backendRoots in guard.config.json`,
+    );
+    facts.push(fact);
+  }
   const files = filesRoutedToNoDomain(selection, cfg).filter((f) => !alreadyNamed.has(f));
-  if (files.length === 0) return;
-  const more = files.length > EVIDENCE_NAMES ? ', …' : '';
-  const fact =
-    `${files.length} source file(s) reached no security/performance reviewer ` +
-    `(${files.slice(0, EVIDENCE_NAMES).join(', ')}${more})`;
-  console.error(
-    `guard-review: ${fact} — add each path or its directory to ` +
-      'review.backendRoots/frontendRoots in guard.config.json',
-  );
-  // The fact alone: the ship digest cuts a detail short, and the remedy stays in the log line.
-  emitAdvisoryResult(REVIEW_ROUTING_ADVISORY, 'finding', fact);
+  if (files.length > 0) {
+    const fact = `${files.length} source file(s) reached no security/performance reviewer (${evidenceNames(files)})`;
+    console.error(
+      `guard-review: ${fact} — add each path or its directory to ` +
+        'review.backendRoots/frontendRoots in guard.config.json',
+    );
+    facts.push(fact);
+  }
+  // The facts alone, server first: the ship digest cuts a detail short, and remedies stay in the log.
+  if (facts.length > 0) emitAdvisoryResult(REVIEW_ROUTING_ADVISORY, 'finding', facts.join('; '));
 }
 
 /**

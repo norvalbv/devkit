@@ -363,6 +363,19 @@ describe('unrouted-files notice wiring', () => {
     ]);
   });
 
+  it('a full gate reads a staged server action from the judged tree and names it', async () => {
+    const repo = consumerRepo({ backend: true });
+    mkdirSync(join(repo, 'src', 'renderer', '[id]'), { recursive: true });
+    writeFileSync(join(repo, 'src', 'renderer', '[id]', 'actions.ts'), "'use server';\n");
+    spawnSync('git', ['add', 'src/renderer/[id]/actions.ts'], { cwd: repo });
+    captureEvents(repo);
+    expect(await runReviewGate(repo, { exec: lensExec(repo) })).toBe(0);
+    expect(stderr()).toContain(
+      '1 server file(s) reached only the frontend reviewers (src/renderer/[id]/actions.ts)',
+    );
+    expect(routingRows(repo)).toHaveLength(1);
+  });
+
   it('a recheck never prints it — the narrowed lane is not a topology audit', async () => {
     const repo = consumerRepo({ backend: true });
     stageShared(repo);

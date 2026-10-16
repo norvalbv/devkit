@@ -36,6 +36,7 @@ import { emitReviewCacheHit } from '../judge/gate-events.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { reportFleetMcp } from '../judge/mcp/profile.mts';
 import { execJudgeAsync } from '../judge/run-judge.mts';
+import { treeBlobsAtRef } from '../ratchets/tree-blobs.mts';
 import { loadCache } from './cache.mts';
 import { type CascadeResult, runCascade } from './cascade/reviewer.mts';
 import { reportCachedHitNotes } from './contracts/checklist.mts';
@@ -223,7 +224,9 @@ export async function runReviewGate(
     }
     if (only) selected = narrowSelection(selected, only, knobDropped);
     // Before the early return: name what an empty domain root dropped, then record every non-run.
-    reportNonRuns(staged, cfg, selected, knobDropped, skip, only ? [] : routing);
+    const readStaged = (paths: readonly string[]) =>
+      preJudgeTree ? treeBlobsAtRef(cwd, preJudgeTree, paths) : null;
+    reportNonRuns(staged, cfg, selected, knobDropped, skip, only ? [] : routing, readStaged);
     if (selected.length === 0) return finish(only ? 1 : 0); // an empty recheck is never a PASS
     if (reviewMode) {
       assetRoot = process.env.DEVKIT_REVIEW_ASSET_ROOT;
