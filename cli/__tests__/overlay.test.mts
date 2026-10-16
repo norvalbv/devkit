@@ -27,6 +27,7 @@ import { runStagedStructureGate } from '../../gate-engine/structure/run.mts';
 import {
   applyOverlayConstraints,
   defaultSelection,
+  overlayStructureNotice,
   RECOMMENDED_GUARD_IDS,
   type Selection,
 } from '../lib/components.mts';
@@ -1346,9 +1347,25 @@ describe('overlay selects the same components as package mode', () => {
     const root = workRepo();
     await install(root, 'electron');
     const hook = readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8');
-    expect(hook).toContain('echo "structure: not available in overlay for electron"');
+    const notice = overlayStructureNotice('electron');
+    expect(notice).toMatch(
+      /^⚠️ structure-lint: SKIPPED in overlay for electron .*eslint overlay step/,
+    );
+    expect(hook).toContain(`echo "${notice}"`);
+    // Emitted inside `echo "…"`: any of these would break or expand the hook line.
+    expect(notice).not.toMatch(/["$`\\]/);
     expect(hook).not.toContain('--structure');
     expect(readCfgComponents(root).structure).toBe(false);
+  });
+
+  it('an electron overlay with no repo eslint config still names the skipped structure lint', async () => {
+    const root = workRepo();
+    rmSync(join(root, 'eslint.config.mjs'));
+    await install(root, 'electron');
+    const hook = readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8');
+    expect(existsSync(join(root, 'eslint.config.devkit.mjs'))).toBe(false);
+    expect(hook).toContain(`echo "${overlayStructureNotice('electron')}"`);
+    expect(overlayStructureNotice('electron')).not.toMatch(/eslint overlay step runs/);
   });
 
   it('search-code survives upgrade and clean removes it, with nothing ever visible to git', async () => {
