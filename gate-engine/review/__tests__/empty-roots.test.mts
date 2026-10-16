@@ -6,8 +6,10 @@ import { resolveGuardConfig, resolveGuardConfigJson } from '../../config.mts';
 import {
   domainsDisabledByEmptyRoots,
   filesRoutedToNoDomain,
+  filesUnseenByCorrectness,
   reportNonRuns,
   REVIEW_ROUTING_ADVISORY,
+  SYNCED_ASSET_EXCLUDES,
 } from '../evidence/scope.mts';
 import { selectReviewers } from '../reviewers.mts';
 
@@ -280,6 +282,107 @@ describe('filesRoutedToNoDomain', () => {
       const raw = readFileSync(join(REPO_ROOT, 'templates', template, 'guard.config.json'), 'utf8');
       const cfg = resolveGuardConfigJson(raw, '/nonexistent-cwd-defaults-only');
       expect(unrouted(['src/shared/x.ts'], cfg)).toEqual([]);
+    },
+  );
+});
+
+describe('filesUnseenByCorrectness', () => {
+  // No review.paths: the legacy selector gives correctness only declared roots with a ts/tsx suffix.
+  const legacy = make(['src'], ['src'], []);
+  const unseen = (staged: string[], cfg = legacy) =>
+    filesUnseenByCorrectness(staged, selectReviewers(staged, cfg), cfg);
+  const templateCfg = (template: string) =>
+    resolveGuardConfigJson(
+      readFileSync(join(REPO_ROOT, 'templates', template, 'guard.config.json'), 'utf8'),
+      '/nonexistent-cwd-defaults-only',
+    );
+  const report = (staged: string[], cfg = legacy) => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const selection = selectReviewers(staged, cfg);
+    reportNonRuns(staged, cfg, selection, new Set(), new Set(), selection);
+    return spy.mock.calls.map((c) => String(c[0]));
+  };
+
+  it('names code that reached no reviewer at all, on one line', () => {
+    const lines = report(['drizzle.config.ts', 'src/a.ts']);
+    expect(lines).toEqual([
+      'guard-review: 1 code file(s) reached no correctness reviewer (drizzle.config.ts) — ' +
+        'review.paths is absent, so correctness reviews only declared roots with a sourceExtensions ' +
+        'suffix: declare review.paths in guard.config.json (templates ship include ["**"] with ' +
+        'excludes), or add the extension to sourceExtensions',
+    ]);
+  });
+
+  it("stays silent for devkit's synced agent assets and build output", () => {
+    const synced = [
+      '.claude/skills/x/scripts/checklist.mjs',
+      '.codex/hooks/base-drift-brief.mjs',
+      'dist/index.mjs',
+      'src/a.ts',
+    ];
+    expect(report(synced)).toEqual([]);
+  });
+
+  it('names in-root code outside sourceExtensions that only domain reviewers received', () => {
+    expect(unseen(['src/db.mts', 'src/a.ts'])).toEqual(['src/db.mts']);
+  });
+
+  it('stays silent for test, prose and data files', () => {
+    expect(unseen(['a.test.ts', 'README.md', 'package.json', 'src/a.ts'])).toEqual([]);
+  });
+
+  it('names code when correctness received nothing at all but another reviewer ran', () => {
+    expect(report(['src/db.mts'])).toEqual([
+      expect.stringContaining('1 code file(s) reached no correctness reviewer (src/db.mts)'),
+    ]);
+  });
+
+  it('counts a file the HEAD review.paths policy routed to correctness as seen', () => {
+    const staged = ['drizzle.config.ts', 'src/a.ts'];
+    const routing = selectReviewers(staged, legacy, templateCfg('generic'));
+    expect(filesUnseenByCorrectness(staged, routing, legacy)).toEqual([]);
+  });
+
+  it('never re-names a file the empty-frontendRoots line already named', () => {
+    const lines = report(['src/App.jsx', 'src/a.ts']);
+    expect(lines.filter((l) => l.includes('src/App.jsx'))).toHaveLength(1);
+    expect(lines.some((l) => l.includes('correctness'))).toBe(false);
+  });
+
+  it('stays silent when review.paths is declared', () => {
+    expect(unseen(['drizzle.config.ts', 'src/a.ts'], templateCfg('generic'))).toEqual([]);
+  });
+
+  it('stays silent under the opt-out and on a recheck', () => {
+    expect(filesUnseenByCorrectness(['drizzle.config.ts'], [], legacy)).toEqual([]);
+    process.env.GUARD_REVIEW_NO_TOPOLOGY_WARN = '1';
+    expect(unseen(['drizzle.config.ts', 'src/a.ts'])).toEqual([]);
+  });
+
+  it('joins both routing facts into one advisory row', () => {
+    sinkDir = mkdtempSync(join(tmpdir(), 'review-routing-'));
+    const sink = join(sinkDir, 'events.jsonl');
+    vi.stubEnv('DEVKIT_GATE_EVENTS', sink);
+    const cfg = make(['src'], ['src/main'], ['src/renderer']);
+    report(['src/shared/v.ts', 'drizzle.config.ts', 'src/main/a.ts'], cfg);
+    const rows = readFileSync(sink, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((event) => event.type === 'advisory_result');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].detail).toBe(
+      '1 source file(s) reached no security/performance reviewer (src/shared/v.ts); ' +
+        '1 code file(s) reached no correctness reviewer (drizzle.config.ts)',
+    );
+  });
+
+  it.each(readdirSync(join(REPO_ROOT, 'templates')).filter((t) => !t.startsWith('_')))(
+    'templates/%s excludes every synced asset path',
+    (template) => {
+      expect(templateCfg(template).review.paths?.exclude).toEqual(
+        expect.arrayContaining(SYNCED_ASSET_EXCLUDES),
+      );
     },
   );
 });
