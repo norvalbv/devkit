@@ -4,7 +4,14 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:f
 import { join, relative } from 'node:path';
 import { withLock, writeFileAtomic } from '../../atomic-write.mts';
 import { digest, packageDir } from '../../fs-helpers.mts';
-import { adoptBaselineRuleFindings, readBaseline, writeBaseline } from './baseline.mts';
+import {
+  type AntiSlopBaseline,
+  adoptBaselineRuleFindings,
+  hasCurrentIdentity,
+  readBaseline,
+  rekeySummary,
+  writeBaseline,
+} from './baseline.mts';
 import {
   ANTI_SLOP_BASELINE_LOCK_REL,
   ANTI_SLOP_BASELINE_REL,
@@ -177,13 +184,34 @@ export function clearPendingAntiSlopBaselineActivation(cwd: string, migrationId:
   return true;
 }
 
+/** Move a line-identity baseline to span identity BEFORE adoption, so adopted debt is never re-keyed away. */
+function rekeyLegacyBaseline(
+  cwd: string,
+  dryRun: boolean,
+  rekey: (legacy: AntiSlopBaseline) => AntiSlopBaseline,
+): void {
+  withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
+    const baseline = readBaseline(cwd);
+    if (baseline === null || hasCurrentIdentity(baseline)) return;
+    if (dryRun) {
+      console.log(`  [dry-run] would re-key ${ANTI_SLOP_BASELINE_REL} to span identity`);
+      return;
+    }
+    const next = rekey(baseline);
+    writeBaseline(cwd, next);
+    console.log(`  ✓ anti-slop baseline: ${rekeySummary(baseline, next)}`);
+  });
+}
+
 /** Finish one captured activation while holding the baseline lock through collection and receipt. */
 export function adoptActivatedAntiSlopFindings(
   cwd: string,
   previewActivation: PendingAntiSlopBaselineActivation | null,
   dryRun: boolean,
   collectGroups: () => readonly FindingGroup[],
+  rekey: (legacy: AntiSlopBaseline) => AntiSlopBaseline,
 ): boolean {
+  rekeyLegacyBaseline(cwd, dryRun, rekey);
   if (previewActivation === null) {
     if (dryRun) return true;
     if (existsSync(join(cwd, ANTI_SLOP_BASELINE_REL))) return true;

@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { writeFileAtomic } from '../../atomic-write.mts';
-import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_UPSTREAM } from './constants.mts';
-import type { FindingGroup } from './diagnostics.mts';
+import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_IDENTITY, ANTI_SLOP_UPSTREAM } from './constants.mts';
+import type { AntiSlopFinding, FindingGroup } from './diagnostics.mts';
 
 export interface BaselineEntry {
   fingerprint: string;
@@ -19,6 +19,8 @@ export interface BaselineEntry {
 export interface AntiSlopBaseline {
   schemaVersion: 1;
   upstreamCommit: string;
+  /** Absent on a baseline written before findings were keyed on their span (re-key it). */
+  identity?: typeof ANTI_SLOP_IDENTITY;
   /** Durable transition receipts for activation migrations, including zero-finding rules. */
   migrationReceipts?: string[];
   entries: BaselineEntry[];
@@ -86,6 +88,7 @@ export function baselineFromGroups(groups: readonly FindingGroup[]): AntiSlopBas
   return {
     schemaVersion: 1,
     upstreamCommit: ANTI_SLOP_UPSTREAM,
+    identity: ANTI_SLOP_IDENTITY,
     entries: [...groups]
       .sort((a, b) => a.fingerprint.localeCompare(b.fingerprint))
       .map(({ severity: _severity, line: _line, column: _column, ...entry }) => entry),
@@ -103,6 +106,7 @@ export function parseBaseline(json: string, source = ANTI_SLOP_BASELINE_REL): An
   if (
     baseline.schemaVersion !== 1 ||
     baseline.upstreamCommit !== ANTI_SLOP_UPSTREAM ||
+    (baseline.identity !== undefined && baseline.identity !== ANTI_SLOP_IDENTITY) ||
     (baseline.migrationReceipts !== undefined &&
       (!Array.isArray(baseline.migrationReceipts) ||
         !baseline.migrationReceipts.every(
@@ -126,8 +130,62 @@ export function parseBaseline(json: string, source = ANTI_SLOP_BASELINE_REL): An
     upstreamCommit: baseline.upstreamCommit,
     entries: sorted,
   };
+  // An empty baseline has nothing to re-key, so every baseline derived from it is span-keyed.
+  if (baseline.identity || sorted.length === 0) parsed.identity = ANTI_SLOP_IDENTITY;
   if (migrationReceipts.length > 0) parsed.migrationReceipts = migrationReceipts;
   return parsed;
+}
+
+/** An empty baseline has no identity to migrate. */
+export function hasCurrentIdentity(baseline: AntiSlopBaseline): boolean {
+  return baseline.entries.length === 0 || baseline.identity === ANTI_SLOP_IDENTITY;
+}
+
+/**
+ * Re-key line-identity debt to span identity from a lint of the tree the baseline describes. Each
+ * entry moves at most its own count; debt no finding still carries is dropped, never invented.
+ */
+export function rekeyBaseline(
+  legacy: AntiSlopBaseline,
+  findings: readonly AntiSlopFinding[],
+): AntiSlopBaseline {
+  if (hasCurrentIdentity(legacy)) return legacy;
+  const observed = new Map<string, Map<string, AntiSlopFinding & { count: number }>>();
+  for (const finding of findings) {
+    const targets = observed.get(finding.legacyFingerprint) ?? new Map();
+    const target = targets.get(finding.fingerprint);
+    if (target) target.count += 1;
+    else targets.set(finding.fingerprint, { ...finding, count: 1 });
+    observed.set(finding.legacyFingerprint, targets);
+  }
+  const entries = new Map<string, BaselineEntry>();
+  for (const entry of legacy.entries) {
+    let left = entry.count;
+    const targets = [...(observed.get(entry.fingerprint)?.values() ?? [])].sort((a, b) =>
+      a.fingerprint.localeCompare(b.fingerprint),
+    );
+    for (const target of targets) {
+      const moved = Math.min(left, target.count);
+      if (moved === 0) break;
+      left -= moved;
+      target.count -= moved;
+      const { fingerprint, ruleId, file, diagnostic, context } = target;
+      const count = (entries.get(fingerprint)?.count ?? 0) + moved;
+      entries.set(fingerprint, { fingerprint, ruleId, file, diagnostic, context, count });
+    }
+  }
+  return {
+    ...legacy,
+    identity: ANTI_SLOP_IDENTITY,
+    entries: [...entries.values()].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint)),
+  };
+}
+
+/** What a re-key did, in the words every migration surface prints. */
+export function rekeySummary(legacy: AntiSlopBaseline, next: AntiSlopBaseline): string {
+  const total = (baseline: AntiSlopBaseline) =>
+    baseline.entries.reduce((sum, entry) => sum + entry.count, 0);
+  return `re-keyed ${total(next)} finding(s) to span identity, dropped ${total(legacy) - total(next)} no longer present`;
 }
 
 export function readBaseline(cwd: string): AntiSlopBaseline | null {

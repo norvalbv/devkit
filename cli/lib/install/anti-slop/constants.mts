@@ -8,6 +8,8 @@ export const ANTI_SLOP_MANAGED_REL = '.devkit/anti-slop';
 export const ANTI_SLOP_MANIFEST_REL = `${ANTI_SLOP_MANAGED_REL}/manifest.json`;
 export const ANTI_SLOP_CONFIG_REL = `${ANTI_SLOP_MANAGED_REL}/oxlint.json`;
 export const ANTI_SLOP_BASELINE_REL = '.anti-slop-baseline.json';
+/** A baseline keyed on the reported span's first line; one without it keys on the whole line. */
+export const ANTI_SLOP_IDENTITY = 'span-first-line';
 export const ANTI_SLOP_BASELINE_UPGRADE_REL = '.devkit/anti-slop-baseline-upgrade.json';
 export const ANTI_SLOP_LOCK_REL = '.devkit/anti-slop.lock';
 export const ANTI_SLOP_BASELINE_LOCK_REL = '.devkit/anti-slop-baseline.lock';
