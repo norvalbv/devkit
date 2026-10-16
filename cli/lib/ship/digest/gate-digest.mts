@@ -96,7 +96,10 @@ interface Attributable {
 }
 
 /** The ship_attempt row opens this attempt's span, so finding it bounds the backward read exactly. */
-const ATTEMPT = 'ship_attempt';
+export const ATTEMPT = 'ship_attempt';
+/** From the newest ship_attempt on, else all: an inherited DEVKIT_SHIP_ID spans attempts. */
+const fromNewestAttempt = <T extends { type?: string }>(rows: T[]): T[] =>
+  rows.slice(Math.max(0, rows.map((r) => r.type).lastIndexOf(ATTEMPT)));
 /** The parallel judge's gate name — a `gate_result` row, not a fleet `review_result`. */
 const COMPLETENESS = 'completeness';
 /** Caps on what one terminus prints: past these the digest is the wall of text it replaces. */
@@ -132,11 +135,13 @@ function parseEvent(line: string, shipId: string): GateEvent | undefined {
  */
 export function readShipEvents(sink: string, shipId: string): GateEvent[] {
   if (!shipId) return [];
-  return scanBackward(
-    sink,
-    (line) => parseEvent(line, shipId),
-    // Stop at MY attempt, not the first one met: two repos' ships interleave in the per-machine sink.
-    (kept) => kept.some((e) => e.type === ATTEMPT),
+  return fromNewestAttempt(
+    scanBackward(
+      sink,
+      (line) => parseEvent(line, shipId),
+      // Stop at MY attempt, not the first one met: two repos' ships interleave in the per-machine sink.
+      (kept) => kept.some((e) => e.type === ATTEMPT),
+    ),
   );
 }
 
@@ -194,12 +199,7 @@ function outageWordsByJudge(events: GateEvent[]): Map<string, string> {
 
 /** Pure: events → the rows the terminus should show. No IO, so the interesting cases unit-test. */
 export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
-  const all = events.filter((e) => e.ship_id === shipId);
-  // DEVKIT_SHIP_ID is INHERITED when already set (commit-with-gate-capture.sh), so one id can span
-  // attempts, and the chunk holding this attempt's ship_attempt can also hold the previous one's
-  // rows. Everything before the NEWEST attempt marker belongs to a run that is already over.
-  const opened = all.map((e) => e.type).lastIndexOf(ATTEMPT);
-  const mine = opened === -1 ? all : all.slice(opened);
+  const mine = fromNewestAttempt(events.filter((e) => e.ship_id === shipId));
   // The LAST result row, not the first: index arithmetic rather than findLast, which this
   // target's lib does not carry.
   const results = mine.filter((e) => e.type === 'ship_result');
