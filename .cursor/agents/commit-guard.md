@@ -103,8 +103,8 @@ For each staged file under `scanRoots`:
 - If the human approves: `guard-dup-allowlist add <symA> <fileA> <symB> <fileB> --description "<reason>" --range-a <startA-endA> --range-b <startB-endB>` (line ranges from the search hits — findability metadata).
 - Review the file against the DRY rules below.
 - Mark the file resolved: `node $SCRIPT check-file <path> --pass`, or `--fail "reason"` once per
-  DISTINCT duplicate — repeated `--fail` calls APPEND (up to 3 per file by default;
-  GUARD_REVIEW_MAX_ISSUES_PER_LENS). Every reason starts with the added symbol and its file:line,
+  DISTINCT duplicate — repeated `--fail` calls APPEND, so record every one; the gate shows the
+  first GUARD_REVIEW_MAX_ISSUES_PER_LENS (default 3) per file and counts the rest. Every reason starts with the added symbol and its file:line,
   then the existing symbol and its file:line, then `verbatim` or the concrete difference. Never
   restate one duplicate twice.
 
