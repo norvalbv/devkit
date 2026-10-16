@@ -154,9 +154,32 @@ describe('completeness verdict telemetry', () => {
     const repo = consumerRepo({ backend: true });
     const exec = mkExec(async () => 'it all seems fine to me, honestly');
 
-    expect(await runCompleteness(messageFile(repo, 'feat: unparseable'), repo, { exec })).toBe(0);
+    expect(await runCompleteness(messageFile(repo, 'feat: unparseable'), repo, { exec })).toBe(2);
     expect(verdicts()).toHaveLength(0);
     expect(nonRuns()[0]).toMatchObject({ gate: 'completeness', cause: 'response_contract' });
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain(
+      'guard-review: completeness inconclusive — no VERDICT line (fail-open, not cached)',
+    );
+  });
+
+  it('fails a verdict-less judge closed under strict ship, with the transcript and remedy', async () => {
+    process.env.GUARD_AI_STRICT = '1';
+    const repo = consumerRepo({ backend: true });
+    const exec = mkExec(async () => 'it all seems fine to me, honestly');
+    const msg = messageFile(repo, 'feat: unparseable strict');
+
+    expect(await runCompleteness(msg, repo, { exec })).toBe(3);
+    const stderr = vi.mocked(console.error).mock.calls.flat().join('\n');
+    expect(stderr).toContain(
+      'guard-review: completeness INCONCLUSIVE (no VERDICT line) — strict ship mode fails closed',
+    );
+    expect(stderr).toContain('it all seems fine to me, honestly');
+    expect(stderr).toContain('Remedy: the judge response did not satisfy its declared contract');
+    expect(verdicts()).toHaveLength(0);
+    expect(nonRuns()).toHaveLength(1);
+    // Never cached: a retry pays for a fresh judgement rather than replaying a non-run.
+    expect(await runCompleteness(msg, repo, { exec })).toBe(3);
+    expect(exec).toHaveBeenCalledTimes(2);
   });
 
   // The sink's tear-freedom rests on one sub-4KB atomic append per event, and this gate runs

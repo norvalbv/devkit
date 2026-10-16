@@ -38,3 +38,15 @@ export function reportInconclusive(rows: ReviewOutcome[], strict: boolean): void
     console.error(`   Remedy: ${remedyFor(group)} (completed verdicts are cached).`);
   }
 }
+
+/** A judge that answered without a VERDICT line, worded as the fleet's; returns the gate exit. */
+export function reportNoVerdict(name: string, transcript: string, strict: boolean): number {
+  const row = {
+    name,
+    status: 'inconclusive',
+    reason: 'no VERDICT line',
+    escalated: false,
+  } as const;
+  reportInconclusive([{ ...row, inconclusiveCause: 'response-contract', transcript }], strict);
+  return strict ? 3 : 2;
+}
