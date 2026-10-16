@@ -11,6 +11,7 @@ import type { FindingGroup } from './diagnostics.mts';
 import {
   classifyRelocations,
   creditRelocatedGrowth,
+  deletedDebt,
   formatSources,
   reanchorBaseline,
   relocationBasePaths,
@@ -343,5 +344,17 @@ describe('relocation source formatting', () => {
   it('lists up to three sources, then counts the rest, without duplicates', () => {
     expect(formatSources(['c.ts', 'a.ts', 'b.ts', 'a.ts'])).toBe('a.ts, b.ts, c.ts');
     expect(formatSources(['d.ts', 'c.ts', 'a.ts', 'b.ts'])).toBe('a.ts, b.ts, c.ts +1 more');
+  });
+});
+
+describe('deleted-file debt', () => {
+  it('drops only debt of missing files whose finding reappears nowhere as new', () => {
+    const other = { context: 'export function other(value: object) {' };
+    const base = baselineOf(finding('kept.ts'), finding('gone.ts', 1, other), finding('moved.ts'));
+    const present = (file: string) => file === 'kept.ts';
+
+    const dead = deletedDebt(base.entries, newGroupsOf(base, [finding('destination.ts')]), present);
+
+    expect(dead.map((entry) => entry.file)).toEqual(['gone.ts']);
   });
 });
