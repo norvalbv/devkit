@@ -41,6 +41,7 @@ export async function enforceChecklistContract(
   let result = initial;
   const initialState = readChecklistState(cwd, selection.reviewer);
   const hole = verifyChecklist(initialState, 'PASS', denied);
+  if (hole) reportFailedItems(selection.reviewer, initialState);
   if (hole && recoveryScheduled) {
     // No "retrying" here: the callback runs no judge, and the solo phase announces itself.
     console.error(
@@ -71,6 +72,27 @@ export interface SpawnDenials {
 }
 
 const DENIED_SHOWN = 3;
+const FAILED_SHOWN = 3;
+
+const lensTag = (reviewer: Reviewer): string =>
+  reviewer.lens?.length ? ` [${lensGroupId(reviewer.lens)}]` : '';
+
+/** Print the FAILED items behind a voided PASS, so a retry that passes cannot erase them. Display
+ * only: the retry prompt keeps names alone, so the next judge is never asked to refute its finding. */
+export function reportFailedItems(reviewer: Reviewer, state: ChecklistState | null): void {
+  const items = state?.items ?? state?.files;
+  const failed = Array.isArray(items) ? items.filter((i) => i.status === 'fail') : [];
+  for (const item of failed.slice(0, FAILED_SHOWN)) {
+    const issue = Array.isArray(item.issues) ? boundedCause(String(item.issues[0] ?? '')) : '';
+    console.error(
+      `⚠️  guard-review: ${reviewer.name}${lensTag(reviewer)} — FAILED checklist item under a PASS verdict: ${boundedCause(String(item.name ?? item.path))}${issue ? ` — ${issue}` : ''}`,
+    );
+  }
+  if (failed.length > FAILED_SHOWN)
+    console.error(
+      `⚠️  guard-review: ${reviewer.name}${lensTag(reviewer)} — (+${failed.length - FAILED_SHOWN} more)`,
+    );
+}
 
 /** Name the refused tool calls beside a non-pass outcome; a PASS that lost a test run stays quiet. */
 export function reportDeniedCalls(
@@ -79,11 +101,10 @@ export function reportDeniedCalls(
   denied: string[] | null,
 ): void {
   if (status === 'pass' || !denied?.length) return;
-  const lens = reviewer.lens?.length ? ` [${lensGroupId(reviewer.lens)}]` : '';
   const more = denied.length > DENIED_SHOWN ? ` (+${denied.length - DENIED_SHOWN} more)` : '';
   const shown = denied.slice(0, DENIED_SHOWN).map(boundedCause).join(' | ');
   console.error(
-    `⚠️  guard-review: ${reviewer.name}${lens} — ${deniedCalls(denied)}: ${shown}${more}`,
+    `⚠️  guard-review: ${reviewer.name}${lensTag(reviewer)} — ${deniedCalls(denied)}: ${shown}${more}`,
   );
 }
 
