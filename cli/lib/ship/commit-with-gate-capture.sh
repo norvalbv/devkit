@@ -173,6 +173,12 @@ commit_with_gate_capture() {
     rc=1
   fi
 
+  # The worktree's untracked inputs before any gate or hook dir writes there; base attribution
+  # links exactly these. Narration plumbing: silent, and absent (never empty) when it fails.
+  local snap
+  { snap=$(git -C "$wt" rev-parse --path-format=absolute --git-path devkit-pre-gate-untracked) &&
+    git -C "$wt" ls-files --others --directory -z > "$snap.tmp" && mv -f "$snap.tmp" "$snap"; } 2>/dev/null || true
+
   local ship_hook_rel="" ship_hook_marker source_hook source_name
   ship_hook_marker="devkit-ship-hook-start:$ship_id_safe"
   if [ "$hook_setup_failed" -eq 0 ]; then
