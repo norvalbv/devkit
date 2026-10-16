@@ -79,6 +79,7 @@ export interface GuardConfig {
   fanoutCap: number;
   maxLines: number;
   maxTestLines: number;
+  maxLinesExtensions: string[];
   fanoutExempt: string[];
   allowlistPath: string;
   thresholds: Thresholds;
@@ -117,6 +118,7 @@ interface RawGuardConfigFile {
   fanoutCap?: number;
   maxLines?: number;
   maxTestLines?: number;
+  maxLinesExtensions?: string[];
   fanoutExempt?: string[];
   allowlistPath?: string;
   thresholds?: Partial<Thresholds>;
@@ -168,6 +170,8 @@ export const DEFAULTS = Object.freeze({
   maxLines: 0,
   // Separate loose test-file ceiling. 0 = OFF; init/upgrade enables it alongside maxLines.
   maxTestLines: 0,
+  // Extra extensions only the raw-line ratchet governs (e.g. `["sh"]`); no other gate reads them.
+  maxLinesExtensions: [],
   // Flat-by-design folders exempt from the fanout cap (was frink's hardcoded
   // grandfathered roots — now opt-in per consumer).
   fanoutExempt: [],
@@ -366,6 +370,7 @@ function resolveLoadedGuardConfig(file: RawGuardConfigFile, cwd: string): GuardC
       typeof file.maxTestLines === 'number' && Number.isFinite(file.maxTestLines)
         ? file.maxTestLines
         : DEFAULTS.maxTestLines,
+    maxLinesExtensions: arr(file.maxLinesExtensions, DEFAULTS.maxLinesExtensions),
     fanoutExempt: arr(file.fanoutExempt, DEFAULTS.fanoutExempt),
     allowlistPath: allowlistEnv ?? file.allowlistPath ?? DEFAULTS.allowlistPath,
     // Shallow-merge thresholds so a consumer can override one knob without restating all.

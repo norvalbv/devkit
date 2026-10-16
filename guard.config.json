@@ -157,6 +157,8 @@
   "maxLines": 500,
   "//maxTestLines": "Loose raw line cap per test file; existing oversized tests are grandfathered shrink-only. 0 = off.",
   "maxTestLines": 2000,
+  "//maxLinesExtensions": "Extra extensions the raw-line cap also governs. The ship scripts are shell, and only guard-size can hold them shrink-only on every judge model.",
+  "maxLinesExtensions": ["sh"],
   "//mergeVerdict": "devkit reaches consumers only through devkit release, which needs green CI, so merging to main is not the consumer boundary. The verdict's own code stays human-reviewed so a change cannot certify itself. fix and feat get larger limits than the built-in 50 lines / 4 files.",
   "mergeVerdict": {
     "consumerSurface": ["cli/lib/ship/merge-verdict/**"],
