@@ -81,6 +81,10 @@ function seedRepoWithLinkedWorktree({ husky = true, prefix = 'gatewt-' } = {}) {
  * the caller. Without it these tests would run the code in a shell no consumer uses.
  */
 function prepare(wt: string, root: string, ...extraLinks: string[]) {
+  return prepareWithEnv({}, wt, root, ...extraLinks);
+}
+
+function prepareWithEnv(env: NodeJS.ProcessEnv, wt: string, root: string, ...extraLinks: string[]) {
   // Paths travel as positional args, never interpolated: real roots contain spaces.
   return spawnSync(
     '/bin/bash',
@@ -93,7 +97,7 @@ function prepare(wt: string, root: string, ...extraLinks: string[]) {
       'ship',
       ...extraLinks,
     ],
-    { encoding: 'utf8', env: { ...process.env, ...GIT_ENV } },
+    { encoding: 'utf8', env: { ...process.env, ...GIT_ENV, ...env } },
   );
 }
 
@@ -494,24 +498,135 @@ describe('prepare_gate_worktree — dependency manifest freshness', () => {
     expect(linkTarget(join(wt, 'node_modules'))).toBe(join(main, 'node_modules'));
   });
 
-  it('fails before gates when every available install misses a base dependency', () => {
+  // A checkout that forked before the base added the dependency cannot install it, so the
+  // gate worktree installs the base's own lockfile instead of telling the caller to.
+  it('installs the base lockfile in the gate worktree when every available install is stale', () => {
+    const { main, linked, git } = seedRepoWithLinkedWorktree({ prefix: 'gate wt-' });
+    seedFiles(main, {
+      'package.json': JSON.stringify({ dependencies: { 'fresh-dep': '^1.0.0' } }),
+      'bun.lock': '{}',
+    });
+    git(['add', 'package.json', 'bun.lock']);
+    git(['commit', '-q', '-m', 'base adds fresh-dep']);
+    const wt = join(dirname(main), 'gate');
+    git(['worktree', 'add', '-q', '--detach', wt]);
+    seedFiles(linked, { 'node_modules/old-dep/package.json': '{}' });
+    const stub = stubBun();
+
+    const r = prepareWithEnv(stub.env, wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(stub.calls()).toEqual(['install --frozen-lockfile HUSKY=0']);
+    expect(lstatSync(join(wt, 'node_modules')).isSymbolicLink()).toBe(false);
+    expect(existsSync(join(wt, 'node_modules/fresh-dep/package.json'))).toBe(true);
+    expect(r.stderr).toContain('running `bun install --frozen-lockfile` in the gate worktree');
+    expect(git(['status', '--porcelain'], wt)).toBe('');
+    // The caller's (possibly shared) install is never the one written to.
+    expect(existsSync(join(linked, 'node_modules/fresh-dep'))).toBe(false);
+  });
+
+  it('returns the installed path alone, even when the install writes to stdout', () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(wt, {
+      'package.json': JSON.stringify({ dependencies: { 'fresh-dep': '^1.0.0' } }),
+      'bun.lock': '{}',
+    });
+    const stub = stubBun();
+
+    const r = spawnSync(
+      '/bin/bash',
+      [
+        '-c',
+        'set -euo pipefail; . "$0"; gate_node_modules_source "$@"',
+        scriptPath,
+        wt,
+        linked,
+        main,
+      ],
+      { encoding: 'utf8', env: { ...process.env, ...GIT_ENV, ...stub.env } },
+    );
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stdout).toBe(`${join(wt, 'node_modules')}\n`);
+    expect(r.stderr).toContain('stub: installed');
+  });
+
+  it('refuses when the install exits 0 but still leaves a base dependency missing', () => {
+    const { linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(wt, {
+      'package.json': JSON.stringify({ dependencies: { 'fresh-dep': '^1.0.0' } }),
+      'bun.lock': '{}',
+    });
+    const stub = stubBun({ mode: 'noop' });
+
+    const r = prepareWithEnv(stub.env, wt, linked);
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain(
+      '`bun install --frozen-lockfile` in the gate worktree did not supply them',
+    );
+    expect(lstatSafe(join(wt, 'node_modules'))).toBe(false);
+  });
+
+  it('fails before gates, naming the install error, when the gate worktree install fails', () => {
     const { main, linked, wt } = seedRepoWithLinkedWorktree();
     seedFiles(wt, {
       'package.json': JSON.stringify({ dependencies: { 'fresh-dep': '^1.0.0' } }),
       'bun.lock': '{}',
     });
     seedFiles(linked, { 'node_modules/old-dep/package.json': '{}' });
+    const stub = stubBun({ mode: 'fail' });
 
-    const r = prepare(wt, linked);
+    const r = prepareWithEnv(stub.env, wt, linked);
 
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain('no node_modules satisfies the ship base package.json');
     expect(r.stderr).toContain('fresh-dep');
     expect(r.stderr).toContain(join(linked, 'node_modules'));
     expect(r.stderr).toContain(join(main, 'node_modules'));
-    expect(r.stderr).toContain('bun install --frozen-lockfile');
+    expect(r.stderr).toContain('stub install failed');
+    expect(r.stderr).toContain(
+      '`bun install --frozen-lockfile` in the gate worktree did not supply them',
+    );
+    expect(r.stderr).not.toContain('in the checkout');
+  });
+
+  it('keeps the checkout remedy, and installs nothing, when the base has no lockfile', () => {
+    const { linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(wt, { 'package.json': JSON.stringify({ dependencies: { 'fresh-dep': '^1.0.0' } }) });
+    seedFiles(linked, { 'node_modules/old-dep/package.json': '{}' });
+    const stub = stubBun();
+
+    const r = prepareWithEnv(stub.env, wt, linked);
+
+    expect(r.status).not.toBe(0);
+    expect(stub.calls()).toEqual([]);
+    expect(r.stderr).toContain(
+      "run `install dependencies with this repo's package manager` in the checkout",
+    );
   });
 });
+
+/** A `bun` on PATH that logs its args and HUSKY, then installs fresh-dep into cwd, fails, or does nothing. */
+function stubBun({ mode = 'install' }: { mode?: 'install' | 'fail' | 'noop' } = {}) {
+  const bin = realpathSync(mkdtempSync(join(tmpdir(), 'stub-bun-')));
+  dirs.push(bin);
+  const log = join(bin, 'calls.log');
+  const install = {
+    install: 'mkdir -p node_modules/fresh-dep && echo "{}" > node_modules/fresh-dep/package.json',
+    fail: 'echo "stub install failed" >&2; exit 1',
+    noop: ':',
+  }[mode];
+  writeFileSync(
+    join(bin, 'bun'),
+    `#!/bin/sh\necho "$* HUSKY=\${HUSKY-unset}" >> '${log}'\necho "stub: installed"\n${install}\n`,
+    { mode: 0o755 },
+  );
+  return {
+    env: { PATH: `${bin}:${process.env.PATH}` },
+    calls: () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []),
+  };
+}
 
 // sc-1934: the linked install IS the engine the worktree hook runs — one older than
 // `.devkit/baselines` blocks every grandfathered ratchet entry as new, so ship must stop first.
