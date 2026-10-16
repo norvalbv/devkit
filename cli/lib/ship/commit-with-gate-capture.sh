@@ -502,6 +502,10 @@ SHIP_HOOK_WRAPPER
     # Order matters: stdout joins ship stderr FIRST, then only tee's own complaints are discarded.
     printf '%s\n' "$digest_text" | tee -a "$log" "$ship_log" >&2 2>/dev/null || true
   fi
+  # Name the per-attempt archive: $log is the per-branch file the next attempt overwrites.
+  if [ "$rc" -ne 0 ] && [ "$ship_dry_gates" -eq 0 ] && [ -s "$ship_log" ]; then
+    echo "ship: this attempt's gate log is kept at $ship_log (ship id ${DEVKIT_SHIP_ID:-}); $log is overwritten by the next attempt." >&2 || true
+  fi
 
   # sc-2299. The path brief again, next to the verdict. The resume banner already printed it in FULL,
   # but a blocked ship is read by tailing (the digest note above says so), minutes and often megabytes
