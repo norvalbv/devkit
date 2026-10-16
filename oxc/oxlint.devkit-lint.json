@@ -1,6 +1,7 @@
 {
   "$schema": "../node_modules/oxlint/configuration_schema.json",
   "plugins": ["eslint", "typescript", "oxc", "react"],
+  "jsPlugins": ["./rules/spawn-site-boundary.mjs"],
   "categories": {
     "correctness": "deny",
     "perf": "deny",
@@ -31,6 +32,55 @@
       "files": ["**/comment-firewall/__tests__/detect.test.mts"],
       "rules": {
         "eslint/no-useless-concat": "allow"
+      }
+    },
+    {
+      "files": [
+        "**/cli/__tests__/asset-conflicts.test.mts",
+        "**/cli/__tests__/base-drift.test.mts",
+        "**/cli/__tests__/baseline-status.test.mts",
+        "**/cli/__tests__/baseline-status-config.test.mts",
+        "**/cli/__tests__/baseline-status-edges.test.mts",
+        "**/cli/__tests__/baseline-status-tests.test.mts",
+        "**/cli/__tests__/dist-integrity-release-only.test.mts",
+        "**/cli/__tests__/electron-cli-grammar-mixed.test.mts",
+        "**/cli/__tests__/doctor-hookspath-owner.test.mts",
+        "**/cli/__tests__/fallow-staged-coverage.test.mts",
+        "**/cli/__tests__/guard-branch.test.mts",
+        "**/cli/__tests__/hook-parity.test.mts",
+        "**/cli/__tests__/overlay-anti-slop.test.mts",
+        "**/cli/__tests__/overlay-global-hook.test.mts",
+        "**/cli/__tests__/overlay.test.mts",
+        "**/cli/__tests__/pre-push.test.mts",
+        "**/cli/__tests__/prepare-gate-worktree.test.mts",
+        "**/cli/__tests__/reconcile.test.mts",
+        "**/cli/__tests__/reship-anchor.test.mts",
+        "**/cli/__tests__/reship-pr-state.test.mts",
+        "**/cli/__tests__/reship-publish-lock.test.mts",
+        "**/cli/__tests__/reship-rewrite-pin.test.mts",
+        "**/cli/__tests__/reship.test.mts",
+        "**/cli/__tests__/review.test.mts",
+        "**/cli/__tests__/review-base-inference.test.mts",
+        "**/cli/__tests__/review-gate-supervisor.test.mts",
+        "**/cli/__tests__/ship-base-ancestry.test.mts",
+        "**/cli/__tests__/ship-branch-resume.test.mts",
+        "**/cli/__tests__/ship-branch.test.mts",
+        "**/cli/__tests__/ship-draft.test.mts",
+        "**/cli/__tests__/ship-evidence.test.mts",
+        "**/cli/__tests__/ship-fixture.test.mts",
+        "**/cli/__tests__/ship-format-stage.test.mts",
+        "**/cli/__tests__/ship-literal-paths.test.mts",
+        "**/cli/__tests__/ship-manifest.test.mts",
+        "**/cli/__tests__/ship-push-retry.test.mts",
+        "**/cli/__tests__/ship-run-record.test.mts",
+        "**/cli/__tests__/ship-wait-ci.test.mts",
+        "**/cli/__tests__/test-subprocess.test.mts",
+        "**/gate-engine/decisions/__tests__/integrity-staged.test.mts",
+        "**/gate-engine/deterministic/__tests__/staged-set-scaling.test.mts",
+        "**/gate-engine/ratchets/__tests__/git-index.test.mts"
+      ],
+      "rules": {
+        "devkit/spawn-site-boundary": "error"
       }
     }
   ]
