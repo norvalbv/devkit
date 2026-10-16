@@ -1,0 +1,59 @@
+{
+  "head": "53bda204",
+  "commits": 200,
+  "bar": 0.5,
+  "arms": [
+    {
+      "arm": "A",
+      "commits": 152,
+      "fired": 24,
+      "lines": 54,
+      "perCommit": 0.36,
+      "distinctPairs": 52,
+      "incident": {
+        "moved": true,
+        "inPlace": false
+      },
+      "passes": false
+    },
+    {
+      "arm": "B",
+      "commits": 152,
+      "fired": 66,
+      "lines": 189,
+      "perCommit": 1.24,
+      "distinctPairs": 123,
+      "incident": {
+        "moved": true,
+        "inPlace": true
+      },
+      "passes": false
+    },
+    {
+      "arm": "C",
+      "commits": 152,
+      "fired": 64,
+      "lines": 169,
+      "perCommit": 1.11,
+      "distinctPairs": 107,
+      "incident": {
+        "moved": true,
+        "inPlace": true
+      },
+      "passes": false
+    },
+    {
+      "arm": "D",
+      "commits": 152,
+      "fired": 64,
+      "lines": 182,
+      "perCommit": 1.2,
+      "distinctPairs": 120,
+      "incident": {
+        "moved": true,
+        "inPlace": true
+      },
+      "passes": false
+    }
+  ]
+}
