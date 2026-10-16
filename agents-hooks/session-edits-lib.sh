@@ -23,6 +23,20 @@ session_edits_file() {
   echo "${TMPDIR:-/tmp}/devkit-session-edits/${repo_key}-${sid:-unknown}"
 }
 
+# Echo the checkout to act on ($1 = raw stdin JSON, $2 = the project root). The payload cwd follows
+# the agent into a linked worktree; a cwd in the same checkout or an unrelated repository keeps $2.
+hook_workspace() {
+  local cwd cdup top common project_top project_common
+  cwd=$(printf '%s' "$1" | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+  if [ -n "$cwd" ] &&
+    { read -r cdup; read -r top; read -r common; } < <(git -C "$cwd" rev-parse --show-cdup --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null) &&
+    { read -r project_top; read -r project_common; } < <(git -C "$2" rev-parse --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null) &&
+    [ "$top" != "$project_top" ] && [ "$common" = "$project_common" ]; then
+    (cd "$cwd/$cdup" 2>/dev/null && pwd) && return
+  fi
+  echo "$2"
+}
+
 # Echo a CLEAN copy (mktemp path; caller rm's it) of the raw ledger at $1: deduped, blanks
 # stripped, still-existing files only. Echoes nothing when no files remain. Blank-stripping is
 # load-bearing: an empty pattern line would match EVERY output line and reintroduce exactly

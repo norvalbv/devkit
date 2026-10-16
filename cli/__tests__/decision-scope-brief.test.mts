@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mainWithWorktree } from './_worktree-fixture.mts';
 
 const HOOK = fileURLToPath(new URL('../../agents-hooks/decision-scope-brief.mjs', import.meta.url));
 const CLI = fileURLToPath(new URL('../../gate-engine/decisions/cli.mts', import.meta.url));
@@ -116,6 +117,27 @@ describe('decision-scope-brief', () => {
   it('ignores paths outside the project', () => {
     stubBin(GOVERNED);
     expect(run({ file_path: '/etc/hosts' })).toBe('');
+  });
+
+  it('briefs a linked-worktree file when CLAUDE_PROJECT_DIR is the main checkout and cwd the worktree', () => {
+    const { main, worktree } = mainWithWorktree((prefix) => mkdtempSync(join(root, prefix)));
+    mkdirSync(join(worktree, 'node_modules', '.bin'), { recursive: true });
+    const bin = join(worktree, 'node_modules', '.bin', 'guard-decisions');
+    writeFileSync(bin, `#!/bin/sh\ncat <<'EOF'\n${GOVERNED}\nEOF\n`, { mode: 0o755 });
+    const brief = (payload: { session_id: string; cwd?: string; tool_input: object }) =>
+      spawnSync('node', [HOOK], {
+        cwd: main,
+        encoding: 'utf8',
+        env: { ...process.env, CLAUDE_PROJECT_DIR: main },
+        input: JSON.stringify({ tool_name: 'Edit', ...payload }),
+      }).stdout.trim();
+    const edit = { tool_input: { file_path: join(worktree, 'src/a.ts') } };
+
+    // No cwd: the worktree file sits outside CLAUDE_PROJECT_DIR, so nothing is briefed, as before.
+    expect(brief({ ...edit, session_id: 'wt-1' })).toBe('');
+    const out = JSON.parse(brief({ ...edit, session_id: 'wt-2', cwd: worktree }));
+    expect(out.hookSpecificOutput.additionalContext).toContain('retrieval-candidate-set');
+    expect(out.hookSpecificOutput.additionalContext).toContain('`src/a.ts`');
   });
 
   // A brief that never arrives is indistinguishable from "nothing governs this file", so for an

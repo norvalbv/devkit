@@ -14,11 +14,20 @@
  *   - a block prints fallow's own explanation, never a bare exit code (sc-1192's lesson).
  */
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { rootRegistry } from './_helpers.mts';
+import { mainWithWorktree } from './_worktree-fixture.mts';
 
 const GATE = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -31,7 +40,7 @@ const GATE = join(
 const { mkTmp, cleanup } = rootRegistry();
 afterEach(cleanup);
 
-/** A stub `fallow` that records its argv and replies with the given audit JSON. */
+/** A stub `fallow` that records its argv and stdin, and replies with the given audit JSON. */
 function stubFallow(dir: string, auditJson: string, { version = '3.6.0' } = {}) {
   const binDir = join(dir, 'stub-bin');
   mkdirSync(binDir, { recursive: true });
@@ -41,7 +50,7 @@ function stubFallow(dir: string, auditJson: string, { version = '3.6.0' } = {}) 
     `#!/bin/sh
 if [ "$1" = "--version" ]; then echo "fallow ${version}"; exit 0; fi
 echo "$@" >> "${join(dir, 'argv.log')}"
-cat > /dev/null
+cat >> "${join(dir, 'stdin.log')}"
 cat <<'JSON'
 ${auditJson}
 JSON
@@ -163,6 +172,34 @@ describe('fallow-staged-gate.sh', () => {
     expect(
       run(dir, binDir, { command: 'cd . && git -C . commit -m "test"', cursor: true }).status,
     ).toBe(2);
+  });
+
+  it("audits the index of the worktree the payload cwd names, not CLAUDE_PROJECT_DIR's", () => {
+    // Project-config-root sessions: CLAUDE_PROJECT_DIR stays on the main checkout, which holds
+    // unrelated staged work, while the agent commits from a linked worktree.
+    const { main, worktree } = mainWithWorktree(mkTmp);
+    for (const [root, file] of [
+      [main, 'main-only.ts'],
+      [worktree, 'worktree-only.ts'],
+    ]) {
+      writeFileSync(join(root, '.fallowrc.jsonc'), '{}\n');
+      writeFileSync(join(root, file), 'export const staged = 1;\n');
+      spawnSync('git', ['add', file], { cwd: root });
+    }
+    const binDir = stubFallow(main, PASS);
+    const audited = (payload: { cwd?: string; command?: string; tool_input?: object }) => {
+      rmSync(join(main, 'stdin.log'), { force: true });
+      expect(run(main, binDir, { input: JSON.stringify(payload) }).status).toBe(0);
+      return readFileSync(join(main, 'stdin.log'), 'utf8');
+    };
+    const command = 'git commit -m "test"';
+
+    const claude = audited({ cwd: worktree, tool_input: { command } });
+    expect(claude).toContain('worktree-only.ts');
+    expect(claude).not.toContain('main-only.ts');
+    expect(audited({ cwd: worktree, command })).toContain('worktree-only.ts'); // Cursor's shape
+    // No cwd in the payload: the CLAUDE_PROJECT_DIR checkout, exactly as before.
+    expect(audited({ tool_input: { command } })).toContain('main-only.ts');
   });
 
   it('fails OPEN when hook input is missing or malformed', () => {
