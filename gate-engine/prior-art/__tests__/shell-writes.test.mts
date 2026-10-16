@@ -46,6 +46,9 @@ it('resolves repeated git -C cumulatively, as git does', () => {
 it('expands ~ to the home directory instead of a path under cwd', () => {
   // The suite's HOME is a temp dir, so an unexpanded `~` would land inside root and flip this.
   expect(writes('echo x > ~/notes.md')).toBe(writes(`echo x > ${join(homedir(), 'notes.md')}`));
+  expect(writes('git -C ~/wt apply p.patch')).toBe(
+    writes(`git -C ${join(homedir(), 'wt')} apply p.patch`),
+  );
 });
 
 describe('writesToRepo — commands that do not', () => {

@@ -21,12 +21,14 @@ function inside(path, dir) {
     const rel = relative(dir, path);
     return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
+function expandHome(path) {
+    return path === '~' || path.startsWith('~/') ? homedir() + path.slice(1) : path;
+}
 /** Inside the repo always counts (even a repo under tmp); elsewhere only outside temp and /dev. */
 function writtenPlace(target, scope) {
     if (target === null)
         return false;
-    const expanded = target === '~' || target.startsWith('~/') ? homedir() + target.slice(1) : target;
-    const path = resolve(scope.cwd, expanded);
+    const path = resolve(scope.cwd, expandHome(target));
     if (inside(path, scope.root))
         return true;
     return !path.startsWith('/dev/') && !scope.temps.some((dir) => inside(path, dir));
@@ -92,7 +94,7 @@ function gitApplyWrites(args, { scope }) {
     for (; args[i] === '-C' || args[i] === '-c'; i += 2) {
         const next = args[i + 1];
         if (args[i] === '-C')
-            dir = dir === null || next == null ? null : resolve(dir, next);
+            dir = dir === null || next == null ? null : resolve(dir, expandHome(next));
     }
     return args[i] === 'apply' && writtenPlace(dir, scope);
 }
