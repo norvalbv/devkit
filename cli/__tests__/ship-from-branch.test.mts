@@ -269,6 +269,40 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
     expect(localBranchExists(git, 'feat/refuse-overlay')).toBe(false);
   });
 
+  it('lists index, worktree, untracked and ignored overlays under one header, in that order', () => {
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    writeFileSync(join(dir, 'gone.txt'), 'base\n');
+    writeFileSync(join(dir, 'gone.log'), 'base\n');
+    commit(git, ['gone.txt', 'gone.log'], 'base files');
+    git(['push', '-q', 'origin', 'HEAD:work']);
+    git(['update-ref', 'refs/remotes/origin/work', 'HEAD']);
+    writeFileSync(join(dir, 'staged.txt'), 'committed\n');
+    writeFileSync(join(dir, 'edited.txt'), 'committed\n');
+    git(['rm', '-q', '--', 'gone.txt', 'gone.log']);
+    commit(git, ['staged.txt', 'edited.txt'], 'branch adds two files and deletes two');
+    writeFileSync(join(dir, 'staged.txt'), 'staged overlay\n');
+    git(['add', '--', 'staged.txt']);
+    writeFileSync(join(dir, 'edited.txt'), 'worktree overlay\n');
+    writeFileSync(join(dir, 'gone.txt'), 'recreated\n');
+    writeFileSync(join(dir, '.git/info/exclude'), '*.log\n');
+    writeFileSync(join(dir, 'gone.log'), 'recreated\n');
+
+    const r = runFromBranch(dir, env, 'feat/four-overlays');
+
+    expect(r.status, r.stderr).not.toBe(0);
+    expect(r.stderr.match(/refuses uncommitted overlays/g), r.stderr).toHaveLength(1);
+    const lines = [
+      'staged.txt (index)',
+      'edited.txt (worktree)',
+      'gone.txt (untracked)',
+      'gone.log (ignored)',
+    ];
+    const at = lines.map((l) => r.stderr.indexOf(`\n  ${l}\n`));
+    expect(at[0], r.stderr).toBeGreaterThan(-1);
+    expect(at, r.stderr).toEqual([...at].sort((a, b) => a - b));
+    expect(localBranchExists(git, 'feat/four-overlays')).toBe(false);
+  });
+
   it('refuses a changed gitlink with a submodule-specific diagnostic', () => {
     const { dir, env, git } = seedShipRepoLocalRemote();
     const gitlinkCommit = git(['rev-parse', 'HEAD']).trim();
@@ -384,6 +418,36 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
     expect(readFileSync(hookCount, 'utf8').trim().split('\n')).toHaveLength(1);
     expect(localBranchExists(git, 'feat/drifted')).toBe(false);
     expect(readFileSync(intentFile).equals(recorded)).toBe(true);
+  });
+
+  it('a pre-commit resume behind its base still exits on the ancestry blocker alone', () => {
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    writeFileSync(join(dir, '.git/info/exclude'), '.devkit/\n');
+    writeFileSync(join(dir, 'note.txt'), 'committed\n');
+    commit(git, ['note.txt'], 'committed source snapshot');
+    installHook(dir, 'exit 1');
+    expect(runFromBranch(dir, env, 'feat/resume-behind').status).not.toBe(0);
+
+    const moved = git([
+      'commit-tree',
+      'origin/work^{tree}',
+      '-p',
+      'origin/work',
+      '-m',
+      'base moves',
+    ]).trim();
+    git(['push', '-q', 'origin', `${moved}:refs/heads/work`]);
+    writeFileSync(join(dir, 'note.txt'), 'uncommitted overlay\n');
+    const resumed = spawnSync('/bin/bash', [scriptPath, '--resume', 'feat/resume-behind'], {
+      cwd: dir,
+      input: '',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+
+    expect(resumed.status, resumed.stderr).toBe(1);
+    expect(resumed.stderr).toMatch(/^--from-branch: origin\/work \(\w+\) is not an ancestor/m);
+    expect(resumed.stderr).not.toMatch(/uncommitted overlays|also blocked/);
   });
 
   it('refuses a pre-commit resume when HEAD deletes a base path outside the frozen set', () => {
