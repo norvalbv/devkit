@@ -120,7 +120,6 @@ const SHARED = `export function computeWidgetTotals(items) {
 //   1 = new clone → block · 0 = clean · 2 = could-not-run → fail-open.
 describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
   let tmp: string;
-  let cloneFile: string | undefined; // a real reported clone path, for the --changed scoping test
   let cloneHash: string | undefined; // the reported fragmentHash, for the allowlist-suppression test
 
   function run(args, env) {
@@ -140,11 +139,8 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     tmp = mkdtempSync(join(tmpdir(), 'clone-gate-'));
     writeFileSync(join(tmp, 'a.ts'), `${SHARED}\nexport const A_ONLY = 1;\n`);
     writeFileSync(join(tmp, 'b.ts'), `${SHARED}\nexport const B_ONLY = 2;\n`);
-    // Discover the detector's reported path + fragmentHash for the scoping +
-    // allowlist-suppression tests.
-    const first = JSON.parse(run(['json', '--paths', tmp], {}).stdout)[0];
-    cloneFile = first?.fileA;
-    cloneHash = first?.fragmentHash;
+    // Discover the detector's reported fragmentHash for the allowlist-suppression tests.
+    cloneHash = JSON.parse(run(['json', '--paths', tmp], {}).stdout)[0]?.fragmentHash;
   });
 
   afterAll(() => rmSync(tmp, { recursive: true, force: true }));
@@ -245,19 +241,6 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     expect(status).toBe(1);
   });
 
-  it('--changed scopes to staged: in-scope blocks, out-of-scope clean', () => {
-    expect(cloneFile).toBeTruthy();
-    expect(
-      run(['scan', '--changed', '--gate', '--paths', tmp], { MATCHER_CHANGED_FILES: cloneFile })
-        .status,
-    ).toBe(1);
-    expect(
-      run(['scan', '--changed', '--gate', '--paths', tmp], {
-        MATCHER_CHANGED_FILES: 'src/totally/unrelated.ts',
-      }).status,
-    ).toBe(0);
-  });
-
   it('exit 0 — a clone covered by a LIVE allowlist entry is suppressed', () => {
     const al = join(tmp, 'allowlist-live.json');
     const today = new Date().toISOString().slice(0, 10);
@@ -311,18 +294,17 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate approve-command cap', () => {
   const APPROVE_CAP = 6; // must match clone-detector.mts
 
   // n distinct >50-token blocks, each duplicated across its own a<i>/b<i> pair → n novel
-  // cross-file clones. Blocks differ by token (compute_i, seen_i, *i, label-i) so a<i>
-  // matches ONLY b<i> — the shared lines between pairs (`for (...)`, `const average`) are
-  // single lines, far under jscpd's min-tokens, so no cross-pair or same-file inflation.
+  // cross-file clones. Blocks call differently named functions (callee names survive jscpd's
+  // --similarity normalisation, local names and literals do not), so a<i> matches ONLY b<i>.
   function writeNClones(dir, n) {
     for (let i = 1; i <= n; i++) {
       const block = `export function compute_${i}(items) {
-  let total = 0; let count = 0; let seen_${i} = 0;
+  let total = 0; let count = 0;
   for (const item of items) {
-    if (item.active_${i} && item.value > 0) { total += item.value * ${i}; count += 1; seen_${i} += 1; }
+    if (isActive_${i}(item) && weigh_${i}(item) > 0) { total += weigh_${i}(item) * ${i}; count += 1; }
   }
-  const average = count > 0 ? total / count : 0;
-  return { total, count, average, seen_${i}, label: 'block-number-${i}-summary' };
+  const average = divide_${i}(total, count);
+  return summarise_${i}({ total, count, average, label: 'block-number-${i}-summary' });
 }`;
       writeFileSync(join(dir, `a${i}.ts`), `${block}\nexport const A_${i} = 1;\n`);
       writeFileSync(join(dir, `b${i}.ts`), `${block}\nexport const B_${i} = 2;\n`);

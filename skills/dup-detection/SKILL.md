@@ -7,7 +7,7 @@ description: Use when working with `.co-occurrence-allowlist.json` — fixing a 
 
 ## Overview
 
-Frink catches code duplication at commit via two detectors writing one allowlist (`.co-occurrence-allowlist.json` at repo root): the **embedding matcher** (semantic, symbol-level) and the **clone detector** (verbatim, jscpd, token-level). Entries are keyed by `symFileKey` (pairs) or `fragmentHash` (clones); ranges/similarity/lines are findability metadata only.
+Frink catches code duplication at commit via two detectors writing one allowlist (`.co-occurrence-allowlist.json` at repo root): the **embedding matcher** (semantic, symbol-level) and the **clone detector** (jscpd: verbatim token clones, plus whole functions copied under new names). Entries are keyed by `symFileKey` (pairs) or `fragmentHash` (clones: the file pair plus the fragment); ranges/similarity/lines are findability metadata only.
 
 ## When to use
 
@@ -78,6 +78,10 @@ Some pairs are **intentional deploy artifacts**, not real dups: one path is a *g
 - `reconcile` asks "does this dup still exist?" (detection). Drops dead baseline entries. **Doesn't care about expiry.**
 
 ## Burning down the baseline
+
+Clone debt is not in the allowlist: the clone gate blocks only clones absent from HEAD, so a
+`clones[]` entry approves the commit that introduced its clone and nothing after it. List clone debt
+with `guard-clone scan` and refactor it with the workflow above. The steps below are for matcher pairs.
 
 1. `guard-dup-allowlist list` — pick a target. **Skip `src/shared ↔ _shared` mirrors** (gotcha above).
 2. `guard-dup-allowlist remove …` the entry.

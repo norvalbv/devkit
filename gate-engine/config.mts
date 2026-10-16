@@ -39,6 +39,7 @@ export interface Thresholds {
   driftDesc: number;
   minLoc: number;
   minTokens: number;
+  similarity: number;
 }
 
 /** Coverage gate config: `false` opts out; an object enforces the KEYS present (`{}` still fails on
@@ -181,6 +182,7 @@ export const DEFAULTS = Object.freeze({
     driftDesc: 0.88, // description cosine gate for the drifted tier
     minLoc: 15, // min lines per chunk to qualify as a drifted candidate
     minTokens: 50, // jscpd token-clone floor (clone-detector)
+    similarity: 0.9, // jscpd --similarity floor: same-structure functions under other names
   }),
   // search-code index path for the embedding matcher. null => matcher opt-out:
   // no index configured means the semantic matcher fails open / does nothing
