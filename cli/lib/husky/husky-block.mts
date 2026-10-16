@@ -241,14 +241,14 @@ fi`;
  * chain: husky's _/h runs the repo's own hook itself, so chaining would run it twice. */
 export const GATES_ONLY_STOP = '[ -n "${DEVKIT_VIA_HUSKY_INIT:-}" ] && exit 0';
 
-// Review is diagnostic: its merge-base baselines exit on a finding, so they stay AFTER the guards
-// and a lint finding never hides the reviewer's report.
+// Review is diagnostic: its merge-base baselines run AFTER the guards and defer a finding to the
+// finalizer, so a lint failure never hides the reviewer's report or drops it from the summary.
 const overlayReviewBaseline = (
   fallow: boolean,
 ) => `# devkit lint overlay — review mode, merge-base baselines.
 if [ "\${DEVKIT_RUN_MODE:-}" = "review" ]; then
-    __dk_review_baseline_gate eslint || exit 1
-${indent(OVERLAY_BIOME)}${fallow ? '\n    __dk_review_baseline_gate fallow || exit 1' : ''}
+    __dk_review_baseline_gate eslint || __dk_block_deterministic eslint-overlay
+${indent(OVERLAY_BIOME)}${fallow ? '\n    __dk_review_baseline_gate fallow || __dk_block_deterministic fallow' : ''}
 fi`;
 
 /**
