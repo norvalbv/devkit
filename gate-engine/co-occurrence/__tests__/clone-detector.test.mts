@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -117,10 +117,11 @@ const SHARED = `export function computeWidgetTotals(items) {
 `;
 
 // The gate's exit-code contract is what a pre-commit hook depends on:
-//   1 = new clone → block · 0 = clean · 2 = could-not-run → fail-open.
+//   1 = new or lapsed-approval clone → block · 0 = clean · 2 = could-not-run → fail-open.
 describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
   let tmp: string;
   let cloneFile: string | undefined; // a real reported clone path, for the --changed scoping test
+  let cloneFileB: string | undefined; // its partner path, for the reversed-pair lapsed test
   let cloneHash: string | undefined; // the reported fragmentHash, for the allowlist-suppression test
 
   function run(args, env) {
@@ -144,6 +145,7 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     // allowlist-suppression tests.
     const first = JSON.parse(run(['json', '--paths', tmp], {}).stdout)[0];
     cloneFile = first?.fileA;
+    cloneFileB = first?.fileB;
     cloneHash = first?.fragmentHash;
   });
 
@@ -271,16 +273,102 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     expect(run(['scan', '--gate', '--paths', tmp], { CO_OCCURRENCE_ALLOWLIST: al }).status).toBe(0);
   });
 
-  it('exit 1 — an EXPIRED allowlist entry re-surfaces the clone', () => {
-    const al = join(tmp, 'allowlist-expired.json');
-    writeFileSync(
-      al,
-      JSON.stringify({
-        pairs: [],
-        clones: [{ fragmentHash: cloneHash, date: '2000-01-01', decayDays: 1 }],
-      }),
-    );
-    expect(run(['scan', '--gate', '--paths', tmp], { CO_OCCURRENCE_ALLOWLIST: al }).status).toBe(1);
+  function gateWithClones(name, clones, env = {}) {
+    const al = join(tmp, name);
+    writeFileSync(al, JSON.stringify({ pairs: [], clones }));
+    return run(['scan', '--gate', '--paths', tmp], { CO_OCCURRENCE_ALLOWLIST: al, ...env });
+  }
+
+  it('exit 1 — an EXPIRED allowlist entry re-surfaces as a LAPSED approval, not a new clone', () => {
+    const { status, stdout } = gateWithClones('allowlist-expired.json', [
+      { fragmentHash: cloneHash, date: '2000-01-01', decayDays: 1, description: 'shared harness' },
+    ]);
+    expect(status).toBe(1);
+    expect(stdout).toContain('clone gate: 1 clone(s) under a lapsed approval — block.');
+    expect(stdout).toContain('approved 2000-01-01, 1-day lifetime: "shared harness"');
+    expect(stdout).toContain(`add-clone "${cloneHash}"`);
+    expect(stdout).not.toContain('new clone');
+  });
+
+  it('a lapsed legacy entry with no lifetime, reason or files reads as such, never "undefined"', () => {
+    const { status, stdout } = gateWithClones('allowlist-legacy.json', [
+      { fragmentHash: cloneHash, date: '2000-01-01' },
+    ]);
+    expect(status).toBe(1);
+    expect(stdout).toContain('no lifetime recorded (7-day default): "no reason recorded"');
+    expect(stdout).not.toContain('undefined');
+  });
+
+  it('a lapsed entry recorded for other files names them (a third paste, not the reviewed site)', () => {
+    const { stdout } = gateWithClones('allowlist-moved.json', [
+      { fragmentHash: cloneHash, date: '2000-01-01', fileA: 'x.ts', fileB: 'y.ts' },
+    ]);
+    expect(stdout).toContain('— approved for x.ts <> y.ts');
+  });
+
+  // The ship digest shows the gate's reason file, not its stdout — the label must reach it too.
+  it('the gate reason file carries the lapsed label, not "new clone"', () => {
+    const reasonFile = join(tmp, 'reason-lapsed.txt');
+    const clones = [{ fragmentHash: cloneHash, date: '2000-01-01' }];
+    gateWithClones('allowlist-reason.json', clones, { DEVKIT_GATE_REASON_FILE: reasonFile });
+    const reason = readFileSync(reasonFile, 'utf8');
+    expect(reason).toContain('clone gate: 1 clone(s) under a lapsed approval');
+    expect(reason).toContain(`${cloneHash}`);
+    expect(reason).toContain('[lapsed, approved 2000-01-01]');
+    expect(reason).not.toContain('new clone');
+  });
+
+  it('several expired entries for one hash show the NEWEST approval, whatever the file order', () => {
+    const { stdout } = gateWithClones('allowlist-renewed.json', [
+      { fragmentHash: cloneHash, date: '2000-06-01', description: 'second look' },
+      { fragmentHash: cloneHash, date: '2000-01-01', description: 'first look' },
+    ]);
+    expect(stdout).toContain('approved 2000-06-01');
+    expect(stdout).not.toContain('first look');
+  });
+
+  // jscpd's A/B order is not part of the approval: the same two files reversed are the reviewed site.
+  it('a lapsed entry recorded with the same files in reverse order is NOT flagged as a third paste', () => {
+    const { stdout } = gateWithClones('allowlist-reversed.json', [
+      { fragmentHash: cloneHash, date: '2000-01-01', fileA: cloneFileB, fileB: cloneFile },
+    ]);
+    expect(stdout).toContain('approved 2000-01-01');
+    expect(stdout).not.toContain('approved for');
+  });
+
+  // One approval covers every pair of a three-way paste, so the header counts clones, not approvals.
+  it('a three-way paste under one lapsed approval counts its clones, not phantom approvals', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'clone-3way-'));
+    try {
+      // Byte-identical files: jscpd reports one fragment (one hash) for every pair.
+      for (const f of ['a', 'b', 'c']) writeFileSync(join(dir, `${f}.ts`), SHARED);
+      const found = JSON.parse(run(['json', '--paths', dir], {}).stdout);
+      const al = join(dir, 'allowlist.json');
+      writeFileSync(
+        al,
+        JSON.stringify({
+          pairs: [],
+          clones: [{ fragmentHash: found[0].fragmentHash, date: '2000-01-01' }],
+        }),
+      );
+      const { stdout } = run(['scan', '--gate', '--paths', dir], { CO_OCCURRENCE_ALLOWLIST: al });
+      expect(found.length).toBeGreaterThan(1);
+      expect(new Set(found.map((c) => c.fragmentHash)).size).toBe(1);
+      expect(stdout).toContain(
+        `clone gate: ${found.length} clone(s) under a lapsed approval — block.`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['expired first', ['2000-01-01', null]],
+    ['live first', [null, '2000-01-01']],
+  ])('exit 0 — a hash with a live AND an expired entry stays covered (%s)', (_label, dates) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const clones = dates.map((d) => ({ fragmentHash: cloneHash, date: d ?? today, decayDays: 1 }));
+    expect(gateWithClones('allowlist-dup.json', clones).status).toBe(0);
   });
 
   // A corrupt allowlist must FAIL OPEN (exit 2), not silently empty the approved set →
@@ -329,17 +417,35 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate approve-command cap', () => {
     }
   }
 
-  function runGate(n) {
-    const dir = mkdtempSync(join(tmpdir(), 'clone-cap-'));
-    writeNClones(dir, n);
+  // `expireCount` writes that many of the run's own clone hashes to a temp allowlist as expired;
+  // the allowlist is always pinned so devkit's own .co-occurrence-allowlist.json never leaks in.
+  function gateIn(dir, env) {
     try {
-      execFileSync('node', [DETECTOR, 'scan', '--gate', '--paths', dir], {
-        env: { ...process.env, MATCHER_CHANGED_FILES: '', JSCPD_BIN },
-        encoding: 'utf8',
-      });
+      execFileSync('node', [DETECTOR, 'scan', '--gate', '--paths', dir], { env, encoding: 'utf8' });
       return { status: 0, stdout: '' };
     } catch (e) {
       return { status: e.status, stdout: `${e.stdout ?? ''}` };
+    }
+  }
+
+  function runGate(n, expireCount = 0) {
+    const dir = mkdtempSync(join(tmpdir(), 'clone-cap-'));
+    const al = join(dir, 'allowlist.json');
+    const env = {
+      ...process.env,
+      MATCHER_CHANGED_FILES: '',
+      JSCPD_BIN,
+      CO_OCCURRENCE_ALLOWLIST: al,
+    };
+    try {
+      writeNClones(dir, n);
+      const all = JSON.parse(
+        execFileSync('node', [DETECTOR, 'json', '--paths', dir], { env, encoding: 'utf8' }),
+      );
+      const expiredHashes = all.slice(0, expireCount).map((c) => c.fragmentHash);
+      const clones = expiredHashes.map((fragmentHash) => ({ fragmentHash, date: '2000-01-01' }));
+      writeFileSync(al, JSON.stringify({ pairs: [], clones }));
+      return { ...gateIn(dir, env), expiredHashes };
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -362,6 +468,19 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate approve-command cap', () => {
     expect(cmdCount(stdout)).toBe(APPROVE_CAP); // helper truncated to the cap
     expect(stdout).toContain('(+1 more'); // overflow count is exact
     expect(rowCount(stdout)).toBe(APPROVE_CAP + 1); // finding is NEVER truncated
+  });
+
+  it('new + lapsed share one cap, NEW commands first, every row still listed', () => {
+    const { status, stdout, expiredHashes } = runGate(APPROVE_CAP + 1, 4);
+    expect(status).toBe(1);
+    expect(stdout).toContain(
+      'clone gate: 3 new clone(s), 4 clone(s) under a lapsed approval — block.',
+    );
+    expect(cmdCount(stdout)).toBe(APPROVE_CAP);
+    expect(stdout).toContain('(+1 more');
+    expect(rowCount(stdout)).toBe(APPROVE_CAP + 1);
+    const commanded = [...stdout.matchAll(/add-clone "([0-9a-f]{16})"/g)].map((m) => m[1]);
+    expect(commanded.slice(0, 3).some((h) => expiredHashes.includes(h))).toBe(false);
   });
 });
 
