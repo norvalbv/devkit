@@ -213,8 +213,11 @@ describe('degrading', () => {
     git(repo.work, ['remote', 'set-url', 'origin', join(tmpdir(), 'bd-definitely-absent.git')]);
     const report = run(repo);
     expect(report.freshness).toBe('unknown');
+    expect(report.silent).toBe('no-drift');
     expect(exitCodeFor(report)).toBe(4);
     expect(renderSessionBrief(report)).toContain('UNKNOWN');
+    // The seeded base never moved, so a failed fetch must not be reported as a move.
+    expect(renderSessionBrief(report)).not.toContain('HAS moved');
   });
 
   it('is LOUD when origin is unreachable and the tracking ref was never fetched', () => {
@@ -520,6 +523,22 @@ describe('runBaseStatus — the wiring every surface shares', () => {
     expect(payload.rendered.ship).toContain('shared.txt');
     expect(payload.rendered.status).toContain('origin/trunk');
     expect(payload.overlap[0].rearm).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('an unreachable origin over an unmoved base reads UNKNOWN on every hook surface, never "moved"', () => {
+    // The synced hooks and ship print rendered.* verbatim, so a wrong line here reaches every agent.
+    const repo = seed();
+    git(repo.work, ['remote', 'set-url', 'origin', join(tmpdir(), 'bd-definitely-absent.git')]);
+    const { text, code } = runBaseStatus(
+      ['--root', repo.work, '--base', 'trunk', '--json', '--', 'shared.txt'],
+      repo.work,
+    );
+    const { session, edit, ship, status } = JSON.parse(text).rendered;
+    expect(code).toBe(4);
+    for (const rendered of [session, edit, ship, status]) {
+      expect(rendered).toContain('UNKNOWN');
+      expect(rendered).not.toContain('HAS moved');
+    }
   });
 
   it('--ship renders the ship wording and reports itself as the ship caller', () => {
