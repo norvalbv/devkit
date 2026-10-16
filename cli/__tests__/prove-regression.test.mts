@@ -711,6 +711,25 @@ describe('devkit prove-regression', () => {
     expect(conclusion.status).toBe(status);
   });
 
+  it('keeps the using-devkit skill quoting the detail a red load failure renders', () => {
+    const red = {
+      ...operand(1),
+      fileErrors: [{ fullName: 'a.test.mts', message: 'no ./fix.mjs' }],
+    };
+    const { reason } = concludeRegression(
+      red,
+      operand(0),
+      { red: new Map(), green: new Map() },
+      true,
+      { redCloneRemoved: true, greenCloneRemoved: true },
+    );
+    const skill = readFileSync(
+      new URL('../../skills/using-devkit/SKILL.md', import.meta.url),
+      'utf8',
+    ).replace(/\s+/g, ' ');
+    expect(skill).toContain(`inconclusive: ${reason.split(' (')[0]}`);
+  });
+
   it('returns inconclusive unless red is nonzero and green is zero', () => {
     const fx = fixture();
     const result = runProof(fx, {
