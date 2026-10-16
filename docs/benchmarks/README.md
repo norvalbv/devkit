@@ -54,6 +54,7 @@ turn exposed cases into unseen evidence, qualify unresolved repairs, or claim a 
 
 Hand-written records that sit beside the ledger; each number in them names its population, `n`, and query.
 
+- [`benchmark-methodology.md`](benchmark-methodology.md) — the house checklist for building any benchmark; items 21–26 cover numbers derived from gate telemetry.
 - [`decisions-findings.md`](decisions-findings.md) — decision-log benchmarks: findings, corrections, open work (sc-1236).
 - [`reviewer-yield-vs-diff-size.md`](reviewer-yield-vs-diff-size.md) — the review gate returns ~1 issue per run above ~1k LOC and the corpus never measures that regime (2026-08-22).
 - [`corpus-growth.md`](corpus-growth.md) — how corpus rows are mined from telemetry and adapted.
