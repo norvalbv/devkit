@@ -40,7 +40,7 @@ LEDGER=$(clean_session_ledger "$(session_edits_file "$input")")
 [ -n "$LEDGER" ] || exit 0
 trap 'rm -f "$LEDGER"' EXIT
 
-# Per-session SEEN-SET: a file listing the `<smell-label>\t<contributing-file>` pairs already
+# Per-session SEEN-SET: a file listing the `<smell-label>\t<contributing-file>[\t<dep>]` pairs already
 # nudged this session. The hook re-arms only on a pair NOT yet in the set — so the SAME pending
 # decision (its pairs are already recorded) stays silent across every later edit turn, while a
 # genuinely NEW decision (a never-seen pair) nudges exactly once. Replaces the old binary latch

@@ -240,7 +240,7 @@ describe('guard-decisions sub-engine dispatch (via cli.mts, the real bin)', () =
     stage('package.json', '{"dependencies":{"a":"1.0.0"}}\n');
     const wrapped = run(['detect', 'scan', '--files']);
     expectExit(wrapped, 0);
-    expect(wrapped.stdout).toBe('dep-change\ta\n');
+    expect(wrapped.stdout).toBe('dep-change\tpackage.json\ta\n');
     expect(wrapped.stdout).toBe(run(['scan', '--files'], engine('detect')).stdout);
   });
 
@@ -253,7 +253,9 @@ describe('guard-decisions sub-engine dispatch (via cli.mts, the real bin)', () =
       stdio: 'pipe',
     });
     writeFileSync(join(dir, 'package.json'), '{"dependencies":{"a":"1.0.0","b":"2.0.0"}}\n');
-    expect(run(['detect', 'scan', '--working', '--files']).stdout).toBe('dep-change\tb\n');
+    expect(run(['detect', 'scan', '--working', '--files']).stdout).toBe(
+      'dep-change\tpackage.json\tb\n',
+    );
     expect(run(['detect', 'scan', '--files']).stdout).toBe('');
   });
 
