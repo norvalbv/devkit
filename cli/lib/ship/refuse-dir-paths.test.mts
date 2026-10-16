@@ -169,3 +169,98 @@ describe('the printed remedy lists exactly the changed set', () => {
     expect(runRemedy(r.stderr, join(root, 'sub'))).toEqual(EXPECTED);
   });
 });
+
+/** Call the unmatched-path guard the way both ship scripts do: root, trees, `--`, then the brief. */
+function refuseUnmatched(root: string, trees: string[], paths: string[]) {
+  return spawnSync(
+    '/bin/bash',
+    [
+      '-c',
+      'set -euo pipefail; . "$1"; shift; ship_refuse_unmatched_paths "$@"',
+      'refuse',
+      helper,
+      root,
+      ...trees,
+      '--',
+      ...paths,
+    ],
+    { encoding: 'utf8', env: { ...process.env, ...GIT_ENV } },
+  );
+}
+
+/** Committed files, then: gone.ts deleted on disk only, rmd.ts `git rm`'d (in the tree only). */
+function seedTracked() {
+  const root = tempRoot();
+  git(root, ['init', '-q', '-b', 'main']);
+  git(root, ['config', 'user.email', 'a@b.c']);
+  git(root, ['config', 'user.name', 'a']);
+  for (const f of ['a.ts', 'b.ts', 'a b', 'x\ny', 'gone.ts', 'rmd.ts']) {
+    writeFileSync(join(root, f), 'x\n');
+  }
+  git(root, ['add', '-A']);
+  git(root, ['commit', '-q', '-m', 'base']);
+  rmSync(join(root, 'gone.ts'));
+  git(root, ['rm', '-q', 'rmd.ts']);
+  symlinkSync('missing-target', join(root, 'dangling'));
+  return { root, head: git(root, ['rev-parse', 'HEAD']).trim() };
+}
+
+describe('ship_refuse_unmatched_paths', () => {
+  it('passes real files, odd names, deletions, a git-rm path, and a dangling symlink', () => {
+    const { root, head } = seedTracked();
+    const r = refuseUnmatched(
+      root,
+      [head],
+      ['a.ts', 'a b', 'x\ny', 'gone.ts', './gone.ts', 'rmd.ts', 'dangling'],
+    );
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+  });
+
+  it('an empty brief is not a refusal (empty array under nounset)', () => {
+    expect(refuseUnmatched(tempRoot(), ['HEAD'], []).status).toBe(0);
+  });
+
+  it('names every typo in one refusal, with no shell-split hint', () => {
+    const { root, head } = seedTracked();
+    const r = refuseUnmatched(root, [head, head], ['typo.ts', 'a.ts', 'other typo.ts']);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      `names nothing ship can stage (not on disk, in the index, or in ${head.slice(0, 7)}): typo.ts other\\ typo.ts\n`,
+    );
+    expect(r.stderr).not.toContain('one argument holds');
+  });
+
+  // A bare pathspec would glob `*.ts` onto a.ts and pass; `:(literal)` keeps it the typo it is.
+  // The blank path exercises the empty split array under bash 3.2's nounset.
+  it('a glob-shaped or blank path is refused cleanly, never matched or crashed on', () => {
+    const { root, head } = seedTracked();
+    const r = refuseUnmatched(root, [head], ['*.ts', ' ']);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      `in ${head.slice(0, 7)}): \\*.ts \\ \n  paths are repo-root-relative\n`,
+    );
+    expect(r.stderr).not.toContain('one argument holds');
+  });
+
+  it('a newline- or space-joined list is named as unsplit, with a copyable argv tail', () => {
+    const { root, head } = seedTracked();
+    for (const joined of ['a.ts\nb.ts\nrmd.ts', 'a.ts b.ts']) {
+      const r = refuseUnmatched(root, [head], [joined]);
+      expect(r.status).toBe(1);
+      const n = joined.split(/\s/).length;
+      expect(r.stderr).toContain(
+        `one argument holds ${n} paths — an unquoted $VAR is not word-split in zsh`,
+      );
+      const tail = r.stderr.trimEnd().split('\n').at(-1)!;
+      const argv = spawnSync(
+        '/bin/bash',
+        ['-c', 'eval "set -- $1"; printf "%s\\0" "$@"', '_', tail],
+        {
+          encoding: 'utf8',
+        },
+      ).stdout.split('\0');
+      expect(argv.slice(0, -1)).toEqual(joined.split(/\s/));
+    }
+  });
+});
