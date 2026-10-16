@@ -253,7 +253,7 @@ describe('--gate (integration, real git repo)', () => {
     const r = gateWithStub(bin, { GUARD_AI_STRICT: '1' });
     expect(r.status).toBe(3);
     expect(r.stderr).toContain('strict ship mode fails closed');
-    expect(r.stderr).toContain('re-run devkit ship');
+    expect(r.stderr).toContain('devkit ship --resume');
   });
 
   it('a confirmed CONTRADICT under GUARD_AI_STRICT still exits 1 (never conflated with 3)', () => {

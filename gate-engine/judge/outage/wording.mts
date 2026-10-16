@@ -106,8 +106,11 @@ export function strictRemedy(cause: RemedyCause, bin = 'claude', resetsAt?: numb
       `does serve; set that role's model env to one of them, or ${familyOverrideRemedy(bin, true)}`
     );
   // Every binary reaching this arm ran (only ENOENT reads as absent), so doctor's bind cannot apply.
+  // Resume leads: a family move re-pays every reviewer to recover what is often one blipped call.
   return (
-    `check \`${bin}\` CLI auth/quota, then re-run devkit ship. If the account stays dark longer ` +
-    `than the ship can wait, ${familyOverrideRemedy(bin, true)}`
+    `check \`${bin}\` CLI auth/quota, then resume with \`devkit ship --resume <branch>\`: it ` +
+    're-judges only what has no cached verdict, and every cached PASS replays. A judge that ' +
+    `failed while others on \`${bin}\` answered (a model at capacity, say) needs nothing more. ` +
+    `Only if the account stays dark longer than the ship can wait, ${familyOverrideRemedy(bin, true)}`
   );
 }

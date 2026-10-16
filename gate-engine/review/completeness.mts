@@ -58,7 +58,7 @@ import {
 } from '../judge/mcp/profile.mts';
 import { printCachedPass, reportMcpDegraded } from './evidence/base-context.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
-import type { JudgeOutage } from '../judge/outage/classify.mts';
+import { spawnWithRetry } from '../judge/outage/retry.mts';
 import {
   DEEP_JUDGE_TIMEOUT_MS,
   execJudgeAsync,
@@ -405,23 +405,24 @@ export async function runCompleteness(
 
   // Its own process (backgrounded by the hook), so it names itself — only once a judge will spawn.
   const mcpSpawn = trackMcpSpawns(mcp, ['completeness'], capabilityFingerprint);
-  let outage: JudgeOutage | undefined;
-  const raw = await exec({
-    label: 'review:completeness',
-    args: ['-p', prompt, '--model', model, ...JUDGE_ISOLATION, '--allowedTools', allowedTools],
-    input: diff,
-    timeout: DEEP_JUDGE_TIMEOUT_MS,
-    cwd,
-    mcpProfile,
-    mcpProjectRoots,
-    codexReadOnly: true,
-    onMcpPrepared: (fingerprint, cause) => {
-      mcpSpawn.observe(cause, fingerprint);
-    },
-    onOutage: (kind) => {
-      outage = kind;
-    },
-  });
+  const { result: raw, outage } = await spawnWithRetry(
+    (timeout, onOutage) =>
+      exec({
+        label: 'review:completeness',
+        args: ['-p', prompt, '--model', model, ...JUDGE_ISOLATION, '--allowedTools', allowedTools],
+        input: diff,
+        timeout,
+        cwd,
+        mcpProfile,
+        mcpProjectRoots,
+        codexReadOnly: true,
+        onMcpPrepared: (fingerprint, cause) => {
+          mcpSpawn.observe(cause, fingerprint);
+        },
+        onOutage,
+      }),
+    { retry: envFlag('AI_STRICT'), label: 'completeness', capMs: DEEP_JUDGE_TIMEOUT_MS },
+  );
   const mcpCause = mcpSpawn.cause();
   if (mcpSpawn.drift() === 'unexplained') {
     emitNoRun('mcp_capabilities_changed');
