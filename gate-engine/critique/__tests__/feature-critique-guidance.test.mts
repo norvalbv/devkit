@@ -106,4 +106,11 @@ describe('feature-critique guidance', () => {
       expect(text).toContain('wrong_phase');
     }
   });
+
+  it('ships the same text to every synced agent surface', () => {
+    for (const surface of ['.claude', '.cursor'])
+      expect(readFileSync(join(ROOT, surface, 'agents', 'feature-critique.md'), 'utf8')).toBe(
+        agent,
+      );
+  });
 });

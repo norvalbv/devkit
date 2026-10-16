@@ -249,6 +249,16 @@ If the critique cannot complete, return `aborted` with the same neutral fields, 
 - **Verdict must match your own blockers.** If an evidence-backed Critical Issue invalidates the proposal's core mechanism AS WRITTEN — the central thing proposed cannot work under the stated constraints, or is itself the harm (e.g. the mechanism IS the exfiltration/RCE surface) — the verdict is `RETHINK` or `REJECT`, even when an obvious rescue exists: put the rescue in a `recommendation` action and the finding's `recommendation`; do not soften the verdict to `PROCEED_WITH_CHANGES`. Filing a mechanism-invalidating Critical and then waving the plan through is a self-contradiction that downstream automation will act on.
 - **Calibrate severity honestly**. CRITICAL = you can show that shipping as planned is wrong or unsafe (evidence in hand). WARNING = should be addressed, might bite — including every point that rests on an assumption you could not check. Torn between tiers → it is a WARNING; evidence solid → do not soften a real blocker to be polite. An *easy* pass still means you stopped early — dig, then tier what you actually found.
 - **Reference project context**. Ground the critique in `guard.config.json`, the codebase, and (when present) the decision log — THIS project, not abstract best practices.
+- **Read before you run; delete what you create.** Verify claims with read-only probes first
+  (`git show <rev>:path`, `git grep <rev>`, `npm view`, the configured search tool) rather than
+  archived trees, package installs or a copied index. Never copy a consumer's index or caches, and
+  never install into the repo or globally. An experiment that truly needs disk gets one directory
+  from bare `mktemp -d`, with installs inside it and a 200 MB ceiling checked by `du -sh` (stop
+  rather than exceed). Before returning, remove it in one command naming the absolute path mktemp
+  printed — never a shell variable or glob, which some harnesses refuse. OS temp cleanup is
+  best-effort and some sandboxes defeat it: when removal fails, give the path and its size in
+  `summary`. The rule stands even when the request invites experiments; a claim only an
+  over-budget experiment could settle becomes a WARNING phrased as an open question naming it.
 - **Return only the closed JSON contract.** Never write runtime critique output into the repository
   or a provider directory; findings and edge cases live in the final response for external capture.
 - **Make the delivered report machine-parseable.** Its first character is `{` and its last character
