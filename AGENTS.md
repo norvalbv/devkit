@@ -172,6 +172,11 @@ Do not invoke reviewers, run approval scripts, or touch marker files by hand. Wr
 commit (via `devkit ship` on a protected branch); react only when a gate blocks: read the finding,
 fix it, re-commit. Every bypass needs the user's explicit OK.
 
+Format devkit's own source with `bun run format` (oxfmt) before `guard-size preflight`, since the
+hook's oxfmt pass can push a file over its cap. `biome/` holds consumer presets with no root config,
+so `biome format` here applies Biome's defaults and still exits 0. The other local checks are listed
+in `README.md`, "Developing this repository".
+
 Tracked `dist/` is rebuilt only by `devkit release`: brief your source plus only NEW dist artifacts,
 never a rebuilt existing one (`docs/troubleshooting.md`, "CI `Release-only dist` failed").
 
