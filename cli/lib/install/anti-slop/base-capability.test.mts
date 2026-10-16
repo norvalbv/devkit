@@ -1330,7 +1330,7 @@ describe('anti-slop relocation across existing files', () => {
 
     expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
     expect(out.join('\n')).toMatch(
-      /RELOCATED anti-slop\/no-object-parameters src\/other\.ts:2:\d+ <- src\/file\.ts \(\+1\)/u,
+      /RELOCATED anti-slop\/no-object-parameters src\/other\.ts:2:\d+ \(1 relocated\) <- src\/file\.ts/u,
     );
     expect(out.join('\n')).not.toContain('ERROR anti-slop/no-object-parameters src/other.ts');
     expect(err.join('\n')).toContain(
@@ -1420,7 +1420,7 @@ describe('anti-slop relocation across existing files', () => {
     git(cwd, ['add', '-A']);
 
     expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
-    expect(out.join('\n')).toContain('<- src/file.ts (+1)');
+    expect(out.join('\n')).toContain('(1 relocated) <- src/file.ts');
     expect(antiSlop(['adopt-relocations'], cwd)).toBe(0);
     expect(entries(cwd).some((entry) => entry.file === 'src/file.ts')).toBe(false);
     git(cwd, ['add', ANTI_SLOP_BASELINE_REL]);
@@ -1463,7 +1463,7 @@ describe('anti-slop relocation across existing files', () => {
     git(cwd, ['add', ANTI_SLOP_BASELINE_REL]);
 
     expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
-    expect(out.join('\n')).toContain('<- src/renamed.ts (+1)');
+    expect(out.join('\n')).toContain('(1 relocated) <- src/renamed.ts');
     expect(antiSlop(['adopt-relocations'], cwd)).toBe(0);
     git(cwd, ['add', ANTI_SLOP_BASELINE_REL]);
     expect(antiSlop(['check', '--staged'], cwd)).toBe(0);
@@ -1484,7 +1484,7 @@ describe('anti-slop relocation across existing files', () => {
     git(cwd, ['add', '-A']);
 
     expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
-    expect(out.join('\n')).toContain('<- src/a.ts, src/b.ts (+1)');
+    expect(out.join('\n')).toContain('(1 relocated) <- src/a.ts, src/b.ts');
     expect(antiSlop(['adopt-relocations'], cwd)).toBe(0);
     expect(['src/a.ts', 'src/b.ts', 'src/other.ts'].map((file) => debtAt(cwd, file))).toEqual([
       0, 1, 1,
@@ -1508,7 +1508,7 @@ describe('anti-slop relocation across existing files', () => {
     moveFinding(cwd);
 
     expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
-    expect(out.join('\n')).toMatch(/src\/other\.ts:2:\d+ <- src\/file\.ts \(\+1\)/u);
+    expect(out.join('\n')).toMatch(/src\/other\.ts:2:\d+ \(1 relocated\) <- src\/file\.ts/u);
     expect(antiSlop(['adopt-relocations'], cwd)).toBe(0);
     git(cwd, ['add', ANTI_SLOP_BASELINE_REL]);
     expect(antiSlop(['check', '--staged'], cwd)).toBe(0);
@@ -1613,7 +1613,7 @@ describe('anti-slop relocation across existing files', () => {
     moveFinding(root);
 
     expect(antiSlop(['check', '--staged'], root)).toBe(1);
-    expect(out.join('\n')).toContain('<- src/file.ts (+1)');
+    expect(out.join('\n')).toContain('(1 relocated) <- src/file.ts');
     expect(out.join('\n')).toContain('anti-slop: overlay');
     expect(antiSlop(['adopt-relocations', '--base', 'HEAD'], root)).toBe(2);
     expect(err.join('\n')).toContain('--base is unavailable in an overlay install');

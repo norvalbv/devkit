@@ -13,7 +13,7 @@ import {
   migrateBaselineRenames,
   removedBaselineMigrationReceipts,
 } from './baseline.mts';
-import type { FindingGroup } from './diagnostics.mts';
+import { type FindingGroup, formatGroupSites } from './diagnostics.mts';
 import {
   activatedRuleIdsBetween,
   committedBaselineProbe,
@@ -125,9 +125,7 @@ export function printNewAntiSlopFindings(
 ): void {
   for (const group of groups) {
     const tag = group.severity === 'error' ? 'ERROR' : 'WARN';
-    console.log(
-      `${tag} ${group.ruleId} ${group.file}:${group.line}:${group.column} (+${group.additionalCount})`,
-    );
+    console.log(`${tag} ${group.ruleId} ${formatGroupSites(group, group.additionalCount, 'new')}`);
     console.log(`      ${group.diagnostic}`);
   }
 }
@@ -138,8 +136,7 @@ export function recordErrorLocations(
 ): void {
   writeGateReason(
     groups.map(
-      (group) =>
-        `ERROR ${group.ruleId} ${group.file}:${group.line}:${group.column} (+${group.additionalCount})`,
+      (group) => `ERROR ${group.ruleId} ${formatGroupSites(group, group.additionalCount, 'new')}`,
     ),
   );
 }

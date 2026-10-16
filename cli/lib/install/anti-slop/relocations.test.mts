@@ -47,6 +47,7 @@ function finding(file: string, count = 1, variant: Variant = {}): FindingGroup {
     line: 1,
     column: 1,
     count,
+    locations: Array.from({ length: count }, (_, index) => ({ line: index + 1, column: 1 })),
   };
 }
 

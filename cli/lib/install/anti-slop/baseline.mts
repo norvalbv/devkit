@@ -97,7 +97,10 @@ export function baselineFromGroups(groups: readonly FindingGroup[]): AntiSlopBas
     upstreamCommit: ANTI_SLOP_UPSTREAM,
     entries: [...groups]
       .sort((a, b) => a.fingerprint.localeCompare(b.fingerprint))
-      .map(({ severity: _severity, line: _line, column: _column, ...entry }) => entry),
+      .map(
+        ({ severity: _severity, line: _line, column: _column, locations: _locations, ...entry }) =>
+          entry,
+      ),
   };
 }
 
