@@ -35,7 +35,7 @@ function printFinding(finding: CommentFinding): void {
 const PARAGRAPH_REMEDY = [
   '',
   'A paragraph is one block comment, or a run of same-style single-line comments with only blank lines between them.',
-  'Blank lines never split it; only changed lines with text count, and 3 or more block. Shorten the comment where possible.',
+  'Blank lines never split it. It blocks at 3 or more changed lines with text. Shorten the comment where possible.',
   'If you need a paragraph-long comment to justify a workaround, the code is wrong — fix the code.',
   'If every line states something the code cannot, retry unchanged: a paragraph blocks only once.',
 ].join('\n');

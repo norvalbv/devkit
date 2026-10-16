@@ -82,7 +82,9 @@ describe('runCommentFirewall', () => {
     expect(text).toContain(
       'A paragraph is one block comment, or a run of same-style single-line comments with only blank lines between them.',
     );
-    expect(text).toContain('Blank lines never split it; only changed lines with text count');
+    expect(text).toContain(
+      'Blank lines never split it. It blocks at 3 or more changed lines with text.',
+    );
     expect(text).toContain('Shorten the comment where possible.');
     expect(text).toContain('to justify a workaround, the code is wrong — fix the code.');
     expect(text).toContain('retry unchanged: a paragraph blocks only once.');
