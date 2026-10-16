@@ -163,10 +163,8 @@ export const LINE_CAP = 500;
 export const TEST_LINE_CAP = 2000;
 
 // The //-comment sibling written next to `maxLines` (guard.config.json keeps guidance in "//" keys).
-const MAXLINES_DOC =
-  'Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only). 0 = off. Per-FUNCTION caps need a parser — not yet.';
-const MAXTESTLINES_DOC =
-  'Loose raw line cap per test file; existing oversized tests are grandfathered shrink-only. 0 = off.';
+const MAXLINES_DOC = `Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only in ${LINES_BASELINE}). 0 = off. Per-FUNCTION caps need a parser — not yet.`;
+const MAXTESTLINES_DOC = `Loose raw line cap per test file; existing oversized tests are grandfathered shrink-only in ${LINES_BASELINE}. 0 = off.`;
 
 /** Does guard.config.json explicitly configure both line caps, including 0 = off? */
 export function hasLineCap(cwd: string): boolean {

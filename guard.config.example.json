@@ -38,10 +38,10 @@
     }
   },
 
-  "//maxLines": "Raw line cap for implementation files. Existing oversized files are grandfathered shrink-only. 0 = off.",
+  "//maxLines": "Raw line cap for implementation files. Existing oversized files are grandfathered shrink-only in .devkit/baselines/size-lines.json. 0 = off.",
   "maxLines": 500,
 
-  "//maxTestLines": "Looser raw line cap for test files. Existing oversized tests are grandfathered shrink-only into the same size-lines.json baseline. 0 = off.",
+  "//maxTestLines": "Looser raw line cap for test files. Existing oversized tests are grandfathered shrink-only into the same .devkit/baselines/size-lines.json baseline. 0 = off.",
   "maxTestLines": 2000,
 
   "//decisionsDir": "Append-only decision-log dir (guard-decisions CLI + smell gate target). Default: 'docs/decisions'.",
