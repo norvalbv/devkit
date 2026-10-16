@@ -2,6 +2,7 @@
  *  and where the gates find devkit's bins. */
 
 import { SHIP_REHEARSAL_LEAD } from '../../../../gate-engine/deterministic/recheck.mts';
+import { DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER } from '../review-fragments.mts';
 
 // Commit/ship exit on a block. Review remembers both lanes and dry-gates the deterministic one, so
 // every selected gate still reports before REVIEW_FAILURE_FINALIZER (safe under `sh -e`).
@@ -24,6 +25,14 @@ __dk_block_ai() {
     dk_review_failed=1
     dk_review_failed_gates="$dk_review_failed_gates $1"
 }`;
+// The helpers every gate block opens with, in emit order. A test running one fragment alone uses
+// the same list, so a fragment can never call a helper its test leaves undefined.
+export const gateBlockPrelude = (binOpen: string) => [
+  ...DK_HOOK_HELPERS,
+  binOpen,
+  DK_REVIEW_BASELINE_HELPER,
+  DK_GATE_BLOCK_HELPERS,
+];
 export const DK_DETERMINISTIC_GATE_HELPER = `__dk_gate_deterministic() {
     dk_det_rc=0
     __dk_no_git_env "$@" || dk_det_rc=$?
