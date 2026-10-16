@@ -19,6 +19,7 @@ import {
   detectSmells,
   gateVerdict,
   parseVerdict,
+  scanLine,
   smellSources,
 } from '../detect.mts';
 
@@ -29,18 +30,18 @@ const DETECT = fileURLToPath(new URL('../detect.mts', import.meta.url));
 // one. The default is [] (no boundaries → the cross-boundary smell never fires).
 const BOUNDARIES = ['src/main/', 'socket-server/', 'vercel-serverless/'];
 
-const entry = (o) => ({ status: 'M', path: 'x', added: 0, deleted: 0, depChanged: false, ...o });
+const entry = (o) => ({ status: 'M', path: 'x', added: 0, deleted: 0, ...o });
 
 describe('detectSmells', () => {
   it('flags a dependency change in package.json', () => {
     expect(
-      detectSmells([entry({ status: 'M', path: 'package.json', depChanged: true })], BOUNDARIES),
+      detectSmells([entry({ status: 'M', path: 'package.json', depKeys: ['a'] })], BOUNDARIES),
     ).toContain('dep-change');
   });
 
   it('does not flag a package.json edit that left dependencies untouched', () => {
     expect(
-      detectSmells([entry({ status: 'M', path: 'package.json', depChanged: false })], BOUNDARIES),
+      detectSmells([entry({ status: 'M', path: 'package.json', depKeys: [] })], BOUNDARIES),
     ).toEqual([]);
   });
 
@@ -112,7 +113,7 @@ describe('detectSmells', () => {
   it('a package.json + lockfile dep bump still flags only via the real dep change', () => {
     const s = detectSmells(
       [
-        entry({ status: 'M', path: 'package.json', depChanged: true }),
+        entry({ status: 'M', path: 'package.json', depKeys: ['a'] }),
         entry({ status: 'M', path: 'bun.lock', added: 9, deleted: 3 }),
       ],
       BOUNDARIES,
@@ -124,13 +125,20 @@ describe('detectSmells', () => {
 // The Stop-hook seen-set re-arms iff a never-seen (label, contributing-file) pair appears. These
 // pure tests are load-bearing: the hook is just `grep -vxF` plumbing over smellSources' output.
 describe('smellSources (seen-set pairs)', () => {
-  const pairs = (e, b = BOUNDARIES) => smellSources(e, b).map((s) => `${s.label}\t${s.path}`);
+  const pairs = (e, b = BOUNDARIES) => smellSources(e, b).map(scanLine);
 
   it('emits one dep-change pair per CHANGED dependency NAME, not per package.json (C2)', () => {
     // Two distinct dep decisions on the same package.json stay distinguishable by name.
     expect(
       smellSources([entry({ path: 'package.json', depKeys: ['lodash'] })], BOUNDARIES),
-    ).toEqual([{ label: 'dep-change', path: 'lodash' }]);
+    ).toEqual([{ label: 'dep-change', path: 'package.json', dep: 'lodash' }]);
+  });
+
+  // The Stop hook matches column 2 against its edit ledger, so it must name the manifest file.
+  it('a nested manifest is the file column, the dependency the third', () => {
+    expect(pairs([entry({ path: 'packages/x/package.json', depKeys: ['zod'] })])).toEqual([
+      'dep-change\tpackages/x/package.json\tzod',
+    ]);
   });
 
   it('re-arms on a NEW pair, never on the cumulative set (anti-nag + new-decision)', () => {
@@ -154,7 +162,7 @@ describe('smellSources (seen-set pairs)', () => {
   it('a distinct second dep bump is a fresh pair (the dep-collapse ceiling is lifted)', () => {
     const first = pairs([entry({ path: 'package.json', depKeys: ['lodash'] })]);
     const second = pairs([entry({ path: 'package.json', depKeys: ['lodash', 'axios'] })]);
-    expect(second.filter((p) => !first.includes(p))).toEqual(['dep-change\taxios']);
+    expect(second.filter((p) => !first.includes(p))).toEqual(['dep-change\tpackage.json\taxios']);
   });
 
   it('its distinct labels equal detectSmells (one source of truth)', () => {
@@ -205,7 +213,7 @@ describe('gateVerdict', () => {
 // The evidence extractor: the judge must see the smell-tripping files' hunks and NEVER the
 // routine haystack — a buried decision cannot be sliced away, and churn cannot dilute attention.
 describe('buildDetectJudgeInput', () => {
-  const depEntry = entry({ path: 'package.json', depChanged: true, depKeys: ['prisma'] });
+  const depEntry = entry({ path: 'package.json', depKeys: ['prisma'] });
   const churnEntry = entry({ path: 'src/generated/fixtures.ts', added: 300, deleted: 300 });
   const seg = (p, body) => `diff --git a/${p} b/${p}\n--- a/${p}\n+++ b/${p}\n${body}\n`;
 
@@ -560,14 +568,14 @@ describe('--gate (integration, real git repo)', () => {
     expect(scan(['--working'])).not.toContain('\t');
   });
 
-  it('scan --working --files emits (label, dep-name) pairs for the Stop-hook seen-set', () => {
+  it('scan --working --files emits (label, manifest, dep-name) lines for the Stop-hook seen-set', () => {
     writeFileSync(
       join(repo, 'package.json'),
       '{\n  "name": "x",\n  "dependencies": { "a": "1.0.0", "b": "2.0.0" }\n}\n',
     );
-    // --files surfaces the changed dependency NAME (b), not "package.json" — so a later, distinct
-    // dep decision is a fresh pair rather than colliding with this one.
-    expect(scan(['--working', '--files'])).toBe('dep-change\tb');
+    // The manifest matches the hook's edit ledger; the dependency NAME (b) keeps a later, distinct
+    // dep decision a fresh line rather than colliding with this one.
+    expect(scan(['--working', '--files'])).toBe('dep-change\tpackage.json\tb');
   });
 
   // The LLM downgrade path (runDetectJudge via execJudge), with a stub `claude` on PATH. Pins the
