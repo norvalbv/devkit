@@ -17,6 +17,9 @@ import { normalizeSelection, type Selection } from '../lib/components.mts';
 import { buildFullHook } from '../lib/husky/husky-block.mts';
 import { CLI, ceilingTimeoutMessage, rootRegistry, testSpawnSync } from './_helpers.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../commands/review.mts'));
+
 const { cleanup, mkTmp } = rootRegistry();
 afterEach(cleanup);
 

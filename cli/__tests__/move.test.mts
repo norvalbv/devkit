@@ -18,6 +18,9 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CLI, rootRegistry, testSpawnSync } from './_helpers.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../commands/move.mts'));
+
 const { mkTmp, cleanup } = rootRegistry();
 afterEach(cleanup);
 

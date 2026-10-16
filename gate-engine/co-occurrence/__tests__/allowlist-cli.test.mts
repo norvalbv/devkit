@@ -5,6 +5,9 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../allowlist-cli.mts'));
+
 // guard-dup-allowlist is the tool the dup/clone gates print as their approval remedy — its
 // exit codes (0 approve/removed, 1 usage/not-covered, 2 corrupt-refuse) and its refusal to
 // wipe a corrupt allowlist are what a human/agent depends on when a commit is blocked.

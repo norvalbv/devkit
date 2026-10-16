@@ -7,6 +7,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
 import { resolveSearchTools } from '../tools.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../search-tool-counter.mts'));
+void (() => import('../search-tool-guard.mts'));
+
 // End-to-end tests that spawn the real hook scripts over stdin (the same JSON
 // contract Claude Code uses). Covers wiring + the counter's per-session streak
 // state machine. The counter is the only stateful piece, so the concurrency /

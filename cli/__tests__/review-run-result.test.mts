@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { devkitVersion } from '../../gate-engine/devkit-version.mts';
 import { rootRegistry } from './_helpers.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../lib/ship/review/telemetry/run-result.mts'));
+
 const RUN_RESULT = fileURLToPath(
   new URL('../lib/ship/review/telemetry/run-result.mts', import.meta.url),
 );

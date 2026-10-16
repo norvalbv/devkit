@@ -13,6 +13,9 @@ import {
   recordPrefix,
 } from '../prefix-cache.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../cli.mts'));
+
 const CLI = fileURLToPath(new URL('../cli.mts', import.meta.url));
 
 const dirs = [];

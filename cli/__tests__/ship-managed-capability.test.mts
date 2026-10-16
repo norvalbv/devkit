@@ -18,6 +18,9 @@ import { antiSlopCapabilityIssue } from '../lib/install/anti-slop/lifecycle.mts'
 import { oxcBaseCapabilityIssue } from '../lib/install/oxc/lifecycle.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../lib/ship/managed-capability-runtime.mts'));
+
 // sc-2099: a ship worktree is cut from $BASE, so its committed .devkit/oxc + .devkit/anti-slop bytes
 // are the branch's FORK POINT, while the gates judging them come from the caller's linked
 // node_modules. prepare_gate_worktree therefore refreshes that managed state from the RUNNING package

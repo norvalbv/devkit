@@ -2,6 +2,13 @@ import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { CLI } from './_helpers.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../commands/base-drift/base-status.mts'));
+void (() => import('../commands/guard-branch.mts'));
+void (() => import('../commands/oxc/oxc.mts'));
+void (() => import('../commands/sync/sync-worktree.mts'));
+void (() => import('../lib/guard/require-git.mts'));
+
 // Run the CLI with an explicit env (so a test can strip git from PATH). An argv that dispatches a
 // ship takes a real machine-wide ship slot, so routing cases live in commands/ship.test.mts.
 const run = (args, env) =>

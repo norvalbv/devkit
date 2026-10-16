@@ -7,6 +7,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../../review/cli.mts'));
+
 const CLI = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   '..',

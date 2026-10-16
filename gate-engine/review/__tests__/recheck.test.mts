@@ -23,6 +23,9 @@ import {
   writeArtifact,
 } from './run-review-fixtures.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../cli.mts'));
+
 // `guard-review lens`: only the target is judged, its PASS lands on the gate's own part key, and a
 // run that judged nothing (or one lens of four) never reads as a reviewer-level PASS.
 
