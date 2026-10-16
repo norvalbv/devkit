@@ -63,28 +63,33 @@ BENCH_MODEL=opus node bench.mts run                            # opus ceiling, r
 
 ## Corpus
 
-One JSONL file per reviewer (`cases-<skill>.jsonl`). The four **domain** reviewers carry 13–14
-rows each (api-security 14, the rest 13): the original 12 — 6 gold seeded-bugs (distinct catalog
-items; 3 clear / 2 borderline / 1 adversarial), 3 clean decoys (trigger ≥2 checklist items,
-genuinely fine), 2 near-miss decoys (look vulnerable, provably safe), 1 minimal pair (`variantOf`:
-the fixed twin of a gold row, expected PASS) — plus gold rows for the licensed-source catalog
-refresh items (`mass-assignment`, `object-level-authz`, `sync-io`, `layout-thrash`,
-`postmessage-origin`; `command-injection` reuses its retagged original row). 2 rows per file are
-`holdout: true` (excluded by `--dev`, included in baselines). Dataset-card fields per row:
-`note` (mandatory why), `difficulty`, `provenance` (`authored`/`mined`/`adapted` — mined rows are
-anonymized adaptations of real CodeRabbit/Macroscope findings from our PR history), `variantOf`.
+One JSONL file per reviewer (`cases-<skill>.jsonl`): correctness 287 rows, api-security 44,
+frontend-security 21, frontend-performance 19, backend-performance 13. Dataset-card fields per row:
+`note` (mandatory why), `difficulty`, `holdout` (excluded by `--dev`, included in baselines),
+`provenance`, `source` / `sourcePr`, `caseId` and `variantOf` (a repair sibling of a gold row).
 
-**`correctness` is the exception — a larger, growing cohort (66 rows, 38 gold / 28 decoy).** Its
-four always-on lenses have no per-item catalog to spread across, so it is built for bug-CLASS
-coverage instead: gold by lens `state-transitions:14 · concurrency-races:7 · writer-reader-contracts:7
-· error-and-edge-classification:10`. It includes a regression set for the classes that leaked PAST
-the shipped reviewer to CodeRabbit — stale-state/missing-reset, documented-early-exit-bypassed,
-exit-code contract, and cleanup-after-throwable/no-`try`/`finally` — each gold paired with a
-**true minimal-pair decoy** (`variantOf`, same fixture differing ONLY in the bug construct) so a
-precision regression from an over-broad prompt edit shows as a decoy false-block. ~40% holdout;
-each leaked class carries ≥1 dev gold to tune on + ≥2 holdout golds to validate generalization.
-Note `variantOf` is documentation/traceability only — no metric reads it; the decoy's protection is
-its contribution to the `cleanPass` denominator.
+**Admission.** New rows are mined from verdict-labeled telemetry or imported from fix-anchored
+known answers (`docs/decisions/benchmarks-grow-from-telemetry.md`), through the mine → propose →
+adapt → finalize workflow in [`docs/benchmarks/corpus-growth.md`](../../../../docs/benchmarks/corpus-growth.md).
+`bun run benchmarks:corpus` and `finalize.mts --check` refuse any row whose id is absent from the
+base (`DEVKIT_SHIP_PR_BASE_SHA` during a ship, else `HEAD`) unless it has:
+
+- `provenance` `mined`, `known-answer` or `adapted` — never `authored`;
+- a source anchor: `source.url`, `source.receipt` or a numeric `sourcePr`;
+- a `caseId` when `adapted`, and a `caseId` shared with its gold when `variantOf` is set.
+
+The check proves those fields are present, not that the cited source is true. It keys on row id,
+so it does not see an existing row rewritten in place. The `authored` rows still in the files
+(the original domain catalog golds, decoys and minimal pairs, and the early correctness regression
+set) are historical and kept by id; no new ones are added.
+
+**Proving a prompt edit adds no rows.** Use the `--against` A/B below over the committed rows. It
+shows whether the edit regresses existing golds or decoys; it cannot show recall on a bug class
+the corpus has no row for. For correctness, an unscored probe runs through the comparison runner
+(`runProbe` in `corpus/row.mts`: no expected label, no score).
+
+`variantOf` is documentation/traceability only — no metric reads it; a decoy's protection is its
+contribution to the `cleanPass` denominator.
 
 Fixture shape: gate assets (guard.config.json with `backendRoots:["api"]` /
 `frontendRoots:["web"]`, the agent brief, the checklist script, and the skill's SKILL.md — the

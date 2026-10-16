@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { BenchAbort, parseCasesText } from '../../../decisions/eval/bench.mts';
 import { BENCH_REVIEWERS, validateRow } from './bench.mts';
 import { assertHoldoutGroups, casesFile, lintRows, loadRows } from './corpus.mts';
+import { admissionProblems } from './corpus/admission.mts';
 import { groupByPair, nearTwins, unrelatedTwins } from './corpus/twins.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -96,6 +97,8 @@ function checkProposal(file) {
       const target = BENCH_REVIEWERS.find((r) => r.name === row.reviewer);
       const existing = target ? loadRows(target) : [];
       problems.push(...unrelatedTwinProblems([row], existing));
+      const existingIds = new Set(existing.map((r) => r.id));
+      problems.push(...admissionProblems([...existing, row], existingIds, row.reviewer));
       const cell = `${row.reviewer} × ${row.expected === 'FAIL' ? (row.expectItems ?? []).join('+') : 'decoy'} × ${row.difficulty ?? 'unlabelled'}`;
       const same = existing.filter(
         (r) =>
