@@ -1210,7 +1210,12 @@ if [ -n "$PR_URL" ]; then
   READY_STATUS=0
   reship_mark_ready "${PR_NUM:-}" || READY_STATUS=1
   echo "$PR_URL"
-  if [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then publish_evidence_block "$WT" "$PR_NUM" "$REPO" "$SHIP_COMMIT"; fi
+  # A body flag already wrote the UI item, unless this run resumed a rewrite past its gates.
+  if [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then
+    if [ "$REWRITE_ALREADY_PUBLISHED" -eq 1 ]; then publish_ui_item "$ROOT" "$PR_NUM" "$REPO" "$SHIP_COMMIT"
+    elif [ "$UPDATE_PR_BODY" -eq 0 ]; then publish_ui_item "$ROOT" "$PR_NUM" "$REPO"; fi
+    publish_evidence_block "$WT" "$PR_NUM" "$REPO" "$SHIP_COMMIT"
+  fi
   # The wait comes after the ready flip so it observes the check set that flip triggers — but a
   # FAILED flip skips it: the operator has an actionable remedy above, and burying it under up to two
   # hours of polling on a PR that is in the wrong state helps nobody.

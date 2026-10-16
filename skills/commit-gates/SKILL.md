@@ -133,9 +133,10 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   means no advice, and the judge can miss: when a change showed in the UI, attach the screenshots
   even if the reminder stayed silent. `uiEvidence.paths` adds globs to the defaults, for backend or
   `.ts` files whose output a repo knows the UI renders. `devkit ship --dry-gates` applies the path
-  rule only, with no model call. When a ship writes the PR body (opening the PR, or a re-ship with
-  `--body`/`--body-file`), a fired reminder becomes an unticked `📸` task item in that body. Tick
-  it once the screenshots or the "nothing visible changed" note are there; re-ships keep it.
+  rule only, with no model call. Once a ship has a PR, a fired reminder becomes an unticked `📸`
+  task item in its body. A ship that skipped its gates (a `--resume` or an adopted PR) applies the
+  path rule to its commit instead. Tick the item once the screenshots or the "nothing visible
+  changed" note are there; re-ships keep it.
 
 ## Comment budget
 

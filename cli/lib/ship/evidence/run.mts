@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
 // Ship's evidence step, run by publish-evidence.sh after the PR exists. `budget` sizes the bound,
-// `publish` writes the red/green block, `body` cleans a caller body and adds the UI task item.
+// `publish` writes the red/green block, `body` cleans a caller body and adds the UI task item, and
+// `ui-item` adds that item to an open PR whose body this ship did not write.
 import { readFileSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import type { RegressionEvidence } from '../../baseline-status/regression-evidence.mts';
@@ -11,9 +13,16 @@ import {
   type PreparedRegressionRepository,
   prepareRegressionRepository,
 } from '../../baseline-status/regression-repository.mts';
-import { UI_EVIDENCE } from '../../../../gate-engine/ui-evidence/check.mts';
+import { resolveGuardConfig } from '../../../../gate-engine/config.mts';
+import { git } from '../../../../gate-engine/decisions/git-io.mts';
+import {
+  instruction,
+  UI_EVIDENCE,
+  uiPathReason,
+} from '../../../../gate-engine/ui-evidence/check.mts';
 import { textOf } from '../digest/fields.mts';
 import { ATTEMPT, readShipEvents } from '../digest/gate-digest.mts';
+import { readJson } from '../../fs-helpers.mts';
 import { errorMessage } from '../review/shared/common.mts';
 import type { VerdictInput } from '../merge-verdict/ship-change.mts';
 import {
@@ -21,15 +30,17 @@ import {
   type PrintedVerdict,
   readEvidenceBlock,
   renderEvidenceBlock,
+  upsertEvidenceBlock,
   verdictUnavailable,
 } from './block.mts';
 import { type EvidenceConfig, expandCommand, readEvidenceConfig } from './config.mts';
 import { type EvidenceOutcome, inconclusive, notRun, outcomeFromRegression } from './outcome.mts';
-import { publishEvidenceBlock, readPull } from './pr-body.mts';
+import { publishBody, readPull } from './pr-body.mts';
 import { buildRedCommit, classifyChange, prBase, treeOf } from './red-ref.mts';
 import { withUiItem } from './ui-item.mts';
 
 const REPORT = '.devkit-evidence-report.json';
+const SKIPPED_QUIET = `📸 ${UI_EVIDENCE}: the gates were skipped (an earlier run passed them), so only file paths were checked, and none is a UI file; if this change is visible, add before/after screenshots to the PR`;
 
 interface Produced {
   outcome: EvidenceOutcome;
@@ -139,7 +150,7 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<vo
     env,
   });
   const block = renderEvidenceBlock(produced.outcome, produced.evidence, verdict);
-  const result = publishEvidenceBlock(repo, pr, head, block);
+  const result = publishBody(repo, pr, head, (body) => upsertEvidenceBlock(body, block));
   const { status, reason, detail } = produced.outcome;
   console.error(
     `evidence: ${status}${reason ? ` (${reason})` : ''}: ${detail} [PR body ${result}]`,
@@ -156,6 +167,35 @@ function uiEvidenceDetail(env: NodeJS.ProcessEnv): string | null {
   const rows = mine.filter((e) => e.type === 'advisory_result' && e.gate === UI_EVIDENCE);
   // A sink row is arbitrary JSON, so a non-string detail reads as no reminder instead of throwing.
   return textOf(rows[rows.length - 1]?.detail) || null;
+}
+
+/** The reminder a gate-skipped run would have given: the model-free path rule over its commit. */
+function skippedCommitDetail(cwd: string, commit: string): string | null {
+  const paths = git(cwd, ['diff', '--name-only', '-z', `${commit}^`, commit]).split('\0');
+  const reason = uiPathReason(paths.filter(Boolean), resolveGuardConfig(cwd).uiEvidence.paths);
+  return reason ? instruction(reason) : null;
+}
+
+/** Whether the repo installed the ui-evidence guard; a deselected one never reminds. */
+function uiEvidenceSelected(cwd: string): boolean {
+  const record = readJson<{ components?: { guards?: unknown } }>(
+    join(cwd, '.devkit', 'config.json'),
+  );
+  const guards = record?.components?.guards;
+  return Array.isArray(guards) && guards.includes(UI_EVIDENCE);
+}
+
+/** Add the item to the open PR's own body; an item already there, ticked or not, is left alone. */
+function publishUiItem(cwd: string, repo: string, pr: string, skipped: string | undefined): void {
+  if (skipped && !uiEvidenceSelected(cwd)) return;
+  const detail = skipped ? skippedCommitDetail(cwd, skipped) : uiEvidenceDetail(process.env);
+  if (!detail) {
+    if (skipped) console.error(SKIPPED_QUIET);
+    return;
+  }
+  if (publishBody(repo, pr, null, (body) => withUiItem(body, body, detail)) === 'written') {
+    console.error(`📸 ${UI_EVIDENCE}: added the screenshot task item to the PR`);
+  }
 }
 
 function required(values: Record<string, string | undefined>, name: string): string {
@@ -176,6 +216,7 @@ async function main(argv: string[]): Promise<void> {
     pr: { type: 'string' },
     head: { type: 'string' },
     failed: { type: 'string' },
+    'skipped-commit': { type: 'string' },
   } as const;
   const { values } = parseArgs({ args: rest, options, strict: true });
   if (command === 'body') {
@@ -192,7 +233,14 @@ async function main(argv: string[]): Promise<void> {
     process.stdout.write(withUiItem(body, current, uiEvidenceDetail(process.env)));
     return;
   }
-  if (command !== 'publish') throw new Error('usage: run.mts budget <dir> | publish … | body …');
+  if (command === 'ui-item') {
+    const [cwd, repo, pr] = ['cwd', 'repo', 'pr'].map((name) => required(values, name));
+    publishUiItem(cwd, repo, pr, values['skipped-commit']);
+    return;
+  }
+  if (command !== 'publish') {
+    throw new Error('usage: run.mts budget <dir> | publish … | body … | ui-item …');
+  }
   await publish({
     cwd: required(values, 'cwd'),
     repo: required(values, 'repo'),
