@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { envBool, envVar } from '../../../../gate-engine/config.mts';
 import { readShipEvents } from '../digest/gate-digest.mts';
+import { SKIP_CONTROLS } from '../digest/skip-controls.mts';
 
 /** Where this ship's gate rows live, captured before the evidence run clears DEVKIT_* from env. */
 export interface ShipRecord {
@@ -38,12 +39,6 @@ export const BYPASS_FLAGS = [
 const REAIM_FLAGS = ['REVIEW_SKIP', 'DECISIONS_DIR', 'ALLOWLIST_PATH'] as const;
 /** Hard by default; an explicit =0 softens the gate to a warning. */
 const SOFTEN_FLAGS = ['COMPLETENESS_HARD', 'SENTRY_HARD'] as const;
-
-/** review_skipped reasons a one-run control causes, under the control's own name. */
-const SKIP_CONTROLS = new Map([
-  ['gate_disabled', 'GUARD_NO_REVIEW'],
-  ['GUARD_REVIEW_SKIP', 'GUARD_REVIEW_SKIP'],
-]);
 
 // Untrusted JSONL from several emitters: a wrong-typed field reads as absent, the row is kept.
 const text = z.string().optional().catch(undefined);
