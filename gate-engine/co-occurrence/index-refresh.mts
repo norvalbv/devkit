@@ -99,6 +99,15 @@ export function primaryIndexFallback(indexPath: string, cwd: string): string | n
   return primary && (usableChunksAt(primary) ?? 0) > 0 ? primary : null;
 }
 
+/** The index doctor inspects for a configured `indexPath`, and how to name it: a linked worktree
+ * without a usable one inspects the primary checkout's, as the matcher reads it. */
+export function indexToInspect(indexPath: string, cwd: string) {
+  const local = resolve(cwd, indexPath);
+  const fallback = primaryIndexFallback(local, cwd);
+  if (!fallback) return { indexPath: local, reads: indexPath };
+  return { indexPath: fallback, reads: `${fallback} (the primary checkout's)` };
+}
+
 /** The index the matcher reads: the configured one, or (when `borrow`) the primary's when a linked
  * worktree has none usable. A caller that writes the index passes false: it must own what it writes. */
 export function linkedWorktreeIndex(
@@ -110,7 +119,7 @@ export function linkedWorktreeIndex(
   const primary = borrow ? primaryIndexFallback(local, cfg.cwd) : null;
   if (!primary) return local;
   process.stderr.write(
-    `guard-dup: this linked worktree has no usable index — reading the primary checkout's ${primary} read-only, as \`devkit ship\` does.\n`,
+    `guard-dup: this linked worktree has no usable index — reading the primary checkout's ${primary}, as \`devkit ship\` does.\n`,
   );
   return primary;
 }
