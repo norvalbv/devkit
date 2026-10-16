@@ -71,7 +71,7 @@ export const meta = {
 
 Usage:
   devkit ship <branch> "<title>" [--dry-gates [--with-reviewers]] [--base <b>] [--from-branch] [--body "<text>"] [--body-file <f>] [--draft] [--link <d>]... [--] <path...>
-  devkit ship --pr <branch> "<title>" [--ready] [--body "<text>"] [--link <d>]... [--] <path...>
+  devkit ship --pr <branch> "<title>" [--ready] [--body "<text>"] [--body-file <f>] [--link <d>]... [--] <path...>
   devkit ship --resume <branch> [--body-file <f>] [--] <extra-path...>
   devkit ship --queue
                           bare positional paths (no --) are accepted.
@@ -112,6 +112,9 @@ Usage:
                       the recorded body differ). Mutually exclusive with --body; wins over stdin.
                       With --pr, only these two explicit flags refresh the EXISTING PR description;
                       omitting both preserves it (piped stdin remains commit-only for compatibility).
+                      That same text is the NEW commit's message, judged against its diff alone, so
+                      on a --pr follow-up (no --base) it must describe only the new commit: pipe a
+                      commit-scoped body on stdin to keep the whole-PR description.
   --resume <branch>   Replay the invocation recorded by the previous attempt for <branch> (title,
                       base, body, links, paths — every attempt records itself), instead of re-typing
                       them. LEADING position only. For an explicit-path ship, extra paths after [--]
