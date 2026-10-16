@@ -47,6 +47,19 @@ describe('devkit vitest config under vitest 5', () => {
     for (const project of projects) expect(project).toMatchObject({ extends: false });
   });
 
+  it('lints exactly the git-integration files for the spawn-site boundary', () => {
+    const lint: { overrides: { files: string[]; rules: Record<string, string> }[] } = JSON.parse(
+      readFileSync(path.join(REPO, 'oxc/oxlint.devkit-lint.json'), 'utf8'),
+    );
+    const override = lint.overrides.find((o) => 'devkit/spawn-site-boundary' in o.rules);
+    const files = override?.files.map((f) => f.replace(/^\*\*\//, ''));
+    expect(config.test?.projects).toContainEqual(
+      expect.objectContaining({
+        test: expect.objectContaining({ name: 'git-integration', include: files }),
+      }),
+    );
+  });
+
   it('attaches v8 coverage to spawned child processes', () => {
     expect(config.test?.coverage).toMatchObject({ provider: 'v8', autoAttachSubprocess: true });
   });
