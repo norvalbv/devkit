@@ -6,7 +6,9 @@ import { afterEach, expect, it } from 'vitest';
 import {
   declaringFiles,
   liveNotes,
+  passesBar,
   replayCommit,
+  tally,
 } from '../../../docs/benchmarks/experiments/2026-10-16-note-mention-replay/replay.mjs';
 
 const dirs: string[] = [];
@@ -107,4 +109,25 @@ it('drops a hit in arm C when another file declares the same name and the note n
   });
   expect(replayCommit(sha, 'B', dir)).toHaveLength(1);
   expect(replayCommit(sha, 'C', dir)).toEqual([]);
+});
+
+const hit = (note: string, name: string) => ({ file: 'src/env.mts', note, name });
+
+it('tallies only commits that changed source, and counts each note-and-name pair once', () => {
+  const counts = tally([
+    null,
+    [],
+    [hit('a#note:1', 'withStagedFiles')],
+    [hit('a#note:1', 'withStagedFiles'), hit('b#note:2', 'readDiagnosis')],
+  ]);
+  expect(counts).toEqual({ commits: 3, fired: 2, lines: 3, perCommit: 1, distinctPairs: 2 });
+});
+
+// `null <= 0.5` is true in JavaScript, so an empty replay would otherwise read as a pass.
+it('never passes a replay with no source-changing commit, even when both incident variants hit', () => {
+  const both = { moved: true, inPlace: true };
+  expect(tally([null, null]).perCommit).toBeNull();
+  expect(passesBar(tally([null, null]), both)).toBe(false);
+  expect(passesBar(tally([[], []]), both)).toBe(true);
+  expect(passesBar(tally([[], []]), { moved: true, inPlace: false })).toBe(false);
 });

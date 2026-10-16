@@ -66,20 +66,24 @@ export function liveNotes(rev, cwd = process.cwd()) {
   return out;
 }
 
+function headerNames(header, arm) {
+  if (arm === 'A') return [];
+  if (arm === 'D') return [...header.matchAll(DECL)].map((m) => m[1]);
+  return header.match(TOKEN) ?? [];
+}
+
+/** Names one diff line contributes: its hunk header's (arms B to D) or a removed line's tokens. */
+function lineNames(line, arm) {
+  if (line.startsWith('@@')) return headerNames(line.replace(/^@@[^@]*@@/, ''), arm);
+  if (!line.startsWith('-') || line.startsWith('---')) return [];
+  if (arm === 'C' && COMMENT_LINE.test(line)) return [];
+  return line.match(TOKEN) ?? [];
+}
+
 /** Names the diff changes, per arm. Every arm keeps only names the parent file declares. */
 function changedNames(diff, arm, declared) {
-  const out = new Set();
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('@@')) {
-      const header = line.replace(/^@@[^@]*@@/, '');
-      if (arm === 'D') for (const m of header.matchAll(DECL)) out.add(m[1]);
-      else if (arm !== 'A') for (const t of header.match(TOKEN) ?? []) out.add(t);
-    } else if (line.startsWith('-') && !line.startsWith('---')) {
-      if (arm === 'C' && COMMENT_LINE.test(line)) continue;
-      for (const t of line.match(TOKEN) ?? []) out.add(t);
-    }
-  }
-  return [...out].filter((n) => looksLikeIdentifier(n) && declared.has(n));
+  const names = new Set(diff.split('\n').flatMap((line) => lineNames(line, arm)));
+  return [...names].filter((n) => looksLikeIdentifier(n) && declared.has(n));
 }
 
 /** Files at `rev` declaring `name`. POSIX classes only: BSD regex (Apple git) has no `\s` or `\b`. */
@@ -156,32 +160,30 @@ function inPlaceIncident(arm) {
   }
 }
 
-function runArm(arm, shas) {
-  let commits = 0;
-  let fired = 0;
-  let lines = 0;
-  const pairs = new Map();
-  for (const sha of shas) {
-    const hits = replayCommit(sha, arm);
-    if (hits === null) continue;
-    commits++;
-    if (hits.length) fired++;
-    lines += hits.length;
-    for (const h of hits) pairs.set(`${h.note} ${h.name}`, (pairs.get(`${h.note} ${h.name}`) ?? 0) + 1);
-  }
-  const movedIncident = (replayCommit(git(process.cwd(), 'rev-parse', INCIDENT).trim(), arm) ?? []).some((h) => h.note === INCIDENT_NOTE);
-  const inPlace = inPlaceIncident(arm);
-  const perCommit = Number((lines / commits).toFixed(2));
+/** Counts over one arm's replays; a null replay is a commit that changed no source file. */
+export function tally(replays) {
+  const counted = replays.filter((hits) => hits !== null);
+  const lines = counted.reduce((n, hits) => n + hits.length, 0);
   return {
-    arm,
-    commits,
-    fired,
+    commits: counted.length,
+    fired: counted.filter((hits) => hits.length > 0).length,
     lines,
-    perCommit,
-    distinctPairs: pairs.size,
-    incident: { moved: movedIncident, inPlace },
-    passes: movedIncident && inPlace && perCommit <= BAR_LINES_PER_COMMIT,
+    perCommit: counted.length ? Number((lines / counted.length).toFixed(2)) : null,
+    distinctPairs: new Set(counted.flat().map((h) => `${h.note} ${h.name}`)).size,
   };
+}
+
+/** An empty replay never passes: `null <= bar` is true in JavaScript. */
+export function passesBar(counts, incident) {
+  return incident.moved && incident.inPlace && counts.perCommit !== null && counts.perCommit <= BAR_LINES_PER_COMMIT;
+}
+
+function runArm(arm, shas) {
+  const counts = tally(shas.map((sha) => replayCommit(sha, arm)));
+  const incidentSha = git(process.cwd(), 'rev-parse', INCIDENT).trim();
+  const moved = (replayCommit(incidentSha, arm) ?? []).some((h) => h.note === INCIDENT_NOTE);
+  const incident = { moved, inPlace: inPlaceIncident(arm) };
+  return { arm, ...counts, incident, passes: passesBar(counts, incident) };
 }
 
 function main() {
