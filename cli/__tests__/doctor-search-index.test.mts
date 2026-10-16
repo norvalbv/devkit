@@ -270,8 +270,8 @@ describe('checkSearchIndex — the branches the callers gate off', () => {
     const result = checkSearchIndex(root, '.search-code/index.db', true);
     expect(result.status).toBe('MISSING');
     expect(result.advisory).toBe(true);
-    expect(result.detail).toContain('LINKED WORKTREE');
-    expect(result.detail).toContain('devkit ship --link');
+    expect(result.detail).toContain('Build one with your indexer');
+    expect(result.detail).not.toContain('ln -s');
   });
 
   it('surfaces a configured index whose file stamps are behind the checkout', () => {

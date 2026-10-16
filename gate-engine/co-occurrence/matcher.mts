@@ -72,7 +72,7 @@ import {
 } from './chunk-index.mts';
 import { classifyPair } from './classify.mts';
 import { isExpired } from './decay.mts';
-import { missingIndexMessage, refreshIndex } from './index-refresh.mts';
+import { linkedWorktreeIndex, missingIndexMessage, refreshIndex } from './index-refresh.mts';
 
 // ── Types ── the row shape, blob decode and freshness live in chunk-index.mts (index-read boundary).
 // Tier + size thresholds (mirrors resolveGuardConfig().thresholds + --flag overrides).
@@ -121,9 +121,6 @@ const labelsPath = resolve(here, 'labels.json');
 // Resolve config against the consumer cwd (W-3). All thresholds + paths flow from here.
 const cfg = resolveGuardConfig(process.cwd());
 
-// Index path: SEARCH_CODE_DB env (fixtures/tests) wins; else config.indexPath
-// resolved to the consumer cwd. null => no index configured => matcher opt-out.
-const dbPath = process.env.SEARCH_CODE_DB ?? resolveFromCwd(cfg, 'indexPath');
 // Allowlist: CO_OCCURRENCE_ALLOWLIST env (fixtures/tests) wins; else config.allowlistPath.
 const allowlistPathRaw =
   process.env.CO_OCCURRENCE_ALLOWLIST ?? resolveFromCwd(cfg, 'allowlistPath');
@@ -136,6 +133,9 @@ const CO_SCRIPT = process.env.GUARD_ALLOWLIST_CLI || ALLOWLIST_CLI;
 
 const argv = process.argv.slice(2);
 const mode = argv[0] ?? 'scan';
+// SEARCH_CODE_DB (fixtures/tests) wins; else config.indexPath, or the primary checkout's in a linked
+// worktree without a usable one. baseline writes the index, so it never borrows. null => opt-out.
+const dbPath = process.env.SEARCH_CODE_DB ?? linkedWorktreeIndex(cfg, mode !== 'baseline');
 const flag = flagReader(argv);
 // Knob defaults come from the resolved config thresholds (consumer-tunable), with
 // per-run --flag overrides on top.
