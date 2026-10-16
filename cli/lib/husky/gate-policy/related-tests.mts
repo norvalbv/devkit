@@ -5,8 +5,9 @@
 
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mts';
 import { stagedSet } from '../../../../gate-engine/ratchets/git-index.mts';
 
 // Runs with every selection: it fails when a module is left unreachable to `vitest related` itself.
@@ -19,6 +20,74 @@ const RERUN_TRIGGER_RE = /(^|\/)(package\.json|(vitest|vite)\.config\.[^/]*)$|^v
 /** The staged paths handed to `vitest related`, sorted, minus the full-suite triggers. */
 export function relatedPaths(staged: Iterable<string>): string[] {
   return [...staged].filter((p) => !RERUN_TRIGGER_RE.test(p)).sort();
+}
+
+// Extensions vite can hold in its module graph; any other staged path never selects a test.
+const MODULE_RE = /\.[cm]?[jt]sx?$|\.json$/;
+
+/** Staged paths `vitest related` cannot map to a test, such as shell scripts and templates. */
+export function unmappedPaths(paths: string[]): string[] {
+  return paths.filter((p) => !MODULE_RE.test(p));
+}
+
+type Grep = (root: string, needles: string[]) => ReadonlyMap<string, Iterable<string>>;
+
+// `reship.test.mts` first, then `reship-*.test.mts`, then any other test naming reship.sh.
+function nameRank(test: string, stem: string): number {
+  if (test === `${stem}.test.mts`) return 0;
+  return test.startsWith(stem) ? 1 : 2;
+}
+
+/** The commit-index test files naming each needle: one ls-files and one grep however many there are. */
+function gitGrepTests(root: string, needles: string[]): Map<string, Set<string>> {
+  const env = commitIndexEnv(root);
+  const ls = spawnSync('git', ['ls-files', '--cached', '-z'], { cwd: root, env, encoding: 'utf8' });
+  const counts = new Map<string, number>();
+  for (const f of ls.stdout.split('\0')) {
+    if (f && !f.startsWith('dist/')) counts.set(basename(f), (counts.get(basename(f)) ?? 0) + 1);
+  }
+  // A basename several sources share (README.md, check.sh) names none of them; dist/ only mirrors.
+  const named = needles.filter((n) => (counts.get(n) ?? 0) < 2);
+  const hits = new Map<string, Set<string>>();
+  if (!named.length) return hits;
+  // -o prints `file\0match` per hit; -w keeps a test naming reship.sh from naming ship.sh.
+  const args = ['grep', '--cached', '-zowF', ...named.flatMap((n) => ['-e', n])];
+  const r = spawnSync('git', [...args, '--', ':(glob)**/*.test.mts'], {
+    cwd: root,
+    env,
+    encoding: 'utf8',
+  });
+  if (r.status === 1) return hits;
+  if (r.status !== 0) throw new Error(r.stderr || 'git grep failed');
+  for (const [file, match] of r.stdout.split('\n').map((l) => l.split('\0'))) {
+    if (match) hits.set(match, (hits.get(match) ?? new Set()).add(file));
+  }
+  return hits;
+}
+
+/** Names each unmapped staged path and the tests that mention it, since vitest related ran none. */
+export function noteUnmapped(root: string, paths: string[], grep: Grep = gitGrepTests): void {
+  try {
+    const unmapped = unmappedPaths(paths);
+    if (!unmapped.length) return;
+    const hits = grep(root, [...new Set(unmapped.map((p) => basename(p)))]);
+    const lines = unmapped.flatMap((p) => {
+      const stem = basename(p, extname(p));
+      const tests = [...(hits.get(basename(p)) ?? [])]
+        .map((t) => basename(t))
+        .sort((a, b) => nameRank(a, stem) - nameRank(b, stem));
+      if (!tests.length) return [];
+      const more = tests.length > 3 ? ` (+${tests.length - 3})` : '';
+      return [`  ${p} ← ${tests.slice(0, 3).join(', ')}${more}`];
+    });
+    if (!lines.length) return;
+    console.log(
+      `related-tests: ${lines.length} staged path(s) have no import-graph tests — not run here, CI will:`,
+    );
+    console.log(lines.join('\n'));
+  } catch {
+    // Disclosure only: a failed lookup never changes the gate's verdict.
+  }
 }
 
 type Exec = (
@@ -49,5 +118,7 @@ export function runRelatedTests(root: string, opts: RunOpts = {}): number {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-  process.exitCode = runRelatedTests(process.cwd());
+  const code = runRelatedTests(process.cwd());
+  noteUnmapped(process.cwd(), relatedPaths(stagedSet(process.cwd()) ?? []));
+  process.exitCode = code;
 }
