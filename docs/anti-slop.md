@@ -34,6 +34,7 @@ devkit anti-slop check --staged             # exact Git-index snapshot against H
 devkit anti-slop check --base <git-ref>     # full CI scan + baseline monotonicity
 devkit anti-slop inspect [--json]           # read-only debt inventory
 devkit anti-slop prune [paths...]           # shrink existing debt only
+devkit anti-slop rekey                      # one-time move of line-identity debt to span identity
 ```
 
 Paths are literal existing files/directories inside the repository and default to the repository
@@ -102,7 +103,7 @@ while the source still exists (or is deleted), which Git reports as edits rather
 `check --staged` and `check --base` print such a finding as
 `RELOCATED <rule> <file>:<line> <- <source>` and summarize `FAIL — X new, Y relocated from
 <sources>` instead of counting it as new. A finding is relocated only when its rule, normalized
-diagnostic, and normalized source line match debt that a modified, renamed, or deleted file provably
+diagnostic, and normalized span context match debt that a modified, renamed, or deleted file provably
 gave up: the source's base baseline entry AND a lint of its base bytes must both carry it, and the
 candidate lint of the source must no longer, so unpruned stale credit is never spendable. Pairing is
 one-to-one in source path order, every candidate source is named, and excess copies stay new. Run the
@@ -121,7 +122,7 @@ local baseline and `HEAD` bound relocation, and `adopt-relocations --base` is re
 other base comparison.
 
 Occurrences with the same rule, repository-relative file, normalized diagnostic, and normalized
-source line are intentionally fungible and share one counted fingerprint. The ratchet prevents that
+span context are intentionally fungible and share one counted fingerprint. The ratchet prevents that
 debt class from growing; it does not assign provenance to otherwise indistinguishable occurrences.
 This keeps unrelated line-number shifts from reclassifying an adopted repository's existing debt.
 
@@ -130,11 +131,22 @@ Each fingerprint is SHA-256 over exactly:
 1. the namespaced rule id;
 2. the POSIX repository-relative file path;
 3. the whitespace-normalized diagnostic;
-4. the whitespace/line-ending-normalized reported source line.
+4. the whitespace-normalized first line of the reported span's text (sliced by Oxlint's UTF-8 byte
+   offset), or the reported source line for a diagnostic without a span.
 
+Keying on the span rather than the line around it means a formatter reflowing a signature, or an
+edit to a neighbouring parameter on the same line, leaves the unchanged findings baselined.
 Absolute checkout paths and line numbers are excluded. Identical fingerprints carry a count, so a
 third copy of an already-baselined two-copy pattern is still new. The file contains no timestamp and
 entries sort by fingerprint, making identical repositories byte-for-byte deterministic.
+
+A baseline written before span identity has no `"identity": "span-first-line"` field. Check, prune,
+create and the adopt verbs refuse it with `run devkit anti-slop rekey`; `devkit upgrade` re-keys it
+automatically. Rekey lints the tree the baseline describes (HEAD when HEAD commits one, else the
+working tree) and moves each entry onto the span fingerprints it observes, never more than the entry's
+count; entries no finding carries any more are dropped. Every gate re-keys a legacy committed base
+the same way when it reads it, so the migration commit compares like with like and real growth still
+reports `BASELINE-GROWTH`.
 
 ## Authoring-time check
 

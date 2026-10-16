@@ -30,7 +30,9 @@ import { adoptAgentAssetCollisions } from '../lib/install/agent-assets/agent-sur
 import {
   adoptActivatedAntiSlopFindings,
   captureAntiSlopBaselineActivation,
+  type PendingAntiSlopBaselineActivation,
 } from '../lib/install/anti-slop/managed-state.mts';
+import { rekeyWorkingBaseline } from '../lib/install/anti-slop/baseline-envelope.mts';
 import { collectAntiSlopGroups } from '../lib/install/anti-slop/runner.mts';
 import { lockedCommand } from '../lib/install/init/init-lock.mts';
 import {
@@ -44,6 +46,21 @@ import doctor from './doctor.mts';
 import { applyInit } from './init.mts';
 import { computeMigration } from './migrate-config.mts';
 import update, { cmpSemver, DEP, fetchLatestTag, needsRerun, repinPackageJson } from './update.mts';
+
+/** Re-key a line-identity baseline, then adopt a release's newly activated rule debt. */
+function adoptAntiSlopBaseline(
+  cwd: string,
+  previewActivation: PendingAntiSlopBaselineActivation | null,
+  dryRun: boolean,
+): boolean {
+  return adoptActivatedAntiSlopFindings(
+    cwd,
+    previewActivation,
+    dryRun,
+    () => collectAntiSlopGroups(cwd, []),
+    (legacy) => rekeyWorkingBaseline(cwd, legacy),
+  );
+}
 
 export const meta = {
   name: 'upgrade',
@@ -152,10 +169,7 @@ async function upgrade(args: string[], cwd: string): Promise<number> {
       regenStructureBaselines: false,
     });
     const baselineReady =
-      !selection.antiSlop ||
-      adoptActivatedAntiSlopFindings(cwd, previousAntiSlopRuleIds, dryRun, () =>
-        collectAntiSlopGroups(cwd, []),
-      );
+      !selection.antiSlop || adoptAntiSlopBaseline(cwd, previousAntiSlopRuleIds, dryRun);
     if (dryRun) {
       console.log('\nDry-run complete — nothing written.');
       return 0;
@@ -279,10 +293,7 @@ async function upgrade(args: string[], cwd: string): Promise<number> {
       resyncOverlayAgentSurfaces(cwd, sel, cfg.components, () => true, dryRun);
     }
     const overlayBaselineReady =
-      !sel.antiSlop ||
-      adoptActivatedAntiSlopFindings(cwd, previousAntiSlopRuleIds, dryRun, () =>
-        collectAntiSlopGroups(cwd, []),
-      );
+      !sel.antiSlop || adoptAntiSlopBaseline(cwd, previousAntiSlopRuleIds, dryRun);
     if (dryRun) {
       console.log('\nDry-run complete — nothing written.');
       return 0;
@@ -417,10 +428,7 @@ async function upgrade(args: string[], cwd: string): Promise<number> {
     disabledGuards,
   });
   const baselineReady =
-    !sel.antiSlop ||
-    adoptActivatedAntiSlopFindings(cwd, previousAntiSlopRuleIds, dryRun, () =>
-      collectAntiSlopGroups(cwd, []),
-    );
+    !sel.antiSlop || adoptAntiSlopBaseline(cwd, previousAntiSlopRuleIds, dryRun);
 
   // ── 5. --force asset adoption (assets only — never configs) ─────────────────
   // --force is driven by the `override` OPT (args only carry --dry-run). Re-syncs the selected

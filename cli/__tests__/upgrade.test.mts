@@ -7,6 +7,7 @@
  * fast (no network) → upgrade takes the installed==latest reconcile path deterministically.
  */
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -209,6 +210,41 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
     const bytes = read(join(root, '.anti-slop-baseline.json'));
     expect(run(root, 'upgrade').status).toBe(0);
     expect(read(join(root, '.anti-slop-baseline.json'))).toBe(bytes);
+  });
+
+  it('re-keys a line-identity baseline before adopting a release activation', () => {
+    const root = initFixture(['--no-cursor', '--anti-slop']);
+    mkdirSync(join(root, 'src'), { recursive: true });
+    const line = 'export function widen(value: object) { return value; }';
+    writeFileSync(join(root, 'src', 'existing.ts'), `${line}\n`);
+    expect(run(root, 'anti-slop', 'create').status).toBe(0);
+    const current = JSON.parse(read(join(root, '.anti-slop-baseline.json')));
+    const legacy = current.entries.map((entry) => {
+      const parts = [entry.ruleId, entry.file, entry.diagnostic, line];
+      const fingerprint = createHash('sha256').update(JSON.stringify(parts)).digest('hex');
+      return { ...entry, context: line, fingerprint };
+    });
+    const { identity: _identity, ...rest } = current;
+    writeFileSync(
+      join(root, '.anti-slop-baseline.json'),
+      `${JSON.stringify({ ...rest, entries: legacy }, null, 2)}\n`,
+    );
+    expect(run(root, 'anti-slop', 'check').status).toBe(1);
+    writeFileSync(
+      join(root, 'src', 'introduced.ts'),
+      'const parsed = JSON.parse(raw); parsed["constructor"]; Object.entries(parsed);\n',
+    );
+    restorePublishedV059AntiSlop(root);
+
+    const up = run(root, 'upgrade');
+    expect(up.status, up.stderr || up.stdout).toBe(0);
+    expect(up.stdout).toContain('re-keyed 1 finding(s) to span identity, dropped 0');
+    expect(up.stdout).toMatch(/adopted 2 existing finding\(s\)/);
+    const after = JSON.parse(read(join(root, '.anti-slop-baseline.json')));
+    expect(after.identity).toBe('span-first-line');
+    expect(after.entries).toEqual(expect.arrayContaining(current.entries));
+    const checked = run(root, 'anti-slop', 'check');
+    expect(checked.status, checked.stderr || checked.stdout).toBe(0);
   });
 
   it('retries baseline adoption after capability sync completed but the prior upgrade stopped', () => {
