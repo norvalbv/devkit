@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { aggregate, regressionFlips } from '../eval/bench.mts';
 import { loadRows } from '../eval/cases.mts';
@@ -112,5 +114,29 @@ describe('committed corpus', () => {
     expect(row?.expectVerdict).not.toContain('SOLVED_ELSEWHERE');
     expect(row?.expectFraming).toEqual(['NARROWS']);
     expect(row?.legs.local).toMatchObject({ status: 'reached', resolved: 1 });
+  });
+});
+
+describe('CLI argument wiring (no LLM call on either path)', () => {
+  const bench = (...args: string[]) =>
+    spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL('../eval/bench.mts', import.meta.url)), ...args],
+      {
+        encoding: 'utf8',
+      },
+    );
+
+  it('feeds a comma-separated --only into the run as one corpus', () => {
+    const result = bench('coverage', '--only', 'int-qavis-visual-qa,int-vendored-adhd');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('prior-art-eval corpus: 2 rows');
+  });
+
+  it('exits 2 with usage when --only has no value, instead of a stack trace or a full run', () => {
+    const result = bench('--dev', '--only');
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('usage: node bench.mts');
+    expect(result.stderr).not.toContain('    at ');
   });
 });

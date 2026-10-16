@@ -63,7 +63,14 @@ node gate-engine/prior-art/eval/bench.mts coverage      # corpus lint + slot cou
 node gate-engine/prior-art/eval/bench.mts --dev         # K=1 scoring run
 BENCH_RUNS=3 node gate-engine/prior-art/eval/bench.mts --baseline   # writes results.baseline.json
 node gate-engine/prior-art/eval/bench.mts --fail        # exit 1 on any row flip vs baseline
+node gate-engine/prior-art/eval/bench.mts --dev --only int-a,int-b   # subset, one combined summary
 ```
+
+Under each row, every slot the majority flagged (gold missed, decoy endorsed) lists its agreeing
+runs: the item the matcher picked (`← F<n>`, `(unstable)` on a split vote) and a 240-char excerpt
+of that item and of the response's conclusion, or `matcher dark` when every vote was dark. That is
+enough to tell a matcher false positive from an agent regression without opening
+`checkpoint.jsonl`; the `run#` is the bank's run index.
 
 **The committed seed baseline is K=1** (a deliberate cost decision, 2026-08-06): `runs: 1` in the
 baseline, so the adapter reports it not-accepted and the subject stays `evidence-only`. Upgrading

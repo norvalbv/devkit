@@ -21,10 +21,12 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 import { BenchAbort, cleanBenchEnv, majorityVerdict, wilson } from '../../decisions/eval/bench.mts';
 import { parsePriorArtResponse } from '../response-contract.mts';
 import { casesPath, loadRows, type Row } from './cases.mts';
 import { mapPool, projectResponse, runMatcher, scoreCase } from './matcher.mts';
+import { formatRow, type RowResult, type RunMatch, selectRows } from './report.mts';
 import {
   AGENT_MD_PATH,
   type AgentSource,
@@ -81,20 +83,6 @@ export function responseFingerprint(agent: AgentSource): string {
 
 // ─── Per-row execution ────────────────────────────────────────────────────────────
 
-interface RowResult {
-  id: string;
-  verdict: string;
-  verdictOk: boolean;
-  framing: string;
-  framingOk: boolean | null;
-  unanimous: boolean;
-  valid: { ok: number; total: number };
-  gold: { slotId: string; hit: boolean }[];
-  decoys: { slotId: string; endorsed: boolean }[];
-  genuineClean: boolean | null;
-  outages: number;
-}
-
 interface RunRecord {
   raw: string | null;
   valid: boolean;
@@ -117,7 +105,11 @@ function recordRun(raw: string | null): RunRecord {
   };
 }
 
-async function scoreRow(row: Row, runs: RunRecord[], outages: number): Promise<RowResult> {
+async function scoreRow(
+  row: Row,
+  runs: RunRecord[],
+  outages: number,
+): Promise<{ result: RowResult; matches: RunMatch[] }> {
   const verdictVote = majorityVerdict(runs.map((run) => run.verdict)) as {
     verdict: string;
     unanimous: boolean;
@@ -140,13 +132,15 @@ async function scoreRow(row: Row, runs: RunRecord[], outages: number): Promise<R
     slotId: slot.id,
     endorsed: false,
   }));
+  const matches: RunMatch[] = [];
   if (!row.contractOnly && (row.gold.length || row.decoys.length)) {
     const hitCounts = new Map<string, number>();
     const endorseCounts = new Map<string, number>();
-    const validRuns = runs.filter((run) => run.valid && run.raw !== null);
-    for (const run of validRuns) {
-      const items = projectResponse(run.raw as string);
+    for (const [run, record] of runs.entries()) {
+      if (!record.valid || record.raw === null) continue;
+      const items = projectResponse(record.raw);
       const outcomes = await runMatcher(row.gold, row.decoys, items, { runs: MATCH_RUNS });
+      matches.push({ run, items, outcomes });
       for (const slot of scoreCase(outcomes).slots) {
         if (slot.kind === 'gold' && slot.got === 'hit')
           hitCounts.set(slot.slotId, (hitCounts.get(slot.slotId) ?? 0) + 1);
@@ -154,11 +148,11 @@ async function scoreRow(row: Row, runs: RunRecord[], outages: number): Promise<R
           endorseCounts.set(slot.slotId, (endorseCounts.get(slot.slotId) ?? 0) + 1);
       }
     }
-    const majority = Math.floor(validRuns.length / 2) + 1;
+    const majority = Math.floor(matches.length / 2) + 1;
     for (const entry of gold) entry.hit = (hitCounts.get(entry.slotId) ?? 0) >= majority;
     for (const entry of decoys) entry.endorsed = (endorseCounts.get(entry.slotId) ?? 0) >= majority;
   }
-  return {
+  const result: RowResult = {
     id: row.id,
     verdict: verdictVote.verdict,
     verdictOk,
@@ -171,6 +165,7 @@ async function scoreRow(row: Row, runs: RunRecord[], outages: number): Promise<R
     genuineClean,
     outages,
   };
+  return { result, matches };
 }
 
 // ─── Aggregation ──────────────────────────────────────────────────────────────────
@@ -257,7 +252,7 @@ const line = (label: string, k: number, n: number) => {
   return `  ${label}: ${k}/${n} = ${(k / n).toFixed(2)} [${lo.toFixed(2)}, ${hi.toFixed(2)}]`;
 };
 
-function printSummary(summary: Summary): void {
+function printSummary(summary: Summary, matchesByRow: Map<string, RunMatch[]>): void {
   const value = summary.priorArt;
   console.log(`\nprior-art-eval — model=${value.model} K=${value.runs} matchK=${value.matchRuns}`);
   console.log(
@@ -281,19 +276,8 @@ function printSummary(summary: Summary): void {
     ),
   );
   console.log(`  outages: ${value.outages}`);
-  for (const [id, row] of Object.entries(value.rows)) {
-    const marks = [
-      row.verdictOk ? 'V✓' : `V✗(${row.verdict})`,
-      row.framingOk === null ? '' : row.framingOk ? 'F✓' : `F✗(${row.framing})`,
-      row.gold.length
-        ? `gold ${row.gold.filter((slot) => slot.hit).length}/${row.gold.length}`
-        : '',
-      row.decoys.some((slot) => slot.endorsed) ? 'DECOY-ENDORSED' : '',
-    ]
-      .filter(Boolean)
-      .join(' ');
-    console.log(`    ${id}: ${marks}`);
-  }
+  for (const [id, row] of Object.entries(value.rows))
+    for (const text of formatRow(id, row, matchesByRow.get(id) ?? [])) console.log(text);
 }
 
 // ─── Regression check (row flips, never aggregate deltas) ─────────────────────────
@@ -318,7 +302,7 @@ export function regressionFlips(summary: Summary, baselineRaw: string): string[]
 // ─── CLI ──────────────────────────────────────────────────────────────────────────
 
 const USAGE =
-  'usage: node bench.mts <coverage | --dev | --baseline | --fail> [--only <rowId>]\n' +
+  'usage: node bench.mts <coverage | --dev | --baseline | --fail> [--only <rowId[,rowId…]>]\n' +
   '  coverage    lint the corpus and print slot counts (no LLM calls)\n' +
   '  --dev       K=1 scoring run, no baseline write\n' +
   '  --baseline  full run (set BENCH_RUNS=3), writes results.baseline.json\n' +
@@ -326,16 +310,22 @@ const USAGE =
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
-  const only = argv.includes('--only') ? argv[argv.indexOf('--only') + 1] : null;
+  let only: string | undefined;
+  try {
+    const flag = { type: 'boolean' } as const;
+    only = parseArgs({
+      args: argv,
+      allowPositionals: true,
+      options: { only: { type: 'string' }, dev: flag, baseline: flag, fail: flag },
+    }).values.only;
+  } catch (error) {
+    throw new BenchAbort(2, `${error instanceof Error ? error.message : error}\n${USAGE}`);
+  }
   const mode = argv.find((arg) => ['coverage', '--dev', '--baseline', '--fail'].includes(arg));
   if (!mode) throw new BenchAbort(2, USAGE);
 
   const corpus = loadRows();
-  let rows = corpus;
-  if (only) {
-    rows = rows.filter((row) => row.id === only);
-    if (!rows.length) throw new BenchAbort(2, `prior-art-eval: no row matches --only ${only}`);
-  }
+  const rows = selectRows(corpus, only);
 
   if (mode === 'coverage') {
     const gold = rows.reduce((sum, row) => sum + row.gold.length, 0);
@@ -413,13 +403,15 @@ async function main(): Promise<void> {
   });
 
   const results: RowResult[] = [];
-  for (const row of rows)
-    results.push(
-      await scoreRow(row, runsByRow.get(row.id) as RunRecord[], outagesByRow.get(row.id) ?? 0),
-    );
+  const matchesByRow = new Map<string, RunMatch[]>();
+  for (const row of rows) {
+    const scored = await scoreRow(row, runsByRow.get(row.id) ?? [], outagesByRow.get(row.id) ?? 0);
+    results.push(scored.result);
+    matchesByRow.set(row.id, scored.matches);
+  }
   const summary = aggregate(results, agent, hashes, corpus.length);
   if (reused > 0) console.log(`\nresumed ${reused}/${work.length} agent calls from checkpoint`);
-  printSummary(summary);
+  printSummary(summary, matchesByRow);
   appendFileSync(
     runsLogPath,
     `${JSON.stringify({ at: new Date().toISOString(), mode, ...summary.priorArt })}\n`,
