@@ -7,8 +7,8 @@
  * prefix → symlink that prefix's node_modules into a throwaway git repo → run the REAL installed
  * `devkit`/`guard-*` bins.
  *
- * Shared by the `*.e2e.test.mts` suites and by `scripts/playground.mts` (same bootstrap, one an
- * asserted run, the other an interactive shell).
+ * Shared by the `*.e2e.test.mts` suites, by `scripts/playground.mts` (same bootstrap, one an
+ * asserted run, the other an interactive shell) and by `ship-proof.mts` (a dry-gates ship consumer).
  */
 import { execFileSync, spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -46,6 +46,7 @@ export const MARKERS = {
   // deterministically, with no index / jscpd / network and no baseline-grandfather escape for a
   // folder created after init. (The eslint structure gate does NOT forbid unlisted/misnamed files.)
   fanoutExceeded: '🚫 Folder fan-out exceeded',
+  shipDetBlocked: '✗ deterministic gates failed',
   doctorClean: 'All checks OK.',
   doctorHuskyMissing: '✗ .husky/pre-commit: MISSING',
   doctorUninitialized: '.devkit/config.json: not initialized',

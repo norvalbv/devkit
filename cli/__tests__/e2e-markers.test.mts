@@ -15,6 +15,7 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SOURCE_PHRASES = [
   '🚧 Deterministic gates',
   '🚫 Folder fan-out exceeded',
+  '✗ deterministic gates failed',
   'All checks OK.',
   'not initialized',
   'MISSING',

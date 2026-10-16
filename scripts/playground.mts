@@ -5,27 +5,50 @@
  * block — against the actual shipped CLI, not the source.
  *
  *   bun run playground [--stack <name>] [--guards <csv>] [--keep]
+ *
+ * With --change it runs no shell: it commits --seed (or the default seed) as the base, overlays
+ * --change, prints a queued `devkit ship --dry-gates` of those files and exits with its status.
+ * Flags after `--` go to ship. The stack defaults to generic there.
+ *
+ *   bun run playground --change <dir> [--seed <dir>] [--stack <name>] [--keep] [-- <ship flags>]
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { makeFixture } from '../e2e/lib/harness.mts';
+import { prepareShipProof, writeDefaultSeed } from '../e2e/lib/ship-proof.mts';
 
+const dashDash = process.argv.indexOf('--');
+const ownArgs = dashDash >= 0 ? process.argv.slice(0, dashDash) : process.argv;
+const shipArgs = dashDash >= 0 ? process.argv.slice(dashDash + 1) : [];
 function flag(name: string): string | undefined {
-  const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 ? process.argv[i + 1] : undefined;
+  const i = ownArgs.indexOf(`--${name}`);
+  return i >= 0 ? ownArgs[i + 1] : undefined;
 }
-const stack = flag('stack') ?? 'component-lib';
+const change = flag('change');
+const stack = flag('stack') ?? (change ? 'generic' : 'component-lib');
 const guards = flag('guards') ?? 'size,fanout';
-const keep = process.argv.includes('--keep');
+const keep = ownArgs.includes('--keep');
+
+if (change) process.exit(await runShipProof(change));
+
+async function runShipProof(changeDir: string): Promise<number> {
+  const proof = await prepareShipProof({ seed: flag('seed'), change: changeDir, stack, guards });
+  const devkit = join(proof.fx.repoDir, 'node_modules', '.bin', 'devkit');
+  const ship = spawnSync(
+    devkit,
+    ['ship', 'proof', 'proof', '--dry-gates', ...shipArgs, '--', ...proof.paths],
+    { cwd: proof.fx.repoDir, env: proof.env, stdio: ['ignore', 'inherit', 'inherit'] },
+  );
+  if (keep) process.stdout.write(`\nkept: ${proof.fx.repoDir}\n      ${proof.root}\n`);
+  else proof.cleanup();
+  return ship.status ?? 1;
+}
 
 const fx = await makeFixture();
 
 // Seed a base commit + init so the repo is a realistic consumer with the hook armed.
-mkdirSync(join(fx.repoDir, 'src'), { recursive: true });
-writeFileSync(join(fx.repoDir, 'README.md'), '# playground\n');
-writeFileSync(join(fx.repoDir, 'src', 'index.ts'), 'export {};\n');
+writeDefaultSeed(fx.repoDir);
 fx.git('add', 'README.md', 'src/index.ts');
 fx.git('commit', '-q', '-m', 'base');
 
