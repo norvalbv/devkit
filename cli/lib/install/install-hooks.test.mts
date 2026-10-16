@@ -1043,3 +1043,106 @@ describe('superseded hook commands', () => {
     expect(checkHookRegistrations(root, ['searchSteering']).ok).toBe(true);
   });
 });
+
+describe('removal report', () => {
+  const REMOVAL = /^ {2}(✓ removed|\[dry-run\] remove) \S+ \S+: /;
+  const removals = () =>
+    console.log.mock.calls.map(([line]) => line).filter((l) => REMOVAL.test(l));
+  const RETIRED_CLAUDE =
+    '.claude/settings.json PreToolUse[Bash]: bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh" (retired)';
+  const RETIRED_CURSOR =
+    '.cursor/hooks.json beforeShellExecution: .cursor/hooks/fallow-gate.sh (retired)';
+
+  it('names each handler a deselected component loses, with the component', () => {
+    const root = tmpRepo();
+    installHookRegistrations(root, ['agentHooks'], { targets: ['claude'] });
+    installHookRegistrations(root, ['decisions'], { targets: ['claude'] });
+    expect(removals()).toContain(
+      '  ✓ removed .claude/settings.json UserPromptSubmit: node "$CLAUDE_PROJECT_DIR/.claude/hooks/claude-rules-reminder.mjs" (deselected: agentHooks)',
+    );
+    expect(removals()).toHaveLength(6);
+  });
+
+  it('names retired handlers in both the Claude group and the Cursor flat shape', () => {
+    const root = tmpRepo();
+    writeRetiredFallowHooks(root);
+    installHookRegistrations(root, [], { targets: ['claude', 'cursor'] });
+    expect(removals()).toEqual([`  ✓ removed ${RETIRED_CLAUDE}`, `  ✓ removed ${RETIRED_CURSOR}`]);
+  });
+
+  it('prints the same lines under --dry-run and writes nothing', () => {
+    const root = tmpRepo();
+    writeRetiredFallowHooks(root);
+    const before = readFileSync(join(root, '.claude', 'settings.json'), 'utf8');
+    installHookRegistrations(root, [], { targets: ['claude', 'cursor'], dryRun: true });
+    expect(removals()).toEqual([
+      `  [dry-run] remove ${RETIRED_CLAUDE}`,
+      `  [dry-run] remove ${RETIRED_CURSOR}`,
+    ]);
+    expect(readFileSync(join(root, '.claude', 'settings.json'), 'utf8')).toBe(before);
+  });
+
+  it('prints nothing on a converged rerun', () => {
+    const root = tmpRepo();
+    writeRetiredFallowHooks(root);
+    installHookRegistrations(root, ['agentHooks'], { targets: ['claude', 'cursor'] });
+    console.log.mockClear();
+    installHookRegistrations(root, ['agentHooks'], { targets: ['claude', 'cursor'] });
+    expect(removals()).toEqual([]);
+  });
+
+  it('keeps an earlier provider line when a later provider throws', () => {
+    const root = tmpRepo();
+    writeRetiredFallowHooks(root);
+    writeFileSync(join(root, '.cursor', 'hooks.json'), 'null\n');
+    expect(() => installHookRegistrations(root, [], { targets: ['claude', 'cursor'] })).toThrow(
+      /must contain a provider hook object/,
+    );
+    expect(removals()).toEqual([`  ✓ removed ${RETIRED_CLAUDE}`]);
+  });
+
+  it('names a superseded spelling in the Claude, Codex and Cursor shapes', () => {
+    const root = tmpRepo();
+    const rels = ['.claude/settings.json', '.codex/hooks.json', '.cursor/hooks.json'];
+    installHookRegistrations(root, ['searchSteering']);
+    for (const rel of rels) {
+      const text = readFileSync(join(root, rel), 'utf8');
+      writeFileSync(join(root, rel), text.replaceAll('/dist/gate-engine/', '/gate-engine/'));
+    }
+    console.log.mockClear();
+    installHookRegistrations(root, ['searchSteering']);
+    for (const line of removals()) expect(line).toMatch(/devkit\/gate-engine\/.*\(superseded\)$/);
+    for (const rel of rels) expect(removals().some((l) => l.includes(` ${rel} `))).toBe(true);
+  });
+
+  it('prints nothing for a provider whose conflict aborts before its write', () => {
+    const root = tmpRepo();
+    installHookRegistrations(root, ['searchSteering'], { targets: ['claude'] });
+    const stored = ledger(root);
+    stored.entries = stored.entries.map((e) => ({
+      ...e,
+      native: { ...e.native, command: `${e.native.command}--unknown` },
+    }));
+    writeFileSync(ledgerPath(root), JSON.stringify(stored, null, 2));
+    const settings = claude(root);
+    settings.hooks.PreToolUse.push({
+      matcher: 'Bash',
+      hooks: [{ type: 'command', command: 'bash .claude/hooks/fallow-gate.sh' }],
+    });
+    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(settings));
+    console.log.mockClear();
+    expect(() =>
+      installHookRegistrations(root, ['searchSteering'], { targets: ['claude'] }),
+    ).toThrow(/hook registration conflicts require resolution/);
+    expect(removals()).toEqual([]);
+    expect(claudeCommands(root)).toContain('bash .claude/hooks/fallow-gate.sh');
+  });
+
+  it('labels removeHookRegistrations removals as uninstalled', () => {
+    const root = tmpRepo();
+    installHookRegistrations(root, ['agentHooks'], { targets: ['claude'] });
+    removeHookRegistrations(root, { targets: ['claude'] });
+    expect(removals()).toHaveLength(6);
+    for (const line of removals()) expect(line).toMatch(/\(uninstalled: agentHooks\)$/);
+  });
+});
