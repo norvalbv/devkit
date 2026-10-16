@@ -5,6 +5,7 @@ import type { Finding } from './matcher.mts';
 export {
   accumulateFindingMetrics,
   accumulateVerdictMetric,
+  compareCaseFlips,
   finalizeOpenEndedSummary,
   measuredCaseMetrics,
   openEndedSummary,
