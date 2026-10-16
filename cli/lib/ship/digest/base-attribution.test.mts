@@ -51,6 +51,18 @@ function git(cwd: string, ...args: string[]): string {
   }).trim();
 }
 
+/** What commit-with-gate-capture.sh records before the gates run, recorded the same way. */
+function snapshot(wt: string): void {
+  const path = git(
+    wt,
+    'rev-parse',
+    '--path-format=absolute',
+    '--git-path',
+    'devkit-pre-gate-untracked',
+  );
+  writeFileSync(path, git(wt, 'ls-files', '--others', '--directory', '-z'));
+}
+
 interface FixtureOptions {
   /** guard.config.json `extraGates` in force for the gate worktree. */
   gates?: Record<string, string>;
@@ -121,6 +133,7 @@ function fixture(options: FixtureOptions = {}) {
   linkOrOverrideConfig(root, wt, gates, options.trackedGates !== undefined);
   writeFileSync(join(wt, 'mine.txt'), LONG);
   git(wt, 'add', 'mine.txt');
+  snapshot(wt);
   const rows = options.rows ?? [failRow('max-lines')];
   writeFileSync(sink, rows.map((r) => `${JSON.stringify({ ...r, ship_id: SHIP_ID })}\n`).join(''));
   vi.stubEnv('DEVKIT_GATE_EVENTS', sink);
@@ -133,7 +146,7 @@ function fixture(options: FixtureOptions = {}) {
       .map((line): Row => JSON.parse(line));
   const worktrees = () =>
     git(root, 'worktree', 'list', '--porcelain').match(/^worktree /gm)?.length;
-  return { tmp, root, wt, sha, sink, outPrefix, types, worktrees };
+  return { tmp, root, wt, sha, sink, outPrefix, types, worktrees, snapshot: () => snapshot(wt) };
 }
 
 describe('attributeToBase', () => {
@@ -281,9 +294,82 @@ describe('attributeToBase', () => {
     chmodSync(join(f.root, 'node_modules', '.bin', 'bare-gate'), 0o755);
     // Relative on purpose: copied verbatim into a worktree elsewhere, the link would dangle.
     symlinkSync('../root/node_modules', join(f.wt, 'node_modules'));
+    f.snapshot();
 
     expect(await attributeToBase(f.wt, f.outPrefix)).toHaveLength(1);
     expect(existsSync(join(f.root, 'node_modules', '.bin', 'bare-gate'))).toBe(true);
+  });
+
+  // An input ship placed before the gates (a copied asset, a projected file) must reach the base,
+  // or the base exits 1 for the missing input rather than for being red.
+  it('says nothing when the base passes once it sees an untracked file the gate worktree held', async () => {
+    const needs =
+      "import { existsSync } from 'node:fs';\nprocess.exit(existsSync('input.gen') ? 0 : 1);\n";
+    const f = fixture({
+      gates: { needs: 'node needs.mjs' },
+      files: { 'needs.mjs': needs },
+      rows: [failRow('needs')],
+    });
+    writeFileSync(join(f.wt, 'input.gen'), 'generated\n');
+    f.snapshot();
+
+    expect(await attributeToBase(f.wt, f.outPrefix)).toEqual([]);
+    expect(f.types()[1]).toMatchObject({ gate: 'needs', outcome: 'not-reproduced' });
+  });
+
+  it('links what the gate worktree held before its gates ran, and nothing a gate wrote later', async () => {
+    const probe =
+      "import { existsSync, readFileSync } from 'node:fs';\n" +
+      "for (const p of ['early.txt', 'early/sub/x.txt', 'fresh/in.txt', 'late.txt']) console.log(p + '=' + existsSync(p));\n" +
+      "console.log('base.txt=' + readFileSync('base.txt', 'utf8').length);\n" +
+      'process.exit(1);\n';
+    const f = fixture({
+      gates: { probe: 'node probe.mjs' },
+      files: { 'probe.mjs': probe, 'base.txt': SHORT },
+      rows: [failRow('probe')],
+    });
+    writeFileSync(join(f.wt, 'early.txt'), 'x\n');
+    mkdirSync(join(f.wt, 'early', 'sub'), { recursive: true });
+    writeFileSync(join(f.wt, 'early', 'sub', 'x.txt'), 'x\n');
+    writeFileSync(join(f.wt, 'gone.txt'), 'x\n');
+    // Under a directory the change adds, so the base has no parent to link into yet.
+    mkdirSync(join(f.wt, 'fresh'));
+    writeFileSync(join(f.wt, 'fresh', 'a.txt'), 'x\n');
+    git(f.wt, 'add', 'fresh/a.txt');
+    writeFileSync(join(f.wt, 'fresh', 'in.txt'), 'x\n');
+    // A staged deletion leaves base.txt untracked here; the base keeps its own committed copy.
+    git(f.wt, 'rm', '-q', '--cached', 'base.txt');
+    writeFileSync(join(f.wt, 'base.txt'), LONG);
+    f.snapshot();
+    rmSync(join(f.wt, 'gone.txt'));
+    writeFileSync(join(f.wt, 'late.txt'), 'x\n');
+
+    expect(await attributeToBase(f.wt, f.outPrefix)).toHaveLength(1);
+    expect(readFileSync(`${f.outPrefix}.base-probe.log`, 'utf8')).toBe(
+      `early.txt=true\nearly/sub/x.txt=true\nfresh/in.txt=true\nlate.txt=false\nbase.txt=${SHORT.length}\n`,
+    );
+    // Removing the base worktree unlinks the linked directory, never empties it.
+    expect(existsSync(join(f.wt, 'early', 'sub', 'x.txt'))).toBe(true);
+    expect(f.worktrees()).toBe(2);
+  });
+
+  // An empty list is a worktree with no untracked inputs, not a missing list.
+  it('still names a red base when the gate worktree held no untracked entries', async () => {
+    const f = fixture({ trackedGates: { 'max-lines': 'node check.mjs' } });
+
+    expect(git(f.wt, 'ls-files', '--others')).toBe('');
+    expect(await attributeToBase(f.wt, f.outPrefix)).toHaveLength(1);
+  });
+
+  it('runs nothing when the ship recorded no pre-gate snapshot', async () => {
+    const f = fixture();
+    rmSync(
+      git(f.wt, 'rev-parse', '--path-format=absolute', '--git-path', 'devkit-pre-gate-untracked'),
+    );
+
+    expect(await attributeToBase(f.wt, f.outPrefix)).toEqual([]);
+    expect(f.types().map((r) => r.type)).toEqual(['gate_result']);
+    expect(f.worktrees()).toBe(2);
   });
 
   // A gate that never ends on its own, and records the pid of a process it leaves in its group.

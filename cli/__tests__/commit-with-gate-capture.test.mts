@@ -572,8 +572,8 @@ describe('commit_with_gate_capture — a failed config gate that also fails at t
   const LINE =
     /ship: always-red also exits 1 at [0-9a-f]{7}, the commit this gate worktree was cut from/;
 
-  function redGateFixture(declared: boolean, prefix?: string) {
-    const made = fixture(true, RED_GATE_HOOK, prefix);
+  function redGateFixture(declared: boolean, prefix?: string, hook = RED_GATE_HOOK) {
+    const made = fixture(true, hook, prefix);
     if (declared) {
       const config = join(made.root, 'guard.config.json');
       writeFileSync(config, JSON.stringify({ extraGates: { 'always-red': 'false' } }));
@@ -609,6 +609,50 @@ describe('commit_with_gate_capture — a failed config gate that also fails at t
     expect(control.stderr).not.toMatch(LINE);
     expect(result.status).toBe(control.status);
     expect(result.status).not.toBe(0);
+  });
+
+  // The base run is fed exactly this list, so a gate's own output or ship's hook dir must not be in it.
+  it('records the untracked entries the gate worktree held before its gates ran', () => {
+    const red = redGateFixture(true, undefined, `: > late.txt\n${RED_GATE_HOOK}`);
+    mkdirSync(join(red.wt, 'big', 'a'), { recursive: true });
+    writeFileSync(join(red.wt, 'big', 'a', 'b.txt'), 'x\n');
+
+    const result = runCommit(red.root, red.wt, red.base, false, false, '', red.callerVars);
+    const snapshot = git(
+      red.wt,
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-path',
+      'devkit-pre-gate-untracked',
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(existsSync(join(red.wt, 'late.txt'))).toBe(true);
+    expect(readFileSync(snapshot, 'utf8').split('\0').filter(Boolean).sort()).toEqual([
+      'big/',
+      'guard.config.json',
+    ]);
+    expect(result.stderr).not.toContain('devkit-pre-gate-untracked');
+  });
+
+  // A list left by an earlier run in the same worktree must not stand in for a failed capture.
+  it('leaves no list, and says nothing, when the capture fails over an earlier list', () => {
+    const red = redGateFixture(true);
+    const snapshot = git(
+      red.wt,
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-path',
+      'devkit-pre-gate-untracked',
+    );
+    writeFileSync(snapshot, 'stale\0');
+    mkdirSync(`${snapshot}.tmp`);
+
+    const result = runCommit(red.root, red.wt, red.base, false, false, '', red.callerVars);
+
+    expect(result.status).not.toBe(0);
+    expect(existsSync(snapshot)).toBe(false);
+    expect(result.stderr).not.toMatch(LINE);
   });
 
   it('says so on a --dry-gates run too, under repo and worktree paths containing a space', () => {
