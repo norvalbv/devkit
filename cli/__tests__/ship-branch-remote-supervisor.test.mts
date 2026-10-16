@@ -1,10 +1,15 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
-import { scriptPath } from './_ship-branch-fixture.mts';
+import {
+  localBranchExists,
+  publishEnvFor,
+  scriptPath,
+  seedShipRepoLocalRemote,
+} from './_ship-branch-fixture.mts';
 
 const reshipPath = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
 const REWRITE_FN_RE = /^rewrite_remote\(\) \{[\s\S]*?^\}/m;
@@ -33,13 +38,13 @@ function shipTree(ext: 'mts' | 'mjs') {
   return dir;
 }
 
-function runBoundedRemoteGit(scriptDir: string) {
+function runBoundedRemoteGit(scriptDir: string, env: NodeJS.ProcessEnv = process.env) {
   const fn = FN_RE.exec(readFileSync(scriptPath, 'utf8'))?.[0];
   if (!fn) throw new Error('bounded_remote_git not found in ship-branch.sh');
   return spawnSync(
     '/bin/bash',
     ['-c', `set -eu; SCRIPT_DIR=${JSON.stringify(scriptDir)}; ${fn}; bounded_remote_git ls-remote`],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', env },
   );
 }
 
@@ -51,6 +56,93 @@ describe('ship-branch.sh — bounded_remote_git resolves the packaged supervisor
       expect(r.stdout).toBe(`SUPERVISOR 60 -- git ${NO_AUTO_GC} ls-remote\n`);
     });
   }
+});
+
+// Attempt N exits STUB_STATUSES[N] after printing STUB_OUTPUTS[N]; COUNT_FILE gets one line per run.
+const SEQUENCED_SUPERVISOR = `import { appendFileSync, readFileSync } from 'node:fs';
+appendFileSync(process.env.COUNT_FILE, 'run\\n');
+const n = readFileSync(process.env.COUNT_FILE, 'utf8').split('\\n').length - 2;
+const out = process.env.STUB_OUTPUTS.split(',')[n] ?? '';
+if (out) console.log(out);
+process.exit(Number(process.env.STUB_STATUSES.split(',')[n]));
+`;
+
+function runSequenced(statuses: string, outputs: string) {
+  const scriptDir = shipTree('mts');
+  writeFileSync(join(scriptDir, 'review/process/gate-supervisor.mts'), SEQUENCED_SUPERVISOR);
+  const countFile = join(scriptDir, 'count');
+  const r = runBoundedRemoteGit(scriptDir, {
+    ...process.env,
+    COUNT_FILE: countFile,
+    STUB_STATUSES: statuses,
+    STUB_OUTPUTS: outputs,
+  });
+  return { ...r, runs: readFileSync(countFile, 'utf8').split('\n').length - 1 };
+}
+
+describe('ship-branch.sh — bounded_remote_git retries only a silent timeout', () => {
+  it('re-runs a 124 that printed nothing and reports the second answer once', () => {
+    const r = runSequenced('124,0', ',abc refs/heads/main');
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toBe('abc refs/heads/main\n');
+    expect(r.runs).toBe(2);
+  });
+
+  it('still returns 124 when the retry stalls too', () => {
+    const r = runSequenced('124,124', ',');
+    expect(r.status).toBe(124);
+    expect(r.stdout).toBe('');
+    expect(r.runs).toBe(2);
+  });
+
+  // Output means git answered (a reaped straggler); a re-run would append a second advertisement.
+  it('never re-runs a 124 that already printed output', () => {
+    const r = runSequenced('124,0', 'abc refs/heads/main,abc refs/heads/main');
+    expect(r.status).toBe(124);
+    expect(r.stdout).toBe('abc refs/heads/main\n');
+    expect(r.runs).toBe(1);
+  });
+
+  it.each(['2', '128'])('fails exit %s at once — only a timeout earns a retry', (status) => {
+    const r = runSequenced(`${status},0`, ',');
+    expect(r.status).toBe(Number(status));
+    expect(r.runs).toBe(1);
+  });
+});
+
+describe('ship-branch.sh — a remote-branch check that stalls past its retry', () => {
+  it('refuses naming the bound and the knob that raises it, before creating the branch', () => {
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    const bin = mkdtempSync(join(tmpdir(), 'ship-stall-'));
+    dirs.push(bin);
+    const realGit = spawnSync('/bin/sh', ['-c', 'command -v git'], {
+      encoding: 'utf8',
+    }).stdout.trim();
+    writeFileSync(
+      join(bin, 'git'),
+      `#!/bin/bash\ncase " $* " in *" ls-remote "*" refs/heads/feat/stall "*) sleep 30 ;; esac\nexec '${realGit}' "$@"\n`,
+    );
+    chmodSync(join(bin, 'git'), 0o755);
+    const { publishEnv } = publishEnvFor(dir, env);
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const started = Date.now();
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/stall', 'ship it', '--', 'note.txt'], {
+      cwd: dir,
+      input: 'pr body\n',
+      encoding: 'utf8',
+      env: {
+        ...publishEnv,
+        DEVKIT_REMOTE_TIMEOUT_SECONDS: '0.1',
+        PATH: `${bin}:${publishEnv.PATH}`,
+      },
+    });
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      'could not verify remote branch (ls-remote exit 124: no clean finish within the 0.1s bound) — machine load or network; re-run ship, or raise DEVKIT_REMOTE_TIMEOUT_SECONDS',
+    );
+    expect(localBranchExists(git, 'feat/stall')).toBe(false);
+  });
 });
 
 function runRewriteRemote(args: string) {
