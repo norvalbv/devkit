@@ -404,6 +404,42 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     },
   );
 
+  it('--changed reads only staged files: an unrelated unreadable dir cannot blind the gate', () => {
+    const dir = writeFixture({
+      'jscpd-stub': '#!/bin/sh\nexit 0\n',
+      'src/locked/x.ts': '',
+      'src/a.ts': `// ${MARK}-start\n`,
+    });
+    chmodSync(join(dir, 'jscpd-stub'), 0o755);
+    chmodSync(join(dir, 'src', 'locked'), 0o000);
+    try {
+      const { status, stdout } = run(['scan', '--changed', '--gate', '--paths', join(dir, 'src')], {
+        JSCPD_BIN: join(dir, 'jscpd-stub'),
+        MATCHER_CHANGED_FILES: join(dir, 'src', 'a.ts'),
+      });
+      expect(status).toBe(1);
+      expect(stdout).toContain(`marker  ${join(dir, 'src', 'a.ts')}:1`);
+    } finally {
+      chmodSync(join(dir, 'src', 'locked'), 0o755);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('exit 0 — a changed-set entry for a deleted file is skipped, not a could-not-run', () => {
+    const dir = writeFixture({ 'jscpd-stub': '#!/bin/sh\nexit 0\n', 'src/a.ts': '' });
+    chmodSync(join(dir, 'jscpd-stub'), 0o755);
+    try {
+      const args = ['scan', '--changed', '--gate', '--paths', join(dir, 'src')];
+      const env = {
+        JSCPD_BIN: join(dir, 'jscpd-stub'),
+        MATCHER_CHANGED_FILES: join(dir, 'src', 'gone.ts'),
+      };
+      expect(run(args, env).status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('exit 0 — a marker in a test file is out of scope, like its clones', () => {
     const dir = writeFixture({ '__tests__/a.ts': `// ${MARK}-start\nexport const A = 1;\n` });
     try {

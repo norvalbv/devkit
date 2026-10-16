@@ -40,7 +40,7 @@ import {
   statSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, matchesGlob, resolve } from 'node:path';
+import { join, matchesGlob, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mts';
 import { exitGate, failLine } from '../deterministic/reason.mts';
@@ -276,22 +276,33 @@ interface IgnoreMarker {
   line: number;
 }
 
+/** Every file under a clone root (a file root is itself); a missing root, which jscpd 5 skips, is empty. */
+function rootFiles(root: string): string[] {
+  const dir = resolve(repoRoot, root);
+  if (!existsSync(dir)) return [];
+  if (!statSync(dir).isDirectory()) return [relPath(dir)];
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((d) => d.isFile())
+    .map((d) => relPath(join(d.parentPath, d.name)));
+}
+
+function isUnderRoot(file: string, root: string): boolean {
+  const [f, r] = [resolve(repoRoot, file), resolve(repoRoot, root)];
+  return f === r || f.startsWith(`${r}${sep}`);
+}
+
 /**
- * Ignore markers in the files jscpd scans, scoped to `changed` when given. jscpd has no switch to
- * disable them and matches by raw substring, so a marker inside a string literal counts too.
+ * Ignore markers in the files jscpd scans, or only the existing `changed` files under its roots, so
+ * an unreadable dir elsewhere cannot blind the gate. jscpd matches raw text: string markers count.
  */
 function findIgnoreMarkers(paths: string[], changed: Set<string> | null): IgnoreMarker[] {
-  const files = paths.flatMap((root) => {
-    const dir = resolve(repoRoot, root);
-    if (!existsSync(dir)) return [];
-    if (!statSync(dir).isDirectory()) return [relPath(dir)];
-    return readdirSync(dir, { recursive: true, withFileTypes: true })
-      .filter((d) => d.isFile())
-      .map((d) => relPath(join(d.parentPath, d.name)));
-  });
+  const files = changed
+    ? [...changed].filter(
+        (f) => paths.some((root) => isUnderRoot(f, root)) && existsSync(resolve(repoRoot, f)),
+      )
+    : paths.flatMap(rootFiles);
   return [...new Set(files)]
     .filter((f) => CODE_EXT.test(f) && !DEFAULTS.ignore.some((glob) => matchesGlob(f, glob)))
-    .filter((f) => changed == null || changed.has(f))
     .flatMap((file) =>
       readFileSync(resolve(repoRoot, file), 'utf8')
         .split('\n')
