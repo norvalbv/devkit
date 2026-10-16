@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll } from 'vitest';
 import { testExecFileSync as execFileSync } from './_helpers.mts';
+import { GH_BODY_VIEW_ARM } from './_ship-branch-fixture.mts';
 
 // The `reship --pr --base` rewrite fixture, shared by reship.test.mts and the pin-supervisor suite.
 const GENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
@@ -98,6 +99,7 @@ export function rewriteRepo({ extraPath = false, rename = false, objectFormat = 
       '  fi',
       '  exit "${GH_EDIT_STATUS:-0}"',
       'fi',
+      GH_BODY_VIEW_ARM,
       'case " $* " in',
       "  *' --json url '*) printf '%s\\n' 'https://github.com/acme/app/pull/7'; exit 0 ;;",
       'esac',

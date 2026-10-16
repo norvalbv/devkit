@@ -382,7 +382,7 @@ rewrite_publish_lock_release() {
 # partial-success boundary and name only a manual recovery command: normal successful pushes spend
 # their retry intent before this runs, while the no-delta recovery arm spends it immediately after.
 publish_requested_pr_body() {
-  local published_commit=$1 body=$BODY carried
+  local published_commit=$1 carried
   if [ -z "$PR_URL" ]; then
     echo "reship: PR body was not updated: could not resolve the open PR after the push" >&2
     echo "  the commit is already on origin/$BR at $published_commit; no rollback was attempted" >&2
@@ -390,10 +390,13 @@ publish_requested_pr_body() {
     return 1
   fi
   # The caller owns the text, ship owns the evidence block: carry the PR's current block across.
-  if carried=$(printf '%s' "$BODY" | evidence_caller_body "$REPO" "$PR_URL" && printf .); then
-    body=${carried%.}
+  if ! carried=$(printf '%s' "$BODY" | evidence_caller_body "$REPO" "$PR_URL" && printf .); then
+    echo "reship: PR body was not updated: ship could not carry the PR's evidence block (see the evidence: error above)" >&2
+    echo "  the commit is already on origin/$BR at $published_commit; no rollback was attempted" >&2
+    echo "  once gh pr view '$PR_URL' works, re-run the same devkit ship command; only the body is updated" >&2
+    return 1
   fi
-  if ! printf '%s' "$body" | gh pr edit "$PR_URL" --repo "$REPO" --body-file - >/dev/null; then
+  if ! printf '%s' "${carried%.}" | gh pr edit "$PR_URL" --repo "$REPO" --body-file - >/dev/null; then
     echo "reship: PR body was not updated after the push" >&2
     echo "  the commit is already on origin/$BR at $published_commit; no rollback was attempted" >&2
     echo "  pipe the intended body to: gh pr edit '$PR_URL' --repo '$REPO' --body-file -" >&2
@@ -1198,6 +1201,8 @@ if [ "$UPDATE_PR_BODY" -eq 1 ]; then
   fi
   body_receipt_delete
   if [ "$BODY_UPDATE_STATUS" -ne 0 ]; then
+    # The commit landed, so its evidence still belongs on the PR; the suggested re-run carries it.
+    [[ "${PR_URL##*/}" =~ ^[0-9]+$ ]] && publish_evidence_block "$WT" "${PR_URL##*/}" "$REPO" "$SHIP_COMMIT"
     [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "${PR_NUM:-}" pr-body-publication-failed
     exit "$BODY_UPDATE_STATUS"
   fi

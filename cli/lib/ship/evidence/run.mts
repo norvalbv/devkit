@@ -164,14 +164,7 @@ async function main(argv: string[]): Promise<void> {
   const { values } = parseArgs({ args: rest, options, strict: true });
   if (command === 'body') {
     const caller = readFileSync(0, 'utf8');
-    let current = '';
-    try {
-      if (values.pr) current = readPull(required(values, 'repo'), values.pr).body;
-    } catch (error) {
-      console.error(
-        `evidence: the current PR body was not read, so its block is not carried: ${errorMessage(error)}`,
-      );
-    }
+    const current = values.pr ? readPull(required(values, 'repo'), values.pr).body : '';
     process.stdout.write(carryEvidenceBlock(caller, current));
     return;
   }
