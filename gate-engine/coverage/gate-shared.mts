@@ -1,8 +1,8 @@
 /** What both coverage gate modes print and classify with: remedies, path listing, review notices. */
 import { execFileSync } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { sourceMatchers } from '../config.mts';
+import { appendReviewNotice } from '../deterministic/reason.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { canonicalPath } from './dependencies.mts';
 import { displayPath, formatClearMarker, readClearMarker } from './failures.mts';
@@ -75,20 +75,11 @@ export function artifactLine(file: string): string {
   return `   read ${canonicalPath(file)}`;
 }
 
-/** Tell review-target.sh's verdict line that coverage went unmeasured. Written only into this review's
- * own temp root, so a nested run cannot reach an outer review's file. Advisory: never throws. */
+/** Tell review-target.sh's verdict line that coverage went unmeasured. */
 export function recordReviewNotice(
   reason: 'absent' | 'stale' | 'empty' | 'unknown' | 'scoped',
 ): void {
-  const file = process.env.DEVKIT_REVIEW_NOTICES;
-  const root = process.env.DEVKIT_REVIEW_TEMP_ROOT;
-  if (!file || !root || !isAbsolute(file) || !isAbsolute(root)) return;
-  if (!resolve(file).startsWith(`${resolve(root)}/`)) return;
-  try {
-    appendFileSync(file, `coverage=not-measured reason=${reason}\n`);
-  } catch {
-    // The deterministic runner's skip banner still names the gate.
-  }
+  appendReviewNotice(`coverage=not-measured reason=${reason}`);
 }
 
 export function reviewNotMeasuredAbsent(cwd: string): number {

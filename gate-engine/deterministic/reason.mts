@@ -2,7 +2,7 @@
 // why a file and not a stderr pipe: docs/decisions/gate-telemetry-self-describing.md (2026-09-30).
 import { appendFileSync, closeSync, mkdtempSync, openSync, readSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 
 export const GATE_REASON_ENV = 'DEVKIT_GATE_REASON_FILE';
@@ -46,6 +46,20 @@ export function withReasonFiles<T>(fn: (fileFor: (index: number) => string) => T
 /** The environment a gate runs under: the caller's, with THIS gate's reason file named. */
 export function gateEnv(reasonFile: string): NodeJS.ProcessEnv {
   return { ...process.env, [GATE_REASON_ENV]: reasonFile };
+}
+
+/** One line for review-target.sh's verdict line. Written only into this review's own temp root, so a
+ * nested run cannot reach an outer review's file. Advisory: never throws. */
+export function appendReviewNotice(line: string): void {
+  const file = process.env.DEVKIT_REVIEW_NOTICES;
+  const root = process.env.DEVKIT_REVIEW_TEMP_ROOT;
+  if (!file || !root || !isAbsolute(file) || !isAbsolute(root)) return;
+  if (!resolve(file).startsWith(`${resolve(root)}/`)) return;
+  try {
+    appendFileSync(file, `${line}\n`);
+  } catch {
+    // The deterministic runner's skip banner still names the gate.
+  }
 }
 
 /** Record why this gate is about to fail; a no-op when the variable is unset or the write fails.

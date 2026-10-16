@@ -506,6 +506,47 @@ printf 'REVIEW_SNAPSHOT_OK\\n'
     expect(readFileSync(join(target.root, 'coverage/coverage-final.json'), 'utf8')).toBe('{}');
   }, 240_000);
 
+  it('names a deterministic gate that opted out on the verdict line, coverage only once', () => {
+    const target = fixture(
+      [
+        'printf \'gate=guard-dup opted-out\\ngate=guard-coverage opted-out\\n\' >> "$DEVKIT_REVIEW_NOTICES"',
+        'printf \'coverage=not-measured reason=stale\\n\' >> "$DEVKIT_REVIEW_NOTICES"',
+      ].join('\n'),
+    );
+    write(target.root, 'note.txt', 'reviewed change\n');
+    const before = logs(target.root);
+    const result = runReview(target);
+
+    const output = combinedOutput(result);
+    expect(result.status, output).toBe(0);
+    expect(output).toContain(
+      '✓ devkit review: configured pre-commit gates passed — coverage NOT MEASURED (stale) — did NOT run: guard-dup. full output',
+    );
+    expect(newLogSince(target.root, before)).toContain(
+      'result=passed exit=0 phase=verdict notices=coverage-not-measured,gates-opted-out',
+    );
+  }, 240_000);
+
+  // The common shape: no coverage notice at all. A coverage opt-out without its own notice is named
+  // like any other gate, and the trailer carries no stray leading comma.
+  it('names opted-out gates alone when coverage wrote no notice of its own', () => {
+    const target = fixture(
+      'printf \'gate=guard-dup opted-out\ngate=guard-coverage opted-out\n\' >> "$DEVKIT_REVIEW_NOTICES"',
+    );
+    write(target.root, 'note.txt', 'reviewed change\n');
+    const before = logs(target.root);
+    const result = runReview(target);
+
+    const output = combinedOutput(result);
+    expect(result.status, output).toBe(0);
+    expect(output).toContain(
+      '✓ devkit review: configured pre-commit gates passed — did NOT run: guard-coverage,guard-dup. full output',
+    );
+    expect(newLogSince(target.root, before)).toContain(
+      'result=passed exit=0 phase=verdict notices=gates-opted-out\n',
+    );
+  }, 240_000);
+
   /**
    * A P1 report claimed a drifted core.hooksPath exits 0 with an unreviewed diff — the persisted log
    * being nothing but its own header made a setup abort look like a legitimate short run. The drift

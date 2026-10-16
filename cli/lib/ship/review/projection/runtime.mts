@@ -12,12 +12,15 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { gateInputFor } from '../../../../../gate-engine/deterministic/gate-inputs.mts';
+import { mainWorktreeAlias } from '../repository/dependency-alias.mts';
+import { REVIEW_SETUP_OPTIONAL_PATHS } from '../setup-manifest-format.mts';
 import { runDirectReviewCli } from '../run-direct.mts';
 import { reviewRuntimeFingerprint } from '../runtime-fingerprint.mts';
 import {
   assertSymlinkFreeReviewTree,
   canonicalReviewDirectory,
   canonicalReviewLeaf,
+  reviewPathsOverlap,
   reviewPathWithin,
   safeReviewDestination,
 } from '../runtime-paths.mts';
@@ -35,6 +38,8 @@ import { sqliteFamily, sqliteFamilyPath, sqliteWalIndexPath } from './sqlite-fam
 
 interface SelectedProjection {
   path: string;
+  /** The target checkout, or its main worktree for an input the target lacks (as ship links it). */
+  root: string;
   source: ProjectionState;
 }
 
@@ -115,10 +120,36 @@ function candidatePaths(candidates: string[], indexPath: string): string[] {
 function validateRoots(sourceRoot: string, destinationRoot: string): [string, string] {
   const source = canonicalReviewDirectory(sourceRoot, 'gate projection source');
   const destination = canonicalReviewDirectory(destinationRoot, 'gate projection destination');
-  if (reviewPathWithin(source, destination) || reviewPathWithin(destination, source)) {
+  if (reviewPathsOverlap(source, destination)) {
     fail('gate projection source and destination must be separate, non-nested directories');
   }
   return [source, destination];
+}
+
+/** The main worktree a `fromMain` input is read from; derived here, never taken from the caller. */
+function mainSourceRoot(source: string, destination: string, fromMain: readonly string[]): string {
+  if (fromMain.length === 0) return source;
+  const alias = mainWorktreeAlias(source);
+  if (alias === null) fail('gate projection names the main worktree, but none resolves');
+  const main = canonicalReviewDirectory(alias, 'gate projection main worktree');
+  if (reviewPathsOverlap(main, destination)) {
+    fail('gate projection main worktree and destination must be separate, non-nested directories');
+  }
+  return main;
+}
+
+function setupOwned(path: string): boolean {
+  return REVIEW_SETUP_OPTIONAL_PATHS.some(
+    ([, owned]) => path === owned || path.startsWith(`${owned}/`),
+  );
+}
+
+function fromMainPath(path: string, indexPath: string, fromMain: readonly string[]): boolean {
+  if (setupOwned(path)) return false;
+  return fromMain.some((rel) => {
+    const safe = safeRelativePath(rel);
+    return path === safe || (safe === indexPath && sqliteFamilyPath(path, indexPath));
+  });
 }
 
 function validateManifestPath(path: string, source: string, destination: string): string {
@@ -146,7 +177,7 @@ function projectedSourceState(root: string, path: string, indexPath: string): Pr
 }
 
 function selectProjections(
-  source: string,
+  roots: ProjectionRoots,
   destination: string,
   candidates: string[],
   indexPath: string,
@@ -156,22 +187,22 @@ function selectProjections(
     if (lstatSync(privateDestination(destination, path), { throwIfNoEntry: false }) !== undefined) {
       continue;
     }
-    const sourceBefore = projectedSourceState(source, path, indexPath);
+    const root = fromMainPath(path, indexPath, roots.fromMain) ? roots.main : roots.source;
+    const sourceBefore = projectedSourceState(root, path, indexPath);
     if (sourceBefore.type === 'absent' && !sqliteFamilyPath(path, indexPath)) continue;
-    selected.push({ path, source: sourceBefore });
+    selected.push({ path, root, source: sourceBefore });
   }
   return selected;
 }
 
-function selectedSourcePath(source: string, selected: SelectedProjection): string {
+function selectedSourcePath(selected: SelectedProjection): string {
   if (selected.source.type === 'link-file' || selected.source.type === 'link-directory') {
     return selected.source.physicalPath as string;
   }
-  return absolutePath(source, selected.path);
+  return absolutePath(selected.root, selected.path);
 }
 
 function copySelectedProjections(
-  source: string,
   destination: string,
   selected: SelectedProjection[],
   created: string[],
@@ -185,7 +216,7 @@ function copySelectedProjections(
     }
     created.push(target);
     hooks.beforePrivateCopy?.(entry.path);
-    copySafeTree(selectedSourcePath(source, entry), target);
+    copySafeTree(selectedSourcePath(entry), target);
   }
 }
 
@@ -195,7 +226,7 @@ function verifySelectedProjection(
   selected: SelectedProjection,
   indexPath: string,
 ): ProjectionEntry {
-  const sourceAfter = projectedSourceState(source, selected.path, indexPath);
+  const sourceAfter = projectedSourceState(selected.root, selected.path, indexPath);
   if (!stateMatches(selected.source, sourceAfter)) {
     throw new CaptureDrift(selected.path);
   }
@@ -214,7 +245,8 @@ function verifySelectedProjection(
   return {
     path: selected.path,
     mutable: index || input?.mutable === true,
-    sourceVolatile: index || input?.sourceVolatile === true,
+    // Frozen too when read from main: another checkout's ship may rewrite it during this review.
+    sourceVolatile: index || selected.root !== source || input?.sourceVolatile === true,
     source: selected.source,
     destination: destinationAfter,
   };
@@ -237,7 +269,14 @@ function pause(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-/** Copy absent gate inputs into a private worktree and authenticate their source state. */
+interface ProjectionRoots {
+  source: string;
+  main: string;
+  fromMain: readonly string[];
+}
+
+/** Copy absent gate inputs into a private worktree and authenticate their source state. `fromMain`
+ * names the inputs read from the main worktree instead, as ship links them. */
 export function materializeProjectionRuntime(
   sourceRoot: string,
   destinationRoot: string,
@@ -245,14 +284,20 @@ export function materializeProjectionRuntime(
   candidates: string[],
   indexPath = '',
   hooks: ProjectionRuntimeHooks = {},
+  fromMain: readonly string[] = [],
 ): ProjectionRuntimeManifest {
   const [source, destination] = validateRoots(sourceRoot, destinationRoot);
   const manifestDestination = validateManifestPath(manifestPath, source, destination);
+  const main = mainSourceRoot(source, destination, fromMain);
+  if (reviewPathWithin(main, manifestDestination)) {
+    fail('gate projection manifest must live outside the main worktree');
+  }
+  const roots = { source, main, fromMain };
   let drifted = '';
   for (let attempt = 0; attempt < CAPTURE_ATTEMPTS; attempt += 1) {
     pause(CAPTURE_BACKOFF_MS * attempt);
     try {
-      return captureOnce(source, destination, manifestDestination, candidates, indexPath, hooks);
+      return captureOnce(roots, destination, manifestDestination, candidates, indexPath, hooks);
     } catch (cause) {
       drifted = driftedPath(cause);
     }
@@ -268,7 +313,7 @@ function driftedPath(cause: unknown): string {
 }
 
 function captureOnce(
-  source: string,
+  roots: ProjectionRoots,
   destination: string,
   manifestDestination: string,
   candidates: string[],
@@ -277,13 +322,13 @@ function captureOnce(
 ): ProjectionRuntimeManifest {
   const created: string[] = [];
   try {
-    const selected = selectProjections(source, destination, candidates, indexPath);
-    copySelectedProjections(source, destination, selected, created, hooks);
+    const selected = selectProjections(roots, destination, candidates, indexPath);
+    copySelectedProjections(destination, selected, created, hooks);
     hooks.beforeSourceVerification?.();
     const entries = selected.map((entry) =>
-      verifySelectedProjection(source, destination, entry, indexPath),
+      verifySelectedProjection(roots.source, destination, entry, indexPath),
     );
-    const manifest = projectionManifest(source, destination, entries);
+    const manifest = projectionManifest(roots.source, destination, entries);
     writeFileSync(manifestDestination, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
     return manifest;
   } catch (cause) {
@@ -333,13 +378,15 @@ function stdinCandidates(): string[] {
 }
 
 function runCli(args: string[]): void {
-  if (args[0] === 'materialize' && args.length === 5) {
+  if (args[0] === 'materialize' && args.length >= 5) {
     materializeProjectionRuntime(
       args[1] as string,
       args[2] as string,
       args[3] as string,
       stdinCandidates(),
       args[4],
+      {},
+      args.slice(5),
     );
     return;
   }
@@ -347,12 +394,16 @@ function runCli(args: string[]): void {
     verifyProjectionRuntime(args[1] as string, args[2] as string, args[3] as string);
     return;
   }
+  if (args[0] === 'setup-owned' && args.length === 1) {
+    for (const [, path] of REVIEW_SETUP_OPTIONAL_PATHS) process.stdout.write(`${path}\0`);
+    return;
+  }
   if (args[0] === 'mutable' && args.length === 2) {
     for (const path of mutableProjectionRoots(args[1] as string)) process.stdout.write(`${path}\0`);
     return;
   }
   fail(
-    'usage: projection-runtime materialize <source> <destination> <manifest> <index-path> | verify <source> <destination> <manifest> | mutable <manifest>',
+    'usage: projection-runtime materialize <source> <destination> <manifest> <index-path> [main-path...] | verify <source> <destination> <manifest> | mutable <manifest> | setup-owned',
   );
 }
 
