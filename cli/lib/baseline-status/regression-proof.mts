@@ -1,15 +1,7 @@
 import { randomBytes } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { constants, tmpdir } from 'node:os';
-import { isAbsolute, join, relative, sep } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { constants } from 'node:os';
+import { join } from 'node:path';
 import { writeFileAtomic } from '../atomic-write.mts';
 import { superviseGateCommand } from '../ship/review/process/gate-supervisor.mts';
 import {
@@ -32,6 +24,7 @@ import {
   prepareRegressionRepository,
   readRegressionReport,
   regressionCloneCwd,
+  regressionTempBase,
   RegressionUsageError,
   snapshotRegressionCaller,
 } from './regression-repository.mts';
@@ -347,26 +340,15 @@ function removeClone(path: string): boolean {
   return !existsSync(path);
 }
 
-function regressionTempBase(callerRoot: string): string {
-  const base = realpathSync(tmpdir());
-  const fromCaller = relative(callerRoot, base);
-  if (
-    fromCaller === '' ||
-    (fromCaller !== '..' && !fromCaller.startsWith(`..${sep}`) && !isAbsolute(fromCaller))
-  ) {
-    throw new RegressionUsageError('temporary directory must be outside the caller repository');
-  }
-  return base;
-}
-
 export interface CapturedRegression {
   evidence: RegressionEvidence;
   evidenceDir: string;
 }
 
-/** Throws on interruption or a clone/setup failure, after removing every clone. */
+/** Throws on interruption or setup failure, after removing every clone. `onPhase` marks phases. */
 export async function captureRegressionEvidence(
   prepared: PreparedRegressionRepository,
+  onPhase: (name: 'red' | 'green' | 'cleanup') => void = () => {},
 ): Promise<CapturedRegression> {
   const signalGuard = new CaptureSignalGuard();
   let root: string | null = null;
@@ -393,6 +375,7 @@ export async function captureRegressionEvidence(
     linkRegressionDependencies(greenClone, prepared.prefix, dependencySnapshot);
     await signalGuard.checkpoint();
 
+    onPhase('red');
     const redRun = await runOperand(
       'red',
       redClone,
@@ -405,6 +388,7 @@ export async function captureRegressionEvidence(
       signalGuard,
     );
     signalGuard.throwIfInterrupted();
+    onPhase('green');
     const greenRun = await runOperand(
       'green',
       greenClone,
@@ -417,6 +401,7 @@ export async function captureRegressionEvidence(
       signalGuard,
     );
     signalGuard.throwIfInterrupted();
+    onPhase('cleanup');
     const red = operandEvidence('red', prepared.args.red, prepared.redSha, redRun);
     const green = operandEvidence('green', prepared.args.green, prepared.greenSha, greenRun);
     const cleanup = {

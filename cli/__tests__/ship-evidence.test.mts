@@ -147,6 +147,7 @@ describe('devkit ship evidence block', () => {
       stale: false,
     });
     expect(block).toContain('"src/value.test.mjs"');
+    expect(block).toMatch(/\(setup \d+s, red \d+s, green \d+s, cleanup \d+s\)/);
     expect(block).toMatch(/\| red \| PR base \+ PR test files `\w+` \| 1 \| 0 \| 1 \| 0 \|/);
     // One small source file with proof captured at this head, gated by this ship with no bypass.
     expect(block).toContain(
@@ -254,7 +255,7 @@ describe('devkit ship evidence block', () => {
     expect(Date.now() - started).toBeLessThan(110_000);
     const body = readFileSync(repo.state, 'utf8');
     expect(readEvidenceBlock(body, tipOf(repo.bare, 'feat/slow'))?.status).toBe('inconclusive');
-    expect(body).toContain('did not finish within 10s');
+    expect(body).toMatch(/did not finish within 10s \(setup \d+s[^)]* unfinished\)/);
     expect(body).toContain('**Merge verdict:** human-review (no-captured-proof: inconclusive)');
     const pid = Number(readFileSync(pidFile, 'utf8'));
     expect(() => process.kill(pid, 0)).toThrow();

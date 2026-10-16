@@ -32,20 +32,40 @@ interface Produced {
   evidence: RegressionEvidence | null;
 }
 
+export interface PhaseMark {
+  name: string;
+  at: number;
+}
+
+/** `setup 6s, red 212s`: each phase runs until the next one starts, the last until `now`. */
+export function phaseTimes(marks: readonly PhaseMark[], now: number): string {
+  return marks
+    .map(({ name, at }, index) => {
+      const end = marks[index + 1]?.at ?? now;
+      return `${name} ${Math.round((end - at) / 1000)}s`;
+    })
+    .join(', ');
+}
+
 /** The capture's own SIGTERM path stops the test tree and removes both clones at the deadline. */
 async function captureWithin(
   prepared: PreparedRegressionRepository,
   seconds: number,
-): Promise<RegressionEvidence> {
-  let timedOut = false;
+): Promise<{ evidence: RegressionEvidence; timing: string }> {
+  // Monotonic, like the timer itself, so a wall-clock step cannot skew a phase or make it negative.
+  const marks: PhaseMark[] = [{ name: 'setup', at: performance.now() }];
+  let stalled: string | null = null;
   const timer = setTimeout(() => {
-    timedOut = true;
+    stalled = `${phaseTimes(marks, performance.now())} unfinished`;
     process.kill(process.pid, 'SIGTERM');
   }, seconds * 1000);
   try {
-    return (await captureRegressionEvidence(prepared)).evidence;
+    const { evidence } = await captureRegressionEvidence(prepared, (name) =>
+      marks.push({ name, at: performance.now() }),
+    );
+    return { evidence, timing: phaseTimes(marks, performance.now()) };
   } catch (error) {
-    throw timedOut ? new Error(`the tests did not finish within ${seconds}s`) : error;
+    throw stalled ? new Error(`the tests did not finish within ${seconds}s (${stalled})`) : error;
   } finally {
     clearTimeout(timer);
   }
@@ -81,8 +101,9 @@ async function produce(
     ['--red', red, '--green', head, '--vitest-report', REPORT, '--', ...argv],
     cwd,
   );
-  const evidence = await captureWithin(prepared, config.timeoutSeconds);
-  return { outcome: outcomeFromRegression(evidence, head, base), evidence };
+  const { evidence, timing } = await captureWithin(prepared, config.timeoutSeconds);
+  const outcome = outcomeFromRegression(evidence, head, base);
+  return { outcome: { ...outcome, detail: `${outcome.detail} (${timing})` }, evidence };
 }
 
 /** Loaded only once a block is being written, so a ship that writes none never pays for it. */
