@@ -10,7 +10,14 @@
  * reader consumes, so the two can never disagree.
  */
 import { blockingFindings } from './blocking.mts';
-import { count, oneLine, textOf } from './fields.mts';
+import {
+  baseDriftDetail,
+  earlierDiffDetail,
+  partialPacket,
+  partialPacketDetail,
+} from './cache-detail.mts';
+import { oneLine, textOf } from './fields.mts';
+import { SKIP_CONTROLS } from './skip-controls.mts';
 import { scanBackward } from './tail.mts';
 import { readBranchHistory, renderTrend, summariseTrend } from './trend.mts';
 
@@ -83,6 +90,8 @@ export interface DigestRow {
   findings?: number;
   /** From a stage that holds no exit: the reader acts on it, but never by retrying the ship. */
   advisory?: true;
+  /** A gate a flag or config skipped: never capped, since a hidden skip is what this row ends. */
+  skipped?: true;
 }
 
 /** A row that COULD have stopped the run, so its blocking status must be computed, never assumed. */
@@ -140,11 +149,6 @@ export function readShipEvents(sink: string, shipId: string): GateEvent[] {
   );
 }
 
-/** A sink row's judged base, short — JSON.stringify never invokes a row-supplied toString, so a
- * malformed value (`{"toString":1}`) degrades to "an earlier base" instead of throwing. */
-const shortJudgedBase = (sha: string | null | undefined): string =>
-  /^"([0-9a-f]{7,64})"$/.exec(JSON.stringify(sha ?? null))?.[1].slice(0, 12) ?? 'an earlier base';
-
 /**
  * Which finding this run actually stopped on, given the coarse `blocked_gate` the shell published.
  *
@@ -192,6 +196,30 @@ function outageWordsByJudge(events: GateEvent[]): Map<string, string> {
   return words;
 }
 
+/** No-LLM mode skips the whole fleet, and either the env flag or the repo's config can set it. */
+const NO_LLM = 'GUARD_DECISION_NO_LLM or noLlm config';
+
+/** An env-authorized skip, or a PASS a bypass flag produced: it verified nothing and never blocks. */
+function bypassRow(e: GateEvent): DigestRow | undefined {
+  const skip = e.type === 'review_skipped';
+  const reason = textOf(e.reason);
+  const flag = skip
+    ? reason === 'no_llm'
+      ? NO_LLM
+      : SKIP_CONTROLS.get(reason)
+    : e.type === 'gate_result' && e.status === 'pass' && textOf(e.bypass);
+  if (!flag) return undefined;
+  const reviewer = textOf(e.reviewer);
+  const gate = skip ? (reviewer ? `review:${reviewer}` : 'review') : (e.gate ?? 'unknown');
+  return {
+    gate,
+    state: 'could-not-run',
+    blocking: false,
+    detail: `bypassed via ${flag} — verified nothing`,
+    skipped: true,
+  };
+}
+
 /** Pure: events → the rows the terminus should show. No IO, so the interesting cases unit-test. */
 export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
   const all = events.filter((e) => e.ship_id === shipId);
@@ -223,8 +251,12 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
   const outageWords = outageWordsByJudge(mine);
   // Held out of attributable[] for the same reason: a downgrade or a reused PASS holds no exit.
   const unverified: DigestRow[] = [];
+  // Held out too: a gate an env flag skipped never ran, so it cannot be what stopped the run.
+  const bypassed: DigestRow[] = [];
   for (const e of mine) {
-    if (e.type === 'review_result' && e.status === 'fail') {
+    const skip = bypassRow(e);
+    if (skip) bypassed.push(skip);
+    else if (e.type === 'review_result' && e.status === 'fail') {
       const gate = `review:${e.reviewer ?? 'unknown'}`;
       for (const f of blockingFindings(e)) {
         attributable.push({ gate, family: 'review', state: 'finding', ...f });
@@ -348,6 +380,7 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
       if (a.findings) row.findings = a.findings;
       return row;
     }),
+    ...firstPerGate(bypassed),
     // NOT passed through the `unattributed` null-blocking arm: that arm exists for a run whose
     // blocker is unknowable, and an advisory's non-blocking status is knowable on every run.
     ...firstPerGate(advisory),
@@ -360,53 +393,6 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
 /** A cache_hit's gate label; completeness's intent key reports under the judge's own gate name. */
 const cacheGate = (e: GateEvent): string =>
   e.judge === `review:${COMPLETENESS}` ? COMPLETENESS : (e.judge ?? 'unknown');
-
-/** A PASS reused across a reshaped diff (sc-3175), or ''. `=== false`: an absent field covers it. */
-const earlierDiffDetail = (e: GateEvent): string =>
-  e.diff_matches === false
-    ? 'cached PASS judged an earlier diff — this diff was not re-judged'
-    : '';
-
-/** A PASS judged on an earlier base whose reviewed paths moved (sc-3468), or ''. An absent
- * base_state (non-review emitters) or 'moved-clear' stays a ✓ — base-drift-surfaced-at-read-time (b). */
-function baseDriftDetail(e: GateEvent): string {
-  if (e.base_state === 'unknown')
-    return 'cached PASS whose judged base is unknown — not re-judged against this base';
-  if (e.base_state === 'moved-overlap')
-    return `cached PASS judged against ${shortJudgedBase(e.judged_base_sha)} — reviewed paths changed on the base since; not re-judged`;
-  return '';
-}
-
-function partialPacket(e: GateEvent): boolean {
-  return count(e.evidence_omitted_files) > 0 || count(e.evidence_truncated_files) > 0;
-}
-
-const PATHS_SHOWN = 3;
-
-/** ` — <label>: a, b, c, …` over an untrusted path list, or '' when it holds no usable path. */
-function namedPaths(label: string, list: string[] | undefined, total: number): string {
-  const paths = (Array.isArray(list) ? list : []).map(textOf).filter(Boolean);
-  const more = paths.length > PATHS_SHOWN || total > PATHS_SHOWN ? ', …' : '';
-  return paths.length
-    ? ` — ${label}: ${paths
-        .slice(0, PATHS_SHOWN)
-        .map((p) => oneLine(p))
-        .join(', ')}${more}`
-    : '';
-}
-
-function partialPacketDetail(e: GateEvent): string {
-  const omitted = count(e.evidence_omitted_files);
-  const truncated = count(e.evidence_truncated_files);
-  const lensName = textOf(e.evidence_lens);
-  const lens = lensName ? ` (${oneLine(lensName)} lens)` : '';
-  const total = count(e.evidence_file_count) ? `/${count(e.evidence_file_count)}` : '';
-  const named =
-    namedPaths('not shown', e.evidence_omitted_paths, omitted) +
-    namedPaths('truncated', e.evidence_truncated_paths, truncated);
-  const cached = e.type === 'cache_hit' ? 'cached ' : '';
-  return `${cached}PASS over an incomplete packet${lens}: ${omitted}${total} file(s) omitted, ${truncated} truncated${named}`;
-}
 
 /** The first row per state+gate, in event order. */
 function firstPerGate(rows: DigestRow[]): DigestRow[] {
@@ -456,8 +442,8 @@ export function render(rows: DigestRow[], logPath = ''): string {
     out.push(`   … ${others.length - MAX_FINDINGS} more finding(s) — all of them are in the log`);
   }
   // Blockers are never capped, as with findings: each fail-closed reviewer is one more to clear.
-  const missingBlockers = missing.filter((r) => r.blocking === true);
-  const missingOthers = missing.filter((r) => r.blocking !== true);
+  const missingBlockers = missing.filter((r) => r.blocking === true || r.skipped);
+  const missingOthers = missing.filter((r) => r.blocking !== true && !r.skipped);
   for (const r of [...missingBlockers, ...missingOthers.slice(0, MAX_MISSING)]) {
     // A gate that could not run is normally advisory context, but under GUARD_DETERMINISTIC_STRICT
     // an opt-out IS the block — so this marker follows the computed status, never the row's kind.
