@@ -296,67 +296,38 @@ describe.skipIf(!CAN_SHIM)('knip-check.sh — package-manager resolution (sc-105
   });
 });
 
-describe.skipIf(!CAN_SHIM)(
-  'partial sync: a stale session-edits-lib.sh without the runner helpers',
-  () => {
-    // `sync-hooks --only knip-check.sh` refreshes the hook but NOT the lib (install-hooks.mts), so the
-    // new hook must keep today's bun behaviour against the old lib rather than skip or crash.
-    const staleHookDir = (hookFile) => {
+describe.skipIf(!CAN_SHIM)('a missing or outdated session-edits-lib.sh', () => {
+  // A git-tracked or locally edited lib is the consumer's, so sync leaves it at whatever age it is.
+  it.each(['knip-check.sh', 'lint-check.sh'])(
+    '%s fails open against a lib older than the runner helpers',
+    (hookFile) => {
       const dir = mkTmp('stale-lib-');
       const lib = readFileSync(LIB, 'utf8');
       const marker = lib.indexOf('# ---- Package-manager runner');
       expect(marker).toBeGreaterThan(-1);
       writeFileSync(join(dir, 'session-edits-lib.sh'), lib.slice(0, marker));
       writeFileSync(join(dir, hookFile), readFileSync(join(AGENTS_HOOKS, hookFile), 'utf8'));
-      return join(dir, hookFile);
-    };
-
-    it('knip-check.sh still runs knip through bun', () => {
-      const r = run(knipRepo({}, { 'package-lock.json': '{}' }), {
-        hook: staleHookDir('knip-check.sh'),
-        path: shimPath({ pms: { bun: fakeBun(), npm: fakePm('npm') } }),
-      });
-      expect(r.status).toBe(2);
-      expect(r.stderr).toContain('PM=bun run knip');
-    });
-
-    it.each(['knip-check.sh', 'lint-check.sh'])(
-      '%s: PATH executables named like the helpers never stand in for the missing functions',
-      (hookFile) => {
-        const impostor = '#!/bin/sh\necho "KNIP_RAN.ts: IMPOSTOR"\nexit 0\n';
-        const pms = { bun: fakeBun(), js_eval: impostor, resolve_pm: impostor, pm_run: impostor };
-        const r = run(knipRepo({ scripts: { knip: 'x', 'ts:check': 'x' } }), {
-          hook: staleHookDir(hookFile),
-          path: shimPath({ pms }),
-        });
-        expect(r.status).toBe(2);
-        expect(r.stderr).toContain('PM=bun run');
-        expect(r.stderr).not.toContain('IMPOSTOR');
-      },
-    );
-
-    it('a PATH executable named session_edits_file never stands in for a missing lib', () => {
-      const dir = mkTmp('no-lib-');
-      writeFileSync(join(dir, 'knip-check.sh'), readFileSync(KNIP_HOOK, 'utf8'));
-      const impostor = '#!/bin/sh\necho /dev/null\n';
-      const r = run(knipRepo({}, { 'bun.lock': '' }), {
-        hook: join(dir, 'knip-check.sh'),
-        path: shimPath({ pms: { bun: fakeBun(), session_edits_file: impostor } }),
+      const r = run(knipRepo({ scripts: { knip: 'x', 'ts:check': 'x' } }, { 'bun.lock': '' }), {
+        hook: join(dir, hookFile),
+        path: shimPath({ pms: { bun: fakeBun() } }),
       });
       expect(r.status).toBe(0);
-      expect(r.stderr).toBe('');
-    });
+      expect(r.stderr).not.toContain('KNIP_RAN');
+    },
+  );
 
-    it('knip-check.sh skips (as before) when bun is absent', () => {
-      const r = run(knipRepo({}, { 'package-lock.json': '{}' }), {
-        hook: staleHookDir('knip-check.sh'),
-        path: shimPath({ pms: { npm: fakePm('npm') } }),
-      });
-      expect(r.status).toBe(0);
-      expect(r.stderr).toBe('');
+  it('a PATH executable named session_edits_file never stands in for a missing lib', () => {
+    const dir = mkTmp('no-lib-');
+    writeFileSync(join(dir, 'knip-check.sh'), readFileSync(KNIP_HOOK, 'utf8'));
+    const impostor = '#!/bin/sh\necho /dev/null\n';
+    const r = run(knipRepo({}, { 'bun.lock': '' }), {
+      hook: join(dir, 'knip-check.sh'),
+      path: shimPath({ pms: { bun: fakeBun(), session_edits_file: impostor } }),
     });
-  },
-);
+    expect(r.status).toBe(0);
+    expect(r.stderr).toBe('');
+  });
+});
 
 describe.skipIf(!CAN_SHIM)('lint-check.sh — package-manager resolution (sc-1054)', () => {
   const lintRepo = (scripts, files = {}) =>

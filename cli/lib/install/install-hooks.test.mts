@@ -18,6 +18,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { digest, packageDir } from '../fs-helpers.mts';
 import { checkHookRegistrations } from './hook-registration-ledger/check.mts';
 import {
   projectHookRegistrations,
@@ -669,63 +670,67 @@ describe('removeHookRegistrations', () => {
 });
 
 // syncHookScripts copies the bundled hook FILES + writes .devkit/agent-hooks-manifest.json (sha256),
-// registration-free. `--only` is the incremental per-hook adoption path (add one devkit-owned hook at a
-// time); `--targets` limits which surfaces get a hooks dir. Source = the real agents-hooks/ bundle.
-describe('syncHookScripts --only / --targets', () => {
+// registration-free. `desired` is the exact reconciliation set; `--targets` limits which surfaces
+// get a hooks dir. Source = the real agents-hooks/ bundle.
+describe('syncHookScripts desired / --targets', () => {
   const manifest = (root) =>
     JSON.parse(readFileSync(join(root, '.devkit', 'agent-hooks-manifest.json'), 'utf8'));
   const hookExists = (root, name, surface = 'claude') =>
     existsSync(join(root, `.${surface}`, 'hooks', name));
 
-  it('--only syncs just the named hook + a 1-entry manifest, leaving the rest unsynced', () => {
-    const root = tmpRepo();
-    syncHookScripts(root, { only: ['decision-stop-check.sh'], targets: ['claude'] });
-    expect(hookExists(root, 'decision-stop-check.sh')).toBe(true);
-    expect(hookExists(root, 'lint-check.sh')).toBe(false);
-    expect(hookExists(root, 'knip-check.sh')).toBe(false);
-    expect(Object.keys(manifest(root).files)).toEqual(['decision-stop-check.sh']);
-  });
-
   it('--targets claude does NOT create a .cursor/hooks tree', () => {
     const root = tmpRepo();
-    syncHookScripts(root, { only: ['decision-stop-check.sh'], targets: ['claude'] });
+    syncHookScripts(root, { desired: ['decision-stop-check.sh'], targets: ['claude'] });
     expect(existsSync(join(root, '.cursor', 'hooks'))).toBe(false);
     expect(manifest(root).targets).toEqual(['claude']);
   });
 
-  it('throws on an --only name devkit does not ship (typo guard)', () => {
-    const root = tmpRepo();
-    expect(() => syncHookScripts(root, { only: ['no-such-hook.sh'], targets: ['claude'] })).toThrow(
-      /no hook named/,
-    );
-  });
-
   it('--dry-run writes nothing (no files, no manifest)', () => {
     const root = tmpRepo();
-    syncHookScripts(root, { only: ['decision-stop-check.sh'], targets: ['claude'], dryRun: true });
+    syncHookScripts(root, {
+      desired: ['decision-stop-check.sh'],
+      targets: ['claude'],
+      dryRun: true,
+    });
     expect(hookExists(root, 'decision-stop-check.sh')).toBe(false);
     expect(existsSync(join(root, '.devkit', 'agent-hooks-manifest.json'))).toBe(false);
   });
 
-  it('--only is additive: a second --only ADDS to the manifest, not replaces it', () => {
-    const root = tmpRepo();
-    syncHookScripts(root, { only: ['decision-stop-check.sh'], targets: ['claude'] });
-    syncHookScripts(root, { only: ['strategic-compactor.sh'], targets: ['claude'] });
-    expect(Object.keys(manifest(root).files).sort()).toEqual([
-      'decision-stop-check.sh',
-      'strategic-compactor.sh',
-    ]);
-    expect(hookExists(root, 'decision-stop-check.sh')).toBe(true);
-    expect(hookExists(root, 'strategic-compactor.sh')).toBe(true);
-  });
-
-  it('a full sync (no --only) writes all bundled hooks + a full manifest', () => {
+  it('a full sync (no desired) writes all bundled hooks + a full manifest', () => {
     const root = tmpRepo();
     syncHookScripts(root, { targets: ['claude'] });
     const keys = Object.keys(manifest(root).files);
     expect(keys).toContain('decision-stop-check.sh');
     expect(keys.length).toBeGreaterThanOrEqual(6);
   });
+
+  // ['claude'] keeps the legacy manifest; adding codex moves the sync onto the provider-native one.
+  it.each([[['claude']], [['claude', 'codex']]])(
+    'a full sync to %j refreshes a session-edits-lib.sh an older devkit wrote',
+    (targets) => {
+      const root = tmpRepo();
+      const lib = 'session-edits-lib.sh';
+      const desired = ['knip-check.sh', lib];
+      syncHookScripts(root, { desired, targets });
+      const stale = '# lib before the runner helpers\n';
+      writeFileSync(join(root, '.claude/hooks', lib), stale);
+      const recorded = manifest(root);
+      const records = [
+        recorded.files,
+        ...Object.values(recorded.providers ?? {}).map((p) => p.files),
+      ];
+      for (const files of records)
+        for (const key of Object.keys(files ?? {}))
+          if (key.endsWith(lib)) files[key] = digest(stale);
+      writeFileSync(join(root, '.devkit/agent-hooks-manifest.json'), JSON.stringify(recorded));
+
+      syncHookScripts(root, { desired, targets });
+
+      expect(readFileSync(join(root, '.claude/hooks', lib), 'utf8')).toBe(
+        readFileSync(join(packageDir(), 'agents-hooks', lib), 'utf8'),
+      );
+    },
+  );
 
   it('exact desired reconciliation prunes a previously Devkit-owned decisions hook', () => {
     const root = tmpRepo();

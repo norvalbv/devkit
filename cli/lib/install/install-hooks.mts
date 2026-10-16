@@ -75,8 +75,7 @@ const hookDirs = (targets: string[]) => targets.map((target) => agentAssetDir(ta
 interface SyncHookScriptsOptions {
   dryRun?: boolean;
   targets?: string[];
-  only?: string[];
-  /** Exact lifecycle reconciliation set. Unlike `only`, omitted prior entries are pruned. */
+  /** Exact lifecycle reconciliation set: omitted prior entries are pruned. */
   desired?: string[];
   skipTracked?: (relPath: string) => boolean;
   override?: (kind: string, name: string) => boolean;
@@ -100,10 +99,8 @@ interface AgentHooksManifest extends SyncManifest {
 // kept executable (chmod +x) — the .sh/.mjs are invoked directly by the agent harness.
 /**
  * @param {string} root the git root
- * @param {{ dryRun?: boolean, targets?: string[], only?: string[], skipTracked?: (relPath: string) => boolean, override?: (kind: string, name: string) => boolean }} [opts]
- *   `only` (default all): sync ONLY the named hooks — incremental per-hook adoption. Throws on a name
- *   devkit doesn't ship, and carries the prior manifest forward so an `only` run ADDS to the owned set
- *   rather than shrinking it to the one hook synced. `skipTracked` (overlay-only): leaves a git-tracked
+ * @param {{ dryRun?: boolean, targets?: string[], skipTracked?: (relPath: string) => boolean, override?: (kind: string, name: string) => boolean }} [opts]
+ *   `skipTracked` (overlay-only): leaves a git-tracked
  *   hook script untouched (C2). `override(kind, name)` (default never): a hook script colliding with the
  *   consumer's OWN same-named file (on disk, unmanifested, divergent) is PRESERVED unless
  *   `override('agent-hook', name)` is true.
@@ -113,7 +110,6 @@ export function syncHookScripts(
   {
     dryRun = false,
     targets = AGENT_TARGETS,
-    only,
     desired,
     skipTracked,
     override = () => false,
@@ -127,14 +123,6 @@ export function syncHookScripts(
       .map((e) => e.name);
     const manifestPath = join(root, '.devkit', 'agent-hooks-manifest.json');
     const decoded = readAgentAssetManifest(manifestPath, 'hooks');
-    if (only?.length && desired)
-      throw new Error('syncHookScripts: only and desired are mutually exclusive');
-    if (only?.length) {
-      const unknown = only.filter((n) => !rels.includes(n));
-      if (unknown.length)
-        throw new Error(`sync-hooks --only: devkit ships no hook named ${unknown.join(', ')}`);
-      rels = rels.filter((r) => only.includes(r));
-    }
     if (desired) {
       const unknown = desired.filter((name) => !rels.includes(name));
       if (unknown.length)
@@ -157,7 +145,6 @@ export function syncHookScripts(
         dryRun,
         skipTracked,
         override,
-        retainUnspecified: Boolean(only?.length),
         fileMode: 0o755,
       });
       const reported = new Set<string>();
@@ -178,7 +165,7 @@ export function syncHookScripts(
     assertLegacyAssetWriterCompatible(decoded, targets, 'hooks');
     const prev = decoded?.manifest ?? null;
     const conflicts = new Set(findConflicts(root, src, rels, targets, 'hooks', prev));
-    const files: Record<string, string> = only?.length ? { ...(prev?.files ?? {}) } : {};
+    const files: Record<string, string> = {};
     if (desired) {
       const kept = new Set(rels);
       const oldNames = new Set(Object.keys(prev?.files ?? {}).map((rel) => rel.split('/')[0]));

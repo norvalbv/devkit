@@ -156,27 +156,19 @@ describe('a default init leaves no dangling hook registration', () => {
     expect(Object.keys(manifest.files)).toContain('decision-scope-brief.mjs');
   });
 
-  it('refuses to install either decisions script on a repo without the guard', () => {
+  it('sync-hooks --only fails closed instead of syncing the whole selection', () => {
     const root = tmpRepo();
     expect(devkit(root, 'init', '--stack', 'generic', '--yes').status).toBe(0);
-    const configPath = join(root, '.devkit/config.json');
-    const config = readConfig(root);
-    config.components.guards = config.components.guards.filter(
-      (guard: string) => guard !== 'decisions',
-    );
-    writeFileSync(configPath, JSON.stringify(config, null, 2));
+    breakInstalledHook(root, DECISION_SCOPE_BRIEF_HOOK);
+    const manifestPath = join(root, '.devkit/agent-hooks-manifest.json');
+    const before = readFileSync(manifestPath, 'utf8');
 
-    const result = devkit(
-      root,
-      'sync-hooks',
-      '--only',
-      `${DECISION_EDIT_HOOK},${DECISION_SCOPE_BRIEF_HOOK}`,
-    );
+    const result = devkit(root, 'sync-hooks', '--only', DECISION_SCOPE_BRIEF_HOOK);
 
     expect(result.status).toBe(1);
-    // Both are named: reporting only the first would send the reader round the loop twice.
-    expect(result.stderr).toContain(DECISION_EDIT_HOOK);
-    expect(result.stderr).toContain(DECISION_SCOPE_BRIEF_HOOK);
+    expect(result.stderr).toContain('Run `devkit sync-hooks`');
+    expect(existsSync(join(root, '.claude/hooks', DECISION_SCOPE_BRIEF_HOOK))).toBe(false);
+    expect(readFileSync(manifestPath, 'utf8')).toBe(before);
   });
 });
 

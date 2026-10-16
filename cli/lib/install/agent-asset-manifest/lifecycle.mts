@@ -30,7 +30,6 @@ export interface ProviderNativeAssetOptions {
   dryRun?: boolean;
   skipTracked?: (rootRelativePath: string) => boolean;
   override?: (kind: string, unit: string) => boolean;
-  retainUnspecified?: boolean;
   fileMode?: number;
   now?: () => string;
 }
@@ -250,22 +249,16 @@ function buildPlan(options: ProviderNativeAssetOptions, decoded: DecodedSyncMani
     .flatMap(([, projected]) => projected);
   const skippedUnits = new Set(skips.map((skip) => skip.unit));
   const previousOutputs = oldOutputs(decoded, options.kind);
-  const retained = options.retainUnspecified
-    ? previousOutputs.filter((output) => !logicalRels.has(output.logicalRel))
-    : [];
-  const carried = [
-    ...retained,
-    ...previousOutputs.filter(
-      (output) =>
-        providers.includes(output.provider) &&
-        skippedUnits.has(output.unit) &&
-        !relinquished.has(`${output.provider}:${output.unit}`),
-    ),
-  ];
+  const carried = previousOutputs.filter(
+    (output) =>
+      providers.includes(output.provider) &&
+      skippedUnits.has(output.unit) &&
+      !relinquished.has(`${output.provider}:${output.unit}`),
+  );
   const carriedSources = new Set(carried.map((output) => output.logicalRel));
   const previousFiles = decoded?.manifest.files ?? {};
-  const files = Object.fromEntries([
-    ...sources.flatMap((source) => {
+  const files = Object.fromEntries(
+    sources.flatMap((source) => {
       const unit = unitFor(options.kind, source.logicalRel);
       if (includedUnits.has(unit))
         return [[source.logicalRel, sourceShas.get(source.logicalRel) as string]];
@@ -274,14 +267,10 @@ function buildPlan(options: ProviderNativeAssetOptions, decoded: DecodedSyncMani
         ? [[source.logicalRel, previousSha]]
         : [];
     }),
-    ...Object.entries(previousFiles).filter(([logicalRel]) =>
-      retained.some((output) => output.logicalRel === logicalRel),
-    ),
-  ]);
+  );
   const providerRecords: SyncManifestV2['providers'] = {};
-  for (const provider of SUPPORTED_AGENT_PROVIDERS.filter(
-    (candidate) =>
-      providers.includes(candidate) || retained.some((output) => output.provider === candidate),
+  for (const provider of SUPPORTED_AGENT_PROVIDERS.filter((candidate) =>
+    providers.includes(candidate),
   ))
     providerRecords[provider] = {
       files: Object.fromEntries(

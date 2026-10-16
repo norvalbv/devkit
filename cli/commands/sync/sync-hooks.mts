@@ -2,17 +2,14 @@
  * `devkit sync-hooks` — copy devkit's bundled agent-hook scripts (agents-hooks/*) into the consumer's
  * provider-native hook directories and write .devkit/agent-hooks-manifest.json, so a hook like
  * decision-stop-check.sh is SOURCED from devkit + drift-tracked (like skills/agents) instead of
- * authored per-repo. Parallel to `sync-skills`/`sync-agents`, with two additions they don't need:
+ * authored per-repo. Parallel to `sync-skills`/`sync-agents`, with one addition they don't need:
  *
- *   - `--only a.sh,b.mjs` : sync JUST the named hooks — incremental per-hook adoption. The manifest is
- *     carried forward (adds to the owned set), so a consumer can move hooks under devkit one at a time
- *     as each is verified behaviour-equivalent, without pulling the whole set.
  *   - `--targets claude,codex,cursor` : which surfaces to write. Defaults to recorded agentTargets.
  *
  * REGISTRATION-FREE: writes the hook FILES + manifest only. Unlike `devkit init`, it does NOT touch
  * settings.json hook wiring — the consumer owns their registrations (e.g. keeps knip off the Stop event).
  *
- *   devkit sync-hooks [--only <a.sh,b.mjs>] [--targets <claude,codex,cursor>] [--dry-run] [--force]
+ *   devkit sync-hooks [--targets <claude,codex,cursor>] [--dry-run] [--force]
  */
 
 import { join } from 'node:path';
@@ -24,11 +21,7 @@ import {
   resolveExistingAgentProviders,
   SUPPORTED_AGENT_PROVIDERS,
 } from '../../lib/install/agent-assets/agent-providers.mts';
-import {
-  DECISION_EDIT_HOOK,
-  DECISION_SCOPE_BRIEF_HOOK,
-  hookScriptsFor,
-} from '../../lib/install/hook-registration-ledger/selection.mts';
+import { hookScriptsFor } from '../../lib/install/hook-registration-ledger/selection.mts';
 import { syncHookScripts } from '../../lib/install/install-hooks.mts';
 
 // The relevant slice of `.devkit/config.json` this command reads.
@@ -67,9 +60,8 @@ export const meta = {
 write .devkit/agent-hooks-manifest.json (sha256 per file) so doctor can tell which side drifted.
 
 Usage:
-  devkit sync-hooks [--only <a.sh,b.mjs>] [--targets <claude,codex,cursor>] [--dry-run] [--force]
+  devkit sync-hooks [--targets <claude,codex,cursor>] [--dry-run] [--force]
 
---only     sync just the named hooks (incremental per-hook adoption; ADDS to the owned set).
 --targets  surfaces to write (claude|codex|cursor); default = the recorded agentTargets.
 --force    overwrite a hook you diverged from devkit's (default PRESERVES yours).
 
@@ -77,10 +69,16 @@ Registration-free: writes the hook FILES + manifest only; your settings.json hoo
 };
 
 export default function run(args: string[], cwd: string): number {
+  // A single hook synced alone skipped the libs it sources and the component that owns it.
+  if (args.includes('--only')) {
+    console.error(
+      'sync-hooks: --only was removed. Run `devkit sync-hooks` to sync your recorded selection.',
+    );
+    return 1;
+  }
   const { gitRoot } = detectGitRoot(cwd);
   // Config is package-local in a monorepo even though hook assets are repo-wide.
   const cfg: DevkitConfig | null = readJson(join(cwd, '.devkit', 'config.json'));
-  const only = listFlag(args, '--only');
   const decisions = cfg?.components?.guards?.includes('decisions') ?? false;
   // The fallow staged gate belongs to the FALLOW component, so a full sync must read the recorded
   // selection: omitting it makes `desired` exclude an installed gate, and exact reconciliation then
@@ -109,31 +107,19 @@ export default function run(args: string[], cwd: string): number {
     );
     return 1;
   }
-  // Both decisions-owned scripts are registered ONLY by the decisions component, so installing one
-  // without that guard leaves a script no registration ever invokes.
-  const decisionsOnly = [DECISION_EDIT_HOOK, DECISION_SCOPE_BRIEF_HOOK].filter((hook) =>
-    only?.includes(hook),
-  );
-  if (decisionsOnly.length && !decisions) {
-    console.error(`sync-hooks: ${decisionsOnly.join(', ')} requires the decisions guard`);
-    return 1;
-  }
   const override = args.includes('--force') ? () => true : undefined;
-  const desired = only
-    ? undefined
-    : hookScriptsFor({
-        agentHooks: true,
-        decisions,
-        fallow,
-        adhd,
-        priorArtGate,
-        baseDrift,
-        antiSlop,
-      });
+  const desired = hookScriptsFor({
+    agentHooks: true,
+    decisions,
+    fallow,
+    adhd,
+    priorArtGate,
+    baseDrift,
+    antiSlop,
+  });
   syncHookScripts(gitRoot, {
     dryRun: args.includes('--dry-run'),
     targets,
-    only,
     desired,
     override,
   });

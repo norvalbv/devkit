@@ -31,7 +31,7 @@ cd "${CLAUDE_PROJECT_DIR:-$HOOK_DIR/../..}" 2>/dev/null || exit 0
 [ -n "$FRINK_NO_LOG" ] && exit 0
 
 # Session scoping — only nudge about smells in files THIS session edited (ledger written by
-# format-after-edit.sh; see session-edits-lib.sh). Missing lib (sync-hooks --only) or no
+# format-after-edit.sh; see session-edits-lib.sh). Missing lib or no
 # session edits → FAIL-OPEN: a session that edited nothing made no decision to record.
 # The commit gate (guard-decisions detect --gate) stays working-tree-wide.
 source "$HOOK_DIR/session-edits-lib.sh" 2>/dev/null || true
