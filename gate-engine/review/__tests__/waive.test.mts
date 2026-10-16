@@ -144,6 +144,14 @@ describe('runWaive', () => {
     expect(err.mock.calls.flat().join('\n')).toContain('unknown reviewer');
   });
 
+  it('refuses the completeness judge, whose gate never reads an override', () => {
+    const cwd = repo();
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(runWaive(['completeness', 'a1b2c3d4e5f6', RATIONALE], cwd)).toBe(2);
+    expect(err.mock.calls.flat().join('\n')).toContain('unknown reviewer "completeness"');
+    expect(loadOverrides(cwd)).toEqual({});
+  });
+
   it('refuses a cascade reviewer (no model pin — opus-confirmed, not eligible for override)', () => {
     const cwd = repo();
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
