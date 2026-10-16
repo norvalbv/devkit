@@ -488,19 +488,57 @@ else
   BASE=$(git rev-parse HEAD)   # pin once: shared HEAD may advance mid-run
 fi
 
+# Lists index/worktree/untracked/ignored overlays on the NUL-separated members; 1 when any, 2 when
+# unlisted. Callers sit in `||`, where errexit is off, so every listing failure returns explicitly.
+ship_refuse_overlays() {  # <root> <source-head> <members-file> [header-prefix]
+  local root=$1 head=$2 members=$3 prefix=${4:-} found=0 kind p listed
+  local sel=()
+  while IFS= read -r -d '' p; do sel+=(":(top,literal)$p"); done < "$members"
+  [ "${#sel[@]}" -gt 0 ] || return 0
+  listed=$(mktemp "${TMPDIR:-/tmp}/ship-branch-overlays.XXXXXX") || return 2
+  for kind in index worktree untracked ignored; do
+    case "$kind" in
+      index) git -C "$root" diff --cached --name-only -z "$head" -- "${sel[@]}" ;;
+      worktree) git -C "$root" diff --name-only -z -- "${sel[@]}" ;;
+      untracked) git -C "$root" ls-files -o --exclude-standard -z -- "${sel[@]}" ;;
+      ignored) git -C "$root" ls-files -o -i --exclude-standard -z -- "${sel[@]}" ;;
+    esac | node "$SHIP_INTENT" filter-membership --members-file "$members" > "$listed" \
+      || { echo "--from-branch: could not list $kind overlays on --from-branch paths" >&2; rm -f "$listed"; return 2; }
+    while IFS= read -r -d '' p; do
+      [ "$found" -eq 1 ] || echo "${prefix}--from-branch refuses uncommitted overlays on --from-branch paths; commit or remove these exact overlays:" >&2
+      found=1
+      printf '  %q (%s)\n' "$p" "$kind" >&2
+    done < "$listed"
+  done
+  rm -f "$listed"
+  [ "$found" -eq 0 ]
+}
+
 if [ "$FROM_BRANCH" -eq 1 ]; then
   if [ -z "$LOCAL_BRANCH_EXISTS" ]; then
     set +e
     git -C "$ROOT" merge-base --is-ancestor "$BASE" "$SOURCE_HEAD" >/dev/null 2>&1
     ancestry_status=$?
     set -e
+    ANCESTRY_MSG=
     case "$ancestry_status" in
       0) ;;
-      1) echo "${SELF_DEFER:+ship: also blocked — }--from-branch: origin/$BASE_REF (${BASE:0:7}) is not an ancestor of HEAD (${SOURCE_HEAD:0:7}); rebase/merge the base, or deepen a shallow checkout, then retry" >&2
-         [ -n "$SELF_DEFER" ] || exit 1 ;;
+      1) ANCESTRY_MSG="--from-branch: origin/$BASE_REF (${BASE:0:7}) is not an ancestor of HEAD (${SOURCE_HEAD:0:7}); rebase/merge the base, or deepen a shallow checkout, then retry"
+         [ "$RESUME" -eq 0 ] || { echo "$ANCESTRY_MSG" >&2; exit 1; } ;;
       *) echo "--from-branch: could not verify ancestry (git exit $ancestry_status); fetch/deepen the repository and retry" >&2; exit 1 ;;
     esac
-    if [ -n "$SELF_DEFER" ]; then
+    if [ -n "$SELF_DEFER$ANCESTRY_MSG" ]; then
+      # Blocked: name every cheap blocker in remedy order. `git rebase` refuses a dirty tracked tree, so
+      # overlays on the paths this branch committed (merge-base..HEAD) print before the ancestry blocker.
+      also=${SELF_DEFER:+ship: also blocked — }
+      BLOCKED_PATHS_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-branch-blocked-paths.XXXXXX")
+      if MERGE_BASE=$(git -C "$ROOT" merge-base "$BASE" "$SOURCE_HEAD" 2>/dev/null) \
+        && git -C "$ROOT" diff --name-only --no-renames -z "$MERGE_BASE" "$SOURCE_HEAD" -- \
+          | node "$SHIP_INTENT" validate-paths > "$BLOCKED_PATHS_FILE"; then
+        ship_refuse_overlays "$ROOT" "$SOURCE_HEAD" "$BLOCKED_PATHS_FILE" "$also" || also="ship: also blocked — "
+      fi
+      rm -f "$BLOCKED_PATHS_FILE"
+      [ -z "$ANCESTRY_MSG" ] || echo "${also}${ANCESTRY_MSG}" >&2
       gate_hook_source_preflight "$ROOT" "$BASE" shipping || true   # read-only; prints its own blocker
       exit 1
     fi
@@ -593,30 +631,8 @@ if [ "$FROM_BRANCH" -eq 1 ]; then
     # or both. Do not reject a member merely because it is a directory in the current checkout: a
     # valid file -> directory transition yields both the deleted file `foo` and added `foo/bar`.
 
-    INDEX_OVERLAYS=$(mktemp "${TMPDIR:-/tmp}/ship-branch-index.XXXXXX")
-    WORKTREE_OVERLAYS=$(mktemp "${TMPDIR:-/tmp}/ship-branch-worktree.XXXXXX")
-    UNTRACKED_OVERLAYS=$(mktemp "${TMPDIR:-/tmp}/ship-branch-untracked.XXXXXX")
-    IGNORED_OVERLAYS=$(mktemp "${TMPDIR:-/tmp}/ship-branch-ignored.XXXXXX")
-    git -C "$ROOT" diff --cached --name-only -z "$SOURCE_HEAD" -- "${GIT_PATHS[@]}" \
-      | node "$SHIP_INTENT" filter-membership --members-file "$BRANCH_MEMBERS_FILE" > "$INDEX_OVERLAYS"
-    git -C "$ROOT" diff --name-only -z -- "${GIT_PATHS[@]}" \
-      | node "$SHIP_INTENT" filter-membership --members-file "$BRANCH_MEMBERS_FILE" > "$WORKTREE_OVERLAYS"
-    git -C "$ROOT" ls-files -o --exclude-standard -z -- "${GIT_PATHS[@]}" \
-      | node "$SHIP_INTENT" filter-membership --members-file "$BRANCH_MEMBERS_FILE" > "$UNTRACKED_OVERLAYS"
-    git -C "$ROOT" ls-files -o -i --exclude-standard -z -- "${GIT_PATHS[@]}" \
-      | node "$SHIP_INTENT" filter-membership --members-file "$BRANCH_MEMBERS_FILE" > "$IGNORED_OVERLAYS"
-    if [ -s "$INDEX_OVERLAYS" ] || [ -s "$WORKTREE_OVERLAYS" ] || [ -s "$UNTRACKED_OVERLAYS" ] || [ -s "$IGNORED_OVERLAYS" ]; then
-      echo "--from-branch refuses uncommitted overlays on --from-branch paths; commit or remove these exact overlays:" >&2
-      for overlay_pair in \
-        "$INDEX_OVERLAYS:index" "$WORKTREE_OVERLAYS:worktree" \
-        "$UNTRACKED_OVERLAYS:untracked" "$IGNORED_OVERLAYS:ignored"; do
-        overlay_file=${overlay_pair%:*}; overlay_kind=${overlay_pair##*:}
-        while IFS= read -r -d '' p; do printf '  %q (%s)\n' "$p" "$overlay_kind" >&2; done < "$overlay_file"
-      done
-      rm -f "$BRANCH_MEMBERS_FILE" "$INDEX_OVERLAYS" "$WORKTREE_OVERLAYS" "$UNTRACKED_OVERLAYS" "$IGNORED_OVERLAYS"
-      exit 1
-    fi
-    rm -f "$BRANCH_MEMBERS_FILE" "$INDEX_OVERLAYS" "$WORKTREE_OVERLAYS" "$UNTRACKED_OVERLAYS" "$IGNORED_OVERLAYS"
+    ship_refuse_overlays "$ROOT" "$SOURCE_HEAD" "$BRANCH_MEMBERS_FILE" || { rm -f "$BRANCH_MEMBERS_FILE"; exit 1; }
+    rm -f "$BRANCH_MEMBERS_FILE"
     CURRENT_HEAD=$(git -C "$ROOT" rev-parse HEAD)
     [ "$CURRENT_HEAD" = "$SOURCE_HEAD" ] || {
       echo "--from-branch: HEAD moved while the committed snapshot was prepared (${SOURCE_HEAD:0:7} -> ${CURRENT_HEAD:0:7}); retry" >&2
