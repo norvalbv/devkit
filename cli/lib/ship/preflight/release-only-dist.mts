@@ -68,8 +68,10 @@ export interface ReleaseOnlyReport {
   active: boolean;
   /** Staged rewrites of tracked dist (any status but A/D): refused unless a proven release. */
   releaseOnly: string[];
-  /** Caller-side rewrites of tracked dist: main's drift, named so nobody sorts it by hand. */
+  /** Caller-side rewrites of dist tracked at `against`, named so nobody sorts it by hand. */
   drift: string[];
+  /** The commit whose tracked dist the caller-side drift is named against. */
+  against?: string;
 }
 
 /** Each `<status>\0<path>` pair of a NUL-delimited `--name-status` diff. */
@@ -108,16 +110,25 @@ function callerDrift(root: string, base: string): string[] {
   return rewritten.sort();
 }
 
+/** Rewrites vs `base` of only the dist `target` tracks: a PR tip's own new artifacts are CI's `A`. */
+function trackedDrift(root: string, base: string, target: string): ReleaseOnlyReport {
+  const tracked = new Set(
+    git(root, ['ls-tree', '-r', '--name-only', '-z', target, '--', 'dist']).split('\0'),
+  );
+  const drift = callerDrift(root, base).filter((file) => tracked.has(file));
+  return { active: true, releaseOnly: [], drift, against: target };
+}
+
 /** With `tree` (CI: the PR head's committed tree) this refuses; without it (ship's caller-side
- *  preflight) it only names the working tree's drift, so nobody sorts it by hand. */
+ *  preflight) it only names the working tree's drift from `target` (default `base`). */
 export function inspectReleaseOnlyDist(
   root: string,
   base: string,
   branch: string | undefined,
-  { tree }: { tree?: string } = {},
+  { tree, target }: { tree?: string; target?: string } = {},
 ): ReleaseOnlyReport {
   if (!isDevkit(root, base, tree)) return { active: false, releaseOnly: [], drift: [] };
-  if (tree === undefined) return { active: true, releaseOnly: [], drift: callerDrift(root, base) };
+  if (tree === undefined) return trackedDrift(root, base, target ?? base);
   const diff = ['diff', '--no-renames', '--name-status', '-z', base, tree, '--', 'dist'];
   const rewritten = statusPairs(git(root, diff))
     .filter(([status]) => !FEATURE_SAFE.has(status))
@@ -133,7 +144,7 @@ export function printReleaseOnlyDist(report: ReleaseOnlyReport): number {
   if (!report.active) return 0;
   if (report.drift.length > 0) {
     console.error(
-      `devkit ship: ${report.drift.length} regenerated dist file(s) are release-only drift from main — leave them out of the brief:`,
+      `devkit ship: ${report.drift.length} regenerated dist file(s) are release-only drift from ${report.against?.slice(0, 12) ?? 'the base'} — leave them out of the brief:`,
     );
     for (const file of report.drift.slice(0, DRIFT_LISTED)) console.error(`    ${file}`);
     const rest = report.drift.length - DRIFT_LISTED;
