@@ -290,10 +290,11 @@ export function applyOverlayConstraints(sel: Selection, stack: string): Selectio
   };
 }
 
-/** The line an overlay prints for a component package mode would run but overlay cannot. */
+/** The SKIP line an overlay hook echoes for the structure gate package mode would run but overlay
+ * cannot, naming the repo's own eslint config as the only structure check left. */
 export function overlayStructureNotice(stack: string): string | null {
   return STRUCTURE_STACKS.has(stack) && !CONFIG_DRIVEN_STRUCTURE.has(stack)
-    ? `structure: not available in overlay for ${stack}`
+    ? `⚠️ structure-lint: SKIPPED in overlay for ${stack} — devkit's structure gate cannot run here; any structure check comes only from this repo's own eslint config, via the eslint overlay step on staged files`
     : null;
 }
 
