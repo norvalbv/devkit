@@ -11,7 +11,7 @@
 //       Without this, every gate call clogged the session picker ("You judge…", "You are judging…").
 //   JUDGE_READ_ONLY — add ONLY to PURE TEXT judges (no tool use). Removes all tools from context.
 //     Do NOT add to a judge that must investigate (an align/escalate pass that reads files and runs
-//     `git diff` via --allowedTools) — read-only would strip the tools it needs.
+//     read-only `git diff`) — read-only would strip the tools it needs.
 //
 // Ordering note: `--disallowedTools` / `--allowedTools` are VARIADIC. Splice JUDGE_READ_ONLY BEFORE
 // JUDGE_ISOLATION (so `--no-session-persistence`, a boolean flag, sits right before the positional
