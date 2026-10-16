@@ -400,9 +400,11 @@ ship_apply_text_arm() {
     "${GIT_PATHS[@]}" ${WHOLE_EXCLUDES[@]+"${WHOLE_EXCLUDES[@]}"} > "$patch" || return 2
   [ -s "$patch" ] || return 0
   if [ "$mode" = --index ]; then
-    GIT_INDEX_FILE=$target git -C "$root" apply --cached --3way "$patch" 2> "$err" && return 0
+    GIT_INDEX_FILE=$target git -C "$root" apply --cached --3way "$patch" 2> "$err" &&
+      { _ship_union_guard "$root" "$base" "$patch_base" "$base_ref" "$mode" "$target"; return; }
   else
-    git -C "$target" apply --index --3way "$patch" 2> "$err" && return 0
+    git -C "$target" apply --index --3way "$patch" 2> "$err" &&
+      { _ship_union_guard "$root" "$base" "$patch_base" "$base_ref" "$mode" "$target"; return; }
   fi
 
   # (a) Same-region overlap. UNMERGED index entries are the unambiguous, locale-independent
@@ -487,6 +489,42 @@ ship_apply_text_arm() {
     echo "  (shallow clone: three-way merge data may be missing — \`git fetch --unshallow\` can turn some of these into clean merges)" >&2
   fi
   echo "  Merge or rebase origin/$base_ref into this checkout, then retry the same command." >&2
+  return 1
+}
+
+# _ship_union_guard <root> <base> <patch_base> <base_ref> <mode> <target>
+# Checks a `merge=union` path both sides changed with decision-union/cli, failing closed (0 or 1).
+# The checker refuses with exit 3, so any other failure, such as node unable to load it, is named.
+_ship_union_guard() {
+  local root=$1 base=$2 patch_base=$3 base_ref=$4 mode=$5 target=$6 p attr val rec cli io rc=0
+  local both=() pairs=() ctx=(git -C "$target")
+  [ "$mode" = --index ] && ctx=(env "GIT_INDEX_FILE=$target" git -C "$root")
+  # Via a file, not process substitution, so a git failure is seen rather than read as "no paths".
+  io=$(mktemp "${TMPDIR:-/tmp}/ship-union.XXXXXX") || return 1
+  if "${ctx[@]}" diff --cached --name-only -z --diff-filter=M "$base" > "$io" 2>/dev/null; then
+    while IFS= read -r -d '' p; do
+      git -C "$root" diff --quiet "$patch_base" "$base" -- ":(top,literal)$p" 2>/dev/null || both+=("$p")
+    done < "$io"
+  else rc=2; fi
+  if [ "$rc" -eq 0 ] && [ "${#both[@]}" -gt 0 ]; then
+    if printf '%s\0' "${both[@]}" | "${ctx[@]}" check-attr -z --stdin merge > "$io" 2>/dev/null; then
+      while IFS= read -r -d '' p && IFS= read -r -d '' attr && IFS= read -r -d '' val; do
+        [ "$val" = union ] || continue
+        rec=$("${ctx[@]}" ls-files -s -z -- ":(top,literal)$p" | tr -d '\0')
+        rec=${rec#* }
+        pairs+=("$p" "${rec%% *}")
+      done < "$io"
+    else rc=2; fi
+  fi
+  rm -f "$io"
+  if [ "$rc" -eq 0 ] && [ "${#pairs[@]}" -gt 0 ]; then
+    cli="$SCRIPT_DIR/decision-union/cli.mts"
+    [ -f "$cli" ] || cli="$SCRIPT_DIR/decision-union/cli.mjs"
+    printf '%s\0' "${pairs[@]}" |
+      node "$cli" --root "$root" --base "$base" --patch-base "$patch_base" --base-ref "$base_ref" || rc=$?
+  fi
+  [ "$rc" -eq 0 ] && return 0
+  [ "$rc" -eq 3 ] || echo "  ship refuses rather than commit a union merge it could not verify." >&2
   return 1
 }
 
