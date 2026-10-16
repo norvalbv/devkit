@@ -16,6 +16,7 @@ import {
   setMaxLines,
   TEST_LINE_CAP,
 } from '../../gate-engine/ratchets/size-disable.mts';
+import { LINES_BASELINE } from '../../gate-engine/ratchets/size-policy.mts';
 import { defaultSelection } from '../lib/components.mts';
 
 let roots: string[] = [];
@@ -49,8 +50,9 @@ describe('line-growth block enabler', () => {
     let cfg = JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8'));
     expect(cfg.maxLines).toBe(LINE_CAP);
     expect(cfg.maxTestLines).toBe(TEST_LINE_CAP);
-    expect(cfg['//maxLines']).toBeTypeOf('string');
-    expect(cfg['//maxTestLines']).toBeTypeOf('string');
+    // The docs name the baseline's full path: a bare filename reads as missing from the repo root.
+    expect(cfg['//maxLines']).toContain(LINES_BASELINE);
+    expect(cfg['//maxTestLines']).toContain(LINES_BASELINE);
     // Idempotent — a second call preserves the value and reports "no write".
     expect(setMaxLines(root)).toBe(false);
     // A consumer's tuned implementation cap is preserved while the missing test cap is back-filled.
