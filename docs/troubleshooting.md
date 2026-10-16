@@ -135,13 +135,15 @@ comment line citing a forbidden reference blocks on every attempt:
 ```json
 "comments": {
   "forbiddenRefs": ["\\bsc-\\d+\\b"],
-  "forbidDecisionRefs": true
+  "forbidDecisionRefs": true,
+  "forbidLineAnchors": true
 }
 ```
 
 `forbiddenRefs` holds regular expressions, for example a private tracker's ticket ids.
 `forbidDecisionRefs` matches the `decisionsDir` path and every committed decision record name that
-contains a hyphen. Both are off by default. A code-only edit beside an unchanged trailing reference
+contains a hyphen. `forbidLineAnchors` matches a `<file>.<ext>:<line>` anchor, which goes stale on
+the next edit to that file: cite the function or test name instead. All three are off by default. A code-only edit beside an unchanged trailing reference
 passes; rewording that comment, pasting a copy, or swapping the ticket blocks. State the fact the
 reference stands for, or move the ticket to the commit message or PR body.
 

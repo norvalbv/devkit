@@ -57,8 +57,9 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   more changed text lines the first time it is shown. Shorten the comment where possible; a
   paragraph that justifies a workaround means the code is wrong, so fix the code. If every line
   states something the code cannot, retry unchanged: the same paragraph never blocks twice. When
-  `guard.config.json` sets `comments.forbiddenRefs` or `comments.forbidDecisionRefs`, a changed
-  comment citing a ticket or decision record blocks on every attempt until the reference is gone.
+  `guard.config.json` sets `comments.forbiddenRefs`, `comments.forbidDecisionRefs` or
+  `comments.forbidLineAnchors`, a changed comment citing a ticket, a decision record or a
+  `<file>:<line>` anchor blocks on every attempt until the reference is gone.
 - **Decision checks** (`decision-checks`, armed by the `decisions` guard) run the command linked to
   a decision Target when the commit touches its Scope, and print the ruling on failure. Fix the code;
   do not weaken the check. If the ruling itself changed, commit the new Target or the unlink

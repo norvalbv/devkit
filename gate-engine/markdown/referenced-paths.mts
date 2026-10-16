@@ -5,6 +5,15 @@ const PATH_EXT_RE = /\.(?:md|json|mts|mjs|ts|sh)$/;
 const REMOTE_SCHEME_RE = /^(?:[a-z][a-z\d+.-]*:\/\/|mailto:)/i;
 const TOKEN_SPLIT_RE = /[\s`() ,;"']+/;
 
+/** A `<file>.<ext>:<line>` citation. The extension allowlist keeps `host.com:443` from matching. */
+export const LINE_ANCHOR_RE =
+  /(?<![\w./-])[\w./-]*\w\.(?:mts|cts|mjs|cjs|tsx?|jsx?|sh|md|jsonl?|ya?ml|py|rs|go|c|h|toml):\d+(?:-\d+)?(?![\w-])/g;
+
+/** Every distinct line anchor in `text`, in order of first appearance. */
+export function lineAnchors(text: string): string[] {
+  return [...new Set(Array.from(text.matchAll(LINE_ANCHOR_RE), (match) => match[0]))];
+}
+
 /**
  * Repo-root-relative path candidates named in Markdown prose, links, inline code, or fenced code.
  *
