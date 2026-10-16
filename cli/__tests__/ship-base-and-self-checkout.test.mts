@@ -383,6 +383,35 @@ describe('ship-branch.sh — the branch is checked out in THIS worktree (sc-2261
       expect(r.stderr.trimEnd().split('\n').at(-1)).toMatch(/renaming keeps every commit/);
     });
 
+    it.each(['work', 'origin/work'])(
+      're-run line echoes the caller’s --base %s when no base can be suggested',
+      (base) => {
+        // Behind its base, no origin branch is an ancestor of story, so the suggestion is empty.
+        const { env, wt } = seedFromBranch({ behind: true });
+        const args = FROM_BRANCH_ARGS.map((a) => (a === 'work' ? base : a));
+
+        const r = spawnSync('/bin/bash', [scriptPath, ...args], { cwd: wt, encoding: 'utf8', env });
+
+        expect(r.status, r.stderr).not.toBe(0);
+        expect(r.stderr).toMatch(
+          /^ {4}devkit ship 'story' "<title>" --base 'work' --from-branch$/m,
+        );
+        expect(r.stderr).not.toContain('<branch-on-origin>');
+      },
+    );
+
+    it('re-run line keeps the caller’s --base over a different suggested base', () => {
+      // `aaa` ties `work` as story's nearest origin ancestor and wins the resolver's name order.
+      const { env, git, wt } = seedFromBranch({ behind: false });
+      git(['push', '-q', 'origin', 'work:aaa'], { stdio: 'ignore' });
+
+      const r = ship(wt, env);
+
+      expect(r.status, r.stderr).not.toBe(0);
+      expect(r.stderr).toMatch(/^ {4}devkit ship 'story' "<title>" --base 'work' --from-branch$/m);
+      expect(r.stderr).not.toMatch(/--base 'aaa'/);
+    });
+
     it('the two printed remedies, applied in order, let the same ship through', () => {
       const { env, wt, wtGit, bare } = seedFromBranch({ behind: true });
 
