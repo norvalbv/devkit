@@ -172,6 +172,30 @@ describe('ship --base: concurrent decision records under merge=union', () => {
     expect(r.stderr).toContain('could not verify');
   });
 
+  it('names the clash when two branches each create the same axis', () => {
+    const fx = seedForked((d) => writeFileSync(join(d, '.gitattributes'), ATTRIBUTES));
+    const tip = advanceBase(fx.bare, (c) => decide(c, ...TARGET, ...TARGET_REST, '--new'));
+    decide(
+      fx.dir,
+      '--target',
+      '--context',
+      'c2',
+      '--ruling',
+      'r2',
+      '--consequences',
+      'p',
+      ...TARGET_REST,
+      '--new',
+    );
+
+    fx.git(['add', AXIS]); // tracked, so the fork-anchored patch carries it
+    const r = stageArm(fx, tip);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(MISFILED);
+    expect(r.stderr).not.toContain('could not verify');
+  });
+
   it('fails closed when git cannot list what the merge changed', () => {
     const { dir, git } = seedAxis();
     const r = spawnSync(

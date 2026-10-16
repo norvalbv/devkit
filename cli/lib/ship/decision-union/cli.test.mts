@@ -72,8 +72,8 @@ afterEach(() => {
   for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true });
 });
 
-/** A repo whose `fork` and `base` commits carry `ax.md` as given, plus the merged blob's oid. */
-function axisRepo(fork: string, base: string, merged: string) {
+/** A repo whose `fork` and `base` commits carry `ax.md` as given (null: absent), plus the merged oid. */
+function axisRepo(fork: string | null, base: string, merged: string) {
   const root = mkdtempSync(join(tmpdir(), 'union-cli-'));
   roots.push(root);
   const git = (...a: string[]) =>
@@ -81,9 +81,9 @@ function axisRepo(fork: string, base: string, merged: string) {
       encoding: 'utf8',
       env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
     }).trim();
-  const commit = (text: string) => {
-    writeFileSync(join(root, 'ax.md'), text);
-    git('add', 'ax.md');
+  const commit = (text: string | null) => {
+    writeFileSync(join(root, text === null ? 'seed' : 'ax.md'), text ?? '');
+    git('add', '-A');
     git('-c', 'user.name=a', '-c', 'user.email=a@b.c', 'commit', '-q', '-m', 'x');
     return git('rev-parse', 'HEAD');
   };
@@ -105,6 +105,13 @@ describe('refusals', () => {
   it('throws on an unreadable revision instead of reading it as an empty file', () => {
     const { args, oid } = axisRepo(FORK, `${FORK}- 2026-01-03 — base note\n`, FORK);
     expect(() => refusals({ ...args, base: 'no-such-rev' }, ['ax.md', oid])).toThrow();
+  });
+
+  it('reads a path the fork point lacks as empty instead of failing the add/add merge', () => {
+    const plain = axisRepo(null, 'a\n', 'a\nb\n');
+    expect(refusals(plain.args, ['ax.md', plain.oid])).toEqual([]);
+    const axis = axisRepo(null, FORK, `${FORK}- 2026-01-04 — caller note\n`);
+    expect(refusals(axis.args, ['ax.md', axis.oid])[0]).toMatch(/new Target/);
   });
 
   it('passes a note-on-note merge', () => {
