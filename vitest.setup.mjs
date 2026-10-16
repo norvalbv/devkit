@@ -128,6 +128,10 @@ export const TEST_ONLY_ADDITIONS = [
   // The coverage gate runs this suite inside a 'gate'-marked process. Kept out of INHERITED_RUN_ENV
   // because `devkit review` must keep an inherited 'bench'.
   'DEVKIT_RUN_ORIGIN',
+  // An operator may export this for one ship; inherited through the related-tests gate, it would
+  // replace the deadline the deterministic gate tests assert.
+  'GUARD_GATE_TIMEOUT_MS',
+  'FRINK_GATE_TIMEOUT_MS',
 ];
 
 // One-run gate bypasses, in both spellings envFlag reads: everything `devkit ship --help` documents,

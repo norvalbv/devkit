@@ -13,6 +13,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deterministicStrict } from '../../config.mts';
+import { testSpawnSync } from '../../../cli/__tests__/_helpers.mts';
+import { gateTimeoutMs } from '../command-gates.mts';
 import { recheckCommand } from '../recheck.mts';
 import { parseOpts, prefixCacheScope, runDeterministic, selectedIds } from '../run.mts';
 
@@ -38,6 +40,8 @@ afterEach(() => {
   delete process.env.GUARD_DETERMINISTIC_STRICT;
   delete process.env.FRINK_DETERMINISTIC_STRICT;
   delete process.env.DEVKIT_GATE_EVENTS;
+  delete process.env.GUARD_GATE_TIMEOUT_MS;
+  delete process.env.FRINK_GATE_TIMEOUT_MS;
   vi.restoreAllMocks();
 });
 
@@ -69,6 +73,14 @@ const cacheStates = (sink) =>
     .map((line) => JSON.parse(line))
     .filter((e) => e.type === 'gate_timing' && e.gate === 'deterministic')
     .map((e) => e.cache_state);
+
+// Every gate_result event written to `sink`.
+const eventsOf = (sink) =>
+  readFileSync(sink, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l))
+    .filter((e) => e.type === 'gate_result');
 
 // Fake `node <guard-module> <args>` runner: maps a guard module basename → exit code. Throws
 // { status } for non-zero (like execFileSync), returns for 0. argv[0] is the resolved module path.
@@ -196,13 +208,6 @@ function runRealGates(guards, files, guardConfig) {
 
 // sc-2753: the judge-free comment budget aggregates here, so one fix pass sees every cheap finding.
 describe('runDeterministic — comments joins the aggregated set', () => {
-  const eventsOf = (sink) =>
-    readFileSync(sink, 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map((l) => JSON.parse(l))
-      .filter((e) => e.type === 'gate_result');
-
   it('reports anti-slop AND comment-budget findings in ONE block (the sc-2753 two-attempt bug)', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exec = mkExec({ 'cli/index.mts': 1, 'comment-firewall/cli': 1 });
@@ -285,7 +290,7 @@ describe('runDeterministic — comments joins the aggregated set', () => {
   });
 
   // A caller-shaped `--extra` label must never decide the outcome: the exit code does (sc-2753).
-  it.each(['x(unreadable-evidence)', 'y(unexpected:9)', 'z(could-not-run)'])(
+  it.each(['x(unreadable-evidence)', 'y(unexpected:9)', 'z(could-not-run)', 'w(timed-out:5s)'])(
     'an --extra gate labelled %s that exits 1 is a fail under its full label',
     (label) => {
       vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -1545,5 +1550,158 @@ describe('recheckCommand — repo-written argv is never rewritten', () => {
     const extra = [{ label: 'probe', cmd: `tool ${join(d, 'cfg.json')}` }];
     expect(runDeterministic(d, { exec, extra })).toBe(1);
     expect(err.mock.calls.flat().join('\n')).toContain(`probe: env -- tool ${join(d, 'cfg.json')}`);
+  });
+});
+
+// Runner that raises execFileSync's deadline error for the modules in `hang` and hands the rest
+// to mkExec(codes). `status` is 0 when the signalled child exited cleanly from its SIGTERM handler.
+function hangExec(hang, codes = {}, status = null) {
+  const rest = mkExec(codes);
+  return vi.fn((node, argv, opts) => {
+    if (hang.some((m) => argv[0].includes(m))) {
+      throw Object.assign(new Error('spawnSync node ETIMEDOUT'), { code: 'ETIMEDOUT', status });
+    }
+    return rest(node, argv, opts);
+  });
+}
+
+describe('runDeterministic — a gate that outlives its deadline', () => {
+  it.each([null, 0, 1])(
+    'blocks as timed-out and never as a verdict (child status %s)',
+    (status) => {
+      const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const d = repo(['size']);
+      const sink = join(d, 'events.jsonl');
+      process.env.DEVKIT_GATE_EVENTS = sink;
+      process.env.GUARD_GATE_TIMEOUT_MS = '600000';
+      const exec = hangExec(['size-disable'], {}, status);
+      expect(runDeterministic(d, { exec })).toBe(1);
+      const out = err.mock.calls.flat().join('\n');
+      expect(out).toContain('deterministic gates failed: guard-size(timed-out:600s)');
+      expect(out).toContain('no exit within 600s');
+      expect(out).toContain('GUARD_GATE_TIMEOUT_MS');
+      expect(exec.mock.calls[0][2]).toMatchObject({ timeout: 600_000 });
+      expect(eventsOf(sink)).toEqual([
+        expect.objectContaining({ gate: 'size', status: 'could_not_run', family: 'deterministic' }),
+      ]);
+    },
+  );
+
+  it('the remaining gates still run, and a real failure is reported beside the timeout', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size', 'fanout', 'dup', 'clone']);
+    const sink = join(d, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    const exec = hangExec(['folder-fanout'], { 'clone-detector': 1 });
+    expect(runDeterministic(d, { exec })).toBe(1);
+    expect(exec).toHaveBeenCalledTimes(4);
+    expect(err.mock.calls.flat().join('\n')).toContain(
+      'deterministic gates failed: guard-fanout(timed-out:1800s) guard-clone',
+    );
+    expect(eventsOf(sink).map((e) => [e.gate, e.status])).toEqual([
+      ['fanout', 'could_not_run'],
+      ['clone', 'fail'],
+    ]);
+  });
+
+  // dup's exit 2 is an opt-out and comments' exit 4 has its own label: a timeout is neither.
+  it.each([
+    ['dup', 'matcher', ''],
+    ['dup', 'matcher', '1'],
+    ['comments', 'comment-firewall/cli', ''],
+    ['comments', 'comment-firewall/cli', '1'],
+  ])(
+    'guard-%s (%s) times out the same way whatever its exit rules, strict=%j',
+    (id, mod, strict) => {
+      const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+      if (strict) process.env.GUARD_DETERMINISTIC_STRICT = strict;
+      expect(runDeterministic(repo([id]), { exec: hangExec([mod]) })).toBe(1);
+      const out = err.mock.calls.flat().join('\n');
+      expect(out).toContain(`deterministic gates failed: guard-${id}(timed-out:1800s)`);
+      expect(out).not.toContain('could-not-run');
+      expect(out).not.toContain('opted out');
+    },
+  );
+
+  it('a gate killed by a signal with no deadline involved is unchanged: a plain failure', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = vi.fn(() => {
+      throw Object.assign(new Error('killed'), { status: null, signal: 'SIGKILL' });
+    });
+    expect(runDeterministic(repo(['size']), { exec })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('deterministic gates failed: guard-size\n');
+    expect(out).not.toContain('timed-out');
+  });
+
+  it('a real gate process that never exits is stopped at the deadline and named', () => {
+    const d = repo([]);
+    const sink = join(d, 'events.jsonl');
+    writeFileSync(join(d, 'stall.mjs'), 'setTimeout(() => {}, 120_000);\n');
+    const run = testSpawnSync(
+      process.execPath,
+      [join(import.meta.dirname, '..', 'run.mts'), '--extra', 'stall=node stall.mjs'],
+      {
+        cwd: d,
+        encoding: 'utf8',
+        env: { ...process.env, GUARD_GATE_TIMEOUT_MS: '300', DEVKIT_GATE_EVENTS: sink },
+      },
+    );
+    expect(run.stderr).toContain('deterministic gates failed: stall(timed-out:0.3s)');
+    expect(run.status).toBe(1);
+    expect(eventsOf(sink)).toEqual([
+      expect.objectContaining({ gate: 'stall', status: 'could_not_run' }),
+    ]);
+  });
+});
+
+// A repo with no built-in gates whose guard.config.json sets `gateTimeoutMs` to `value`.
+function withGateTimeout(value) {
+  const d = repo([]);
+  writeFileSync(join(d, 'guard.config.json'), JSON.stringify({ gateTimeoutMs: value }));
+  return d;
+}
+
+describe('gateTimeoutMs', () => {
+  it('defaults to 30 minutes with no config and no env', () => {
+    expect(gateTimeoutMs(repo())).toBe(1_800_000);
+  });
+
+  it('reads guard.config.json, and the env var beats it', () => {
+    const d = withGateTimeout(900_000);
+    expect(gateTimeoutMs(d)).toBe(900_000);
+    process.env.GUARD_GATE_TIMEOUT_MS = '60000';
+    expect(gateTimeoutMs(d)).toBe(60_000);
+  });
+
+  // Node throws on a fractional timeout, which would fail every gate, and reads 0 as "no timeout".
+  it.each([1500.5, 0, -5, '900000', null, true])('ignores an unusable config value (%j)', (v) => {
+    expect(gateTimeoutMs(withGateTimeout(v))).toBe(1_800_000);
+  });
+
+  it.each(['', '0', '-1', '1500.5', 'Infinity', 'ten'])(
+    'ignores an unusable env value (%j)',
+    (v) => {
+      process.env.GUARD_GATE_TIMEOUT_MS = v;
+      expect(gateTimeoutMs(withGateTimeout(900_000))).toBe(900_000);
+    },
+  );
+
+  // Were this a value Node rejects, the spawn would throw and the gate would read as a bare `ok`.
+  it('the largest deadline it accepts is one the real spawn accepts too', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = withGateTimeout(Number.MAX_SAFE_INTEGER);
+    expect(gateTimeoutMs(d)).toBe(Number.MAX_SAFE_INTEGER);
+    const extra = [{ label: 'ok', cmd: 'node -e process.exit(7)' }];
+    expect(runDeterministic(d, { extra })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain(
+      'deterministic gates failed: ok(unexpected:7)',
+    );
+  });
+
+  it('falls back to the default when guard.config.json is unreadable', () => {
+    const d = repo();
+    writeFileSync(join(d, 'guard.config.json'), '{ "gateTimeoutMs": ');
+    expect(gateTimeoutMs(d)).toBe(1_800_000);
   });
 });

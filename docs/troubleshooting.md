@@ -408,6 +408,10 @@ all-and-**aggregate**: instead of failing fast on the first, they collect every 
 naming each (`guard-<id>`). Fix each named gate (see **A pre-commit gate blocked my commit** above) and
 re-commit. To converge without a ship round, stage the paths and run `guard-deterministic` locally.
 `guard-comments(unreadable-evidence)` is not a rejection: the gate could not read the staged content.
+`<gate>(timed-out:Ns)` is not a rejection either: the gate produced no exit within its deadline and
+was signalled, so re-run. A gate that is legitimately that slow needs a higher `gateTimeoutMs` in
+`guard.config.json`, or `export GUARD_GATE_TIMEOUT_MS=<ms>` for one run. Work the gate itself started
+may still be running after the signal.
 On a commit or ship, the decision and reviewer gates run only after this stage passes, one finding
 at a time, by design.
 
