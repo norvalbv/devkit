@@ -90,6 +90,21 @@ export function relocationBasePaths(
   return [...paths].sort((a, b) => a.localeCompare(b));
 }
 
+/** Baselined files with unstaged edits that may hold the half of a move the index does not carry. */
+export function unstagedRelocationSources(
+  bound: AntiSlopBaseline,
+  newGroups: readonly FindingGroup[],
+  dirtyPaths: () => readonly string[],
+): string[] {
+  const errors = newGroups.filter((group) => group.severity === 'error');
+  if (errors.length === 0) return [];
+  const dirty = new Map(dirtyPaths().map((path) => [path, { basePath: path, deleted: false }]));
+  // A file that gained the finding is its destination, never the place it moved out of.
+  const gained = new Set(errors.map((group) => group.fingerprint));
+  const sources = { ...bound, entries: bound.entries.filter((e) => !gained.has(e.fingerprint)) };
+  return relocationBasePaths(sources, dirty, new Set(errors.map((group) => relocationKey(group))));
+}
+
 /**
  * Debt a changed file provably gave up. Bounded by BOTH its base baseline count and a lint of its
  * base bytes, so unpruned stale credit is never spendable, minus what the candidate still carries.

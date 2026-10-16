@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   type AntiSlopBaseline,
   baselineFromGroups,
@@ -16,6 +16,7 @@ import {
   relocationBasePaths,
   relocationKey,
   type RelocationSource,
+  unstagedRelocationSources,
   vacatedDebt,
 } from './relocations.mts';
 
@@ -145,6 +146,30 @@ describe('vacated relocation debt', () => {
       'src/original.ts',
     ]);
     expect(relocationBasePaths(bound, sources, new Set(['["other"]']))).toEqual([]);
+  });
+
+  it('names dirty baselined sources only for new error findings, without probing Git otherwise', () => {
+    const bound = baselineOf(finding('src/a.ts'), finding('src/b.ts', 1, { context: 'other' }));
+    const dirty = vi.fn(() => ['src/a.ts', 'src/b.ts', 'src/c.ts']);
+
+    expect(unstagedRelocationSources(bound, [finding('src/new.ts')], dirty)).toEqual(['src/a.ts']);
+    expect(dirty).toHaveBeenCalledTimes(1);
+    dirty.mockClear();
+    const warning = finding('src/new.ts', 1, { severity: 'warning' });
+    expect(unstagedRelocationSources(bound, [warning], dirty)).toEqual([]);
+    expect(dirty).not.toHaveBeenCalled();
+    const unmatched = finding('src/new.ts', 1, { context: 'unbaselined' });
+    expect(unstagedRelocationSources(bound, [unmatched], dirty)).toEqual([]);
+  });
+
+  it('never names the file that gained the finding as the place it moved out of', () => {
+    // A second copy added to a file that already carries this debt, plus unrelated unstaged edits there.
+    const bound = baselineOf(finding('src/a.ts'), finding('src/other.ts'));
+    const dirty = () => ['src/a.ts', 'src/other.ts'];
+
+    expect(unstagedRelocationSources(bound, [finding('src/other.ts')], dirty)).toEqual([
+      'src/a.ts',
+    ]);
   });
 });
 
