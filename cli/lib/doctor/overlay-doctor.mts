@@ -99,7 +99,7 @@ export async function runOverlayDoctor(
     );
   else if (sync.drift)
     console.log(
-      '  ⚠ .devkit/hooks/pre-commit is STALE (predates the current devkit) — run `devkit doctor --fix` to refresh',
+      '  ⚠ .devkit/hooks/pre-commit is STALE or not executable (0755) — run `devkit doctor --fix` to refresh',
     );
   else console.log('  ✓ .devkit/hooks/pre-commit present');
   for (const hook of ['pre-commit', 'commit-msg'])

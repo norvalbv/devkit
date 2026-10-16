@@ -1,25 +1,14 @@
 /** Overlay's local `.devkit/hooks/commit-msg` (sc-1794): devkit's message judges from the global
  *  CLI, failing closed without it, then the repo's own commit-msg. Rationale: overlay-self-heal. */
 
-import {
-  chmodSync,
-  closeSync,
-  fstatSync,
-  mkdirSync,
-  openSync,
-  statSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { GATE_LOG_FINISH_PASS } from '../gate-policy/commit-gate-log.mts';
 import { buildCommitMsgBlock, COMMIT_MSG_PREAMBLE, commitMsgGuards } from '../commit-msg-block.mts';
+import { hookDrift, readHook, writeHookAtomic } from './hook-file.mts';
 import { buildPassthroughHook, chainExec, GATES_ONLY_STOP } from '../husky-block.mts';
 
 const LOCAL_HOOK = join('.devkit', 'hooks', 'commit-msg');
-const HOOK_MODE = 0o755;
 
 // Text that LOOKS like a repo hook already calls a judge. Advisory only (a double-run warning): hook
 // text cannot prove execution, so a selected judge is never omitted on its strength.
@@ -107,47 +96,6 @@ export function planOverlayCommitMsg({
   return { kind: 'passthrough', content: buildPassthroughHook(chainTarget, gitRuns) };
 }
 
-// One descriptor, content THEN mode: no check-then-use gap, and a chmod during the read is seen.
-export function readHook(
-  path: string,
-  readFile: (fd: number) => string = (fd) => readFileSync(fd, 'utf8'),
-): { content: string | null; mode: number } | null {
-  let fd: number;
-  try {
-    fd = openSync(path, 'r');
-  } catch (e) {
-    const code = e instanceof Error && 'code' in e ? e.code : undefined;
-    if (code === 'ENOENT') return null;
-    // Unreadable devkit hook (e.g. mode 0100): content unknown, so it can only be drift, never clean.
-    if (code === 'EACCES') return unreadableHook(path);
-    throw e;
-  }
-  try {
-    const content = readFile(fd);
-    return { content, mode: fstatSync(fd).mode & 0o777 };
-  } finally {
-    closeSync(fd);
-  }
-}
-
-function unreadableHook(path: string): { content: null; mode: number } | null {
-  try {
-    return { content: null, mode: statSync(path).mode & 0o777 };
-  } catch (e) {
-    if (e instanceof Error && 'code' in e && e.code === 'ENOENT') return null;
-    throw e;
-  }
-}
-
-/** Publish a hook atomically: git may exec it mid-write, so never truncate the live file in place. */
-export function writeHookAtomic(path: string, content: string) {
-  mkdirSync(join(path, '..'), { recursive: true });
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, content);
-  chmodSync(tmp, HOOK_MODE);
-  renameSync(tmp, path);
-}
-
 /** Compare the hook (bytes AND its exact 0755 mode) with the plan and, unless dryRun, repair it.
  *  Returns the state seen BEFORE any write; `missing` = a hook is wanted and none exists. */
 export function syncOverlayCommitMsg(
@@ -158,10 +106,7 @@ export function syncOverlayCommitMsg(
   const path = join(input.gitRoot, LOCAL_HOOK);
   const current = readHook(path);
   const expected = plan.kind === 'absent' ? null : plan.content;
-  // Devkit writes exactly 0755; any other mode (0644, owner-less 0001, …) may leave git skipping the
-  // hook silently, so it is drift even when the bytes match.
-  const drift =
-    (current?.content ?? null) !== expected || (current !== null && current.mode !== HOOK_MODE);
+  const drift = hookDrift(current, expected);
   const missing = expected !== null && current === null;
   if (!dryRun && drift) {
     if (expected === null) rmSync(path, { force: true });
