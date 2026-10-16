@@ -6,7 +6,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mts';
 import { adoptManagedCapability } from './base-capability.mts';
-import { type AntiSlopBaseline, parseBaseline } from './baseline.mts';
+import {
+  type AntiSlopBaseline,
+  hasCurrentIdentity,
+  parseBaseline,
+  rekeyBaseline,
+} from './baseline.mts';
 import {
   ANTI_SLOP_BASELINE_REL,
   ANTI_SLOP_CONFIG_REL,
@@ -15,6 +20,7 @@ import {
 } from './constants.mts';
 import type { AntiSlopManagedActivationEvidence } from './constants.mts';
 import type { RelocationSource } from './relocations.mts';
+import { collectAntiSlopFindings } from './runner.mts';
 import {
   git,
   type GitLayout,
@@ -191,11 +197,24 @@ function fileAtTree(
   });
 }
 
-function baselineAtTree(layout: GitLayout, tree: string): AntiSlopBaseline | null {
+/** A line-identity baseline re-keyed from a lint of the tree it describes; current ones pass. */
+export function rekeyBaselineAtTree(
+  cwd: string,
+  tree: string,
+  legacy: AntiSlopBaseline,
+): AntiSlopBaseline {
+  if (hasCurrentIdentity(legacy)) return legacy;
+  const files = [...new Set(legacy.entries.map((entry) => entry.file))];
+  return withBaseAntiSlopSnapshot(cwd, cwd, tree, files, ({ cwd: root, paths }) =>
+    rekeyBaseline(legacy, paths.length === 0 ? [] : collectAntiSlopFindings(root, paths)),
+  );
+}
+
+/** Every gate reads the committed base here, so a legacy base is compared in today's identity. */
+function baselineAtTree(cwd: string, layout: GitLayout, tree: string): AntiSlopBaseline | null {
   const json = fileAtTree(layout, tree, ANTI_SLOP_BASELINE_REL, 'the base baseline');
-  return json === null
-    ? null
-    : parseBaseline(json, `${tree.slice(0, 12)}:${layout.prefix}${ANTI_SLOP_BASELINE_REL}`);
+  const source = `${tree.slice(0, 12)}:${layout.prefix}${ANTI_SLOP_BASELINE_REL}`;
+  return json === null ? null : rekeyBaselineAtTree(cwd, tree, parseBaseline(json, source));
 }
 
 function activationEvidenceAtTree(
@@ -227,7 +246,7 @@ function envelope(
     baseTree,
     candidateTree,
     changes,
-    base: baselineAtTree(repo, baseTree),
+    base: baselineAtTree(cwd, repo, baseTree),
     ...packageChanges(changes, repo.prefix),
     activatedRuleIds: activatedRuleIdsBetween(
       activationEvidenceAtTree(repo, baseTree),
@@ -274,7 +293,7 @@ export function committedBaselineProbe(cwd: string): CommittedBaselineProbe {
     const repo = layout(cwd);
     if (resolveRef(repo.root, 'HEAD') === null) return { kind: 'skip', notice: null };
     const baseTree = treeForRef(repo.root, 'HEAD');
-    const base = baselineAtTree(repo, baseTree);
+    const base = baselineAtTree(cwd, repo, baseTree);
     if (base === null) return { kind: 'skip', notice: null };
     const staged = execFileSync(
       'git',

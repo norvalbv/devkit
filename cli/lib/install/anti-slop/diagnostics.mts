@@ -7,6 +7,8 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 const RULE_CODE = /^anti-slop\(([^)]+)\)$/u;
 
 interface RawSpan {
+  offset?: number;
+  length?: number;
   line?: number;
   column?: number;
 }
@@ -32,9 +34,11 @@ export interface AntiSlopFinding {
   severity: 'error' | 'warning';
   line: number;
   column: number;
+  /** The pre-span identity (context = the whole physical line), kept only to re-key old baselines. */
+  legacyFingerprint: string;
 }
 
-export interface FindingGroup extends AntiSlopFinding {
+export interface FindingGroup extends Omit<AntiSlopFinding, 'legacyFingerprint'> {
   count: number;
 }
 
@@ -56,9 +60,19 @@ function repositoryFile(cwd: string, filename: unknown): { absolute: string; rel
   return { absolute, relative: rel.split(sep).join('/') };
 }
 
-function sourceContext(path: string, line: number): string {
-  const lines = readFileSync(path, 'utf8').replace(/\r\n?/gu, '\n').split('\n');
+function lineContext(source: Buffer, line: number): string {
+  const lines = source.toString('utf8').replace(/\r\n?/gu, '\n').split('\n');
   return normalizeText(lines[Math.max(0, line - 1)] ?? '');
+}
+
+/** The first line of the reported span, so a formatter reflowing the line around it keeps the
+ * identity. Oxlint offsets count UTF-8 bytes, so the slice is taken from the raw bytes. */
+function spanContext(source: Buffer, span: RawSpan | undefined, line: number): string {
+  const offset = span?.offset ?? -1;
+  const length = span?.length ?? 0;
+  if (offset < 0 || length < 1) return lineContext(source, line);
+  const text = source.subarray(offset, offset + length).toString('utf8');
+  return normalizeText(text.split(/\r\n?|\n/u)[0] ?? '');
 }
 
 function fingerprintFor(parts: {
@@ -84,6 +98,7 @@ export function parseAntiSlopFindings(cwd: string, json: string): AntiSlopFindin
   }
   if (!Array.isArray(payload.diagnostics)) throw new Error('Oxlint JSON has no diagnostics array');
   const findings: AntiSlopFinding[] = [];
+  const sources = new Map<string, Buffer>();
   for (const diagnostic of payload.diagnostics) {
     const id = ruleId(diagnostic.code);
     if (!id) continue;
@@ -93,11 +108,18 @@ export function parseAntiSlopFindings(cwd: string, json: string): AntiSlopFindin
     const column = typeof span?.column === 'number' && span.column > 0 ? span.column : 1;
     const message =
       typeof diagnostic.message === 'string' ? normalizeText(diagnostic.message) : 'diagnostic';
-    const context = sourceContext(location.absolute, line);
-    const stable = { ruleId: id, file: location.relative, diagnostic: message, context };
+    let source = sources.get(location.absolute);
+    if (!source) sources.set(location.absolute, (source = readFileSync(location.absolute)));
+    const stable = {
+      ruleId: id,
+      file: location.relative,
+      diagnostic: message,
+      context: spanContext(source, span, line),
+    };
     findings.push({
       ...stable,
       fingerprint: fingerprintFor(stable),
+      legacyFingerprint: fingerprintFor({ ...stable, context: lineContext(source, line) }),
       severity: diagnostic.severity === 'warning' ? 'warning' : 'error',
       line,
       column,
@@ -114,7 +136,8 @@ export function groupFindings(findings: readonly AntiSlopFinding[]): FindingGrou
   for (const finding of findings) {
     const current = groups.get(finding.fingerprint);
     if (!current) {
-      groups.set(finding.fingerprint, { ...finding, count: 1 });
+      const { legacyFingerprint: _legacy, ...group } = finding;
+      groups.set(finding.fingerprint, { ...group, count: 1 });
       continue;
     }
     current.count += 1;

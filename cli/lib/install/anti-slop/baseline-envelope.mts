@@ -1,5 +1,6 @@
 /** Baseline growth, activation migration, and inherited-debt checks for anti-slop gates. */
 
+import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { failLine, writeGateReason } from '../../../../gate-engine/deterministic/reason.mts';
@@ -10,14 +11,18 @@ import {
   baselineFromGroups,
   baselineIncreases,
   compareBaseline,
+  hasCurrentIdentity,
   migrateBaselineRenames,
+  rekeyBaseline,
   removedBaselineMigrationReceipts,
 } from './baseline.mts';
+import { ANTI_SLOP_BASELINE_REL } from './constants.mts';
 import type { FindingGroup } from './diagnostics.mts';
 import {
   activatedRuleIdsBetween,
   committedBaselineProbe,
   type GitBaselineEnvelope,
+  rekeyBaselineAtTree,
   withBaseAntiSlopSnapshot,
 } from './git-snapshot.mts';
 import { readManagedAntiSlopActivationEvidence } from './managed-state.mts';
@@ -31,7 +36,7 @@ import {
   type VacatedDebt,
   vacatedDebt,
 } from './relocations.mts';
-import { collectAntiSlopGroups } from './runner.mts';
+import { collectAntiSlopFindings, collectAntiSlopGroups } from './runner.mts';
 
 /** Where a relocation's evidence is linted, and which candidate files that lint actually covered. */
 export interface RelocationContext {
@@ -417,4 +422,22 @@ export function inheritedBaseAllowance(
       };
     },
   );
+}
+
+function headTreeWithBaseline(cwd: string): string | null {
+  const git = (args: string[]) => spawnSync('git', args, { cwd, encoding: 'utf8' });
+  if (git(['cat-file', '-e', `HEAD:./${ANTI_SLOP_BASELINE_REL}`]).status !== 0) return null;
+  return git(['rev-parse', '--verify', 'HEAD^{tree}']).stdout.trim() || null;
+}
+
+/** Re-key from HEAD's tree when HEAD commits a baseline, so the result equals the gates' base
+ * re-key and dirty lines cannot drop debt; otherwise from the working tree. */
+export function rekeyWorkingBaseline(cwd: string, legacy: AntiSlopBaseline): AntiSlopBaseline {
+  if (hasCurrentIdentity(legacy)) return legacy;
+  const tree = headTreeWithBaseline(cwd);
+  if (tree) return rekeyBaselineAtTree(cwd, tree, legacy);
+  const files = [...new Set(legacy.entries.map((entry) => entry.file))].filter((file) =>
+    existsSync(join(cwd, file)),
+  );
+  return rekeyBaseline(legacy, files.length === 0 ? [] : collectAntiSlopFindings(cwd, files));
 }

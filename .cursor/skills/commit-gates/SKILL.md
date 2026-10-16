@@ -183,6 +183,8 @@ Code moved between files is not new debt, so do not rewrite it to pass. Delete i
 `git add` both files, then run `devkit anti-slop adopt-relocations` for a partial move, or
 `devkit anti-slop adopt-renames` when Git reports a rename, and stage the baseline where it is
 tracked. The FAIL output names the source file when a new finding repeats debt baselined elsewhere.
+A FAIL saying the baseline predates span-anchored identity is a one-time migration: run `devkit
+anti-slop rekey` and stage the baseline (`devkit upgrade` does this itself).
 
 ## Judge outage: re-targeting, not bypassing
 
