@@ -150,7 +150,10 @@ devkit command.
   the ship mid-gates as exit 143 with no banner. Poll the shell output for the per-reviewer heartbeat
   lines (`guard-review: <name> — PASS … (checkpointed)`). A judge still in flight (completeness can
   take many minutes) prints `guard-review: still running — <lane> <elapsed> (killed in ≤<bound>) · log:
-  <path>` about every 45s; while those keep arriving the gate is alive, not hung.
+  <path>` about every 45s; while those keep arriving the gate is alive, not hung. Never pipe ship through
+  `tail` or `head`: `tail` holds every line until ship exits, and `head`'s early exit can SIGPIPE-kill
+  it. Poll the unpiped output (or `> /tmp/ship-<slug>.log 2>&1`, one file per ship) and trim when you
+  read it; the heartbeat's `log:` path holds this attempt's gate chain.
 - **A blocked or timed-out ship retries with `devkit ship --resume <branch>` — never re-type the
   invocation.** Reviewer PASSes checkpoint as they land, cleared decisions judgements and the
   deterministic gate prefix are cached, so a retry only pays for the unfinished work; `--resume`
