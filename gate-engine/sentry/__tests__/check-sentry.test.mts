@@ -27,7 +27,6 @@ import {
   judge,
   majority,
   parseSentryVerdict,
-  reportLine,
   run,
   sentryExit,
   shouldJudge,
@@ -313,15 +312,7 @@ describe('selectSentryHunks (decisions-style evidence selection — error hunks 
   });
 });
 
-describe('reportLine + buildPrompt (report formatting; few-shot toggle)', () => {
-  it('formats a verdict + evidence, and the no-verdict fallback', () => {
-    expect(reportLine({ verdict: 'MONITOR', evidence: 'executor path' })).toBe(
-      'sentry-judge: MONITOR — executor path',
-    );
-    expect(reportLine({ verdict: 'SKIP', evidence: '' })).toBe('sentry-judge: SKIP'); // no evidence
-    expect(reportLine(null)).toContain('no verdict');
-  });
-
+describe('buildPrompt (few-shot toggle)', () => {
   it('few-shot exemplars present at 4 shots, absent at 0', () => {
     expect(buildPrompt(4)).toContain('Examples:');
     expect(buildPrompt(0)).not.toContain('Examples:');
@@ -466,18 +457,22 @@ describe('judge (fail-open guards, no claude call)', () => {
 
 describe('run dispatch (in-process; covers readMessage + skipReason + applyGateResult wiring)', () => {
   // run() ends in process.exit; capture the FIRST exit code (run's own catch re-exits 2 on the
-  // mock's throw, so ignore subsequent calls). Silence the gate's stdout/stderr to keep output clean.
+  // mock's throw, so ignore subsequent calls) and what was printed before it.
+  let printed = { out: [], err: [] };
   const callRun = (gate, message, env = {}) => {
     const origArgv = process.argv;
     process.argv = ['node', 'check-sentry.mts', ...(gate ? ['--gate'] : []), message];
     for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v);
     let code: number | undefined;
-    const exit = vi.spyOn(process, 'exit').mockImplementation((c) => {
-      if (code === undefined) code = c ?? 0;
-      throw new Error('__exit__');
-    });
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exit = vi.spyOn(process, 'exit').mockImplementation((c) => {
+      if (code === undefined) {
+        code = c ?? 0;
+        printed = { out: log.mock.calls.flat(), err: err.mock.calls.flat() };
+      }
+      throw new Error('__exit__');
+    });
     try {
       run(gate);
     } catch (e) {
@@ -494,6 +489,32 @@ describe('run dispatch (in-process; covers readMessage + skipReason + applyGateR
 
   it('report mode: a judged commit with the LLM disabled prints + exits 0', () => {
     expect(callRun(false, 'fix(executor): disarm signal', { GUARD_SENTRY_NO_LLM: '1' })).toBe(0);
+    expect(printed).toEqual({
+      out: ['sentry-judge: SKIP (GUARD_SENTRY_NO_LLM — not judged)'],
+      err: [],
+    });
+  });
+
+  it.each([
+    [
+      { GUARD_NO_SENTRY_JUDGE: '1' },
+      'fix(x): y',
+      '⚠️  Sentry gate BYPASSED for this run (GUARD_NO_SENTRY_JUDGE=1).',
+    ],
+    [
+      { FRINK_NO_SENTRY_JUDGE: '1' },
+      'fix(x): y',
+      '⚠️  Sentry gate BYPASSED for this run (GUARD_NO_SENTRY_JUDGE=1).',
+    ],
+    [{}, 'chore(x): y', 'sentry-judge: SKIP (trivial commit type / empty — not judged)'],
+    [
+      { GUARD_SENTRY_NO_LLM: '1' },
+      'fix(x): y',
+      'sentry-judge: SKIP (GUARD_SENTRY_NO_LLM — not judged)',
+    ],
+  ])('gate mode: an unjudged run prints exactly one stderr line (%o, %s)', (env, msg, line) => {
+    expect(callRun(true, msg, env)).toBe(0);
+    expect(printed).toEqual({ out: [], err: [line] });
   });
 
   it('report mode: GUARD_NO_SENTRY_JUDGE bypass exits 0', () => {
@@ -511,7 +532,9 @@ describe('run dispatch (in-process; covers readMessage + skipReason + applyGateR
   });
 });
 
-describe('check-sentry gate — fail-open / bypass / free-skip (provider-absent degrades silently)', () => {
+describe('check-sentry gate — fail-open / bypass / free-skip (one verdict line per run)', () => {
+  const verdictLines = (stderr) =>
+    stderr.split('\n').filter((l) => /sentry-judge: (PASS|SKIP)|sentry-advisory: MONITOR/.test(l));
   const gate = (env, msg) =>
     spawnSync('node', [SCRIPT, '--gate', msg], {
       // GUARD_REVIEW_MODEL: the stub on PATH is a fake `claude`; the default is codex-family.
@@ -567,12 +590,22 @@ describe('check-sentry gate — fail-open / bypass / free-skip (provider-absent 
     const r = gate({ PATH: stubPath('echo SKIP\n') }, 'fix(x): y');
     expect(r.status).toBe(0);
     expect(r.stderr).not.toContain('claude judge unavailable');
+    expect(verdictLines(r.stderr)).toEqual(['sentry-judge: PASS']);
+  });
+
+  it('judged commit + unparseable reply → exit 0 and one no-confident-verdict line', () => {
+    const r = gate({ PATH: stubPath('echo MAYBE\n') }, 'fix(x): y');
+    expect(r.status).toBe(0);
+    expect(verdictLines(r.stderr)).toEqual([expect.stringContaining('no confident verdict')]);
   });
 
   it('judged commit + claude dark → exit 0 (fail-open unchanged) AND warns visibly', () => {
     const r = gate({ PATH: stubPath('exit 3\n') }, 'fix(x): y');
     expect(r.status).toBe(0);
     expect(r.stderr).toContain('sentry-advisory: claude judge unavailable');
+    expect(verdictLines(r.stderr)).toEqual([
+      expect.stringContaining('no verdict (judge unavailable)'),
+    ]);
   });
 });
 

@@ -79,17 +79,16 @@ import { execJudge } from '../judge/run-judge.mts';
 import { resolveSentryModel } from '../review/reviewers.mts';
 import { buildEvidence, degradeCause, renderInventory, type SentryEvidence } from './evidence.mts';
 import { judgeSentryWithCache } from './verdict-cache.mts';
+import {
+  gateVerdictLine,
+  reportLine,
+  type SentryVerdictLike as SentryVerdict,
+} from './verdict-line.mts';
 
 // One judge sample: the parsed verdict + the raw reply it came from (kept for evidence extraction).
 interface SentryRun {
   verdict: string | null;
   raw: string;
-}
-
-// The gate's judgement of one commit: the voted verdict + the human-readable evidence line.
-interface SentryVerdict {
-  verdict: string | null;
-  evidence: string;
 }
 
 // Overrides for `judge` — all optional; each falls back to the module env default.
@@ -400,27 +399,21 @@ function readMessage() {
 
 // ─── Dispatch ───────────────────────────────────────────────────────────────────
 
-/** Report-mode (no --gate) one-liner for a human running the gate by hand. Pure (tested). */
-export function reportLine(result: SentryVerdict | null): string {
-  const verdict = result?.verdict ?? 'no verdict (judge unavailable / ambiguous)';
-  return `sentry-judge: ${verdict}${result?.evidence ? ` — ${result.evidence}` : ''}`;
-}
-
 /** Name a withheld block on stderr AND in telemetry: a gate that quietly stops blocking is
  * indistinguishable from one that never ran (gate-telemetry-self-describing). */
 function reportDegrade(evidence: SentryEvidence | null): void {
   const cause = degradeCause(evidence);
-  console.error(`sentry-judge: advisory only — ${cause}, so a MONITOR cannot block this commit.`);
+  console.error(
+    `⚠️  sentry-judge: DEGRADED — advisory only — ${cause}, so a MONITOR cannot block this commit.`,
+  );
   emitGateEvent({ type: 'gate_degraded', judge: 'sentry-advisory', cause });
 }
 
-/** Gate-mode side effects: warn on MONITOR, log to the watchlist only on the warn path. Returns exit code. */
+/** Gate-mode side effects: one verdict line, watchlist only on the MONITOR warn path. Returns exit code. */
 function applyGateResult(result: SentryVerdict | null, message: string, hard: boolean): number {
   const code = sentryExit(result?.verdict ?? null, hard);
+  console.error(gateVerdictLine(result));
   if (result?.verdict === 'MONITOR') {
-    console.error(
-      `⚠️  sentry-advisory: MONITOR — consider a Sentry capture${result.evidence ? ` (${result.evidence})` : ''}.`,
-    );
     // Warn path only: a hard-mode BLOCK (code 1) means the commit didn't ship, so don't log a backlog
     // entry for a commit that never landed (it would be stale + duplicate on re-commit).
     if (code === 0) appendWatchlist(subjectOf(message), result.evidence);
@@ -447,12 +440,13 @@ export function effectiveHard(
   return evidence?.sufficient === true;
 }
 
-/** Why the gate should bypass judging (env override or trivial commit type), or null to proceed. */
+/** Why the gate should bypass judging (env override, no LLM, or trivial type), or null to proceed. */
 export function skipReason(message: string): string | null {
   if (envVar('NO_SENTRY_JUDGE')) {
     emitGateBypass('sentry', 'GUARD_NO_SENTRY_JUDGE'); // previously this bypass emitted nothing
-    return 'sentry-judge: skipped (GUARD_NO_SENTRY_JUDGE)';
+    return '⚠️  Sentry gate BYPASSED for this run (GUARD_NO_SENTRY_JUDGE=1).';
   }
+  if (envVar('SENTRY_NO_LLM')) return 'sentry-judge: SKIP (GUARD_SENTRY_NO_LLM — not judged)';
   if (!shouldJudge(message)) return 'sentry-judge: SKIP (trivial commit type / empty — not judged)';
   return null;
 }
@@ -465,7 +459,7 @@ export function run(gate: boolean): void {
     const message = readMessage();
     const skip = skipReason(message);
     if (skip) {
-      if (!gate) console.log(skip);
+      (gate ? console.error : console.log)(skip);
       process.exit(0);
     }
     const nameStatus = CONTEXT_TIER === 'names' ? stagedNameStatus() : '';
@@ -480,9 +474,9 @@ export function run(gate: boolean): void {
     const input = buildContext(message, nameStatus, diff, CONTEXT_TIER, evidence ?? undefined);
     const opts = { model: modelSpec(), samples: resolveSamples(hard), prompt: SENTRY_JUDGE_PROMPT };
     // Diff-tier only: message/names evidence can't change with the demanded FIX, so a cached hard
-    // MONITOR would replay forever there. A bypassed run (SENTRY_NO_LLM) earns and replays nothing.
+    // MONITOR would replay forever there.
     const result =
-      envVar('SENTRY_NO_LLM') || CONTEXT_TIER !== 'diff'
+      CONTEXT_TIER !== 'diff'
         ? judge(input, opts)
         : judgeSentryWithCache(CWD, input, opts, () => judge(input, opts));
     if (!gate) {
