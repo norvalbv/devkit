@@ -154,9 +154,22 @@ describe('escalation reconciles the first pass', () => {
     });
     expect(res.transcript).toBe('escalation notes\nVERDICT: FAIL — holds');
     expect(res.fullTranscript).toBe(
-      '─── first pass · sonnet ───\ntwo issues\nVERDICT: FAIL — two\n\n' +
+      '─── first pass · sonnet ───\n│ two issues\n│ VERDICT: FAIL — two\n\n' +
         '─── escalation · opus ───\nescalation notes\nVERDICT: FAIL — holds',
     );
+  });
+
+  it('an escalation with no VERDICT line leaves the archive with no verdict a reader can parse', async () => {
+    const { res } = await cascade(firstFailsTwo, () => 'ran out of turns');
+    expect(res.status).toBe('inconclusive');
+    // Last-VERDICT readers (the usage dashboard) trim each line and anchor the label at its start.
+    const verdicts = res.fullTranscript!.split('\n').filter((l) => /^\**VERDICT/.test(l.trim()));
+    expect(verdicts).toEqual([]);
+  });
+
+  it('tells an escalation over reset rows not to regenerate the checklist', async () => {
+    const { exec } = await cascade(firstFailsTwo, () => 'VERDICT: FAIL — holds');
+    expect(exec.mock.calls[1][0].args[1]).toContain('do not run its generate or init command');
   });
 });
 

@@ -13,7 +13,8 @@ export function escalatePrompt(wrappedPrompt, firstPass, reopened = []) {
         (reopened.length
             ? `Its failed checklist rows (${reopened.join(', ')}) were reset to pending: re-record each ` +
                 'issue you confirm with the check command and --fail, and mark a row --pass when you ' +
-                'overturn every issue on it. A row you leave pending keeps the first pass issues. '
+                'overturn every issue on it. A row you leave pending keeps the first pass issues. The ' +
+                'checklist is already populated: do not run its generate or init command again. '
             : '') +
         'Your verdict is final; a FAIL blocks the commit.');
 }
@@ -63,7 +64,9 @@ export async function escalateOverReopened(cwd, reviewer, run) {
         restoreUnjudgedItems(cwd, reviewer, snapshot);
     }
 }
-/** Both passes' output for the transcript archive, each headed with the model that wrote it. */
+/** Both passes for the archive, each under its model. The first pass is quoted so the only
+ * parseable VERDICT line is the escalation's, the final one. */
 export function labelPasses(firstModel, first, escalationModel, second) {
-    return `─── first pass · ${firstModel} ───\n${first}\n\n─── escalation · ${escalationModel} ───\n${second}`;
+    const quoted = first.replace(/^/gm, '│ ');
+    return `─── first pass · ${firstModel} ───\n${quoted}\n\n─── escalation · ${escalationModel} ───\n${second}`;
 }
