@@ -647,8 +647,8 @@ fi
 #
 # --from-branch is skipped outright: it diffs a pinned COMMIT PAIR whose ancestry was already proven
 # above, so its merge base IS BASE and the classification would be pure cost. Everywhere else
-# ship_patch_base echoes BASE unchanged unless the base genuinely moved under this checkout, which
-# keeps the default arm and every in-sync ship byte-identical to before.
+# ship_patch_base echoes BASE unchanged unless the base genuinely moved under this checkout (or no
+# fork point is visible, which refuses below), keeping the default arm and in-sync ships unchanged.
 . "$SCRIPT_DIR/patch-anchor.sh"
 WHOLE_POSITIVES=()
 WHOLE_SELECTORS=()
