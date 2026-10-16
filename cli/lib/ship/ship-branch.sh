@@ -1747,6 +1747,9 @@ git update-ref -d "$RECOVERY_RECEIPT_REF" "${RECOVERY_COMMIT:-${SHIP_COMMIT:-}}"
 # concurrent actor could legitimately advance, whereas this blob is devkit-private, rewritten whole
 # on every ship to this branch, and worthless once the commit it describes is published.
 git update-ref -d "$RECOVERY_GATE_ADDS_REF" 2>/dev/null || true
+# Only a gate-skipped recovery leaves the PR body without its UI item: every other run wrote it.
+GATES_SKIPPED_COMMIT=${LOCAL_BRANCH_EXISTS:+${RECOVERY_COMMIT:-}}
+[ -z "$PR_NUM" ] || [ -z "$GATES_SKIPPED_COMMIT" ] || publish_ui_item "$ROOT" "$PR_NUM" "$REPO" "$GATES_SKIPPED_COMMIT"
 # After every ref is settled, so a ship killed during the bounded test runs loses no recovery state.
 [ -z "$PR_NUM" ] || publish_evidence_block "$WT" "$PR_NUM" "$REPO" "${RECOVERY_COMMIT:-$SHIP_COMMIT}"
 git worktree remove --force "$WT" 2>/dev/null || true

@@ -14,6 +14,15 @@ describe('ui-evidence PR-body item', () => {
     expect(withUiItem('', '', DETAIL)).toBe(`${renderUiItem(DETAIL)}\n`);
   });
 
+  it('keeps every byte of the body it appends to, whatever the body ends with', () => {
+    for (const body of ['plain', 'one\n', 'two\n\n', 'crlf\r\n', 'crlf two\r\n\r\n', 'pad  ']) {
+      const next = withUiItem(body, body, DETAIL);
+      expect(next.startsWith(body)).toBe(true);
+      expect(next.slice(body.length).trimStart()).toBe(`${renderUiItem(DETAIL)}\n`);
+      expect(next).toMatch(/\n\r?\n<!-- devkit:ui-evidence:begin -->/);
+    }
+  });
+
   it('adds nothing when the reminder stayed quiet and the PR has no item', () => {
     expect(withUiItem('Fixes the API.', '', null)).toBe('Fixes the API.');
   });
