@@ -6,8 +6,10 @@ import { resolveGuardConfig } from '../../gate-engine/config.mts';
 import {
   claudeFamilyEnvLine,
   claudeFamilyKeyLine,
+  DOCTOR_BIND_PRECONDITION,
   FAMILY_ENV_KEYS,
   familyOverrideRemedy,
+  judgeEnvUnsetLine,
 } from '../../gate-engine/judge/outage/family-override.mts';
 import { resolveChunkCap } from '../../gate-engine/review/lens/chunk-tasks.mts';
 import {
@@ -67,6 +69,29 @@ function binDir(...names: string[]): string {
     chmodSync(p, 0o755);
   }
   return d;
+}
+
+const OPERATOR_DOCS = ['docs/troubleshooting.md', 'skills/commit-gates/SKILL.md'];
+const DOCTOR_BULLET_ANCHOR = '`devkit doctor --fix` writes the same four keys';
+
+function readDoc(rel: string): string {
+  return readFileSync(join(__dirname, '..', '..', rel), 'utf8');
+}
+
+/** The doc bullet that offers the doctor route, whitespace-collapsed; '' when the anchor is gone. */
+function doctorBullet(doc: string): string {
+  const start = doc.indexOf(DOCTOR_BULLET_ANCHOR);
+  if (start < 0) return '';
+  const end = doc.slice(start).search(/\n(- |\n)/);
+  return doc.slice(start, end < 0 ? undefined : start + end).replace(/\s+/g, ' ');
+}
+
+/** Each line of a doc with `\`-continuations joined and whitespace collapsed. */
+function shellLines(doc: string): string[] {
+  return doc
+    .replace(/\\\n\s*/g, ' ')
+    .split('\n')
+    .map((line) => line.trim().replace(/\s+/g, ' '));
 }
 
 const TEMPLATE_CONFIG = {
@@ -184,16 +209,27 @@ describe('bindClaudeFamily', () => {
   // The operator docs tell you to remove a bind only when the marker holds doctor's EXACT text; a
   // paraphrase there sends the reader comparing against a string doctor never writes.
   it('both operator docs quote the provenance marker verbatim', () => {
-    for (const doc of ['docs/troubleshooting.md', 'skills/commit-gates/SKILL.md'])
-      expect(readFileSync(join(__dirname, '..', '..', doc), 'utf8')).toContain(
-        FAMILY_PROVENANCE_TEXT,
-      );
+    for (const doc of OPERATOR_DOCS) expect(readDoc(doc)).toContain(FAMILY_PROVENANCE_TEXT);
+  });
+
+  // Anchored on the doctor bullet; a brand-new paragraph offering doctor --fix is not detected.
+  it('the printed doctor route and both operator docs state its precondition', () => {
+    expect(familyOverrideRemedy('codex')).toContain(DOCTOR_BIND_PRECONDITION);
+    for (const doc of OPERATOR_DOCS)
+      expect(doctorBullet(readDoc(doc)), doc).toContain(DOCTOR_BIND_PRECONDITION);
+  });
+
+  // Whole-line equality: the codex block's sentry unset is a suffix of the claude-dark unset line.
+  it('both operator docs carry the remedy commands line for line', () => {
+    const commands = [...claudeFamilyEnvLine().split('; '), judgeEnvUnsetLine()];
+    for (const doc of OPERATOR_DOCS) {
+      const lines = shellLines(readDoc(doc));
+      for (const command of commands) expect(lines, doc).toContain(command);
+    }
   });
 
   it('the claude set matches the documented claude-era example values', () => {
-    const example = JSON.parse(
-      readFileSync(join(__dirname, '..', '..', 'guard.config.example.json'), 'utf8'),
-    );
+    const example = JSON.parse(readDoc('guard.config.example.json'));
     expect(CLAUDE_FAMILY_SET).toEqual({
       model: example.review.model,
       escalationModel: example.review.escalationModel,
@@ -205,11 +241,7 @@ describe('bindClaudeFamily', () => {
   it('no family surface claims the chunk cap is benched for gpt-5.6-sol only', () => {
     const surfaces = [
       familyOverrideRemedy('codex'),
-      ...[
-        'docs/troubleshooting.md',
-        'skills/commit-gates/SKILL.md',
-        'guard.config.example.json',
-      ].map((doc) => readFileSync(join(__dirname, '..', '..', doc), 'utf8')),
+      ...[...OPERATOR_DOCS, 'guard.config.example.json'].map(readDoc),
     ];
     for (const text of surfaces) expect(text).not.toMatch(/benched for `?gpt-5\.6-sol`? only/);
   });

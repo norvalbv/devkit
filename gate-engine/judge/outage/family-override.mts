@@ -74,6 +74,9 @@ export const judgeEnvUnsetLine = (): string => `unset ${JUDGE_MODEL_ENVS.join(' 
 export const claudeFamilyKeyLine = (): string =>
   FAMILY_ENV_KEYS.map((k) => `review.${k.key}=${CLAUDE_FAMILY_SET[k.key]}`).join(', ');
 
+/** When the `devkit doctor --fix` route applies; the operator docs quote this phrase verbatim. */
+export const DOCTOR_BIND_PRECONDITION = 'no codex binary resolves';
+
 /** The redirect an outage prints. The caller names the bin that went dark; nothing here probes PATH
  *  (gate-engine cannot reach binResolvable), so the seam stays testable with GUARD_CODEX_BIN alone. */
 // The provider comes from judgeProviderOfBin, so a GUARD_CODEX_BIN path still reads as codex; a
@@ -98,7 +101,7 @@ export function familyOverrideRemedy(dark: string, binPresent?: boolean): string
   const doctorRoute =
     binPresent === true
       ? ''
-      : 'If no codex binary resolves at all, `devkit doctor --fix` writes the same keys into ' +
+      : `If ${DOCTOR_BIND_PRECONDITION} at all, \`devkit doctor --fix\` writes the same keys into ` +
         'guard.config.json instead, which a ship reads only once that file is committed. ';
   return (
     `move the judges to the claude family: run \`${claudeFamilyEnvLine()}\` in the shell that ` +
