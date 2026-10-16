@@ -76,7 +76,13 @@ describe('runCommentFirewall', () => {
     expect(runCommentFirewall('/repo', { ...deps, detect: () => detection() })).toBe(1);
     const text = output();
     expect(text).toContain('guard-comments: 1 added/modified comment paragraph need a decision.');
-    expect(text).toContain('[a1b2c3d4e5f6] src/a.ts:2-4 — // The wire format uses UTF-16');
+    expect(text).toContain(
+      '[a1b2c3d4e5f6] src/a.ts:2-4 (3 changed text lines) — // The wire format uses UTF-16',
+    );
+    expect(text).toContain(
+      'A paragraph is one block comment, or a run of same-style single-line comments with only blank lines between them.',
+    );
+    expect(text).toContain('Blank lines never split it; only changed lines with text count');
     expect(text).toContain('Shorten the comment where possible.');
     expect(text).toContain('to justify a workaround, the code is wrong — fix the code.');
     expect(text).toContain('retry unchanged: a paragraph blocks only once.');
@@ -148,7 +154,7 @@ describe('runCommentFirewall', () => {
     ).toBe(1);
     const text = output();
     expect(text).toContain('guard-comments: 2 added/modified comment paragraphs need a decision.');
-    expect(text).toContain('[b1c2d3e4f5a6] src/b.ts:2 —');
+    expect(text).toContain('[b1c2d3e4f5a6] src/b.ts:2 (3 changed text lines) —');
   });
 
   it('reads no environment: strict mode and ship-log hints change nothing', () => {
@@ -274,7 +280,7 @@ describe('runCommentFirewall — reason for the aggregated verdict', () => {
     expect(runCommentFirewall('/repo', { ...fresh(), detect })).toBe(1);
     expect(readGateReason(file)).toEqual([
       'guard-comments: 2 added/modified comment paragraphs need a decision.',
-      'src/a.ts:2-4 [a1b2c3d4e5f6] — 3+-line comment paragraph: shorten it, or retry unchanged (blocks once)',
+      'src/a.ts:2-4 [a1b2c3d4e5f6] — 3 changed text lines in one comment paragraph: shorten it, or retry unchanged (blocks once)',
       'src/c.ts:7 cites sc-3836 — state the fact or drop the reference',
     ]);
   });

@@ -27,12 +27,15 @@ function findingLocation(finding: CommentFinding): string {
 
 function printFinding(finding: CommentFinding): void {
   const summary = finding.comment.replace(/\s+/g, ' ').slice(0, 140);
-  console.error(`  • [${finding.id}] ${findingLocation(finding)} — ${summary}`);
+  console.error(
+    `  • [${finding.id}] ${findingLocation(finding)} (${finding.textLines} changed text lines) — ${summary}`,
+  );
 }
 
 const PARAGRAPH_REMEDY = [
   '',
-  'Each paragraph has 3+ changed text lines. Shorten the comment where possible.',
+  'A paragraph is one block comment, or a run of same-style single-line comments with only blank lines between them.',
+  'Blank lines never split it; only changed lines with text count, and 3 or more block. Shorten the comment where possible.',
   'If you need a paragraph-long comment to justify a workaround, the code is wrong — fix the code.',
   'If every line states something the code cannot, retry unchanged: a paragraph blocks only once.',
 ].join('\n');
@@ -50,7 +53,7 @@ function printParagraphs(findings: CommentFinding[]): void {
   writeGateReason(
     findings.map(
       (f) =>
-        `${findingLocation(f)} [${f.id}] — 3+-line comment paragraph: shorten it, or retry unchanged (blocks once)`,
+        `${findingLocation(f)} [${f.id}] — ${f.textLines} changed text lines in one comment paragraph: shorten it, or retry unchanged (blocks once)`,
     ),
   );
 }

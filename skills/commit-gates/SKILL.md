@@ -137,7 +137,8 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
 ## Comment budget
 
 The gate is deterministic: it counts the added or modified text lines of each standalone comment
-paragraph, treating comment groups separated only by blank lines as one paragraph. One- and
+paragraph. A block comment is one paragraph, blank ` *` lines included, and same-style
+single-line comments separated only by blank lines are one paragraph; blank lines never count. One- and
 two-line changes, inline comments after code, untouched comments, deletions, and pure renames pass.
 There is no bypass. Exit 4 (unreadable staged evidence or an unsupported language) is not a
 rejection; follow the printed remedy for that outcome.
