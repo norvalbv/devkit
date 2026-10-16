@@ -8,7 +8,14 @@ import { SHIP_REHEARSAL_LEAD } from '../../../../gate-engine/deterministic/reche
 export const DK_GATE_BLOCK_HELPERS = `dk_review_failed=0
 dk_review_failed_gates=""
 __dk_block_deterministic() {
-    case "\${DEVKIT_RUN_MODE:-}" in review|dry-gates) ;; *) exit 1 ;; esac
+    if [ "$1" != deterministic-gates ]; then
+        [ -x "\${__dk_package_bin_dir:-}/guard-review" ] &&
+            __dk_no_git_env "$__dk_package_bin_dir/guard-review" record-gate "$1" >/dev/null 2>&1 || true
+    fi
+    case "\${DEVKIT_RUN_MODE:-}" in review|dry-gates) ;; *)
+        [ "$1" = deterministic-gates ] || echo "✗ staged gate blocked: $1 (its report is above)" >&2
+        exit 1 ;;
+    esac
     dk_review_failed=1
     dk_review_failed_gates="$dk_review_failed_gates $1"
 }

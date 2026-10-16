@@ -426,6 +426,9 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     ['✗ deterministic gates failed: guard-anti-slop guard-comments', 'deterministic'],
     ['✗ deterministic gates failed: guard-comments guard-anti-slop', 'deterministic'],
     ['✗ deterministic gates failed: guard-comments-lint', 'deterministic'],
+    ['✗ staged gate blocked: fallow (its report is above)', 'fallow'],
+    ['✗ staged gate blocked: eslint-overlay (its report is above)', 'eslint-overlay'],
+    ['✗ staged gate blocked: biome-overlay (its report is above)', 'biome-overlay'],
   ])('attributes terminal hook output %s to %s', (message, blockedGate) => {
     const { root, wt, base } = fixture(
       true,
@@ -444,6 +447,32 @@ describe('commit_with_gate_capture — executable hook proof', () => {
       exit_code: 1,
       blocked_gate: blockedGate,
     });
+  });
+
+  it.each([
+    // A finding that QUOTES the shell-gate line (a diff of this very file) is not that gate blocking.
+    [
+      "printf '%s\\n' '  finding: ✗ staged gate blocked: fallow (its report is above)' 'guard-review: correctness FAILED'",
+      {},
+      'review',
+    ],
+    // BSD sed in a UTF-8 locale aborts on the first invalid byte, before it reaches the line.
+    [
+      "printf '\\377\\n✗ staged gate blocked: fallow (its report is above)\\n'",
+      { LC_ALL: 'en_US.UTF-8' },
+      'fallow',
+    ],
+  ])('attributes a shell-gate line only as a whole line: %s', (emit, env, blockedGate) => {
+    const { root, wt, base } = fixture(true, `${emit} >&2\nexit 1\n`);
+
+    const result = runCommit(root, wt, base, false, false, '', env);
+
+    expect(result.status).not.toBe(0);
+    const events = readFileSync(join(root, 'telemetry/gate-events.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(events.at(-1)).toMatchObject({ type: 'ship_result', blocked_gate: blockedGate });
   });
 
   it('rewinds and records a failed result when the execution proof is not observed', () => {

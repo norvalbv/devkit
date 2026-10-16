@@ -18,6 +18,9 @@ import {
 } from '../lib/install/overlay-lint-configs.mts';
 import { ALL_GUARDS, cleanupHomes, hasDash, homes, runHook } from './_husky-hook-harness.mts';
 
+/** The calls an AI guard could have made: `guard-review record-gate` is a shell gate's own narration. */
+const aiCalls = (calls: string) => calls.replace(/^guard-review record-gate .*\n/gm, '');
+
 // The hook's SHELL contract: commit/ship fail fast, review/dry-gates defer per lane, and it all
 // survives dash + a hook path with spaces. The orchestrator's own aggregation is tested in run.test.mjs.
 
@@ -894,7 +897,11 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
       const r = runHook({ FALLOW_RC: '1', DEVKIT_RUN_MODE: mode }, REVIEWED, overlay());
       expect(r.status).toBe(1);
       expect(r.calls).toContain('fallow audit --diff-stdin');
-      for (const ai of AI_CALLS) expect(r.calls).not.toContain(ai);
+      expect(r.calls).toContain('guard-review record-gate fallow');
+      expect(`${r.stdout}${r.stderr}`).toContain(
+        '✗ staged gate blocked: fallow (its report is above)',
+      );
+      for (const ai of AI_CALLS) expect(aiCalls(r.calls)).not.toContain(ai);
     });
   }
 
@@ -968,7 +975,7 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
     const r = runHook({ FALLOW_RC: '1' }, { biome: false, guards: ['review'] }, overlay());
     expect(r.status).toBe(1);
     expect(r.calls).toContain('fallow audit');
-    expect(r.calls).not.toContain('guard-review');
+    expect(aiCalls(r.calls)).not.toContain('guard-review');
   });
 
   it('a failing eslint overlay blocks before any AI guard runs', () => {
@@ -979,7 +986,7 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
     );
     expect(r.status).toBe(1);
     expect(r.calls).toContain('eslint -c eslint.config.devkit.mjs');
-    for (const ai of AI_CALLS) expect(r.calls).not.toContain(ai);
+    for (const ai of AI_CALLS) expect(aiCalls(r.calls)).not.toContain(ai);
   });
 
   // A plugin that roots at its own real path judges the caller's checkout through a linked
@@ -1040,7 +1047,9 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
     const r = runHook({ FALLOW_RC: '1' }, REVIEWED, overlay({ pkgRel: 'pkg/a' }));
     expect(r.status).toBe(1);
     expect(r.calls).toContain('fallow audit');
-    for (const ai of AI_CALLS) expect(r.calls).not.toContain(ai);
+    // The bin dir resolved before the `cd` still reaches the narrator inside the subshell.
+    expect(r.calls).toContain('guard-review record-gate fallow');
+    for (const ai of AI_CALLS) expect(aiCalls(r.calls)).not.toContain(ai);
   });
 
   // The deferred flag and the finalizer share the package subshell, or a rehearsal would exit 0.
@@ -1079,7 +1088,7 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
     const r = runHook({ FALLOW_RC: '1' }, REVIEWED, overlay({ shell: 'dash' }));
     expect(r.status).toBe(1);
     expect(r.calls).toContain('fallow audit');
-    expect(r.calls).not.toContain('guard-review');
+    expect(aiCalls(r.calls)).not.toContain('guard-review');
   });
 });
 
@@ -1104,7 +1113,7 @@ describe('overlay lint blocks name the ship --dry-gates rehearsal (sc-2695)', ()
       expect(r.calls).toContain(arm);
       expect(`${r.stdout}${r.stderr}`).toContain(LEAD);
       expect(`${r.stdout}${r.stderr}`).toContain(`     ${CMD}\n`);
-      expect(r.calls).not.toContain('guard-review');
+      expect(aiCalls(r.calls)).not.toContain('guard-review');
     });
 
     it(`a failing ${arm} overlay prints nothing extra when no ship exported a command`, () => {
@@ -1135,7 +1144,7 @@ describe('overlay lint blocks name the ship --dry-gates rehearsal (sc-2695)', ()
       overlay({ eslintOverlay: true, biomeOverlay: true }),
     );
     expect(r.status).toBe(1);
-    expect(r.calls).not.toContain('guard-review');
+    expect(aiCalls(r.calls)).not.toContain('guard-review');
     expect(r.stdout).toContain('failed gates: eslint-overlay biome-overlay (findings above).');
   });
 
@@ -1182,7 +1191,7 @@ describe('overlay lint blocks name the ship --dry-gates rehearsal (sc-2695)', ()
     );
     expect(r.status).toBe(1);
     expect(`${r.stdout}${r.stderr}`).toContain(`     ${CMD}\n`);
-    expect(r.calls).not.toContain('guard-review');
+    expect(aiCalls(r.calls)).not.toContain('guard-review');
   });
 
   it.skipIf(!hasDash)('stays POSIX: dash prints the hint and blocks on a failing overlay', () => {
@@ -1225,7 +1234,7 @@ describe.each(['package', 'standalone'])('staged fallow gate (%s hook)', (builde
     const r = run({ FALLOW_RC: '1' });
     expect(r.status).toBe(1);
     expect(r.calls).toContain('fallow audit --diff-stdin');
-    expect(r.calls).not.toContain('guard-review');
+    expect(aiCalls(r.calls)).not.toContain('guard-review');
   });
 
   it('defers a fail verdict under dry-gates, so the selected reviewers still run', () => {
@@ -1279,7 +1288,7 @@ describe.each(['package', 'standalone'])('staged fallow gate (%s hook)', (builde
       const r = run({ FALLOW_RC: '1', ...env }, { pkgRel: 'packages/app' });
       expect(r.status).toBe(1);
       expect(r.calls).toContain('fallow audit --diff-stdin');
-      expect(r.calls).not.toContain('guard-review');
+      expect(aiCalls(r.calls)).not.toContain('guard-review');
     },
   );
 
