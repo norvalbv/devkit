@@ -52,11 +52,18 @@ export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
 # supervisor terminates the complete Git/helper process group on expiry (portable on macOS/Linux).
 bounded_remote_git() {
   # .mts in source, built .mjs in an installed consumer (the gate-config-paths dual-ext idiom).
-  local supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mts"
+  local supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mts" out status
   [ -f "$supervisor" ] || supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
-  # -c: a detached auto-gc/maintenance inherits the supervisor's ownership token and is reaped as a
-  # leaked tree, turning a finished fetch into 124 (sc-3761). Remote git never needs maintenance.
-  node "$supervisor" "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git -c gc.auto=0 -c maintenance.auto=false "$@"
+  # A silent 124 is a stall a fresh connection clears; output means git answered, so never re-run it.
+  for _ in 1 2; do
+    status=0
+    # -c: a detached auto-gc/maintenance inherits the supervisor's ownership token and is reaped as a
+    # leaked tree, turning a finished fetch into 124 (sc-3761). Remote git never needs maintenance.
+    out=$(node "$supervisor" "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git -c gc.auto=0 -c maintenance.auto=false "$@") || status=$?
+    [ "$status" -eq 124 ] && [ -z "$out" ] || break
+  done
+  [ -z "$out" ] || printf '%s\n' "$out"
+  return "$status"
 }
 
 # `--resume <branch>` replays the invocation the previous attempt recorded (ship-intent.mts). A
@@ -350,6 +357,7 @@ if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; then
          exit 1
        fi ;;
     2) ;; # no matching remote branch → safe to create it
+    124) echo "could not verify remote branch (ls-remote exit 124: no clean finish within the ${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}s bound) — machine load or network; re-run ship, or raise DEVKIT_REMOTE_TIMEOUT_SECONDS" >&2; exit 1 ;;
     *) echo "could not verify remote branch (ls-remote exit $remote_check) — refusing to push" >&2; exit 1 ;;
   esac
 fi
