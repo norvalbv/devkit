@@ -105,8 +105,8 @@ export interface BaseDriftReport {
   /** True when the attribution cap was hit, so some entries carry `commit: null`. */
   truncated: boolean;
   /**
-   * Why every render function returns an empty string, or null when there is something to say.
-   * Callers branch on this instead of re-deriving "is this worth printing" three different ways.
+   * The drift answer from the refs on hand, or null when there is overlap to report. Read it with
+   * `freshness`: when that is 'unknown', every value here comes from possibly-stale refs.
    */
   silent: null | 'unresolvable' | 'no-drift' | 'no-overlap' | 'undetermined';
 }
