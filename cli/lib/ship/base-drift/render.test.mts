@@ -216,7 +216,10 @@ describe('an incomplete comparison is never a clean pass', () => {
   });
 
   it('says so on every surface rather than going quiet', () => {
-    for (const render of RENDERERS) expect(render(undetermined)).toContain('UNKNOWN');
+    for (const render of RENDERERS) {
+      expect(render(undetermined)).toContain('UNKNOWN');
+      expect(render(undetermined)).toContain('HAS moved');
+    }
   });
 
   it('is reported by the status block too', () => {
@@ -269,9 +272,13 @@ describe('a stale-ref ancestry result is not a clean pass', () => {
       mergeBase: null,
       moved: [],
       overlap: [],
-      silent: 'undetermined',
+      silent: 'no-drift',
     });
     expect(exitCodeFor(stale)).toBe(4);
-    for (const render of RENDERERS) expect(render(stale)).toContain('UNKNOWN');
+    for (const render of [...RENDERERS, renderStatus]) {
+      expect(render(stale)).toContain('UNKNOWN');
+      // Only the fetch failed: nothing showed the base moving, so saying it did is a false alarm.
+      expect(render(stale)).not.toContain('HAS moved');
+    }
   });
 });
