@@ -1522,6 +1522,12 @@ EOF
   GATE_SIGNAL_DEFER_EXIT=
   [ "$REQUESTED_SIGNAL_STATUS" -eq 0 ] || exit "$REQUESTED_SIGNAL_STATUS"
   [ "$COMMIT_STATUS" -eq 0 ] || exit "$COMMIT_STATUS"
+  # Before the push, so a push-failure --resume rebuilds from caller bytes that match this commit.
+  if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$SHIP_COMMIT" != "$BASE" ]; then
+    SYNC_MODE=write; [ "$FROM_BRANCH" -eq 0 ] || SYNC_MODE=hint
+    ship_sync_gate_rewrites "$ROOT" "$STAGED_STATE" "$SHIP_COMMIT" "$SYNC_MODE" ||
+      echo "ship: could not sync gate-rewritten files into your working copy (non-fatal)" >&2
+  fi
 fi
 
 if [ "$DRY_GATES" -eq 1 ]; then
