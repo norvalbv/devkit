@@ -56,6 +56,7 @@ tester.run('devkit/spawn-site-boundary', spawnSiteBoundaryRule, {
     },
     { code: `${RAW}execSync('node cli/index.mts review');`, errors: [error] },
     { code: `${RAW}execSync('bash ' + join(ROOT, 'cli/lib/run.sh'));`, errors: [error] },
+    { code: `${RAW}execSync('git status && bash cli/lib/run.sh');`, errors: [error] },
     {
       code: `${RAW}${HELPERS}
       /** Named 124-sentinel carve-out, but on the test rather than the call. */
