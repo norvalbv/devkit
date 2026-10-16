@@ -20,6 +20,8 @@ import {
   ANTI_SLOP_BASELINE_LOCK_REL,
   ANTI_SLOP_BASELINE_REL,
 } from '../../lib/install/anti-slop/constants.mts';
+import type { FindingGroup } from '../../lib/install/anti-slop/diagnostics.mts';
+import { git } from '../../lib/install/anti-slop/git-index-lock.mts';
 import {
   gitBaselineEnvelope,
   withStableGitIndex,
@@ -32,6 +34,8 @@ import {
   reanchorBaseline,
   type RelocatedGroup,
   relocationKey,
+  relocationRemedy,
+  unstagedRelocationSources,
 } from '../../lib/install/anti-slop/relocations.mts';
 import {
   collectAntiSlopGroups,
@@ -114,6 +118,34 @@ interface RelocationPlan {
   relocated: RelocatedGroup[];
   bound: AntiSlopBaseline;
   staged: boolean;
+  newGroups: FindingGroup[];
+}
+
+/** Explain an adopt that moved nothing, naming any baselined source whose unstaged edits explain it. */
+function reportNothingAdopted(
+  cwd: string,
+  plan: RelocationPlan,
+  baseRef: string,
+  explicitBase: boolean,
+): number {
+  const paths = unstagedRelocationSources(plan.bound, plan.newGroups, () =>
+    git(cwd, ['diff', '--name-only', '-z', '--relative']).split('\0').filter(Boolean),
+  );
+  const hint = paths.length
+    ? `anti-slop: if this code moved out of ${formatSources(paths)}, that change is not staged; git add it (or git add -p), then re-run \`${relocationRemedy(explicitBase ? baseRef : undefined)}\``
+    : null;
+  if (explicitBase) {
+    console.error(
+      `anti-slop: no lint-evidenced relocations from ${baseRef} to the index; baseline unchanged`,
+    );
+    if (hint) console.error(hint);
+    return 2;
+  }
+  console.log(
+    `anti-slop: adopted 0 relocated finding(s); baseline unchanged${plan.staged ? '' : ' — nothing is staged, so stage the moved files first'}`,
+  );
+  if (hint) console.log(hint);
+  return 0;
 }
 
 /**
@@ -139,7 +171,7 @@ function planRelocations(
       }
       const bound = relocationBound(snapshot, baseline);
       if (snapshot.skipped) {
-        return { relocated: [], bound, staged: snapshot.changedFiles.length > 0 };
+        return { relocated: [], bound, staged: snapshot.changedFiles.length > 0, newGroups: [] };
       }
       const pin = snapshot.baseTree
         ? mkdtempSync(join(tmpdir(), 'devkit-anti-slop-capability-'))
@@ -165,6 +197,7 @@ function planRelocations(
           relocated: classifyRelocations(newGroups, vacated).relocated,
           bound,
           staged: true,
+          newGroups,
         };
       } finally {
         if (pin) rmSync(pin, { recursive: true, force: true });
@@ -208,18 +241,7 @@ export function adoptRelocations(
       );
       return 2;
     }
-    if (plan.relocated.length === 0) {
-      if (explicitBase) {
-        console.error(
-          `anti-slop: no lint-evidenced relocations from ${baseRef} to the index; baseline unchanged`,
-        );
-        return 2;
-      }
-      console.log(
-        `anti-slop: adopted 0 relocated finding(s); baseline unchanged${plan.staged ? '' : ' — nothing is staged, so stage the moved files first'}`,
-      );
-      return 0;
-    }
+    if (plan.relocated.length === 0) return reportNothingAdopted(cwd, plan, baseRef, explicitBase);
     const next = reanchorBaseline(baseline, plan.bound, plan.relocated);
     printRelocatedAntiSlopFindings(plan.relocated);
     return withStableGitIndex(
