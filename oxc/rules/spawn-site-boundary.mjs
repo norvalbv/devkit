@@ -7,7 +7,8 @@ const RAW_SYNC_SPAWNS = new Set(['spawnSync', 'execFileSync', 'execSync']);
 const CHILD_PROCESS = new Set(['node:child_process', 'child_process']);
 const DEVKIT_ENTRY_RE = /\.sh\b|\b(?:index|cli)\.m[tj]s\b/;
 const CARVE_OUT_RE = /\b(?:124-)?sentinel carve-out\b|\bsupervisor-subject carve-out\b/i;
-const GIT_PROGRAM_RE = /^git(?: |$)/;
+// A lone git command: a shell operator could chain a script after it.
+const GIT_PROGRAM_RE = /^git(?: [^;&|`$()<>\n]*)?$/;
 const STATEMENT_KINDS = new Set([
   'ExpressionStatement',
   'ReturnStatement',
