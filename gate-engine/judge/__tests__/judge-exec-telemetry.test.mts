@@ -576,8 +576,9 @@ describe('judge_exec usage on failure outcomes', () => {
   });
 
   it('sync: the SIGKILL at the cap salvages usage from the partial stdout on the timeout row', () => {
-    fakeClaude(`printf '%s' '${ENVELOPE}'\ntrap '' TERM\nsleep 5`);
-    const out = execJudge({ label: 'review:x', args: ['-p', 'q'], timeout: 700 });
+    fakeClaude(`printf '%s' '${ENVELOPE}'\nexec sleep 60`);
+    // The cap races the fake shell's startup; generous so a starved shell still prints first.
+    const out = execJudge({ label: 'review:x', args: ['-p', 'q'], timeout: 3000 });
     expect(out).toBeNull();
     const [ev] = events();
     expect(ev).toMatchObject({ outcome: 'timeout', input_tokens: 111, cost_usd: 0.5 });
