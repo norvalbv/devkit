@@ -16,15 +16,16 @@
 # contradicting it.
 
 # ship_patch_base <root> <base>
-# The commit this checkout forked from, or the base itself when that cannot be improved on.
+# The commit this checkout forked from. The default arm sets BASE=HEAD, so there it IS BASE.
 #
-# Echoing BASE unchanged is the load-bearing default, not a fallback nobody hits: the ship default arm
-# sets BASE=$(git rev-parse HEAD), so the merge base IS BASE and the entire mechanism below stays
-# switched off, byte-for-byte. An unrelated-histories or shallow-graft failure lands in the same place.
+# Only genuinely unrelated histories (exit 1 in a full clone) fall back to BASE. A shallow graft or a
+# git error returns 1 instead: a BASE anchor there would stage base-only work as a silent revert.
 ship_patch_base() {
-  local root=$1 base=$2 fork
-  fork=$(git -C "$root" merge-base "$base" HEAD 2>/dev/null) || fork=
-  printf '%s\n' "${fork:-$base}"
+  local root=$1 base=$2 fork rc=0
+  fork=$(git -C "$root" merge-base "$base" HEAD 2>/dev/null) || rc=$?
+  [ "$rc" -eq 0 ] && { printf '%s\n' "$fork"; return 0; }
+  [ "$rc" -eq 1 ] && [ "$(git -C "$root" rev-parse --is-shallow-repository 2>/dev/null)" = false ] || return 1
+  printf '%s\n' "$base"
 }
 
 # _ship_whole_add <path>
