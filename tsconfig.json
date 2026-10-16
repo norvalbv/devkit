@@ -10,7 +10,16 @@
     "types": ["node"],
     "strict": true
   },
-  "include": ["anti-slop/**/*.ts", "cli/**/*.mts", "gate-engine/**/*.mts"],
-  "//": "Typecheck shipped source only. Tests are validated by running them (vitest); templates import consumer-only peer deps (see their @ts-nocheck). Phase A: strict OFF (rename pass); Phase B flips strict/noImplicitAny true. tsconfig.build.json handles emit.",
-  "exclude": ["node_modules", "templates", "dist", "**/*.test.mts", "**/__tests__/**", "**/eval/**"]
+  "include": ["anti-slop/**/*.ts", "cli/**/*.mts", "gate-engine/**/*.mts", "e2e/**/*.mts"],
+  "//": "Typecheck shipped source plus e2e/, which CI never runs, so a stale e2e import fails here. Unit tests are validated by running them (vitest); templates import consumer-only peer deps (see their @ts-nocheck). tsconfig.build.json handles emit.",
+  "exclude": [
+    "node_modules",
+    "templates",
+    "dist",
+    "cli/**/*.test.mts",
+    "gate-engine/**/*.test.mts",
+    "**/__tests__/**",
+    "**/eval/**",
+    "e2e/fixtures/**"
+  ]
 }
