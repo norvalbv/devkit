@@ -8,14 +8,13 @@
  * anchor, and no GitHub content to enrich (`!originalCommitId` would hard-drop every one), so
  * they get their own path. No LLM calls, no network — the diff bytes ride in the candidate rows.
  *
- *   bun propose-telemetry.mts [--max N]   (default 10)
+ *   bun propose-telemetry.mts [--max N]   (default 10 per suite)
  *
  * Output: raw/queue-telemetry.jsonl (gitignored), one JSON line per surviving candidate —
- *   { queueId, suite: 'correctness', candidate: <full candidates-telemetry.jsonl row> }
+ *   { queueId, suite: 'correctness' | 'commit-guard', candidate: <full candidates-telemetry.jsonl row> }
  *
- * Pipeline: HARD DROPS (counted) → SORT (evidence richness, then recency) → CAP → WRITE.
- * Charter: correctness-reviewer rows only — the other telemetry emitters (commit-guard, the
- * deterministic gates) are not reviewer suites. Evidence tiers: both diffs archived › fail diff
+ * Pipeline: HARD DROPS (counted) → SORT (evidence richness, then recency) → CAP per suite → WRITE.
+ * Charter: the reviewers in SUITES. Evidence tiers: both diffs archived › fail diff
  * only › failReason-only (kept, flagged `failReasonOnly` — adaptation from prose alone needs
  * extra care and usually waits).
  */
@@ -43,9 +42,16 @@ const CANDIDATES_FILE = path.join(reviewersDir, 'raw', 'candidates-telemetry.jso
 const RAW_DIR = path.join(reviewersDir, 'raw');
 const OUT_FILE = path.join(RAW_DIR, 'queue-telemetry.jsonl');
 
+/** Reviewer → its corpus suite (the skill) and queue-id prefix. A commit-guard FAIL is only a
+ * candidate: many are correctness findings, so adaptation confirms it names a duplicated original. */
+const SUITES = {
+  'correctness-reviewer': { suite: 'correctness', prefix: 'corr-tel' },
+  'commit-guard': { suite: 'commit-guard', prefix: 'cg-tel' },
+};
+
 /** Returns a drop reason string, or null if the candidate survives. */
 function hardDropReason(c) {
-  if (c.reviewer !== 'correctness-reviewer') return `out-of-charter:${c.reviewer}`;
+  if (!SUITES[c.reviewer]) return `out-of-charter:${c.reviewer}`;
   if (c.kind === 'waived-decoy') return null;
   if (c.kind !== 'fail-fix') return `unknown-kind:${c.kind}`;
   if (!c.failReason || String(c.failReason).trim().length === 0) return 'no-fail-reason';
@@ -66,8 +72,23 @@ function compareCandidates(a, b) {
   return Date.parse(b.tsFail ?? 0) - Date.parse(a.tsFail ?? 0);
 }
 
-const makeQueueId = (candidate, seen) =>
-  uniqueId(`corr-tel-${slugify(candidate.failReason)}`, seen);
+/** Sort kept candidates and cap each suite at `max`, so one suite's volume never displaces another's. */
+export function queueRows(kept, max, bump) {
+  const seenIds = new Set();
+  const rows = [];
+  for (const [reviewer, { suite, prefix }] of Object.entries(SUITES)) {
+    const mine = kept.filter((c) => c.reviewer === reviewer).sort(compareCandidates);
+    if (mine.length > max) bump(`over-max:${suite}:${mine.length - max}`);
+    for (const candidate of mine.slice(0, max))
+      rows.push({
+        queueId: uniqueId(`${prefix}-${slugify(candidate.failReason)}`, seenIds),
+        suite,
+        failReasonOnly: evidenceTier(candidate) === 2,
+        candidate,
+      });
+  }
+  return rows;
+}
 
 function main() {
   const max = parseMaxArg(process.argv.slice(2), 'propose-telemetry');
@@ -77,22 +98,12 @@ function main() {
   const { drops, bump } = makeDropCounter();
 
   const kept = partitionDrops(candidates, makeHardDrop(reviewersDir, hardDropReason), bump);
-  kept.sort(compareCandidates);
-  const queued = kept.slice(0, max);
-  if (kept.length > max) bump(`over-max:${kept.length - max}`);
-
-  const seenIds = new Set();
-  const rows = queued.map((candidate) => ({
-    queueId: makeQueueId(candidate, seenIds),
-    suite: 'correctness',
-    failReasonOnly: evidenceTier(candidate) === 2,
-    candidate,
-  }));
+  const rows = queueRows(kept, max, bump);
 
   writeQueue(OUT_FILE, rows);
 
   const tiers = { 0: 0, 1: 0, 2: 0 };
-  for (const c of queued) tiers[evidenceTier(c)] += 1;
+  for (const { candidate } of rows) tiers[evidenceTier(candidate)] += 1;
   printSummary(
     [
       `propose-telemetry: ${candidates.length} candidates → ${kept.length} in charter → ${rows.length} queued`,

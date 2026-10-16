@@ -148,7 +148,7 @@ The dashboard below is generated from an append-only event ledger and immutable,
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/benchmarks/assets/dashboard-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="docs/benchmarks/assets/dashboard-light.svg">
-  <img alt="Benchmark evidence dashboard. Equivalent detailed tables follow: 13 suites have accepted checkpoints, 0 are current, and 1 shipped agents have no benchmark evidence." src="docs/benchmarks/assets/dashboard-light.svg">
+  <img alt="Benchmark evidence dashboard. Equivalent detailed tables follow: 14 suites have accepted checkpoints, 0 are current, and 1 shipped agents have no benchmark evidence." src="docs/benchmarks/assets/dashboard-light.svg">
 </picture>
 
 The tracker separates lifecycle, evidence provenance, freshness, change type, and assessment. A stale score remains visible but is never presented as current. Current history is too sparse and heterogeneous to support exponential-growth or diminishing-return claims; the honest classification is **insufficient comparable evidence**.
@@ -172,6 +172,7 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 | Decision brief: rule kept on edit | experimental | accepted | stale | quality | ↑ improved | Rule kept: brief only, agent cannot read on (best-case tasks): 36/40 (90.0%) · Rule kept: brief, agent may read on (best-case tasks): 38/40 (95.0%) |
 | Semantic search retrieval | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Duplication matcher | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
+| Commit-guard reviewer (localized fixture) | shipped | accepted | stale | coverage | → flat | first-pass FAIL recall: 1/1 (100.0%) · first-pass clean pass: 2/2 (100.0%) · block recall: 1/1 (100.0%) · clean pass: 2/2 (100.0%) |
 | Commit-guard retrieval | shipped | evidence-only | unknown | quality | ? unknown | Clone retrieval recall at 10: 59.0% · Semantic retrieval recall at 10: 25.0% |
 | Ship fixture setup cost | experimental | accepted | stale | methodology-reset | ? unknown | Fixture CPU candidate/baseline: 19.0% · Fixture elapsed candidate/baseline: 31.4% |
 
@@ -181,7 +182,7 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 | --- | --- | --- | --- |
 | API security agent | shipped | evidence-only | reviewer-api-security |
 | Backend performance agent | shipped | evidence-only | reviewer-backend-performance |
-| Commit guard agent | shipped | evidence-only | commit-guard-retrieval |
+| Commit guard agent | shipped | evidence-only | reviewer-commit-guard, commit-guard-retrieval |
 | Conventions agent | shipped | accepted | conventions |
 | Correctness agent | shipped | evidence-only | reviewer-correctness |
 | Feature completeness agent | shipped | accepted | completeness |
