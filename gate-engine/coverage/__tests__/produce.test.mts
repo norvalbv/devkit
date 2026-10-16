@@ -899,14 +899,16 @@ describe('a retry devkit cannot report on', () => {
     }
   };
 
-  // Whether the json report ran cannot be predicted from argv: a consumer who sets `reporters` in
-  // vitest.config silently WINS over the CLI flag (verified against vitest 4.1.10), so the report
+  // Whether the json report ran cannot be predicted from argv: a vitest.config `outputFile` diverts
+  // it (config `reporters` cannot — our --reporter replaces them), so the report
   // never appears while the injected retry still fires — a rescue nobody can see. Deciding from the
   // artifact covers that case, an older vitest, an argv --reporter and the env switch at once.
   it('discloses a retry whose rescue produced no report', () => {
     const out = said(null, true);
     expect(out).toMatch(/cannot be reported/);
     expect(out).toMatch(/--retry=0/);
+    expect(out).toMatch(/`outputFile`/);
+    expect(out).not.toMatch(/reporters/);
   });
 
   it('says nothing when it did not retry', () => {
@@ -1622,32 +1624,37 @@ process.exit(99);`,
   });
 });
 
+// Starves on EVERY attempt at 300ms — the field report's shape, where the retry at the same
+// ceiling failed too. Only a bigger budget gets it through, and only it carries the wait scale.
+const starvedRepo = (configLine = '') => {
+  const root = makeRoot();
+  symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(root, 'node_modules'));
+  writeFileSync(
+    join(root, 'vitest.config.mjs'),
+    `export default {
+      test: {
+        include: ['*.test.mjs'],
+        testTimeout: 300,${configLine}
+        coverage: { provider: 'v8', reporter: ['json'], reportsDirectory: './coverage' },
+      },
+    };\n`,
+  );
+  writeFileSync(
+    join(root, 'starved.test.mjs'),
+    `import { appendFileSync } from 'node:fs';
+    import { expect, it } from 'vitest';
+    it('starved under load', async () => {
+      appendFileSync('scale.log', String(process.env.DEVKIT_COVERAGE_RERUN_SCALE) + '\\n');
+      await new Promise((r) => setTimeout(r, 600));
+      expect(process.env.DEVKIT_COVERAGE_RERUN_SCALE).toBe('5');
+    });\n`,
+  );
+  return root;
+};
+
 describe('a load flake the retry cannot rescue, against real vitest', () => {
-  // Starves on EVERY attempt at 300ms — the field report's shape, where the retry at the same
-  // ceiling failed too. Only a bigger budget gets it through, and only it carries the wait scale.
   it('goes green on the one re-run and keeps the artifact', () => {
-    const root = makeRoot();
-    symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(root, 'node_modules'));
-    writeFileSync(
-      join(root, 'vitest.config.mjs'),
-      `export default {
-        test: {
-          include: ['*.test.mjs'],
-          testTimeout: 300,
-          coverage: { provider: 'v8', reporter: ['json'], reportsDirectory: './coverage' },
-        },
-      };\n`,
-    );
-    writeFileSync(
-      join(root, 'starved.test.mjs'),
-      `import { appendFileSync } from 'node:fs';
-      import { expect, it } from 'vitest';
-      it('starved under load', async () => {
-        appendFileSync('scale.log', String(process.env.DEVKIT_COVERAGE_RERUN_SCALE) + '\\n');
-        await new Promise((r) => setTimeout(r, 600));
-        expect(process.env.DEVKIT_COVERAGE_RERUN_SCALE).toBe('5');
-      });\n`,
-    );
+    const root = starvedRepo();
 
     // An exported scale must not leak into pass 1: both of its attempts see none, the re-run sees 5.
     const result = coverageRun(root, { ...process.env, DEVKIT_COVERAGE_RERUN_SCALE: '99' });
@@ -1658,6 +1665,29 @@ describe('a load flake the retry cannot rescue, against real vitest', () => {
     expect(result.stderr).toMatch(/re-running the whole suite ONCE/);
     expect(result.stderr).toMatch(/starved under load/);
     expect(result.stderr).toMatch(/passed only at the raised timeout/);
+  });
+
+  // Our CLI --reporter replaces the config's, so config `reporters` cannot starve the re-run.
+  it('still re-runs when vitest.config sets reporters', () => {
+    const root = starvedRepo(`\n        reporters: ['dot'],`);
+
+    const result = coverageRun(root);
+
+    expect(result.status).toBe(0);
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(true);
+    expect(result.stderr).toMatch(/re-running the whole suite ONCE/);
+  });
+
+  // A string outputFile does beat --outputFile.json: no report, so no re-run, and the cause is named.
+  it('discloses, instead of re-running, when vitest.config diverts the json report', () => {
+    const root = starvedRepo(`\n        outputFile: './elsewhere.json',`);
+
+    const result = coverageRun(root);
+
+    expect(readFileSync(join(root, 'scale.log'), 'utf8')).toBe('undefined\nundefined\n');
+    expect(result.status).toBe(1);
+    expect(result.stderr).not.toMatch(/re-running the whole suite/);
+    expect(result.stderr).toMatch(/vitest\.config `outputFile` diverted it/);
   });
 });
 
