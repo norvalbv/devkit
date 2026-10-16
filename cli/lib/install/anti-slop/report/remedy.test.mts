@@ -236,7 +236,7 @@ describe('anti-slop check FAIL output (wiring)', () => {
     const [summary, ...locations] = readGateReason(reason);
     expect(summary).toMatch(/^anti-slop: FAIL — 1 new error finding\(s\)/u);
     expect(locations).toEqual([
-      expect.stringMatching(/^ERROR \S+ src\/a\.test\.ts:3:\d+ \(\+1\)$/u),
+      expect.stringMatching(/^ERROR \S+ src\/a\.test\.ts:3:\d+ \(1 new\)$/u),
     ]);
     expect(locations[0]).toContain(MOCKING);
   });
