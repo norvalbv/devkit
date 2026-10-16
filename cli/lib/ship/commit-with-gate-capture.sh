@@ -491,6 +491,9 @@ SHIP_HOOK_WRAPPER
     # Order matters: stdout joins ship stderr FIRST, then only tee's own complaints are discarded.
     printf '%s\n' "$digest_text" | tee -a "$log" "$ship_log" >&2 2>/dev/null || true
   fi
+  # A failed attempt names its own archive: $log is per-branch and dies with the worktree.
+  { [ "$ship_dry_gates" -eq 0 ] && [ "$rc" -ne 0 ] && [ -s "$ship_log" ] &&
+    echo "   Ship $DEVKIT_SHIP_ID — durable log (survives worktree removal): $ship_log"; } >&2 || true
 
   # sc-2299. The path brief again, next to the verdict. The resume banner already printed it in FULL,
   # but a blocked ship is read by tailing (the digest note above says so), minutes and often megabytes

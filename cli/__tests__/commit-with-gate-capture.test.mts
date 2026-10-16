@@ -467,6 +467,77 @@ describe('commit_with_gate_capture — executable hook proof', () => {
   });
 });
 
+// A failed ship must name the per-attempt archive, since the per-branch log dies with its worktree.
+describe('commit_with_gate_capture — a failed ship names its durable log', () => {
+  const failingHook = "echo 'GATE_SAID_NO' >&2\nexit 1\n";
+  const archive = (root: string) => join(root, 'telemetry/logs/sc1537-test.log');
+
+  it('a blocked ship prints its ship id and the archive that holds the gate output', () => {
+    const { root, wt, base } = fixture(true, failingHook);
+
+    const result = runCommit(root, wt, base);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      `   Ship sc1537-test — durable log (survives worktree removal): ${archive(root)}`,
+    );
+    expect(readFileSync(archive(root), 'utf8')).toContain('GATE_SAID_NO');
+    expect(result.stdout).not.toContain('durable log');
+  });
+
+  // The digest is silent on this arm, so a line tied to the digest would vanish exactly here.
+  it('a hook-setup failure, which has no digest, still names the archive', () => {
+    const { root, wt, base } = fixture(false);
+
+    const result = runCommit(root, wt, base);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).not.toContain('Gate findings this run');
+    expect(result.stderr).toContain(`durable log (survives worktree removal): ${archive(root)}`);
+    expect(readFileSync(archive(root), 'utf8')).toMatch(/no executable pre-commit hook/);
+  });
+
+  it('a --pr (reship) failure prints it even with an inherited DEVKIT_SHIP_DRY_GATES=1', () => {
+    const { root, wt, base } = fixture(true, failingHook);
+
+    const result = runCommit(root, wt, base, false, false, '1');
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`durable log (survives worktree removal): ${archive(root)}`);
+  });
+
+  it('a failed --dry-gates run prints none, though it still writes the archive', () => {
+    const { root, wt, base } = fixture(true, failingHook);
+
+    const result = runCommit(root, wt, base, false, true);
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(archive(root), 'utf8')).toContain('GATE_SAID_NO');
+    expect(result.stderr).not.toContain('durable log');
+  });
+
+  it('a dropped archive prints none and leaves the verdict alone', () => {
+    const { root, wt, base } = fixture(true, failingHook);
+    mkdirSync(join(root, 'telemetry'), { recursive: true });
+    writeFileSync(join(root, 'telemetry/logs'), 'not a directory\n');
+
+    const result = runCommit(root, wt, base);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('GATE_SAID_NO');
+    expect(result.stderr).not.toContain('durable log');
+  });
+
+  it('a green ship prints none', () => {
+    const { root, wt, base } = fixture(true);
+
+    const result = runCommit(root, wt, base);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).not.toContain('durable log');
+  });
+});
+
 // sc-3443: ship hands guard-deterministic the exact --dry-gates invocation; the gate prints it in its
 // own failure footer, so the shell attributes nothing. The stub hook echoes what it was handed.
 describe('commit_with_gate_capture — hands the gate the ship-exact --dry-gates command', () => {
