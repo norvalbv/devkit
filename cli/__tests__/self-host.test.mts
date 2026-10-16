@@ -345,24 +345,6 @@ describe('buildSelfHostHook', () => {
     ).toBe(TEMPLATE_GUARD_CONFIG);
   });
 
-  it('blocks the self-host hook when Oxfmt fails', () => {
-    const root = mkdtempSync(join(tmpdir(), 'self-host-oxfmt-failure-'));
-    execFileSync('git', ['init', '-q'], { cwd: root });
-    mkdirSync(join(root, 'cli'), { recursive: true });
-    mkdirSync(join(root, 'node_modules', '.bin'), { recursive: true });
-    const oxfmt = join(root, 'node_modules', '.bin', 'oxfmt');
-    writeFileSync(oxfmt, '#!/bin/sh\nexit 7\n');
-    chmodSync(oxfmt, 0o755);
-    writeFileSync(join(root, 'cli', 'sample.mts'), 'const value={answer:42}\n');
-    execFileSync('git', ['add', 'cli/sample.mts'], { cwd: root });
-
-    const fragment = buildSelfHostHook(HOOK_SEL, '', ROOT).match(
-      /# devkit:biome-format[\s\S]*?# \/devkit:biome-format/,
-    )?.[0];
-    expect(fragment).toBeDefined();
-    expect(() => execFileSync('sh', ['-c', fragment ?? 'exit 1'], { cwd: root })).toThrow();
-  });
-
   // sc-2695: the block names ship's exact rehearsal only when a new ship exported it.
   it.each([
     ['names', "devkit ship feat/x 't' --dry-gates -- cli/sample.mts"],
@@ -380,6 +362,7 @@ describe('buildSelfHostHook', () => {
     const fragment = buildSelfHostHook(HOOK_SEL, '', ROOT).match(
       /# devkit:biome-format[\s\S]*?# \/devkit:biome-format/,
     )?.[0];
+    expect(fragment).toBeDefined();
     const env = { ...process.env, DEVKIT_SHIP_DRY_GATES_CMD: cmd ?? '' };
     const r = spawnSync('sh', ['-c', fragment ?? 'exit 1'], {
       cwd: root,
@@ -388,6 +371,7 @@ describe('buildSelfHostHook', () => {
       timeout: 30_000,
     });
     expect(r.status).toBe(1);
+    expect(r.stderr).toContain('blocking: devkit formats its own staged set hard');
     if (cmd) expect(r.stderr).toContain(`Ship's exact staging, no judges:\n     ${cmd}\n`);
     else expect(r.stderr).not.toContain("Ship's exact staging");
   });
