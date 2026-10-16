@@ -10,12 +10,13 @@ const EMPTY = Buffer.alloc(0);
 
 /**
  * The sink's parsed rows in file order, read backward a chunk at a time until `done` holds for the
- * rows kept so far or MAX_READ is spent. Never throws: an absent, unreadable or torn sink yields [].
+ * rows kept so far or `maxRead` is spent. Never throws: an absent, unreadable or torn sink yields [].
  */
 export function scanBackward<T>(
   sink: string,
   parse: (line: string) => T | undefined,
   done: (kept: T[]) => boolean,
+  maxRead = MAX_READ,
 ): T[] {
   if (!sink) return [];
   let fd: number | undefined;
@@ -27,7 +28,7 @@ export function scanBackward<T>(
     // which sits EARLIER in the file.
     let carry = EMPTY;
     const perChunk: T[][] = [];
-    while (pos > 0 && read < MAX_READ) {
+    while (pos > 0 && read < maxRead) {
       const len = Math.min(CHUNK, pos);
       pos -= len;
       const buf = Buffer.alloc(len);

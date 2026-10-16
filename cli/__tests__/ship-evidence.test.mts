@@ -190,18 +190,13 @@ describe('devkit ship evidence block', () => {
     const body = readFileSync(repo.state, 'utf8');
     expect(body.replace(BLOCK, 'BLOCK')).toBe(`reworded\n\nBLOCK\n\n${QAVIS}\n`);
     expect(readEvidenceBlock(body, next)).toMatchObject({ status: 'captured', stale: false });
-    // Recomputed for the new head: the first commit was gated by an earlier ship, so no clean record.
+    // Recomputed for the new head: each commit's gate record is read by sha, so two clean ships
+    // read as one clean commit does.
     expect(body).toContain(`· advisory, at \`${next.slice(0, 12)}\``);
     expect(body).not.toContain(head.slice(0, 12));
     expect(readEvidenceBlock(body, next)?.mergeVerdict).toEqual({
-      verdict: 'human-review',
-      reasons: [
-        {
-          code: 'bypass-unknown',
-          detail: '2 commits since the PR base, only a one-commit run is on record',
-        },
-        { code: 'captured-proof' },
-      ],
+      verdict: 'auto-merge-eligible',
+      reasons: [{ code: 'captured-proof' }],
     });
   }, 600_000);
 
@@ -358,9 +353,12 @@ describe('evidence outcomes', () => {
     const run = publishRun({}, { 'src/value.mjs': FIXED });
     const sink = join(mkdtempSync(join(tmpdir(), 'evidence-sink-')), 'gate-events.jsonl');
     dirs.push(dirname(sink));
-    const row = (type: string, extra = {}) => JSON.stringify({ ship_id: 's1', type, ...extra });
-    writeFileSync(sink, `${row('ship_attempt')}\n${row('ship_result', { exit_code: 0 })}\n`);
-    const shipped = { DEVKIT_SHIP_ID: 's1', DEVKIT_GATE_EVENTS: sink };
+    const ts = new Date().toISOString();
+    writeFileSync(
+      sink,
+      `${JSON.stringify({ type: 'ship_gated', head: run.head, bypasses: [], ts })}\n`,
+    );
+    const shipped = { DEVKIT_GATE_EVENTS: sink };
     const verdictOf = () =>
       readEvidenceBlock(readFileSync(run.gh.state, 'utf8'), run.head)?.mergeVerdict?.reasons;
 
@@ -375,7 +373,10 @@ describe('evidence outcomes', () => {
 
     writeFileSync(run.gh.state, '');
     expect(run.publish().status).toBe(0);
-    expect(verdictOf()?.[0]).toEqual({ code: 'bypass-unknown', detail: 'no devkit ship gate run' });
+    expect(verdictOf()?.[0]).toEqual({
+      code: 'bypass-unknown',
+      detail: `no passing devkit ship gate record for ${run.head.slice(0, 12)}`,
+    });
   });
 
   it('still writes the block when the verdict cannot be computed, and says why', () => {

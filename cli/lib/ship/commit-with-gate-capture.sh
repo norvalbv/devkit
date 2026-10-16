@@ -364,6 +364,13 @@ SHIP_HOOK_WRAPPER
       "$(( $(date +%s) - dur_start ))" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
   fi
+  # The merge verdict reads each PR commit's bypass record by the sha this passing run produced.
+  if [ "$rc" -eq 0 ] && [ "$ship_dry_gates" -eq 0 ]; then
+    local gated_writer
+    gated_writer="$(dirname "${BASH_SOURCE[0]}")/merge-verdict/bypasses.mts"
+    [ -f "$gated_writer" ] || gated_writer="$(dirname "${BASH_SOURCE[0]}")/merge-verdict/bypasses.mjs"
+    [ ! -f "$gated_writer" ] || node "$gated_writer" record "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" >/dev/null 2>&1 || true
+  fi
 
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
     : # run_gates_with_capture already emitted the attributed timeout + retry guidance
