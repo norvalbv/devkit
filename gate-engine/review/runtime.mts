@@ -186,6 +186,8 @@ export interface ReviewOutcome {
    * say how long the wait is instead of telling the operator to re-run into the same wall. */
   outageResetsAt?: number;
   transcript?: string;
+  /** Both passes of an escalated run, each labelled with its model; archived instead of `transcript`. */
+  fullTranscript?: string;
   /** Contract-validated waiver lenses of a FAIL — the only findings the override valve may
    * block or waive (a fabricated pair beside a grounded one must not demand its own waiver). */
   blockingLenses?: string[];

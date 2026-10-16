@@ -125,8 +125,9 @@ export function settleReviewOutcome(
     holdLensPart(ctx.splitParts, t.splitOf, { res, secs, task: t, retried }, taskLabel(t));
     return res;
   }
-  const transcriptRef = res.transcript
-    ? saveTranscript(`review-${res.name}`, composeTranscript(t.diffText, res.transcript))
+  const archived = res.fullTranscript ?? res.transcript;
+  const transcriptRef = archived
+    ? saveTranscript(`review-${res.name}`, composeTranscript(t.diffText, archived))
     : null;
   // What the judge's packet actually covered (sc-2305) — on the verdict row, so a PASS over a
   // partial packet reaches the digest as unverified instead of reading like a whole-diff PASS.

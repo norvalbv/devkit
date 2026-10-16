@@ -127,6 +127,21 @@ describe('scoreRow buckets', () => {
     expect(res.reasonClass).toBe('right-item');
   });
 
+  it('right-item: a reopened row the escalation left pending keeps the first pass failure', () => {
+    const reopened = { items: [{ name: 'sql-injection', status: 'pending', issues: [] }] };
+    const res = scoreRow(
+      goldRow(),
+      cap(
+        'VERDICT: FAIL — sqli',
+        { out: 'VERDICT: FAIL — x', snapshot: reopened },
+        { first: failArtifact },
+      ),
+      { status: 'fail', reason: 'x', escalated: true },
+    );
+    expect(res.reasonClass).toBe('right-item');
+    expect(reopened.items[0].status).toBe('pending');
+  });
+
   it('pattern-only: wrong item failed but the finding text matches reasonPattern', () => {
     const wrongItem = {
       items: [{ name: 'input-validation', status: 'fail', issues: ['raw concat into query'] }],

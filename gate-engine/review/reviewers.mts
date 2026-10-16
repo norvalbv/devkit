@@ -415,20 +415,6 @@ export function wrapConventionsPrompt(
   );
 }
 
-/** Escalation prompt: the escalation model independently re-verifies a first-pass FAIL
- * (check-alignment shape). */
-export function escalatePrompt(wrappedPrompt: string, firstPass: string): string {
-  return (
-    `${wrappedPrompt}\n\n` +
-    'A first-pass reviewer judged FAIL. Its full notes:\n' +
-    '─────\n' +
-    `${firstPass}\n` +
-    '─────\n' +
-    'Independently verify its evidence with your own investigation — confirm or overturn. ' +
-    'Your verdict is final; a FAIL blocks the commit.'
-  );
-}
-
 /**
  * Cache key for a PASS verdict: reviewer identity + devkit version + the exact bytes of its staged
  * domain diff. An IDENTICAL diff re-reviewed (amend, rebase replay, retry after fixing an unrelated

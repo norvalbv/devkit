@@ -12,7 +12,6 @@ import {
   allowedToolsFor,
   cacheKey,
   effectiveReviewConfig,
-  escalatePrompt,
   parseReviewVerdict,
   REVIEWERS,
   rootsFor,
@@ -22,6 +21,7 @@ import {
   wrapPrompt,
 } from '../reviewers.mts';
 import { verifyChecklist } from '../runtime.mts';
+import { escalatePrompt } from '../cascade/escalation.mts';
 
 // A frink-shaped review config without touching disk: defaults + explicit roots.
 const defaults = resolveGuardConfig('/nonexistent-cwd-defaults-only');
