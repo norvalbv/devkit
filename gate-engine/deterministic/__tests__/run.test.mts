@@ -38,6 +38,7 @@ afterEach(() => {
   delete process.env.GUARD_DETERMINISTIC_STRICT;
   delete process.env.FRINK_DETERMINISTIC_STRICT;
   delete process.env.DEVKIT_GATE_EVENTS;
+  delete process.env.DEVKIT_COMMIT_INDEX_FILE;
   vi.restoreAllMocks();
 });
 
@@ -564,6 +565,17 @@ describe('runDeterministic — --structure / --extra / --only', () => {
     const ran = exec.mock.calls.map(([bin, argv]) => [bin, ...argv].join(' ')).slice(1);
     expect(ran).toEqual(['oxlint', 'bun run knip', 'tsc --noEmit']);
     expect(err.mock.calls.flat().join('\n')).toContain('deterministic gates failed: knip');
+  });
+
+  // An extra reads a `commit -a` / `commit -- <path>` index through this documented carrier.
+  it('an extraGates command inherits DEVKIT_COMMIT_INDEX_FILE', () => {
+    process.env.DEVKIT_COMMIT_INDEX_FILE = '/repo/.git/next-index-1.lock';
+    const d = repo(['size']);
+    writeFileSync(join(d, 'guard.config.json'), JSON.stringify({ extraGates: { knip: 'knip' } }));
+    const exec = vi.fn();
+    expect(runDeterministic(d, { exec })).toBe(0);
+    const [, , opts] = exec.mock.calls.find(([bin]) => bin === 'knip');
+    expect(opts.env.DEVKIT_COMMIT_INDEX_FILE).toBe('/repo/.git/next-index-1.lock');
   });
 
   // Raw JSON text: a `__proto__` key in an object literal would never reach the file.
