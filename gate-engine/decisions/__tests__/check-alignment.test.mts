@@ -526,6 +526,8 @@ describe('judge cascade (in-process, stubbed claude on PATH)', () => {
     expect(calls()).toContain('--no-session-persistence');
     expect(calls()).toContain('--allowedTools'); // investigating judge keeps its tools…
     expect(calls()).not.toContain('--disallowedTools'); // …and is NOT read-only
+    // No Bash rule: an explicit Bash(git diff:*) approves `git diff --output=<file>` writes.
+    expect(calls()).toContain('--allowedTools Read,Grep,Glob\n');
   });
 
   // judgeDetailed is the bench's window into the cascade: same calls, plus the intermediates.

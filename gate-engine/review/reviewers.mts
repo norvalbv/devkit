@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import { normalizeReviewRoots } from '../../skills/_devkit/review-roots.mjs';
 import type { GuardConfig } from '../config.mts';
 import { devkitVersion } from '../devkit-version.mts';
-import { LIGHT_JUDGE_MODEL } from '../judge/judge-isolation.mts';
+import { JUDGE_READ_TOOLS, LIGHT_JUDGE_MODEL } from '../judge/judge-isolation.mts';
 import { withNamedAgentMcpTools } from '../judge/mcp/profile.mts';
 import type { ReviewerResponseContractName } from './contracts/registry.mts';
 import { checklistContractFor } from './lens/split.mts';
@@ -166,10 +166,6 @@ export function checklistScriptAt(reviewer: ChecklistReviewer, assetRoot = '.cla
   return `${assetRoot.replace(TRAILING_SLASH_RE, '')}/${checklistAssetPath(reviewer)}`;
 }
 
-// Read-only investigation surface (mirrors check-alignment's JUDGE_TOOLS + log/status for context).
-// No naked Bash: a gate judge must never be able to write, stage, or commit.
-const BASE_TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
-
 // Leading YAML frontmatter (the agent .md header is Task-tool metadata, not brief).
 const FRONTMATTER_RE = /^---\n[\s\S]*?\n---\n/;
 const TRAILING_SLASH_RE = /\/$/;
@@ -264,8 +260,8 @@ export function allowedToolsFor(
   assetRoot = '.claude',
 ): string {
   // A skill-less reviewer has no checklist script; its evidence is pre-rendered onto stdin/prompt.
-  if (!hasChecklist(reviewer)) return withNamedAgentMcpTools('Read,Grep,Glob');
-  const tools = `${BASE_TOOLS},Bash(node ${checklistScriptAt(reviewer, assetRoot)}:*)`;
+  if (!hasChecklist(reviewer)) return withNamedAgentMcpTools(JUDGE_READ_TOOLS);
+  const tools = `${JUDGE_READ_TOOLS},Bash(node ${checklistScriptAt(reviewer, assetRoot)}:*)`;
   if (reviewer.domain === 'code') return withNamedAgentMcpTools(tools, cfg.searchTool);
   // The correctness reviewer's writer/reader-contract lens benefits from semantic search, but
   // only when the consumer actually wired an index (indexPath set) — otherwise cfg.searchTool is

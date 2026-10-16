@@ -126,6 +126,22 @@ describe('reviewer fleet without the codebase MCP server (sc-2837)', () => {
     );
   });
 
+  it('every reviewer spawn grants no Bash rule beyond its own checklist script', async () => {
+    // Wiring guard: an explicit Bash(git diff:*) would approve `git diff --output=<file>` writes.
+    useRegistry(['codebase', 'context7', 'autonomous_bugs']);
+    const repo = consumerRepo({ backend: true });
+    const exec = passJudge(repo);
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec.mock.calls.length).toBeGreaterThan(0);
+    for (const [{ label, args }] of exec.mock.calls) {
+      const bash = args[args.indexOf('--allowedTools') + 1]
+        .split(',')
+        .filter((tool: string) => tool.startsWith('Bash'));
+      expect(bash.length, label).toBeLessThanOrEqual(1);
+      for (const rule of bash) expect(rule, label).toMatch(/^Bash\(node \S+\/checklist\.mjs:\*\)$/);
+    }
+  });
+
   it('one gate_degraded per reviewer and mcp_degraded_cause on each review_result', async () => {
     useRegistry(['context7', 'autonomous_bugs']);
     const repo = consumerRepo({ backend: true });

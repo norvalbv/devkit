@@ -118,6 +118,9 @@ describe('completeness without the codebase MCP server (sc-2837)', () => {
     expect(await runCompleteness(msg, repo, { exec })).toBe(0);
     expect(exec).toHaveBeenCalledTimes(1);
     expect(stderr.join('\n')).not.toContain('DEGRADED');
+    // No Bash rule: an explicit Bash(git diff:*) approves `git diff --output=<file>` writes.
+    const { args } = exec.mock.calls[0][0];
+    expect(args[args.indexOf('--allowedTools') + 1]).not.toContain('Bash');
   });
 
   it('the spawn decides: its own cause degrades a clean run-level read, and is what gets cached', async () => {

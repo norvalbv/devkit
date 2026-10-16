@@ -48,7 +48,7 @@ import {
   emitIntentCacheHit,
   finishGateTiming,
 } from '../judge/gate-events.mts';
-import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
+import { JUDGE_ISOLATION, JUDGE_READ_TOOLS } from '../judge/judge-isolation.mts';
 import {
   judgeMcpCapabilityFingerprint,
   judgeMcpMissingServers,
@@ -83,7 +83,6 @@ import { agentBody } from './runtime.mts';
 import { reportNoVerdict } from './valve/inconclusive.mts';
 
 const AGENT_NAME = 'feature-completeness-reviewer';
-const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
 
 /** The exact judge capabilities shared by cache identity, execution, and the benchmark. */
 export function completenessJudgeSetup(
@@ -92,7 +91,10 @@ export function completenessJudgeSetup(
   { mcpProjectRoots }: { mcpProjectRoots?: readonly string[] } = {},
 ) {
   const mcpProfile = namedAgentMcpProfile();
-  const allowedTools = withNamedAgentMcpTools(TOOLS, cfg.indexPath ? cfg.searchTool : '');
+  const allowedTools = withNamedAgentMcpTools(
+    JUDGE_READ_TOOLS,
+    cfg.indexPath ? cfg.searchTool : '',
+  );
   const mcpOptions = { cwd, projectRoots: mcpProjectRoots };
   return {
     allowedTools,
@@ -273,7 +275,7 @@ export async function runCompleteness(
   }
   let prompt: string;
   let diff: string;
-  let allowedTools = withNamedAgentMcpTools(TOOLS);
+  let allowedTools = withNamedAgentMcpTools(JUDGE_READ_TOOLS);
   let mcpProfile = namedAgentMcpProfile();
   let capabilityFingerprint = '';
   let mcp: ReturnType<typeof completenessJudgeSetup>['mcp'] | undefined;

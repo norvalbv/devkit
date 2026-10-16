@@ -47,7 +47,7 @@ import { matchesRepoGlob } from '../../skills/_devkit/review-roots.mjs';
 import { envFlag, resolveFromCwd, resolveGuardConfig } from '../config.mts';
 import { emitCacheHit } from '../judge/gate-events.mts';
 import { judgeBinForModel } from '../judge/codex/result.mts';
-import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
+import { JUDGE_ISOLATION, JUDGE_READ_TOOLS } from '../judge/judge-isolation.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import type { JudgeOutage } from '../judge/outage/classify.mts';
 import { execJudge, remedyCause, strictRemedy } from '../judge/run-judge.mts';
@@ -87,9 +87,6 @@ const ALIGN_RE = { CONTRADICT: /\bCONTRADICT\b/, ALIGN: /\bALIGN\b/, UNCLEAR: /\
 // verdict must not silently fall through to the ambiguous-word fallback and lose a block.
 const VERDICT_LINE_RE = /^[\s*#>-]*VERDICT:\s*\**\s*(ALIGN|CONTRADICT|UNCLEAR)\b/gim;
 
-// Read-only investigation surface for the judge. `git diff` (pattern-scoped Bash) is how it reads
-// STAGED hunks — worktree Reads alone would miss partial staging.
-const JUDGE_TOOLS = 'Read,Grep,Glob,Bash(git diff:*)';
 // Staged names are root-relative while cwd may be a subdirectory; a filename is never a glob.
 const topLiteral = (file: string) => `:(top,literal)${file}`;
 // One uninterrupted 240s budget for either alignment pass. The old 120s haiku cap killed 9/288
@@ -198,7 +195,7 @@ function runJudge(
 ): string | null {
   return execJudge({
     label: 'decision-alignment',
-    args: ['-p', prompt, '--model', model, ...JUDGE_ISOLATION, '--allowedTools', JUDGE_TOOLS],
+    args: ['-p', prompt, '--model', model, ...JUDGE_ISOLATION, '--allowedTools', JUDGE_READ_TOOLS],
     input: stdinText,
     timeout,
     cwd,
