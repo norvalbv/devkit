@@ -95,6 +95,22 @@ describe('assertMergedParentRows', () => {
       /sc-2073.*commit_review_lenses/s,
     );
   });
+
+  it('skips NULL ship_id rows, which never join, but still throws on a real duplicate key', () => {
+    const pair = (ship: string, reviewer: string) =>
+      `insert into commit_reviews values (${ship},${reviewer},'pass',null),(${ship},${reviewer},'fail',null);`;
+    const db = (rows: string) => makeDb(PARENT_SCHEMA + PARENT_ROWS + rows);
+    const nullPair = pair('null', "'api-security-reviewer'");
+    expect(() => assertMergedParentRows(db(nullPair))).not.toThrow();
+    // Live-warehouse shape: the real duplicate is still caught and named alongside NULL rows.
+    const mixed = () =>
+      assertMergedParentRows(db(nullPair + pair("'s9'", "'api-security-reviewer'")));
+    expect(mixed).toThrow(/commit_reviews has duplicate.*"ship_id":"s9"/s);
+    expect(mixed).not.toThrow(/"ship_id":null/);
+    expect(() => assertMergedParentRows(db(pair("'s9'", 'null')))).toThrow(
+      /commit_reviews has duplicate/,
+    );
+  });
 });
 
 describe('mineLabels under the chunk-era warehouse', () => {
