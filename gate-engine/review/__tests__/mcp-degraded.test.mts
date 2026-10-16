@@ -284,7 +284,7 @@ describe('commit-guard: the MCP cause is independent of retrieval (sc-2837 × sc
     expect(stderr.join('\n')).not.toContain('semantic retrieval');
     expect(
       events().filter((e) => e.type === 'gate_degraded' && e.judge === 'commit-guard'),
-    ).toHaveLength(1);
+    ).toEqual([expect.objectContaining({ kind: 'mcp-missing' })]);
     // Fully cached: no judge spawns, so no fleet "ran without" line either.
     expect(fleetLines(stderr)).toEqual([]);
   });
@@ -309,6 +309,8 @@ describe('commit-guard: the MCP cause is independent of retrieval (sc-2837 × sc
       'remote embeddings unreachable',
       expect.stringMatching(/^MCP codebase unavailable/),
     ]);
+    // The judge's "unreachable" is explained by the gate's own measurement: both rows name it.
+    expect(rows.map((r) => r.kind)).toEqual(['mcp-missing', 'mcp-missing']);
     const result = events().find(
       (e) => e.type === 'review_result' && e.reviewer === 'commit-guard',
     );

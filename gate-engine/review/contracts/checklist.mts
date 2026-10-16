@@ -23,6 +23,7 @@ import {
   type ReviewOutcome,
   verifyChecklist,
 } from '../runtime.mts';
+import type { DegradedKind } from './degraded-kinds.mts';
 
 /**
  * Verify the artifact behind a PASS and, when the caller SCHEDULED a recovery, hand the hole to it.
@@ -92,11 +93,26 @@ export function reportDeniedCalls(
 const retrievalSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('ok') }),
   z.object({ status: z.literal('unavailable'), cause: z.string().trim().min(1) }),
+  z.object({ status: z.literal('skipped'), cause: z.string().trim().min(1) }),
 ]);
 
 export const RETRIEVAL_UNRECORDED =
   'retrieval status not recorded — finalize ran without --retrieval, or the synced checklist ' +
   'script predates it (devkit sync-skills)';
+
+/** What the gate itself measured about the spawn, so a degradation's kind never rests on the judge. */
+export interface RetrievalEvidence {
+  mcpCause?: string;
+  denied?: string[] | null;
+}
+
+/** A refused `search-code` fallback, as `deniedLine` renders it; codex measures no denials (null). */
+const SEARCH_CODE_DENIAL_RE = /^Bash: (\S*\/)?search-code(?![\w.-])/;
+
+function unavailableKind({ mcpCause, denied }: RetrievalEvidence): DegradedKind {
+  if (mcpCause) return 'mcp-missing';
+  return denied?.some((line) => SEARCH_CODE_DENIAL_RE.test(line)) ? 'denied' : 'unclassified';
+}
 
 /** Why a commit-guard PASS did not fully verify (sc-2317). Only an explicit `{status:'ok'}` clears
  * it — an absent or malformed record is no evidence retrieval ran; a named skip never degrades. */
@@ -104,12 +120,15 @@ export function retrievalDegradation(
   reviewerName: string,
   state: ChecklistState | null,
   status: ReviewOutcome['status'],
-): { cause: string } | undefined {
+  evidence: RetrievalEvidence = {},
+): { cause: string; kind: DegradedKind } | undefined {
   if (reviewerName !== RETRIEVAL_REVIEWER || status !== 'pass' || isNamedSkip(state))
     return undefined;
   const recorded = retrievalSchema.safeParse(state?.retrieval);
-  if (!recorded.success) return { cause: RETRIEVAL_UNRECORDED };
-  return recorded.data.status === 'ok' ? undefined : { cause: boundedCause(recorded.data.cause) };
+  if (!recorded.success) return { cause: RETRIEVAL_UNRECORDED, kind: 'unrecorded' };
+  if (recorded.data.status === 'ok') return undefined;
+  const kind = recorded.data.status === 'skipped' ? 'skipped' : unavailableKind(evidence);
+  return { cause: boundedCause(recorded.data.cause), kind };
 }
 
 /** The status token a completion line prints — never a bare PASS for a degraded one. */
@@ -123,11 +142,12 @@ export function verdictToken(
  * Surface a degraded PASS on every channel an operator or agent audits: a ⚠️ stderr line (the ship
  * log's documented marker) and a `gate_degraded` event (the ship digest's "unverified" row).
  */
-export function reportRetrievalDegraded(name: string, rawCause: string): void {
+export function reportRetrievalDegraded(name: string, rawCause: string, kind: DegradedKind): void {
   const cause = boundedCause(rawCause); // the sink re-bounds, whatever path the cause took here
-  const detail = `semantic retrieval unavailable: ${cause} — only the deterministic matcher and clone gates checked duplication`;
+  const what = kind === 'skipped' ? 'skipped by the judge' : 'unavailable';
+  const detail = `semantic retrieval ${what}: ${cause} — only the deterministic matcher and clone gates checked duplication`;
   console.error(`⚠️  guard-review: ${name} — DEGRADED: ${detail}`);
-  emitGateEvent({ type: 'gate_degraded', judge: name, cause, detail });
+  emitGateEvent({ type: 'gate_degraded', judge: name, cause, detail, kind });
 }
 
 /** What a cached PASS replays beside its line: any degradation, and every waiver it rests on. */

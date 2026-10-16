@@ -170,7 +170,7 @@ export function settleReviewOutcome(
   );
   // commit-guard never lens-splits (only correctness does), so the split branch above needs no
   // retrieval report; an MCP-degraded split reviewer is reported once at its merge (lens/split.mts).
-  if (degraded) reportRetrievalDegraded(res.name, degraded.cause);
+  if (degraded) reportRetrievalDegraded(res.name, degraded.cause, degraded.kind);
   if (mcpDegraded) reportMcpDegraded(res.name, mcpDegraded.cause);
   reportAdvisories(res.name, advisories, transcriptRef);
   return res;
