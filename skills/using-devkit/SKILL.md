@@ -105,7 +105,9 @@ devkit command.
   `devkit ship <new-branch> … --base <base>`.
 - **A `--pr` re-ship changes the existing PR description only with explicit `--body` or
   `--body-file`.** Omitting both preserves it; piped stdin remains commit-only. Use `--body ""` to
-  clear the description deliberately.
+  clear the description deliberately. That text is also the new commit's message, and completeness
+  judges it against that commit's diff alone. So on a follow-up (no `--base`) describe only the new
+  commit, or pipe a commit-scoped body on stdin to keep the whole-PR description.
 - **Ship owns the PR body's `<!-- devkit:evidence:begin -->` … `end` block.** When
   `guard.config.json` has an `evidence` entry and the diff adds or changes tests, ship runs them on
   red (PR base plus only the PR's test files) and green (PR head) after the PR opens and writes the
@@ -178,7 +180,8 @@ devkit command.
     intent, not a mechanical file list.
   - Author a long body **once, in a file**, and pass `--body-file` — the recorded invocation keeps
     its CONTENT for every retry. An edit to the file is not picked up by a bare `--resume`; re-pass
-    `--body-file <file>` (the resume warns when the file and the recorded body differ).
+    `--body-file <file>` (the resume warns when the file and the recorded body differ). On a `--pr`
+    follow-up (no `--base`) the file is that commit's message, so it covers only the new commit.
   - **Never reword the body between attempts.** The completeness judge keys on the exact message
     bytes: an unchanged body replays its cached PASS, a reworded one re-pays a multi-minute opus
     call — per attempt.
