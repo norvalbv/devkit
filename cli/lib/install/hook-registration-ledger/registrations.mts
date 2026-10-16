@@ -238,6 +238,16 @@ export const HOOK_REGISTRATIONS: Record<string, HookRegistration[]> = {
       command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-staged-gate.sh"',
     },
   ],
+  // The fanout guard's authoring-time advisory: only Write creates a file. No Cursor mirror, since
+  // Cursor's preToolUse output cannot carry context to the agent.
+  fanout: [
+    {
+      registrationId: 'fanout:new-file-brief',
+      event: 'PreToolUse',
+      matcher: 'Write',
+      command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/fanout-brief.mjs"',
+    },
+  ],
 };
 
 /** Flatten the registrations for the given selected component ids into one ordered list. */

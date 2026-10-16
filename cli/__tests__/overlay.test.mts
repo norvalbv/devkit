@@ -44,6 +44,11 @@ import {
 
 const overlayAll = () =>
   applyOverlayConstraints({ ...defaultSelection(), agentHooks: true, fallow: true }, 'react-app');
+// A pre-ledger install: the fanout guard's hook postdates the ledger, so it cannot be in one.
+const preLedgerAll = () => {
+  const selected = overlayAll();
+  return { ...selected, guards: selected.guards.filter((guard) => guard !== 'fanout') };
+};
 
 // Stub fallow's external CLI (detect/install/baselines) so overlay's fallow flow runs without
 // a real `fallow` binary or a global network install. detectFallow → present, so resolveOverlayFallow
@@ -675,7 +680,7 @@ describe('overlay (local-only) install', () => {
 
     const opts = {
       stack: 'react-app',
-      selection: { ...overlayAll(), agentTargets: ['claude', 'cursor'] },
+      selection: { ...preLedgerAll(), agentTargets: ['claude', 'cursor'] },
       overlay: true,
       devkitRef: 'v0.21.0',
     };
@@ -699,7 +704,7 @@ describe('overlay (local-only) install', () => {
         UserPromptSubmit: [{ matcher: '', hooks: [{ type: 'command', command: 'echo mine' }] }],
       },
     });
-    const selected = overlayAll();
+    const selected = preLedgerAll();
     await applyInit(root, {
       stack: 'react-app',
       selection: selected,
@@ -1042,7 +1047,9 @@ describe('overlay (local-only) install', () => {
     seedLocalSettings(root, {});
     await applyInit(root, {
       stack: 'react-app',
-      selection: overlayOnly({}),
+      selection: overlayOnly({
+        guards: RECOMMENDED_GUARD_IDS.filter((guard) => !['decisions', 'fanout'].includes(guard)),
+      }),
       overlay: true,
       devkitRef: 'v0.21.0',
     });

@@ -260,6 +260,17 @@ function toRepoPath(realRoot: string, file: string): string {
     .join('/');
 }
 
+// The subfolders a blocked folder's new file could go into, read from the tracked index.
+function childDirs(index: string[], dir: string): string[] {
+  const names = new Set<string>();
+  for (const file of index) {
+    if (!file.startsWith(`${dir}/`)) continue;
+    const [child = '', ...below] = file.slice(dir.length + 1).split('/');
+    if (below.length > 0 && !SKIP_DIRS.has(child)) names.add(child);
+  }
+  return [...names].sort();
+}
+
 // Whether the gate's tally would count this one path at all (in scope, impl, not exempt).
 function isCounted(root: string, file: string): boolean {
   return countFanoutFrom(root, [file])?.[parent(file)] !== undefined;
@@ -305,7 +316,9 @@ export function preflightFanout(root: string, paths: string[]): number {
     const register = isDomainGated(cfg, dir)
       ? ' and register it in the tree’s structure libDomains'
       : '';
-    console.log(`${row} — blocks: split into a subfolder${register}`);
+    const existing = childDirs(index, dir);
+    const choices = existing.length > 0 ? ` (existing: ${existing.join(', ')})` : '';
+    console.log(`${row} — blocks: split into a subfolder${choices}${register}`);
   }
   if (unjudged.length > 0) {
     console.log(
