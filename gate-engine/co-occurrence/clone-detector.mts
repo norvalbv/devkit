@@ -25,14 +25,22 @@
  *   guard-clone scan --changed --gate
  *       # commit gate: clones touching a staged file (--changed, set via
  *       # MATCHER_CHANGED_FILES or git), not covered by a live allowlist clone.
- *       # exit 1 = new clone → block · 0 = clean · 2 = could-not-run → fail-open.
+ *       # exit 1 = new clone or jscpd ignore marker → block · 0 = clean · 2 = could-not-run → fail-open.
  */
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, matchesGlob, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mts';
 import { exitGate, failLine } from '../deterministic/reason.mts';
@@ -259,6 +267,38 @@ function liveAllowlistedHashes(): Set<string> {
   return new Set(clones.filter((c) => !isExpired(c)).map((c) => c.fragmentHash));
 }
 
+// Built at runtime: a literal would self-flag this file and, beside an end marker, open a region.
+const IGNORE_MARKER = ['jscpd', 'ignore-start'].join(':');
+
+/** A jscpd ignore-start marker: jscpd drops the region it opens, so the gate blocks it. */
+interface IgnoreMarker {
+  file: string;
+  line: number;
+}
+
+/**
+ * Ignore markers in the files jscpd scans, scoped to `changed` when given. jscpd has no switch to
+ * disable them and matches by raw substring, so a marker inside a string literal counts too.
+ */
+function findIgnoreMarkers(paths: string[], changed: Set<string> | null): IgnoreMarker[] {
+  const files = paths.flatMap((root) => {
+    const dir = resolve(repoRoot, root);
+    if (!existsSync(dir)) return [];
+    if (!statSync(dir).isDirectory()) return [relPath(dir)];
+    return readdirSync(dir, { recursive: true, withFileTypes: true })
+      .filter((d) => d.isFile())
+      .map((d) => relPath(join(d.parentPath, d.name)));
+  });
+  return [...new Set(files)]
+    .filter((f) => CODE_EXT.test(f) && !DEFAULTS.ignore.some((glob) => matchesGlob(f, glob)))
+    .filter((f) => changed == null || changed.has(f))
+    .flatMap((file) =>
+      readFileSync(resolve(repoRoot, file), 'utf8')
+        .split('\n')
+        .flatMap((text, i) => (text.includes(IGNORE_MARKER) ? [{ file, line: i + 1 }] : [])),
+    );
+}
+
 type CloneLocSide = 'startA' | 'endA' | 'startB' | 'endB';
 const loc = (c: Clone, side: CloneLocSide): number => {
   const v = c[side];
@@ -295,22 +335,32 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
 
   // --changed: keep only clones touching a staged file — this commit's clones,
   // not pre-existing ones. Staged set from the hook's staged list / git.
-  if (changed) {
-    const staged = loadChangedSet(repoRoot);
-    clones = clones.filter((c) => staged.has(c.fileA) || staged.has(c.fileB));
-  }
+  const staged = changed ? loadChangedSet(repoRoot) : null;
+  if (staged) clones = clones.filter((c) => staged.has(c.fileA) || staged.has(c.fileB));
 
   if (gate) {
-    // Block on NEW clones (fragmentHash not covered by a live allowlist entry).
+    // Block on NEW clones (fragmentHash not covered by a live allowlist entry) and on any
+    // ignore marker, which would otherwise hide a clone from this gate with no approval.
     const allowed = liveAllowlistedHashes();
     const novel = clones.filter((c) => !allowed.has(c.fragmentHash));
-    const rows = novel.map(
-      (c) =>
-        `  ${String(c.lines).padStart(3)}L  ${c.fragmentHash}  ${c.fileA}:${loc(c, 'startA')} <> ${c.fileB}:${loc(c, 'startB')}`,
-    );
+    const markers = findIgnoreMarkers(paths, staged);
+    const rows = [
+      ...novel.map(
+        (c) =>
+          `  ${String(c.lines).padStart(3)}L  ${c.fragmentHash}  ${c.fileA}:${loc(c, 'startA')} <> ${c.fileB}:${loc(c, 'startB')}`,
+      ),
+      ...markers.map((m) => `  marker  ${m.file}:${m.line}`),
+    ];
+    const headline = `clone gate: ${novel.length} new clone(s), ${markers.length} jscpd ignore marker(s)`;
     for (const row of rows) console.log(row);
+    console.log(rows.length > 0 ? `\n${headline} — block.` : 'clone gate: no new clones ✓');
+    if (markers.length > 0) {
+      console.log(
+        'jscpd ignore markers are not a clone suppression (honoured even inside strings): remove them and re-run.\n' +
+          'The gate then prints add-clone for any clone they hid (--decay-days for a long-lived approval).',
+      );
+    }
     if (novel.length > 0) {
-      console.log(`\nclone gate: ${novel.length} new clone(s) — block.`);
       // Ready-to-paste approval, pre-filled with lines + ranges (fill in <why>), so an
       // approved entry keeps its metadata instead of the empty fields you get by hand.
       // Capped to APPROVE_CAP (mirrors matcher.mjs) — every clone is listed in the rows
@@ -325,10 +375,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
       if (novel.length > APPROVE_CAP) {
         console.log(`  (+${novel.length - APPROVE_CAP} more — re-run after addressing these)`);
       }
-    } else {
-      console.log('clone gate: no new clones ✓');
     }
-    exitGate(novel.length > 0 ? 1 : 0, [`clone gate: ${novel.length} new clone(s)`, ...rows]);
+    exitGate(rows.length > 0 ? 1 : 0, [headline, ...rows]);
   }
 
   if (mode === 'json') {

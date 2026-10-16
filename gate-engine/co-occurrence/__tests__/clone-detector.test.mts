@@ -1,13 +1,25 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { hashFragment, relPath } from '../clone-detector.mts';
+import { GATE_REASON_ENV, readGateReason } from '../../deterministic/reason.mts';
 import { resolveJscpdBin } from '../jscpd-bin.mts';
 
 const HEX16 = /^[0-9a-f]{16}$/;
+const MARK = 'jscpd:ignore';
+
+/** A fresh temp dir holding `files` (relative path → content), parent dirs created. */
+function writeFixture(files: Record<string, string>): string {
+  const dir = mkdtempSync(join(tmpdir(), 'clone-marker-'));
+  for (const [rel, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, rel)), { recursive: true });
+    writeFileSync(join(dir, rel), content);
+  }
+  return dir;
+}
 const LINES_RE = /--lines \d+\b/;
 const RANGE_A_RE = /--range-a \d+-\d+\b/;
 const RANGE_B_RE = /--range-b \d+-\d+\b/;
@@ -299,6 +311,89 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     expect(stdout).toMatch(LINES_RE);
     expect(stdout).toMatch(RANGE_A_RE);
     expect(stdout).toMatch(RANGE_B_RE);
+  });
+
+  // jscpd drops a marked region from detection with no switch to disable it, so wrapping one
+  // copy of a clone would pass the gate silently. The gate blocks the marker itself instead.
+  it('exit 1 — a clone hidden by jscpd ignore markers blocks on the marker', () => {
+    const dir = writeFixture({
+      'a.ts': `/* ${MARK}-start */\n${SHARED}/* ${MARK}-end */\n`,
+      'b.ts': SHARED,
+    });
+    const reasonFile = join(dir, 'reason.txt');
+    try {
+      const { status, stdout } = run(['scan', '--gate', '--paths', dir], {
+        [GATE_REASON_ENV]: reasonFile,
+      });
+      expect(status).toBe(1);
+      expect(stdout).toContain(`marker  ${join(dir, 'a.ts')}:1`);
+      // The ship digest repeats the first reason line, so it must not read "0 new clone(s)" alone.
+      expect(readGateReason(reasonFile)[0]).toBe(
+        'clone gate: 0 new clone(s), 1 jscpd ignore marker(s)',
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('--changed scopes markers to staged files', () => {
+    const dir = writeFixture({
+      'a.ts': `// ${MARK}-start\n${SHARED}// ${MARK}-end\n`,
+      'b.ts': SHARED,
+    });
+    const gate = (changedFiles: string) =>
+      run(['scan', '--changed', '--gate', '--paths', dir], { MATCHER_CHANGED_FILES: changedFiles });
+    try {
+      expect(gate(join(dir, 'a.ts')).status).toBe(1);
+      expect(gate('src/totally/unrelated.ts').status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('exit 1 — a marker inside a string literal blocks (jscpd matches raw text)', () => {
+    const dir = writeFixture({ 'a.ts': `const s = '${MARK}-start';\nexport const A = 1;\n` });
+    try {
+      expect(run(['scan', '--gate', '--paths', dir], {}).status).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a FILE given as a clone root is scanned itself, not walked (no ENOTDIR crash)', () => {
+    const dir = writeFixture({ 'a.ts': 'export const A = 1;\n', 'b.ts': `// ${MARK}-start\n` });
+    try {
+      expect(run(['scan', '--gate', '--paths', join(dir, 'a.ts')], {}).status).toBe(0);
+      expect(run(['scan', '--gate', '--paths', join(dir, 'b.ts')], {}).stdout).toContain(
+        `marker  ${join(dir, 'b.ts')}:1`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // jscpd 5 (a global install's PATH jscpd) skips a missing root where 4 fails; a stub stands in.
+  it('exit 0 — a missing clone root is skipped by the marker scan', () => {
+    const dir = writeFixture({
+      'jscpd-stub': '#!/bin/sh\nexit 0\n',
+      'src/a.ts': 'export const A = 1;\n',
+    });
+    chmodSync(join(dir, 'jscpd-stub'), 0o755);
+    try {
+      const args = ['scan', '--gate', '--paths', `${join(dir, 'nope')} ${join(dir, 'src')}`];
+      expect(run(args, { JSCPD_BIN: join(dir, 'jscpd-stub') }).status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('exit 0 — a marker in a test file is out of scope, like its clones', () => {
+    const dir = writeFixture({ '__tests__/a.ts': `// ${MARK}-start\nexport const A = 1;\n` });
+    try {
+      expect(run(['scan', '--gate', '--paths', dir], {}).status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

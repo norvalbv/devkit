@@ -16,6 +16,8 @@ Frink catches code duplication at commit via two detectors writing one allowlist
 - You're burning down baseline entries (~460 pairs frozen pre-gate).
 - Before adding code that might already exist somewhere — check allowlist coverage first.
 
+**jscpd ignore markers are not a suppression.** The clone gate blocks any `jscpd:ignore-start` in a gated file, because jscpd would hide the wrapped clone from it. Remove the marker and approve the clone it hid with `add-clone`.
+
 **Full mode list:** `guard-dup --help` (scan/reconcile/baseline) and `guard-dup-allowlist --help` (add/add-clone/remove/remove-clone/check/list/prune).
 
 ## The pre-flight rule (this is the biggest hole)
