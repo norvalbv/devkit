@@ -69,17 +69,6 @@
       "decayDays": 3650
     },
     {
-      "fragmentHash": "9bb03b9096f578e5",
-      "fileA": "gate-engine/review/eval/bench.mts",
-      "fileB": "gate-engine/review/eval/conventions/bench.mts",
-      "lines": 25,
-      "rangeA": "508-532",
-      "rangeB": "597-621",
-      "description": "baseline 2026-08-02 — pre-existing clone, frozen by guard-clone",
-      "date": "2026-08-02",
-      "decayDays": 3650
-    },
-    {
       "fragmentHash": "023ee2b2a142bfe5",
       "fileA": "gate-engine/review/eval/bench.mts",
       "fileB": "gate-engine/review/eval/conventions/bench.mts",
@@ -97,17 +86,6 @@
       "lines": 24,
       "rangeA": "854-877",
       "rangeB": "964-987",
-      "description": "baseline 2026-08-02 — pre-existing clone, frozen by guard-clone",
-      "date": "2026-08-02",
-      "decayDays": 3650
-    },
-    {
-      "fragmentHash": "46a9727a0f6b4a75",
-      "fileA": "gate-engine/review/eval/matcher.mts",
-      "fileB": "gate-engine/review/eval/conventions/matcher.mts",
-      "lines": 20,
-      "rangeA": "200-219",
-      "rangeB": "240-259",
       "description": "baseline 2026-08-02 — pre-existing clone, frozen by guard-clone",
       "date": "2026-08-02",
       "decayDays": 3650
@@ -141,28 +119,6 @@
       "lines": 20,
       "rangeA": "835-854",
       "rangeB": "945-964",
-      "description": "baseline 2026-08-02 — pre-existing clone, frozen by guard-clone",
-      "date": "2026-08-02",
-      "decayDays": 3650
-    },
-    {
-      "fragmentHash": "4dd404248140cfef",
-      "fileA": "gate-engine/critique/eval/matcher.mts",
-      "fileB": "gate-engine/review/eval/conventions/matcher.mts",
-      "lines": 20,
-      "rangeA": "188-207",
-      "rangeB": "240-259",
-      "description": "baseline 2026-08-02 — pre-existing clone, frozen by guard-clone",
-      "date": "2026-08-02",
-      "decayDays": 3650
-    },
-    {
-      "fragmentHash": "e6acc3fed969b63c",
-      "fileA": "gate-engine/review/eval/matcher.mts",
-      "fileB": "gate-engine/review/eval/conventions/matcher.mts",
-      "lines": 19,
-      "rangeA": "219-237",
-      "rangeB": "259-278",
       "description": "baseline 2026-08-02 — pre-existing clone, frozen by guard-clone",
       "date": "2026-08-02",
       "decayDays": 3650
@@ -465,17 +421,6 @@
       "decayDays": 3650
     },
     {
-      "fragmentHash": "fbdac0c22fa3b315",
-      "fileA": "cli/commands/sync/sync-agents.mts",
-      "fileB": "cli/commands/sync/sync-skills.mts",
-      "lines": 10,
-      "rangeA": "154-163",
-      "rangeB": "253-262",
-      "description": "baseline 2026-08-02 — pre-existing clone, frozen by guard-clone",
-      "date": "2026-08-02",
-      "decayDays": 3650
-    },
-    {
       "fragmentHash": "a9db065ab7261558",
       "fileA": "gate-engine/review/eval/bench.mts",
       "fileB": "gate-engine/review/eval/conventions/bench.mts",
@@ -663,17 +608,6 @@
       "decayDays": 3650
     },
     {
-      "fragmentHash": "1526c395eee21576",
-      "fileA": "gate-engine/decisions/eval/bench.mts",
-      "fileB": "gate-engine/review/eval/conventions/bench.mts",
-      "lines": 6,
-      "rangeA": "204-209",
-      "rangeB": "428-433",
-      "description": "baseline 2026-08-02 — pre-existing clone, frozen by guard-clone",
-      "date": "2026-08-02",
-      "decayDays": 3650
-    },
-    {
       "fragmentHash": "3b155e9f92e00ccc",
       "fileA": "gate-engine/decisions/eval/bench.mts",
       "fileB": "gate-engine/review/eval/conventions/bench.mts",
@@ -856,26 +790,6 @@
       "rangeB": "785-804"
     },
     {
-      "fragmentHash": "cca08c32dbef3828",
-      "fileA": "gate-engine/review/eval/scoring.mts",
-      "fileB": "gate-engine/review/eval/conventions/bench.mts",
-      "description": "Sibling benchmarks intentionally keep paired flip comparison local because their admissible metrics and regression meanings differ.",
-      "date": "2026-10-09",
-      "lines": 18,
-      "rangeA": "175-192",
-      "rangeB": "580-597"
-    },
-    {
-      "fragmentHash": "c38a71479979c752",
-      "fileA": "gate-engine/review/eval/baseline-audit.mts",
-      "fileB": "gate-engine/review/eval/conventions/bench.mts",
-      "description": "Sibling matcher audits intentionally keep transcript-to-label aggregation local so each benchmark owns its audit provenance.",
-      "date": "2026-10-09",
-      "lines": 14,
-      "rangeA": "77-90",
-      "rangeB": "706-719"
-    },
-    {
       "fragmentHash": "8e3d3e04c8121b12",
       "fileA": "gate-engine/review/eval/cases.mts",
       "fileB": "gate-engine/review/eval/conventions/bench.mts",
@@ -914,16 +828,6 @@
       "lines": 8,
       "rangeA": "203-210",
       "rangeB": "556-563"
-    },
-    {
-      "fragmentHash": "10669774e7f1d097",
-      "fileA": "gate-engine/review/eval/scoring.mts",
-      "fileB": "gate-engine/review/eval/conventions/bench.mts",
-      "description": "Sibling baseline comparisons intentionally keep benchmark-specific informational delta reporting beside their own regression logic.",
-      "date": "2026-10-09",
-      "lines": 8,
-      "rangeA": "142-149",
-      "rangeB": "530-537"
     },
     {
       "fragmentHash": "aeb4a9d2ddfeeac5",
@@ -974,6 +878,168 @@
       "lines": 13,
       "rangeA": "39-51",
       "rangeB": "172-184"
+    },
+    {
+      "fragmentHash": "ddbd414a7c8372cd",
+      "fileA": "gate-engine/review/eval/scoring.mts",
+      "fileB": "gate-engine/review/eval/conventions/bench.mts",
+      "description": "Sibling benchmarks intentionally keep paired flip comparison local because their admissible metrics and regression meanings differ.",
+      "date": "2026-10-09",
+      "lines": 43,
+      "rangeA": "150-192",
+      "rangeB": "556-597"
+    },
+    {
+      "fragmentHash": "abd331723aeccb24",
+      "fileA": "gate-engine/review/eval/matcher.mts",
+      "fileB": "gate-engine/review/eval/conventions/matcher.mts",
+      "description": "baseline 2026-10-16 — pre-existing clone, re-keyed when the clone gate moved to jscpd --mode weak",
+      "date": "2026-10-16",
+      "lines": 31,
+      "rangeA": "189-219",
+      "rangeB": "179-209",
+      "decayDays": 3650
+    },
+    {
+      "fragmentHash": "1385c812ef63f401",
+      "fileA": "gate-engine/critique/eval/matcher.mts",
+      "fileB": "gate-engine/review/eval/conventions/matcher.mts",
+      "description": "baseline 2026-10-16 — pre-existing clone, re-keyed when the clone gate moved to jscpd --mode weak",
+      "date": "2026-10-16",
+      "lines": 30,
+      "rangeA": "178-207",
+      "rangeB": "179-209",
+      "decayDays": 3650
+    },
+    {
+      "fragmentHash": "67cd9387438e3b73",
+      "fileA": "cli/commands/sync/sync-agents.mts",
+      "fileB": "cli/commands/sync/sync-skills.mts",
+      "description": "baseline 2026-10-16 — pre-existing clone, re-keyed when the clone gate moved to jscpd --mode weak",
+      "date": "2026-10-16",
+      "lines": 24,
+      "rangeA": "158-181",
+      "rangeB": "257-281",
+      "decayDays": 3650
+    },
+    {
+      "fragmentHash": "8b8af695d9f7cee2",
+      "fileA": "gate-engine/review/eval/matcher.mts",
+      "fileB": "gate-engine/review/eval/conventions/matcher.mts",
+      "description": "baseline 2026-10-16 — pre-existing clone, re-keyed when the clone gate moved to jscpd --mode weak",
+      "date": "2026-10-16",
+      "lines": 20,
+      "rangeA": "219-238",
+      "rangeB": "209-229",
+      "decayDays": 3650
+    },
+    {
+      "fragmentHash": "0cc1708088421835",
+      "fileA": "gate-engine/co-occurrence/atomic-write.mts",
+      "fileB": "gate-engine/decisions/atomic-write.mts",
+      "description": "baseline 2026-10-16 — pre-existing clone, re-keyed when the clone gate moved to jscpd --mode weak",
+      "date": "2026-10-16",
+      "lines": 18,
+      "rangeA": "3-20",
+      "rangeB": "19-25",
+      "decayDays": 3650
+    },
+    {
+      "fragmentHash": "97c2b9c2ef6cd502",
+      "fileA": "gate-engine/review/eval/baseline-audit.mts",
+      "fileB": "gate-engine/review/eval/conventions/bench.mts",
+      "description": "Sibling matcher audits intentionally keep transcript-to-label aggregation local so each benchmark owns its audit provenance.",
+      "date": "2026-10-09",
+      "lines": 16,
+      "rangeA": "77-92",
+      "rangeB": "706-723"
+    },
+    {
+      "fragmentHash": "bdc39c53ad4f96c4",
+      "fileA": "cli/commands/sync/sync-agents.mts",
+      "fileB": "cli/commands/sync/sync-skills.mts",
+      "description": "baseline 2026-10-16 — pre-existing clone, re-keyed when the clone gate moved to jscpd --mode weak",
+      "date": "2026-10-16",
+      "lines": 12,
+      "rangeA": "237-248",
+      "rangeB": "344-357",
+      "decayDays": 3650
+    },
+    {
+      "fragmentHash": "2dc03cdc1e9f26ca",
+      "fileA": "gate-engine/review/eval/scoring.mts",
+      "fileB": "gate-engine/review/eval/conventions/bench.mts",
+      "description": "Sibling baseline comparisons intentionally keep benchmark-specific informational delta reporting beside their own regression logic.",
+      "date": "2026-10-09",
+      "lines": 9,
+      "rangeA": "142-150",
+      "rangeB": "530-537"
+    },
+    {
+      "fragmentHash": "843edc830878f53f",
+      "fileA": "gate-engine/review/eval/reviewers/external/martian-bench.mts",
+      "fileB": "gate-engine/review/eval/reviewers/external/pr-run.mts",
+      "description": "baseline 2026-10-16 — pre-existing clone, re-keyed when the clone gate moved to jscpd --mode weak",
+      "date": "2026-10-16",
+      "lines": 8,
+      "rangeA": "204-211",
+      "rangeB": "203-211",
+      "decayDays": 3650
+    },
+    {
+      "fragmentHash": "90e51cd25f19fb27",
+      "fileA": "cli/lib/generate/generate-import-wall-baseline.mts",
+      "fileB": "cli/lib/generate/generate-structure-baseline.mts",
+      "description": "baseline 2026-10-16 — pre-existing clone, re-keyed when the clone gate moved to jscpd --mode weak",
+      "date": "2026-10-16",
+      "lines": 8,
+      "rangeA": "282-289",
+      "rangeB": "860-866",
+      "decayDays": 3650
+    },
+    {
+      "fragmentHash": "31f5b255e61e9b84",
+      "fileA": "cli/commands/sync/sync-hooks.mts",
+      "fileB": "cli/commands/sync/sync-skills.mts",
+      "description": "baseline 2026-10-16 — pre-existing clone, re-keyed when the clone gate moved to jscpd --mode weak",
+      "date": "2026-10-16",
+      "lines": 8,
+      "rangeA": "76-83",
+      "rangeB": "344-355",
+      "decayDays": 3650
+    },
+    {
+      "fragmentHash": "115012432a44f202",
+      "fileA": "gate-engine/review/eval/reviewers/scale/extras-adjudicate.mts",
+      "fileB": "gate-engine/review/eval/reviewers/scale/verify-extras.mts",
+      "description": "baseline 2026-10-16 — pre-existing clone, re-keyed when the clone gate moved to jscpd --mode weak",
+      "date": "2026-10-16",
+      "lines": 7,
+      "rangeA": "106-112",
+      "rangeB": "100-109",
+      "decayDays": 3650
+    },
+    {
+      "fragmentHash": "a4a31e2b2ec7c549",
+      "fileA": "gate-engine/decisions/eval/bench.mts",
+      "fileB": "gate-engine/review/eval/conventions/bench.mts",
+      "description": "baseline 2026-10-16 — pre-existing clone, re-keyed when the clone gate moved to jscpd --mode weak",
+      "date": "2026-10-16",
+      "lines": 7,
+      "rangeA": "177-183",
+      "rangeB": "454-460",
+      "decayDays": 3650
+    },
+    {
+      "fragmentHash": "94d2e92974effd7f",
+      "fileA": "cli/commands/sync/sync-agents.mts",
+      "fileB": "cli/commands/sync/sync-skills.mts",
+      "description": "baseline 2026-10-16 — pre-existing clone, re-keyed when the clone gate moved to jscpd --mode weak",
+      "date": "2026-10-16",
+      "lines": 7,
+      "rangeA": "95-101",
+      "rangeB": "154-160",
+      "decayDays": 3650
     }
   ]
 }

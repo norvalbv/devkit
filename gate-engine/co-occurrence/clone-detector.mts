@@ -144,8 +144,10 @@ export function detectClones({
           ...paths,
           '--min-tokens',
           String(minTokens),
+          // weak drops comment tokens, so a comment pasted into a copy cannot split the clone
+          // into two sub-floor halves and hide it, nor pad a sub-floor copy over the floor.
           '--mode',
-          'mild',
+          'weak',
           '--reporters',
           'json',
           '--output',

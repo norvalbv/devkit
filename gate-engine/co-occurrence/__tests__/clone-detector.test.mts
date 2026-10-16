@@ -171,6 +171,21 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     rmSync(mjs, { recursive: true, force: true });
   });
 
+  it('exit 1 — one comment line pasted into a copy does not hide the clone', () => {
+    // SHARED is 77 code tokens; a comment after line 5 splits it 38/39, both under the 50 floor.
+    const lines = SHARED.split('\n');
+    const commented = [
+      ...lines.slice(0, 5),
+      '      // count only active widgets',
+      ...lines.slice(5),
+    ];
+    const dir = mkdtempSync(join(tmpdir(), 'clone-comment-'));
+    writeFileSync(join(dir, 'a.ts'), `${SHARED}\nexport const A_ONLY = 1;\n`);
+    writeFileSync(join(dir, 'b.ts'), `${commented.join('\n')}\nexport const B_ONLY = 2;\n`);
+    expect(run(['scan', '--gate', '--paths', dir], {}).status).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it('exit 0 — an identical import preamble alone is not a clone (module-system forced)', () => {
     // Big enough to clear jscpd's 50-token floor on its own — the exact shape that false-blocked
     // sibling CLI commands sharing the same libs. Imports are ignore-pattern'd out at the
