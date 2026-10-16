@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { blockingFields } from '../../../../gate-engine/review/evidence/items.mts';
 import { blockingNote } from '../../../../gate-engine/review/overrides.mts';
+import { DETAIL_CHARS } from './fields.mts';
 import { type GateEvent, readShipEvents, render, summarise } from './gate-digest.mts';
 
 const SHIP = 'ship-1';
@@ -487,6 +488,15 @@ describe('advisory_result', () => {
 
   it('stays silent when the advisories had nothing to say — sc-2488s rule', () => {
     expect(render(summarise([ev({ type: 'ship_attempt' }), shipResult(null)], SHIP))).toBe('');
+  });
+
+  it('prints a detail as one line cut at DETAIL_CHARS — the width emitAdvisoryResult documents', () => {
+    const detailOf = (detail: string) =>
+      summarise([advisory('review-routing', 'finding', detail), shipResult(null)], SHIP)[0].detail;
+    const fits = 'f'.repeat(DETAIL_CHARS);
+    expect(detailOf(fits)).toBe(fits);
+    expect(detailOf(`${fits}x`)).toBe(`${'f'.repeat(DETAIL_CHARS - 1)}…`);
+    expect(detailOf('fact\n  — remedy')).toBe('fact — remedy');
   });
 
   it('dedupes a repeated advisory but keeps a second, different one', () => {
