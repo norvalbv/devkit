@@ -158,6 +158,13 @@ describe('outcomes that carry no advisory', () => {
     expect(advisoryRows()).toEqual([]);
   });
 
+  it('an escalated outcome archives both labelled passes, not only the escalation', () => {
+    const res = { ...outcome('fail', 'VERDICT: FAIL — holds'), fullTranscript: 'BOTH-PASSES' };
+    settleReviewOutcome(ctx(cwd), plan(cwd).tasks[0], res, 1);
+    const saved = join(cwd, 'transcripts', 'ship-test', 'review-commit-guard.txt');
+    expect(readFileSync(saved, 'utf8')).toMatch(/BOTH-PASSES$/);
+  });
+
   it('a FAIL never reports its advisory lines as advisories', () => {
     settleReviewOutcome(ctx(cwd), plan(cwd).tasks[0], outcome('fail', ADVISED), 1);
     expect(printed().some((l) => l.includes('advisory'))).toBe(false);

@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { resolveGuardConfig } from '../../../../config.mts';
 import { BenchAbort, materializeFixture } from '../../../../decisions/eval/bench.mts';
 import { execJudgeAsync } from '../../../../judge/run-judge.mts';
+import { restoreRows } from '../../../cascade/escalation.mts';
 import { mergeLensCaptures } from '../../../lens/split.mts';
 import { parseReviewVerdict, selectReviewers } from '../../../reviewers.mts';
 import { runCascade } from '../../../run-review.mts';
@@ -78,7 +79,10 @@ export function scoreRow(row, capture, cas) {
   let reasonClass = null;
   if (row.expected === 'FAIL' && cas.status === 'fail') {
     const snap = (esc && !esc.synthetic ? esc.snapshot : null) ?? first?.snapshot ?? null;
-    const items = Array.isArray(snap?.items) ? snap.items : [];
+    const items = Array.isArray(snap?.items) ? [...snap.items] : [];
+    // The escalation snapshot predates the cascade's restore: a row it left pending keeps the first pass's.
+    const firstFails = (first?.snapshot?.items ?? []).filter((i) => i.status === 'fail');
+    if (snap !== first?.snapshot) restoreRows(items, firstFails);
     const failedItems = items.filter((i) => i.status === 'fail').map((i) => i.name);
     const want = row.expectItems ?? [];
     if (want.length > 0 && want.every((n) => failedItems.includes(n))) reasonClass = 'right-item';

@@ -17,7 +17,6 @@ import { lensGroupId } from '../lens/groups.mts';
 import { applyOverrideValve } from '../overrides.mts';
 import {
   allowedToolsFor,
-  escalatePrompt,
   hasChecklist,
   type PromptExtras,
   resolveEscalationModel,
@@ -43,6 +42,7 @@ import {
 } from '../runtime.mts';
 import { retryableReason } from '../recovery/settle.mts';
 import { checklistAssetRoot } from './consumer-assets.mts';
+import { escalateOverReopened, escalatePrompt, labelPasses } from './escalation.mts';
 
 /** One reviewer cascade outcome, including its persisted transcript when a judge ran. */
 export type CascadeResult = ReviewOutcome;
@@ -428,20 +428,22 @@ async function cascadeVerdict(
       transcript: first,
     };
   let secondOutage: JudgeOutage | undefined;
-  const second = await exec({
-    label: `review:${reviewer.name}:escalate`,
-    args: args(escalatePrompt(prompt, first), escalationModel),
-    input,
-    timeout: escalationBudget,
-    cwd,
-    transcript: false,
-    mcpProfile,
-    env,
-    lens,
-    onOutage: (outage: JudgeOutage) => {
-      secondOutage = outage;
-    },
-  });
+  const second = await escalateOverReopened(cwd, reviewer, (reopened) =>
+    exec({
+      label: `review:${reviewer.name}:escalate`,
+      args: args(escalatePrompt(prompt, first, reopened), escalationModel),
+      input,
+      timeout: escalationBudget,
+      cwd,
+      transcript: false,
+      mcpProfile,
+      env,
+      lens,
+      onOutage: (outage: JudgeOutage) => {
+        secondOutage = outage;
+      },
+    }),
+  );
   if (second === null) {
     const outcome: ReviewOutcome = {
       name: reviewer.name,
@@ -457,42 +459,34 @@ async function cascadeVerdict(
     return outcome;
   }
   const finalVerdict = parseReviewVerdict(second);
-  if (finalVerdict.verdict === 'FAIL' && responseContract && lensesOf(second).length === 0)
-    return {
-      name: reviewer.name,
-      status: 'inconclusive',
-      reason: responseContract.missingEvidenceReason(true),
-      inconclusiveCause: 'response-contract',
-      escalated: true,
-      model: passModel,
-      transcript: second,
-    };
-  if (finalVerdict.verdict === 'FAIL')
-    return {
-      name: reviewer.name,
-      status: 'fail',
-      reason: finalVerdict.reason,
-      escalated: true,
-      model: passModel,
-      transcript: second,
-      ...(responseContract && { blockingLenses: lensesOf(second) }),
-    };
-  if (finalVerdict.verdict === 'PASS')
-    return {
-      name: reviewer.name,
-      status: 'pass',
-      reason: finalVerdict.reason,
-      escalated: true,
-      model: passModel,
-      transcript: second,
-    };
-  return {
+  // The escalation's verdict is final; the archive keeps both passes, each under its own model.
+  const escalated = {
     name: reviewer.name,
-    status: 'inconclusive',
-    reason: 'no VERDICT line',
-    inconclusiveCause: 'response-contract',
     escalated: true,
     model: passModel,
     transcript: second,
+    fullTranscript: labelPasses(passModel, first, escalationModel, second),
+  };
+  if (finalVerdict.verdict === 'FAIL' && responseContract && lensesOf(second).length === 0)
+    return {
+      ...escalated,
+      status: 'inconclusive',
+      reason: responseContract.missingEvidenceReason(true),
+      inconclusiveCause: 'response-contract',
+    };
+  if (finalVerdict.verdict === 'FAIL')
+    return {
+      ...escalated,
+      status: 'fail',
+      reason: finalVerdict.reason,
+      ...(responseContract && { blockingLenses: lensesOf(second) }),
+    };
+  if (finalVerdict.verdict === 'PASS')
+    return { ...escalated, status: 'pass', reason: finalVerdict.reason };
+  return {
+    ...escalated,
+    status: 'inconclusive',
+    reason: 'no VERDICT line',
+    inconclusiveCause: 'response-contract',
   };
 }
