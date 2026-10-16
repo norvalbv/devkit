@@ -119,8 +119,10 @@ which ships **no structure preset**. Set it explicitly: `devkit init --stack rea
 The gate is deterministic and checks two things.
 
 **Long paragraphs block once.** A standalone JS/TS-family comment paragraph where the staged change
-adds or modifies three or more non-structural text lines blocks the first time it is shown. Comment
-groups separated only by blank lines count as one paragraph. One- and two-line changes, inline
+adds or modifies three or more non-structural text lines blocks the first time it is shown. A block
+comment is one paragraph, blank ` *` lines included, and same-style single-line comments separated
+only by blank lines count as one paragraph; blank lines are never counted. Each finding prints the
+count it judged. One- and two-line changes, inline
 comments after code, untouched comments, deletions, and pure renames pass. Shorten the comment where
 possible. A paragraph that justifies a workaround means the code is wrong: fix the code. If every
 line states something the code cannot, retry unchanged. The paragraph is remembered by the code
