@@ -21,10 +21,12 @@
 # Only genuinely unrelated histories (exit 1 in a full clone) fall back to BASE. A shallow graft or a
 # git error returns 1 instead: a BASE anchor there would stage base-only work as a silent revert.
 ship_patch_base() {
-  local root=$1 base=$2 fork rc=0
+  local root=$1 base=$2 fork rc=0 shallow
+  # Read BEFORE merge-base: a concurrent unshallow in between would otherwise unlock the fallback.
+  shallow=$(git -C "$root" rev-parse --is-shallow-repository 2>/dev/null) || shallow=
   fork=$(git -C "$root" merge-base "$base" HEAD 2>/dev/null) || rc=$?
   [ "$rc" -eq 0 ] && { printf '%s\n' "$fork"; return 0; }
-  [ "$rc" -eq 1 ] && [ "$(git -C "$root" rev-parse --is-shallow-repository 2>/dev/null)" = false ] || return 1
+  [ "$rc" -eq 1 ] && [ "$shallow" = false ] || return 1
   printf '%s\n' "$base"
 }
 
