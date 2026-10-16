@@ -192,6 +192,17 @@ what is devkit-specific:
   already fixed this task. Never include credentials or tokens.
 </workflow>
 
+<workflow name="test_suite">
+`bun run test:run` runs two vitest projects: `parallel`, and `git-integration`, whose files spawn
+real repositories and worktrees (the list is `GIT_INTEGRATION_TESTS` in `vitest.config.mjs`). A full
+run takes tens of minutes, longer than an agent's foreground tool limit, so a killed run says nothing
+about the code. Iterate with `bun run test:run <test files>`: `--project parallel` alone also runs
+for tens of minutes, so it is not a quick pass. The full-suite verdict is the Tests step of
+`.github/workflows/gate.yml` on the PR; background a local full run when you need one. A plain
+`git push` runs the full suite through the pre-push hook, while a `devkit ship` push leaves it to
+CI. For a run that stops without a summary, see "Reading a run" in `skills/testing/SKILL.md`.
+</workflow>
+
 <workflow name="diff_coverage">
 Coverage of a diff means the lines the change added. `node cli/index.mts coverage-run <test files>`
 followed by `node cli/index.mts coverage-diff` prints, per file, how many added executable lines ran
