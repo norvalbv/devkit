@@ -1,5 +1,6 @@
 /** The `ship_ci` telemetry row `wait.mts` appends after its verdict line. */
 import { appendFileSync } from 'node:fs';
+import { devkitVersion } from '../../../../gate-engine/devkit-version.mts';
 import { parentSessionId } from '../../../../gate-engine/judge/run-context.mts';
 import type { WaitCiResult } from './wait.mts';
 
@@ -14,7 +15,7 @@ export function recordCiEvent(result: WaitCiResult, pr: string, env = process.en
   const row = {
     type: 'ship_ci',
     ship_id: shipId,
-    devkit_version: env.DEVKIT_TELEMETRY_VERSION ?? null,
+    devkit_version: devkitVersion(),
     pr_number: /^\d+$/.test(pr) ? Number(pr) : null,
     outcome: result.outcome,
     failing: result.failures.map((f) => f.name),

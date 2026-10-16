@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { devkitVersion } from '../../../../gate-engine/devkit-version.mts';
 import { recordCiEvent } from './telemetry.mts';
 import { type CheckBucket, type CheckRow, summarise } from './wait.mts';
 
@@ -30,6 +31,7 @@ describe('recordCiEvent', () => {
     expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({
       type: 'ship_ci',
       ship_id: 'ship-1',
+      devkit_version: devkitVersion(),
       pr_number: 514,
       outcome: 'failed',
       failing: ['gate'],
