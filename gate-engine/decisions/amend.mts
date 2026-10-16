@@ -4,6 +4,7 @@ import path from 'node:path';
 import { writeFileAtomic } from './atomic-write.mts';
 import {
   type AddOptions,
+  assertNoLineAnchors,
   currentTarget,
   hasTargetFields,
   parseDecision,
@@ -287,7 +288,9 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
       throw new Error(`"${oldText}" occurs ${matches.length} times in the newest draft note`);
     }
     const bodyOffset = current.length - workingParsed.body.length;
-    const start = bodyOffset + selected.start + prefix.length + matches[0];
+    const at = matches[0];
+    assertNoLineAnchors(noteText.slice(0, at) + newText + noteText.slice(at + oldText.length));
+    const start = bodyOffset + selected.start + prefix.length + at;
     const replacement = foldLines(newText);
     writeFileAtomic(
       file,
