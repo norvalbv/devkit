@@ -656,6 +656,11 @@ WHOLE_EXCLUDES=()
 PATCH_BASE=$BASE
 if [ "$FROM_BRANCH" -eq 0 ]; then
   PATCH_BASE=$(ship_patch_base "$ROOT" "$BASE")
+  # Only this invocation's argv: recorded paths passed when recorded, and a preserved commit is staged.
+  if [ -z "$LOCAL_BRANCH_EXISTS" ]; then
+    if [ "$RESUME" -eq 1 ]; then ARGV_PATHS=(${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}); else ARGV_PATHS=("${PATHS[@]}"); fi
+    ship_refuse_unmatched_paths "$ROOT" "$PATCH_BASE" "$BASE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1
+  fi
   if [ "$PATCH_BASE" != "$BASE" ]; then
     ship_classify_whole_file "$ROOT" "$BASE" "$PATCH_BASE" -- "${GIT_PATHS[@]}"
     echo "ship: origin/$BASE_REF moved to ${BASE:0:7} since this checkout forked at ${PATCH_BASE:0:7} — staging is anchored at the fork point and three-way merged." >&2

@@ -259,6 +259,8 @@ if [ -n "$BASE_FLAG" ]; then
     [ "$rewrite_known" -eq 1 ] || RESUME_EXTRA_PATHS+=("$p")
   done
 fi
+# The unmatched-path guard judges only this invocation's argv; recorded paths passed when recorded.
+if [ "$RESUME" -eq 1 ]; then ARGV_PATHS=(${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}); else ARGV_PATHS=("${PATHS[@]}"); fi
 
 # Announced AFTER the rewrite canonicalisation above, never before it: that pass strips `./` and
 # dedupes, so a brief printed earlier would name a count and a path set the gates never receive —
@@ -504,6 +506,8 @@ if [ "$REWRITE" -eq 1 ]; then
   fi
   EXPECTED_REMOTE=$(git rev-parse "$REWRITE_HEAD_REF")
   BASE=$(git rev-parse "$REWRITE_BASE_REF")
+  # A PR-added file the rewrite drops is briefed (required scope, below) yet lives only in the PR head.
+  ship_refuse_unmatched_paths "$ROOT" "$BASE" "$EXPECTED_REMOTE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1
   REWRITE_BASE_PIN=$BASE
   if [ "$RESUME" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ]; then
     BODY_RECEIPT_REF="$BODY_RECEIPT_PREFIX/$BR/$EXPECTED_REMOTE"
@@ -591,6 +595,7 @@ else
     echo "no remote branch origin/$BR to re-push to — open the PR first (ship without --pr)" >&2; exit 1
   }
   BASE=$(git rev-parse FETCH_HEAD)
+  ship_refuse_unmatched_paths "$ROOT" "$BASE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1
   # Before the intent write too: no later push can reach a non-open PR, so nothing is worth resuming.
   [ -n "${SHIP_DRY_RUN:-}" ] || reship_refuse_closed_pr "" "nothing pushed" || exit 1
 fi
