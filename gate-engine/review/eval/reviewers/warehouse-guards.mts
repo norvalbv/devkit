@@ -20,6 +20,9 @@ const DUP_CHECKS: readonly { table: string; keyCols: string }[] = [
  * and a checked-once pass would go stale mid-loop. A missing table (older warehouse) passes —
  * there is nothing to mis-read; every OTHER query failure (locked/corrupt db, missing sqlite3)
  * rethrows, because "could not verify" must never read as "verified".
+ *
+ * NULL ship_id rows (pre-ship era) are skipped: GROUP BY lumps every NULL into one group, yet a
+ * NULL key never matches a consumer join, so those rows cannot fan anything out.
  */
 export function assertMergedParentRows(dbPath: string): void {
   for (const { table, keyCols } of DUP_CHECKS) {
@@ -31,7 +34,7 @@ export function assertMergedParentRows(dbPath: string): void {
           '-readonly',
           '-json',
           dbPath,
-          `select ${keyCols}, count(*) as n from ${table} group by ${keyCols} having n > 1 limit 3`,
+          `select ${keyCols}, count(*) as n from ${table} where ship_id is not null group by ${keyCols} having n > 1 limit 3`,
         ],
         { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 },
       );
