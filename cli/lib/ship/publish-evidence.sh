@@ -15,6 +15,13 @@ evidence_caller_body() {
   node "$(evidence_run_script)" body --repo "$1" ${2:+--pr "$2"}
 }
 
+# The UI screenshot item for an open PR whose body this run did not write. A gated commit given
+# as $4 means its gates were skipped, so the reminder is recomputed from that commit's paths.
+# usage: publish_ui_item <repo-root> <pr-number> <repo> [<gate-skipped-commit>]
+publish_ui_item() {
+  node "$(evidence_run_script)" ui-item --cwd "$1" --pr "$2" --repo "$3" ${4:+--skipped-commit "$4"} </dev/null || true
+}
+
 # usage: publish_evidence_block <worktree> <pr-number> <repo> <head-sha>
 publish_evidence_block() {
   local wt=$1 pr=$2 repo=$3 head=$4 run supervisor budget tmp status=0

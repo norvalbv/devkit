@@ -745,6 +745,8 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
     expect(existsSync(gateRanOnResume), 'drifted recovery must refuse before gates').toBe(false);
     expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(accepted);
     writeFileSync(join(dir, 'conflict.txt'), 'main + feature\n');
+    const selection = { components: { guards: ['ui-evidence'] } };
+    writeFileSync(join(dir, '.devkit/config.json'), JSON.stringify(selection));
 
     const resumed = run(
       ['--resume', 'feat/pr'],
@@ -756,6 +758,8 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
     expect(resumed.status, resumed.stderr).toBe(0);
     expect(readFileSync(ghBody, 'utf8')).toBe(body);
     expect(existsSync(gateRanOnResume), 'resume must reuse the gated receipt').toBe(false);
+    // With the gates skipped, the screenshot reminder falls back to the commit's own paths.
+    expect(resumed.stderr).toContain('📸 ui-evidence: the gates were skipped');
     expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(accepted);
   });
 
