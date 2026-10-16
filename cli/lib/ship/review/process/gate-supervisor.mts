@@ -368,7 +368,7 @@ export function superviseGateCommand(
         lingerTimer = setTimeout(() => {
           lingerTimer = undefined;
           // Async, so a failed write can never stop the reap; the banner then reads as a ceiling.
-          if (childStatus === 0 && reapNoticeFile) writeFile(reapNoticeFile, '', () => undefined);
+          if (lingerStatus() === 124 && reapNoticeFile) writeFile(reapNoticeFile, '', () => {});
           beginForcedCleanup(lingerStatus());
         }, LINGER_GRACE_MS);
       }

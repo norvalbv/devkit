@@ -1,7 +1,8 @@
-import { ChildProcess, spawn } from 'node:child_process';
+import { ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import { superviseGateCommand } from '../lib/ship/review/process/gate-supervisor.mts';
@@ -15,18 +16,16 @@ import {
   testSpawnSync,
   waitForPath,
 } from './_helpers.mts';
+import { DEADLINE_NOTICE_ENV } from './test-subprocess.mts';
 
 const { mkTmp, cleanup } = rootRegistry();
 
 afterEach(cleanup);
 
-function execTimeoutStatus(
-  command: string,
-  args: readonly string[],
-  options: Record<string, unknown>,
-): number | null {
+/** The status a supervised run reports, read off the error when the runner's own deadline throws. */
+function timeoutStatus(run: () => void): number | null {
   try {
-    testExecFileSync(command, args, options);
+    run();
     return 0;
   } catch (cause) {
     return cause !== null && typeof cause === 'object' && 'status' in cause
@@ -100,20 +99,18 @@ describe('supervised synchronous test subprocesses', () => {
   });
 
   it.each([
-    {
-      api: 'spawnSync',
-      timeoutStatus: (command: string, args: readonly string[], options: Record<string, unknown>) =>
-        testSpawnSync(command, args, options).status,
-    },
-    { api: 'execFileSync', timeoutStatus: execTimeoutStatus },
-  ])('$api times out and reaps the command process group', ({ timeoutStatus }) => {
+    { api: 'spawnSync', run: testSpawnSync },
+    { api: 'execFileSync', run: testExecFileSync },
+  ])('$api times out and reaps the command process group', ({ run }) => {
     const root = mkTmp('test-subprocess-');
     const childPidFile = join(root, 'child.pid');
 
-    const status = timeoutStatus('/bin/sh', ['-c', LEADER_SCRIPT, LEADER_ARGV0, childPidFile], {
-      encoding: 'utf8',
-      timeout: REAP_DEADLINE_MS,
-    });
+    const status = timeoutStatus(() =>
+      run('/bin/sh', ['-c', LEADER_SCRIPT, LEADER_ARGV0, childPidFile], {
+        encoding: 'utf8',
+        timeout: REAP_DEADLINE_MS,
+      }),
+    );
     const childPid = existsSync(childPidFile) ? Number(readFileSync(childPidFile, 'utf8')) : 0;
 
     expect(status).toBe(124);
@@ -146,6 +143,82 @@ describe('supervised synchronous test subprocesses', () => {
     expect(message, 'the reader must be able to identify the wedged command').toContain(
       LEADER_ARGV0,
     );
+  });
+});
+
+// A ship test asserting ship's own 124 must not pass, or fail as a banner mismatch, when the
+// runner's deadline is what fired: that deadline throws, naming itself and the machine load.
+describe("the runner's own deadline is told apart from the command's 124", () => {
+  const HARNESS_LABEL =
+    /^(testSpawnSync|testExecFileSync): 1s harness deadline fired running \/bin\/sleep 5 \(loadavg=[\d./]+ cpus=\d+\)/;
+
+  it.each([
+    { api: 'testSpawnSync', stderr: 'piped', run: testSpawnSync, options: { encoding: 'utf8' } },
+    { api: 'testSpawnSync', stderr: 'ignored', run: testSpawnSync, options: { stdio: 'ignore' } },
+    {
+      api: 'testExecFileSync',
+      stderr: 'ignored',
+      run: testExecFileSync,
+      options: { stdio: 'ignore' },
+    },
+  ])('$api throws a labelled error with status 124 ($stderr stderr)', ({ api, run, options }) => {
+    let thrown: unknown;
+    try {
+      run('/bin/sleep', ['5'], { ...options, timeout: 1000 });
+    } catch (cause) {
+      thrown = cause;
+    }
+
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    expect(message).toMatch(HARNESS_LABEL);
+    expect(message.startsWith(`${api}:`)).toBe(true);
+    expect(thrown).toMatchObject({ status: 124 });
+  });
+
+  // 224 pins that no exit status is reserved to carry the runner's deadline.
+  it.each([124, 224])("returns the command's own exit %i unchanged", (status) => {
+    const result = testSpawnSync('/bin/sh', ['-c', `exit ${status}`], { encoding: 'utf8' });
+
+    expect(result.status).toBe(status);
+  });
+
+  // The label is only useful beside what the wedged command printed, on the message and the field.
+  it.each([
+    { api: 'testSpawnSync', run: testSpawnSync },
+    { api: 'testExecFileSync', run: testExecFileSync },
+  ])('$api keeps the stderr the wedged command wrote', ({ run }) => {
+    let thrown: unknown;
+    try {
+      run('/bin/sh', ['-c', 'echo wedge-marker >&2; exec /bin/sleep 5'], {
+        encoding: 'utf8',
+        timeout: 1000,
+      });
+    } catch (cause) {
+      thrown = cause;
+    }
+
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    expect(message).toMatch(/harness deadline fired[^\n]*\n\nwedge-marker\n$/);
+    expect(thrown).toMatchObject({ status: 124, stderr: 'wedge-marker\n' });
+  });
+
+  // A clean leader that leaks a live tree is reaped as 124 long before the deadline. That 124 is the
+  // runner's but not its deadline, so it stays a status and ship tests keep pairing their banner.
+  it('returns the linger reap as a bare 124, not a deadline error', () => {
+    const result = testSpawnSync('/bin/sh', ['-c', '/bin/sleep 30 & exit 0'], { encoding: 'utf8' });
+
+    expect(result.status).toBe(124);
+  });
+
+  // A TERM-ignoring leak makes the reap settle (~15s) past an 8s deadline it cancelled at 5s, so
+  // elapsed time alone would misname it the deadline, whether the leader exited 0 or 124.
+  it.each([0, 124])('keeps a late linger reap of a leader exiting %i a bare 124', (exit) => {
+    const result = testSpawnSync('/bin/sh', ['-c', `trap "" TERM; /bin/sleep 30 & exit ${exit}`], {
+      encoding: 'utf8',
+      timeout: 8000,
+    });
+
+    expect(result.status).toBe(124);
   });
 });
 
@@ -185,6 +258,28 @@ describe('option passthrough the supervised call sites depend on', () => {
 
     expect(result.stdout).toBe('from-the-caller');
     expect(process.env.DEVKIT_ENV_PROBE, 'the probe must not leak into the runner').toBeUndefined();
+  });
+
+  it("keeps the runner's deadline-notice env out of the supervised command", () => {
+    const result = testSpawnSync(
+      process.execPath,
+      ['-e', `process.stdout.write(String(process.env.${DEADLINE_NOTICE_ENV}))`],
+      { encoding: 'utf8' },
+    );
+
+    expect(result.stdout).toBe('undefined');
+  });
+
+  // The runner's argv is a contract for direct callers such as docs/benchmarks, so the notice
+  // stays optional: raw, because the runner itself is the subject.
+  it('runs a direct caller that passes no deadline notice', () => {
+    const runner = fileURLToPath(new URL('./test-subprocess.mts', import.meta.url));
+    const result = spawnSync(process.execPath, [runner, '5000', '--', '/bin/sh', '-c', 'exit 7'], {
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+
+    expect(result.status, result.stderr).toBe(7);
   });
 
   it.each([

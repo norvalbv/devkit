@@ -82,7 +82,7 @@ describe('ship-branch.sh — resume past a gate-widened scope', () => {
     });
 
     expect(first.status, first.stderr).toBe(124);
-    // Pair every 124 with OUR banner: testSpawnSync also returns 124 at its own deadline.
+    // Pair every 124 with OUR banner: testSpawnSync's linger reap also returns 124.
     expect(first.stderr).toMatch(REAPED_15S_BANNER);
     const preserved = git(['rev-parse', 'feat/gate-widened']).trim();
     // The precondition: the gate really did widen the commit past the brief.

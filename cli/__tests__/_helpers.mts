@@ -9,6 +9,7 @@ import {
   spawnSync as nodeSpawnSync,
   spawn,
 } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import {
   chmodSync,
@@ -26,6 +27,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formatLoad } from '../../vitest.global-setup.mjs';
 import { shQuote } from '../lib/ship/redact-secrets.mts';
+import { DEADLINE_NOTICE_ENV } from './test-subprocess.mts';
 
 /** Absolute path to the devkit CLI entry (cli/index.mjs). */
 export const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'index.mts');
@@ -73,6 +75,7 @@ export function supervisedCommand(
   const supervised = shell
     ? [shellPath, '-c', [call.command, ...call.args].join(' ')]
     : [call.command, ...call.args];
+  const deadlineNotice = join(tmpdir(), `test-subprocess-deadline-${randomUUID()}`);
   return {
     args: [
       TEST_SUBPROCESS,
@@ -83,23 +86,55 @@ export function supervisedCommand(
     ],
     options: {
       ...options,
+      env: { ...(options.env ?? process.env), [DEADLINE_NOTICE_ENV]: deadlineNotice },
       timeout: call.timeoutMs + TEST_SUBPROCESS_CLEANUP_MS,
     },
+    argv: [call.command, ...call.args],
+    timeoutMs: call.timeoutMs,
+    deadlineNotice,
   };
 }
 
-/**
- * Synchronous test subprocess with a killable child-process boundary. Vitest's testTimeout cannot
- * interrupt Node while spawnSync blocks, so the runner owns the command's complete process tree and
- * returns 124 after a bounded cleanup instead of letting one broken fixture wedge the whole suite.
- */
+/** Whether the runner recorded that its own deadline fired; consumes the notice. */
+function harnessDeadlineFired(deadlineNotice: string): boolean {
+  if (!existsSync(deadlineNotice)) return false;
+  rmSync(deadlineNotice, { force: true });
+  return true;
+}
+
+/** The runner's own deadline, named with the load it fired under. Keeps status 124 for callers. */
+function harnessDeadlineError(
+  api: string,
+  supervised: { argv: readonly string[]; timeoutMs: number },
+  outcome: { signal?: unknown; stdout?: unknown; stderr?: unknown },
+  cause?: unknown,
+): Error {
+  const message =
+    `${api}: ${supervised.timeoutMs / 1000}s harness deadline fired running ` +
+    `${supervised.argv.join(' ')} (${formatLoad(loadavg(), availableParallelism())}). ` +
+    'Re-run this file alone to tell load from a regression.';
+  const stderrTail = String(outcome.stderr ?? '').slice(-STDERR_TAIL_CHARS);
+  return Object.assign(new Error(stderrTail ? `${message}\n\n${stderrTail}` : message, { cause }), {
+    status: 124,
+    signal: outcome.signal ?? null,
+    stdout: outcome.stdout,
+    stderr: outcome.stderr,
+  });
+}
+
+/** spawnSync whose runner owns the command's process tree, since vitest cannot interrupt a blocked
+ *  spawnSync. The runner's own deadline throws a labelled error instead of returning a bare 124. */
 export const testSpawnSync = ((
   command: string,
   argsOrOptions?: readonly string[] | Record<string, unknown>,
   maybeOptions?: Record<string, unknown>,
 ) => {
   const supervised = supervisedCommand(command, argsOrOptions, maybeOptions);
-  return nodeSpawnSync(process.execPath, supervised.args, supervised.options);
+  const result = nodeSpawnSync(process.execPath, supervised.args, supervised.options);
+  if (harnessDeadlineFired(supervised.deadlineNotice)) {
+    throw harnessDeadlineError('testSpawnSync', supervised, result);
+  }
+  return result;
 }) as typeof nodeSpawnSync;
 
 /** Exec-style counterpart to testSpawnSync. It retains execFileSync's return/throw contract while
@@ -110,7 +145,12 @@ export const testExecFileSync = ((
   maybeOptions?: Record<string, unknown>,
 ) => {
   const supervised = supervisedCommand(command, argsOrOptions, maybeOptions, true);
-  return nodeExecFileSync(process.execPath, supervised.args, supervised.options);
+  try {
+    return nodeExecFileSync(process.execPath, supervised.args, supervised.options);
+  } catch (cause) {
+    if (!harnessDeadlineFired(supervised.deadlineNotice) || !(cause instanceof Error)) throw cause;
+    throw harnessDeadlineError('testExecFileSync', supervised, cause, cause);
+  }
 }) as typeof nodeExecFileSync;
 
 /** Whether a PID still refers to a live process. */
