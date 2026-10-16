@@ -107,7 +107,9 @@ gave up: the source's base baseline entry AND a lint of its base bytes must both
 candidate lint of the source must no longer, so unpruned stale credit is never spendable. Pairing is
 one-to-one in source path order, every candidate source is named, and excess copies stay new. Run the
 printed `devkit anti-slop adopt-relocations` (or its `--base <oid>` form for a committed move), stage
-the baseline, and check again. Adoption moves exactly the paired counts from the source entry to the
+the baseline, and check again. Adoption credits only what the index carries: when it finds nothing to
+move and a baselined source of the matching debt has unstaged edits, it names that file so you can
+`git add` it and re-run. Adoption moves exactly the paired counts from the source entry to the
 destination, never touches unrelated debt, and is a no-op when re-run before the baseline is staged;
 it refuses while renamed debt still needs `adopt-renames`. The growth check accepts the re-anchored
 baseline only while the source entry actually shrank and the destination does not exceed what its
