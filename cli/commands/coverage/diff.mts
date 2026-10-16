@@ -1,24 +1,30 @@
 /** `devkit coverage-diff` — coverage of the lines a change ADDED, not of the files it touched.
- * Advisory: guard-coverage stays the gate. Rationale: the sc-3228 note on coverage-gate. */
-import { existsSync, readFileSync } from 'node:fs';
+ * Advisory, except under `coverage.scope: "diff"`, where it also prints that gate's verdict. */
+import { existsSync, lstatSync, readFileSync, readlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { resolveGuardConfig, sourceMatchers } from '../../../gate-engine/config.mts';
+import { resolveGuardConfig } from '../../../gate-engine/config.mts';
+import {
+  addedLineVerdict,
+  addedProductionLines,
+  diffClassifier,
+  resolveScope,
+} from '../../../gate-engine/coverage/diff-gate.mts';
 import {
   addedLineCoverage,
-  addedLinesOf,
   type LineCoverageEntry,
   lineRanges,
 } from '../../../gate-engine/coverage/lines.mts';
 import { COVERAGE_DIR, COVERAGE_FILE } from '../../../gate-engine/coverage/produce.mts';
 import {
   blobsIn,
+  boundManifest,
+  type CoverageManifest,
   checkoutRoots,
+  DELETED,
+  git,
   keysByPath,
   readArtifact,
-  readManifest,
-  sha256,
 } from '../../../gate-engine/coverage/provenance.mts';
-import { TEST_PATH } from '../../../gate-engine/coverage/gate-shared.mts';
 import { computePercentages } from '../../../gate-engine/coverage/run.mts';
 import { type GitRun, gitRunner, line, ok } from '../../lib/ship/base-drift/git-run.mts';
 import { resolveBase } from '../../lib/ship/base-drift/resolve-base.mts';
@@ -43,13 +49,17 @@ counts when a statement starts on it (istanbul's line rule, as guard-coverage us
 braces and types are neither covered nor uncovered.
 
 guard-coverage enforces this same measure at commit time when guard.config.json sets
-"coverage": { "scope": "diff", "addedLines": <pct> }.
+"coverage": { "scope": "diff", "addedLines": <pct> }. With that config this command also prints the
+gate's verdict on these lines — unmeasured files, a stale artifact and the threshold, as the gate
+judges them — and exits 1 when the gate would block. \`devkit ship ... --dry-gates\` is the check
+exact to the paths a ship stages.
 
 Use this when a brief asks for coverage of "the new diff": whole-file percentages on a large
 existing file mostly measure code the change never touched.
 
-Exit codes: 0 report printed; 1 below --min, or the artifact is absent or malformed; 2 usage error,
-or no base could be resolved.`,
+Exit codes: 0 report printed; 1 below --min, the configured diff-scope gate would fail, or the
+artifact is absent or malformed; 2 usage error, no base could be resolved, or git could not read
+the diff.`,
 };
 
 const MAX_LISTED = 10;
@@ -108,52 +118,84 @@ function mergeBaseOf(
 
 const nulList = (out: string): string[] => out.split('\0').filter(Boolean);
 
-/** Added new-side line numbers of one tracked path since `mergeBase` (working tree included). */
-function addedLines(run: GitRun, mergeBase: string, path: string): Set<number> {
-  const diff = run([
-    '--literal-pathspecs',
-    'diff',
-    '-U0',
-    '--no-color',
-    '--no-ext-diff',
-    '--no-textconv',
-    '--no-relative',
-    mergeBase,
-    '--',
-    path,
-  ]);
-  return addedLinesOf(diff.stdout);
-}
-
 /** Every line of an untracked file is added. */
 function allLines(top: string, path: string): Set<number> {
   const count = readFileSync(join(top, path), 'utf8').split('\n').length;
   return new Set(Array.from({ length: count }, (_, i) => i + 1));
 }
 
-/** Measured paths whose bytes differ from what the coverage run measured, so its line numbers may
- * not match the diff's. Empty when the artifact carries no trustworthy manifest (reported apart). */
+/** Paths whose bytes differ from what the coverage run measured, a deleted path included, so the
+ * run's line numbers may not match the diff's. */
 function stalePaths(
   run: GitRun,
   top: string,
-  manifest: NonNullable<ReturnType<typeof readManifest>>,
+  manifest: CoverageManifest,
   paths: string[],
 ): string[] {
   if (paths.length === 0) return [];
-  const now = run(['--literal-pathspecs', 'hash-object', '--', ...paths]);
-  if (!ok(now)) return paths;
-  const current = line(now).split('\n');
-  let atHead: Map<string, string>;
+  const stat = (p: string) => lstatSync(join(top, p), { throwIfNoEntry: false });
+  const links = paths.filter((p) => stat(p)?.isSymbolicLink());
+  const plain = paths.filter((p) => stat(p) && !links.includes(p));
+  const now = plain.length
+    ? run(['--literal-pathspecs', 'hash-object', '--', ...plain])
+    : undefined;
+  if (now && !ok(now)) return paths;
+  const hashes = now ? line(now).split('\n') : [];
+  const current = new Map(plain.map((p, i) => [p, hashes[i]]));
   try {
-    atHead = blobsIn(
+    // A symlink's blob is its link text; hashing the path would hash its target instead.
+    for (const p of links) {
+      current.set(p, git(top, ['hash-object', '--stdin'], readlinkSync(join(top, p))).trim());
+    }
+    const atHead = blobsIn(
       top,
       manifest.head,
       paths.filter((p) => !Object.hasOwn(manifest.dirty, p)),
     );
+    return paths.filter(
+      (p) => (manifest.dirty[p] ?? atHead.get(p) ?? DELETED) !== (current.get(p) ?? DELETED),
+    );
   } catch {
     return paths;
   }
-  return paths.filter((p, i) => (manifest.dirty[p] ?? atHead.get(p)) !== current[i]);
+}
+
+interface Row {
+  path: string;
+  covered: number;
+  total: number;
+  uncovered: number[];
+}
+
+/** The configured diff-scope gate's verdict, in the gate's own order; null outside scope diff. */
+function gateVerdict(
+  cwd: string,
+  gated: (path: string) => boolean,
+  added: Map<string, Set<number>>,
+  rows: Row[],
+  notMeasured: string[],
+  bound: boolean,
+  stale: string[],
+): { pass: boolean; reason: string } | null {
+  const coverage = resolveGuardConfig(cwd).coverage;
+  const scope = coverage === false ? null : resolveScope(coverage);
+  if (!scope) return null;
+  if ('error' in scope) return { pass: false, reason: `${scope.error} in guard.config.json` };
+  if (scope.scope === 'repo') return null;
+  if (![...added.keys()].some(gated)) {
+    return { pass: true, reason: 'no added lines in production source' };
+  }
+  if (!bound) return { pass: false, reason: 'artifact provenance unknown' };
+  if (stale.length) {
+    return { pass: false, reason: `the artifact predates ${stale.length} changed file(s)` };
+  }
+  const counted = rows.filter((r) => gated(r.path));
+  return addedLineVerdict(
+    counted.reduce((n, r) => n + r.covered, 0),
+    counted.reduce((n, r) => n + r.total, 0),
+    notMeasured.filter(gated).length,
+    scope.min,
+  );
 }
 
 const pct = (covered: number, total: number): string => `${((covered / total) * 100).toFixed(1)}%`;
@@ -200,38 +242,39 @@ export default function coverageDiff(args: string[], cwd: string): number {
     return 2;
   }
 
-  const manifest = readManifest(resolve(cwd, COVERAGE_DIR));
-  const bound =
-    manifest &&
-    sha256(artifact.bytes) === manifest.artifactSha256 &&
-    artifact.identity === manifest.artifactIdentity
-      ? manifest
-      : null;
+  const bound = boundManifest(resolve(cwd, COVERAGE_DIR), artifact);
   const keys = keysByPath(Object.keys(cov), bound ? bound.roots : checkoutRoots(cwd, top));
-  const { isSource } = sourceMatchers(resolveGuardConfig(cwd).sourceExtensions);
-  const relevant = (p: string) => keys.has(p) || (isSource(p) && !TEST_PATH.test(p));
+  const classify = diffClassifier(cwd, top);
+  // A measured file is reported whatever sourceExtensions says; the verdict counts the gate's set.
+  const reported = (p: string) => classify(p, keys.has(p)) === 'production';
+  const gated = (p: string) => classify(p, false) === 'production';
 
-  const changed = nulList(
-    run(['diff', '--name-only', '-z', '--no-renames', '--no-relative', '--diff-filter=AM', mb.sha])
-      .stdout,
-  ).filter(relevant);
+  let added: Map<string, Set<number>>;
+  try {
+    added = addedProductionLines(top, reported, [mb.sha]);
+  } catch {
+    console.error('devkit coverage-diff: git could not read the diff.');
+    return 2;
+  }
   const untracked = nulList(
     run(['ls-files', '-z', '--others', '--exclude-standard']).stdout,
-  ).filter(relevant);
+  ).filter(reported);
+  for (const path of untracked) added.set(path, allLines(top, path));
 
-  const rows: { path: string; covered: number; total: number; uncovered: number[] }[] = [];
+  const rows: Row[] = [];
   const notMeasured: string[] = [];
-  for (const [paths, linesOf] of [
-    [changed, (p: string) => addedLines(run, mb.sha, p)],
-    [untracked, (p: string) => allLines(top, p)],
-  ] as const) {
-    for (const path of paths) {
-      const key = keys.get(path);
-      if (key === undefined) notMeasured.push(path);
-      else rows.push({ path, ...addedLineCoverage(cov[key] ?? {}, linesOf(path)) });
-    }
+  for (const [path, lines] of added) {
+    const key = keys.get(path);
+    if (key === undefined) notMeasured.push(path);
+    else rows.push({ path, ...addedLineCoverage(cov[key] ?? {}, lines) });
   }
   rows.sort((a, b) => a.path.localeCompare(b.path));
+  const changedSince = nulList(
+    run(['diff', '--name-only', '-z', '--no-renames', '--no-relative', mb.sha]).stdout,
+  );
+  const stale = bound
+    ? stalePaths(run, top, bound, [...changedSince.filter(reported), ...untracked])
+    : [];
 
   console.log(`Coverage of lines added since ${mb.label} (merge-base ${mb.sha.slice(0, 12)}):`);
   let covered = 0;
@@ -260,24 +303,22 @@ export default function coverageDiff(args: string[], cwd: string): number {
       '⚠️  Artifact provenance unknown (not from `devkit coverage-run`, or replaced since):',
     );
     console.log('   line numbers may describe a different tree than the one diffed.');
-  } else {
-    const stale = stalePaths(
-      run,
-      top,
-      bound,
-      rows.map((r) => r.path),
+  } else if (stale.length) {
+    console.log(
+      '⚠️  Changed since the coverage run — line numbers may be stale; re-run `devkit coverage-run`:',
     );
-    if (stale.length) {
-      console.log(
-        '⚠️  Changed since the coverage run — line numbers may be stale; re-run `devkit coverage-run`:',
-      );
-      for (const l of listCapped(stale)) console.log(l);
-    }
+    for (const l of listCapped(stale)) console.log(l);
   }
 
-  if (opts.min !== undefined && total > 0 && (covered / total) * 100 < opts.min) {
-    console.error(`🚫 Added-line coverage ${pct(covered, total)} is below --min ${opts.min}%.`);
-    return 1;
+  const verdict = gateVerdict(cwd, gated, added, rows, notMeasured, bound !== null, stale);
+  if (verdict?.pass) console.log(`✓ Coverage gate (scope "diff") would pass — ${verdict.reason}.`);
+  else if (verdict) {
+    console.error(`🚫 Coverage gate (scope "diff") would FAIL if this ships — ${verdict.reason}.`);
+    console.error('   Exact to what ships: devkit ship <branch> "<title>" --dry-gates -- <paths>');
   }
-  return 0;
+  const belowMin = opts.min !== undefined && total > 0 && (covered / total) * 100 < opts.min;
+  if (belowMin) {
+    console.error(`🚫 Added-line coverage ${pct(covered, total)} is below --min ${opts.min}%.`);
+  }
+  return belowMin || verdict?.pass === false ? 1 : 0;
 }

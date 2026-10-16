@@ -101,6 +101,7 @@ describe('scope "diff": fail closed', () => {
     measure(root, undefined, cov(root, { 'src/a.mts': { 1: 1 } }));
     const { code, out } = gate(root);
     expect(code).toBe(1);
+    expect(out).toContain('FAILED — 1 source file with added lines never measured; 0/0');
     expect(out).toContain('Not measured');
     expect(out).toContain('src/b.mts');
   });

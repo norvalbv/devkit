@@ -1,12 +1,14 @@
 /** `devkit coverage-diff` against real git repos and real `devkit coverage-run` manifests. */
-import { rmSync, writeFileSync } from 'node:fs';
+import { rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cleanupRepos,
+  gate,
   git,
   measure,
   repo,
+  type Thresholds,
   write,
 } from '../../../gate-engine/coverage/__tests__/_provenance-fixtures.mts';
 import { snapshotSource } from '../../../gate-engine/coverage/provenance.mts';
@@ -65,8 +67,8 @@ const commitAll = (root: string, msg = 'c') => {
 
 /** repo() on main, its src/a.mts seeded with `l1`, an origin/main tracking ref, then a feature
  * branch cut from it. */
-function featureRepo(pkg = '') {
-  const r = repo(pkg);
+function featureRepo(pkg = '', coverage: Thresholds = {}) {
+  const r = repo(pkg, coverage);
   write(r.root, pkg ? `${pkg}/src/a.mts` : 'src/a.mts', lines(1));
   commitAll(r.root, 'seed');
   git(r.root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
@@ -303,5 +305,203 @@ describe('devkit coverage-diff — the artifact', () => {
     rmSync(file);
     writeFileSync(file, bytes); // byte-identical, but a different file than the manifest bound
     expect(run(root).out).toContain('provenance unknown');
+  });
+});
+
+/** Staged edits on a branch with no commits of its own: the merge-base is HEAD, so the commit gate
+ * and coverage-diff read the same added lines and must reach the same verdict. */
+describe('devkit coverage-diff — agrees with the scope "diff" gate', () => {
+  beforeEach(() => {
+    vi.stubEnv('GUARD_COVERAGE_OK', '');
+    vi.stubEnv('GUARD_NO_COVERAGE', '');
+    vi.stubEnv('DEVKIT_RUN_MODE', '');
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  const diffRepo = (addedLines = 70) => featureRepo('', { scope: 'diff', addedLines }).root;
+  const both = (root: string) => {
+    git(root, 'add', '-A');
+    const g = gate(root);
+    const d = run(root);
+    expect(d.code).toBe(g.code);
+    return { g, d };
+  };
+  /** src/b.mts (3 lines) on the base too, so later edits to it are modifications. */
+  const withB = (root: string) => {
+    write(root, 'src/b.mts', lines(3));
+    commitAll(root, 'b');
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+  };
+
+  it("fails on an added line in a file no measured test loaded, with the gate's reason", () => {
+    const root = diffRepo();
+    write(root, 'src/b.mts', lines(2));
+    git(root, 'add', '-A');
+    measure(root, snapshotSource(root), cov(root, { 'src/a.mts': [[1, 1]] }));
+    const { g, d } = both(root);
+    const reason = '1 source file with added lines never measured';
+    expect(g.code).toBe(1);
+    expect(g.out).toContain(`Coverage gate FAILED — ${reason}`);
+    expect(d.out).toContain(`would FAIL if this ships — ${reason}`);
+    expect(d.out).toContain('--dry-gates');
+  });
+
+  it('passes at the threshold and fails below it with the same summary', () => {
+    for (const [hit, code, summary] of [
+      [1, 0, '2/2 added executable lines covered (100.0%, min 70%)'],
+      [0, 1, '1/2 added executable lines covered (50.0%, min 70%)'],
+    ] as const) {
+      const root = diffRepo();
+      write(root, 'src/a.mts', lines(3));
+      git(root, 'add', '-A');
+      measure(
+        root,
+        snapshotSource(root),
+        cov(root, {
+          'src/a.mts': [
+            [2, 1],
+            [3, hit],
+          ],
+        }),
+      );
+      const { g, d } = both(root);
+      expect(g.code).toBe(code);
+      expect(g.out).toContain(summary);
+      expect(d.out).toContain(summary);
+    }
+  });
+
+  it('fails when a measured file loses lines, or is deleted, after the coverage run', () => {
+    for (const edit of [
+      (root: string) => write(root, 'src/b.mts', lines(2)),
+      (root: string) => git(root, 'rm', '-q', 'src/b.mts'),
+    ]) {
+      const root = diffRepo();
+      withB(root);
+      write(root, 'src/a.mts', lines(2));
+      git(root, 'add', '-A');
+      measure(
+        root,
+        snapshotSource(root),
+        cov(root, { 'src/a.mts': [[2, 1]], 'src/b.mts': [[1, 1]] }),
+      );
+      edit(root);
+      const { g, d } = both(root);
+      expect(g.code).toBe(1);
+      expect(d.out).toContain('the artifact predates 1 changed file(s)');
+      expect(d.out).toMatch(/stale[^\n]*\n\s+src\/b\.mts$/m);
+    }
+  });
+
+  it('passes a change that adds no production lines, even with an unbound artifact', () => {
+    const root = diffRepo();
+    write(root, 'src/a.test.mts', lines(3));
+    write(root, 'coverage/coverage-final.json', cov(root, { 'src/a.mts': [[1, 1]] }));
+    const { d } = both(root);
+    expect(d.code).toBe(0);
+    expect(d.out).toContain('would pass — no added lines in production source');
+  });
+
+  it('does not list a deletion-only or a renamed unmeasured file', () => {
+    for (const edit of [
+      (root: string) => write(root, 'src/b.mts', lines(2)),
+      (root: string) => git(root, 'mv', 'src/b.mts', 'src/c.mts'),
+    ]) {
+      const root = diffRepo();
+      withB(root);
+      edit(root);
+      git(root, 'add', '-A');
+      measure(root, snapshotSource(root), cov(root, { 'src/a.mts': [[1, 1]] }));
+      const { d } = both(root);
+      expect(d.code).toBe(0);
+      expect(d.out).not.toContain('Not measured');
+    }
+  });
+
+  it('keeps a measured file outside sourceExtensions out of the verdict totals', () => {
+    const root = diffRepo();
+    write(root, 'src/a.mts', lines(4));
+    write(root, 'src/x.mjs', lines(10));
+    git(root, 'add', '-A');
+    const mjs: [number, number][] = Array.from({ length: 10 }, (_, i) => [i + 1, 1]);
+    measure(
+      root,
+      snapshotSource(root),
+      cov(root, {
+        'src/a.mts': [
+          [2, 1],
+          [3, 0],
+          [4, 0],
+        ],
+        'src/x.mjs': mjs,
+      }),
+    );
+    const { d } = both(root);
+    expect(d.code).toBe(1);
+    expect(d.out).toContain('1/3 added executable lines covered (33.3%, min 70%)');
+    expect(d.out).toContain('src/x.mjs');
+  });
+
+  it('fails an unbound artifact when production lines were added', () => {
+    const root = diffRepo();
+    write(root, 'src/a.mts', lines(2));
+    write(root, 'coverage/coverage-final.json', cov(root, { 'src/a.mts': [[2, 1]] }));
+    const { d } = both(root);
+    expect(d.code).toBe(1);
+    expect(d.out).toContain('would FAIL if this ships — artifact provenance unknown');
+  });
+
+  it('judges the whole branch, as ship does: a committed unmeasured file still fails', () => {
+    const root = diffRepo();
+    write(root, 'src/b.mts', lines(2));
+    commitAll(root, 'b'); // the commit gate now sees nothing staged; ship sees the branch
+    measure(root, snapshotSource(root), cov(root, { 'src/a.mts': [[1, 1]] }));
+    const { code, out } = run(root);
+    expect(code).toBe(1);
+    expect(out).toContain('1 source file with added lines never measured');
+  });
+
+  it('fails a misconfigured scope "diff" as the gate does', () => {
+    const { root } = featureRepo('', { scope: 'diff' });
+    write(root, 'src/a.mts', lines(2));
+    git(root, 'add', '-A');
+    measure(root, snapshotSource(root), cov(root, { 'src/a.mts': [[2, 1]] }));
+    const { d } = both(root);
+    expect(d.code).toBe(1);
+    expect(d.out).toContain('coverage.scope "diff" needs coverage.addedLines');
+  });
+
+  it('a package gate ignores an unmeasured file in a sibling package', () => {
+    const { root, cwd } = featureRepo('pkg', { scope: 'diff', addedLines: 70 });
+    write(root, 'pkg/src/a.mts', lines(2));
+    write(root, 'other/src/z.mts', lines(2));
+    git(root, 'add', '-A');
+    measure(cwd, snapshotSource(cwd), cov(root, { 'pkg/src/a.mts': [[2, 1]] }));
+    git(root, 'add', '-A');
+    const g = gate(cwd);
+    const d = run(cwd);
+    expect([g.code, d.code]).toEqual([0, 0]);
+    expect(d.out).toContain('would pass — 1/1 added executable lines covered');
+  });
+
+  it('a source symlink committed before the run is not stale', () => {
+    const root = diffRepo();
+    write(root, 'src/a.mts', lines(2));
+    symlinkSync('a.mts', join(root, 'src/link.mts'));
+    commitAll(root, 'link');
+    measure(root, snapshotSource(root), cov(root, { 'src/a.mts': [[2, 1]] }));
+    const { code, out } = run(root);
+    expect(out).not.toContain('predates');
+    expect(code).toBe(0);
+  });
+
+  it('prints no verdict and exits 0 without a scope "diff" config', () => {
+    const { root } = featureRepo();
+    write(root, 'src/b.mts', lines(2));
+    measure(root, snapshotSource(root), cov(root, { 'src/a.mts': [[1, 1]] }));
+    const { code, out } = run(root);
+    expect(code).toBe(0);
+    expect(out).toContain('Not measured');
+    expect(out).not.toContain('Coverage gate');
   });
 });
