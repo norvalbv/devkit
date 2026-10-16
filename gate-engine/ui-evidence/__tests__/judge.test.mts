@@ -17,10 +17,10 @@ describe('judgeUiVisible', () => {
   beforeEach(() => judge.mockReset());
 
   it('spawns the judge with its own timeout, not the deep-judge ceiling', () => {
-    judge.mockReturnValue('VISIBLE\nprices change');
+    judge.mockReturnValue('Prices change.\nVERDICT: VISIBLE');
     expect(judgeUiVisible(repo(), 'diff', 'haiku', judge)).toEqual({
       visible: true,
-      why: 'prices change',
+      why: 'Prices change.',
     });
     expect(judge.mock.calls[0]?.[0].timeout).toBe(JUDGE_TIMEOUT_MS);
   });

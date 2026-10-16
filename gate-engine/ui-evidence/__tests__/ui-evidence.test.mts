@@ -60,20 +60,60 @@ describe('uiPathReason', () => {
 });
 
 describe('parseUiVerdict', () => {
-  it('reads the verdict from the first line and the why from the rest', () => {
-    expect(parseUiVerdict('VISIBLE\nthe checkout total shows two decimals')).toEqual({
+  it('reads the closing VERDICT line, and the why from the sentence before it', () => {
+    expect(parseUiVerdict('The checkout total shows two decimals.\nVERDICT: VISIBLE')).toEqual({
       visible: true,
-      why: 'the checkout total shows two decimals',
+      why: 'The checkout total shows two decimals.',
     });
-    expect(parseUiVerdict('NONE\nretry policy only')).toEqual({
+    expect(parseUiVerdict('Nothing visible changes on a screen.\nVERDICT: NONE')).toEqual({
       visible: false,
-      why: 'retry policy only',
+      why: 'Nothing visible changes on a screen.',
     });
   });
 
-  it('is null when the reply names neither or both verdicts', () => {
+  it('a verdict-first reply whose reason negates it is unparseable, so it stays silent', () => {
+    expect(parseUiVerdict('VISIBLE\nNothing a user sees changes on a rendered screen.')).toBeNull();
+  });
+
+  it('the closing VERDICT line wins, markdown dressing and all', () => {
+    const raw = 'VERDICT: VISIBLE\nOn reflection, only CLI output changes.\n\n- **VERDICT:** NONE';
+    expect(parseUiVerdict(raw)).toEqual({
+      visible: false,
+      why: 'On reflection, only CLI output changes.',
+    });
+  });
+
+  it('collapses runs of spaces and tabs inside the reason to single spaces', () => {
+    const spaced = `Prices${' '.repeat(3)}show\ttwo decimals.\nVERDICT: VISIBLE`;
+    expect(parseUiVerdict(spaced)?.why).toBe('Prices show two decimals.');
+  });
+
+  it('reads a verdict the judge appends to the end of its sentence', () => {
+    expect(parseUiVerdict('The header greets users by display name. VERDICT: VISIBLE')).toEqual({
+      visible: true,
+      why: 'The header greets users by display name.',
+    });
+  });
+
+  it('a VERDICT line followed by a negating reason is verdict-first, so it stays silent', () => {
+    expect(parseUiVerdict('VERDICT: VISIBLE\nNothing a user sees changes.')).toBeNull();
+  });
+
+  it('a verdict word that does not close the reply is prose or an echoed format', () => {
+    expect(parseUiVerdict('VERDICT: VISIBLE or NONE')).toBeNull();
+    expect(parseUiVerdict('Final verdict: none of these files render anything.')).toBeNull();
+  });
+
+  it('reads a CRLF reply, as a judge on Windows prints it', () => {
+    expect(parseUiVerdict('Prices show two decimals.\r\nVERDICT: VISIBLE\r\n')).toEqual({
+      visible: true,
+      why: 'Prices show two decimals.',
+    });
+  });
+
+  it('is null without a VERDICT line, even when the reply ends in a bare verdict word', () => {
     expect(parseUiVerdict('maybe')).toBeNull();
-    expect(parseUiVerdict('VISIBLE or NONE')).toBeNull();
+    expect(parseUiVerdict('Checkout shows two decimals.\nVISIBLE')).toBeNull();
   });
 });
 
@@ -141,7 +181,11 @@ function runGate(dir: string, subject: string | null, extra: Record<string, stri
 describe('guard-ui-evidence CLI', () => {
   it('a staged UI file prints the screenshot instruction without asking the judge', () => {
     const dir = stagedRepo({ 'src/Card.tsx': 'x' });
-    const r = runGate(dir, 'feat: card', judgeStub(dir, 'echo VISIBLE'));
+    const r = runGate(
+      dir,
+      'feat: card',
+      judgeStub(dir, 'printf "a card changes\\nVERDICT: VISIBLE\\n"'),
+    );
     expect(r.code).toBe(0);
     expect(r.stderr).toContain('📸 ui-evidence: Add before (base branch) and after (this branch)');
     expect(r.stderr).toContain('— UI paths changed: src/Card.tsx');
@@ -171,7 +215,11 @@ describe('guard-ui-evidence CLI', () => {
 
   it('a backend change the judge reads as visible gets the same advice, with its why', () => {
     const dir = stagedRepo({ 'server/price.ts': 'export const fmt = (n) => n.toFixed(2);' });
-    const r = runGate(dir, null, judgeStub(dir, 'printf "VISIBLE\\nprices show two decimals\\n"'));
+    const r = runGate(
+      dir,
+      null,
+      judgeStub(dir, 'printf "prices show two decimals\\nVERDICT: VISIBLE\\n"'),
+    );
     expect(r.code).toBe(0);
     expect(r.stderr).toContain(
       '— the staged diff could change what users see: prices show two decimals',
@@ -184,14 +232,33 @@ describe('guard-ui-evidence CLI', () => {
 
   it('a backend change the judge reads as invisible stays silent', () => {
     const dir = stagedRepo({ 'server/retry.ts': 'export const tries = 3;' });
-    const r = runGate(dir, null, judgeStub(dir, 'echo NONE'));
+    const r = runGate(
+      dir,
+      null,
+      judgeStub(dir, 'printf "only the retry count changes\\nVERDICT: NONE\\n"'),
+    );
     expect(r).toMatchObject({ code: 0, stderr: '', events: [] });
     expect(judgeCalls(dir)).toBe(1);
   });
 
+  it('a gate-engine and config diff stays silent when the reason says nothing is shown', () => {
+    const files = { 'gate-engine/size.mts': 'export const cap = 500;', 'guard.config.json': '{}' };
+    const negating =
+      'printf "VISIBLE\\nonly size ratchets change; a rendered screen would not look different\\n"';
+    for (const script of [negating, 'printf "only size ratchets change\\nVERDICT: NONE\\n"']) {
+      const dir = stagedRepo(files);
+      expect(runGate(dir, null, judgeStub(dir, script))).toMatchObject({
+        code: 0,
+        stderr: '',
+        events: [],
+      });
+      expect(judgeCalls(dir)).toBe(1);
+    }
+  });
+
   it('a second run over the same staged diff replays the verdict without a judge call', () => {
     const dir = stagedRepo({ 'server/price.ts': 'export const fmt = 2;' });
-    const stub = judgeStub(dir, 'printf "VISIBLE\\nprices change\\n"');
+    const stub = judgeStub(dir, 'printf "prices change\\nVERDICT: VISIBLE\\n"');
     const first = runGate(dir, null, stub);
     const second = runGate(dir, 'fix: price', stub);
     expect(judgeCalls(dir)).toBe(1);
@@ -216,7 +283,7 @@ describe('guard-ui-evidence CLI', () => {
 
   it('a diff of only docs, lockfiles and tests never asks the judge', () => {
     const dir = stagedRepo({ 'README.md': 'x', 'bun.lock': 'x', 'src/a.test.ts': 'x' });
-    const r = runGate(dir, null, judgeStub(dir, 'echo VISIBLE'));
+    const r = runGate(dir, null, judgeStub(dir, 'printf "a card changes\\nVERDICT: VISIBLE\\n"'));
     expect(r).toMatchObject({ code: 0, stderr: '', events: [] });
     expect(judgeCalls(dir)).toBe(0);
   });
