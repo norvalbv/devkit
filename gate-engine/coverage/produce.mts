@@ -286,8 +286,8 @@ export function buildInjectedArgs(
     }
   }
   if (!ownsReporter(argv) && !process.env[NO_DIAGNOSIS_ENV]) {
-    // `default` is kept so console output is byte-for-byte what the consumer already sees; the json
-    // reporter is additive and writes only into our run directory; ours names unhandled errors beside it.
+    // CLI reporters REPLACE config `reporters`, so `default` keeps vitest's standard console output;
+    // the json reporter writes only into our run directory; ours names unhandled errors beside it.
     injected.push(
       '--reporter=default',
       '--reporter=json',
@@ -302,9 +302,8 @@ export function buildInjectedArgs(
  * Say what happened, on stderr, and make the flaky rate measurable.
  *
  * `retrying` is the whole reason this takes the outcome rather than predicting it. Whether devkit's
- * json reporter actually ran cannot be decided from argv: a consumer who sets `reporters` in their
- * vitest.config — which is where reporters are normally set — silently WINS over the CLI flag, so the
- * report never appears while the injected retry still fires. Verified against vitest 4.1.10. Deciding
+ * json reporter actually ran cannot be decided from argv: a string `outputFile` in the consumer's
+ * vitest.config (or a json reporter's own) diverts it while the injected retry still fires. Deciding
  * from the artifact covers that, an older vitest ignoring the dotted --outputFile.json, an argv
  * --reporter, and the env switch, with one rule instead of four guesses.
  *
@@ -321,7 +320,7 @@ export function reportDiagnosis(
       console.error(
         '\u2139\uFE0F  Retrying timed-out tests, but the rescue cannot be reported: no devkit json',
       );
-      console.error('   report was produced (your vitest.config sets `reporters`, you passed');
+      console.error('   report was produced (a vitest.config `outputFile` diverted it, you passed');
       console.error(
         `   --reporter, or ${NO_DIAGNOSIS_ENV} is set). A test that only passes on the`,
       );

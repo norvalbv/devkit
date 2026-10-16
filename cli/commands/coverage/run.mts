@@ -38,19 +38,21 @@ failed, so the gate can say "discarded by a failed run, none of it staged" inste
 coverage data".
 
 Two flags are added on your behalf. Both step aside when you name them on the command line.
-Precedence against your vitest.config, verified against vitest 4.1.10:
-  - a 'reporters' array in vitest.config WINS over our --reporter, so no devkit report is
-    produced; the retry then says so on stderr rather than rescuing a test silently.
-  - a 'retry' in vitest.config also wins: the dotted --retry.count we pass does NOT reduce it
-    (only the plain --retry does, and we never pass that), so your retry policy is kept.
+Precedence against your vitest.config, verified against vitest 4.1 and 5.0:
+  - our --reporter REPLACES a 'reporters' array there, so your config reporters do not run under
+    coverage-run. A string 'outputFile', or a json reporter's 'outputFile' option, diverts our
+    report instead; the retry then says so on stderr rather than rescuing a test silently.
+  - a numeric 'retry' of 1 or more there wins: the dotted --retry.count we pass does NOT reduce it
+    (only the plain --retry does, and we never pass that). 'retry: 0' and an object
+    'retry: { count }' are overridden, so pass --retry=0 on the command line to opt out.
   --retry.count=1 --retry.condition='(Test|Hook) timed out'
       Retries a test that TIMED OUT, once. Assertion failures are never retried. A test that only
       passes on the retry is reported as flaky on stderr, not swallowed. Pass any --retry form
       (--retry=0 disables) to take full ownership. Needs vitest >=4.1; below that it is skipped
       out loud.
   --reporter=default --reporter=json --outputFile.json=<run dir>/results.json
-      How the failed-file and flaky reporting is read. Pass your own --reporter, configure
-      'reporters' in vitest.config, or set DEVKIT_COVERAGE_NO_DIAGNOSIS=1, to drop it.
+      How the failed-file and flaky reporting is read. Pass your own --reporter, or set
+      DEVKIT_COVERAGE_NO_DIAGNOSIS=1, to drop it.
 
 When EVERY failure is a timeout the retry could not rescue — the load-flake shape — the whole suite
 re-runs ONCE at testTimeout/hookTimeout = max(5 × the observed per-attempt ceiling, 25000ms). vitest
