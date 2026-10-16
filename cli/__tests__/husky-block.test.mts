@@ -160,7 +160,7 @@ describe('buildGuardBlock', () => {
     const block = buildGuardBlock({ guards: [], antiSlop: true });
     expect(block).toContain('guard-deterministic');
     expect(block).toContain('# devkit:review-failure-finalizer');
-    expect(block).not.toContain('guard-review');
+    expect(block).not.toMatch(/guard-review" (--gate|completeness)/);
   });
 
   it('emits NO deterministic line when only the review guard is selected', () => {

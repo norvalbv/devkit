@@ -134,26 +134,33 @@ describe('ship --resume: record on block, replay on retry', () => {
 
   // The same brief, restated under the verdict: a blocked ship is read by tailing, far below the
   // banner. The second line is the invariant that explains a finding naming an UNBRIEFED file.
-  it('a gate block restates the brief and names the base every other file is read at', () => {
-    const { dir, env, git } = seedResumableRepo({ hookBody: GATE_FAIL_HOOK });
-    writeFileSync(join(dir, 'note.txt'), 'hello\n');
-    const baseShort = git(['rev-parse', '--short=7', 'HEAD']).trim();
+  // A hook-shell gate (fallow) blocks under its own token, which must still restate the brief.
+  it.each([
+    ['a deterministic', GATE_FAIL_HOOK],
+    ['a fallow', "echo '\u2717 staged gate blocked: fallow (its report is above)'\nexit 1"],
+  ])(
+    '%s gate block restates the brief and names the base every other file is read at',
+    (_label, hookBody) => {
+      const { dir, env, git } = seedResumableRepo({ hookBody });
+      writeFileSync(join(dir, 'note.txt'), 'hello\n');
+      const baseShort = git(['rev-parse', '--short=7', 'HEAD']).trim();
 
-    const blocked = runShip(dir, env, ['feat/brief-on-block', 'x', '--', 'note.txt'], {
-      input: 'b\n',
-      extraEnv: { SHIP_DRY_RUN: '1' },
-    });
-    expect(blocked.status).not.toBe(0);
-    expect(blocked.stderr).toContain('ship: the gates judged 1 briefed path(s): note.txt');
-    expect(blocked.stderr).toContain(
-      `every OTHER file in the gate worktree is at base ${baseShort}`,
-    );
-    // An INITIAL ship has no listing to point at, and a ship-intent glob would splice a parallel
-    // agent's branch paths into the very answer this line exists to make trustworthy.
-    expect(blocked.stderr).not.toContain('Full brief');
-    expect(blocked.stderr).not.toContain('ship-intent-*');
-    git(['worktree', 'prune']);
-  });
+      const blocked = runShip(dir, env, ['feat/brief-on-block', 'x', '--', 'note.txt'], {
+        input: 'b\n',
+        extraEnv: { SHIP_DRY_RUN: '1' },
+      });
+      expect(blocked.status).not.toBe(0);
+      expect(blocked.stderr).toContain('ship: the gates judged 1 briefed path(s): note.txt');
+      expect(blocked.stderr).toContain(
+        `every OTHER file in the gate worktree is at base ${baseShort}`,
+      );
+      // An INITIAL ship has no listing to point at, and a ship-intent glob would splice a parallel
+      // agent's branch paths into the very answer this line exists to make trustworthy.
+      expect(blocked.stderr).not.toContain('Full brief');
+      expect(blocked.stderr).not.toContain('ship-intent-*');
+      git(['worktree', 'prune']);
+    },
+  );
 
   // The classifier's catch-all also covers a commit-msg hook failing AFTER the gates passed, so an
   // unattributed non-zero exit must not be narrated as a gate verdict on the brief.

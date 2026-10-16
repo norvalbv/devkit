@@ -411,6 +411,13 @@ re-commit. To converge without a ship round, stage the paths and run `guard-dete
 On a commit or ship, the decision and reviewer gates run only after this stage passes, one finding
 at a time, by design.
 
+## `✗ staged gate blocked: <gate>`
+
+A gate the hook runs as shell blocked the commit: `fallow` (the staged audit), `eslint-overlay` or
+`biome-overlay`. Its own report sits directly above the line; `guard-deterministic` does not re-run
+it, so fix what that report names and re-commit. Under `devkit ship` the block also prints the
+`devkit ship … --dry-gates` command that re-checks the fix on ship's exact staging.
+
 ## `✗ review: failed gates: <names>`
 
 `devkit review` runs every selected gate even after one blocks, then prints this line and exits 1.
