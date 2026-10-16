@@ -521,7 +521,6 @@ describe('readCodexRateLimits — the spawn, not just the parser', () => {
         `echo '{"id":2,"result":{"ordinaryUsageAllowed":false,"rateLimits":{"credits":{"hasCredits":true},"primary":{"usedPercent":10}}}}'`,
         'sleep 5',
       ].join('\n'),
-      700,
     );
     expect(snap).toMatchObject({
       cliVersion: '0.162.1',
@@ -537,7 +536,6 @@ describe('readCodexRateLimits — the spawn, not just the parser', () => {
         `echo '{"id":2,"result":{"ordinaryUsageAllowed":"yes","rateLimits":{"primary":{"usedPercent":10}}}}'`,
         'sleep 5',
       ].join('\n'),
-      700,
     );
     expect(snap?.usedPercent).toBe(10);
     expect(snap).not.toHaveProperty('cliVersion');
