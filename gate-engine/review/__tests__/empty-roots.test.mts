@@ -1,7 +1,9 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PACKAGED_ROOT_DIRS } from '../../../cli/lib/fs-helpers.mts';
 import { resolveGuardConfig, resolveGuardConfigJson } from '../../config.mts';
 import {
   domainsDisabledByEmptyRoots,
@@ -195,6 +197,12 @@ describe('filesRoutedToNoDomain', () => {
       '/nonexistent-cwd-defaults-only',
     );
 
+  // A repo-wide review scope whose only domain root is cli/, the shape devkit's config once had.
+  const cliOnly = (backendRoots = ['cli']) => {
+    const cfg = make(['cli'], backendRoots, []);
+    return { ...cfg, review: { ...cfg.review, paths: { include: ['**'], exclude: [] } } };
+  };
+
   it("devkit's own self-host config routes every scanRoot, so a commit inside them stays quiet", () => {
     const cfg = selfHost();
     expect(
@@ -205,9 +213,41 @@ describe('filesRoutedToNoDomain', () => {
     ).toEqual([]);
   });
 
+  it("devkit's own config routes every code file it ships into consumer repos", () => {
+    const shipped = execFileSync(
+      'git',
+      ['ls-files', '--', ...PACKAGED_ROOT_DIRS, 'anti-slop/src/devkit', 'anti-slop/src/index.ts'],
+      { cwd: REPO_ROOT, encoding: 'utf8' },
+    )
+      .split('\n')
+      .filter(Boolean);
+    expect(shipped).toContain('skills/_devkit/review-roots.mjs');
+    expect(unrouted(shipped, selfHost())).toEqual([]);
+    expect(unrouted(['skills/_devkit/review-roots.mjs'], selfHost())).toEqual([]);
+  });
+
+  it("devkit's own config routes every root-level code file, whatever its extension", () => {
+    const configs = execFileSync('git', ['ls-files', '--', ':!:*/**'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+    })
+      .split('\n')
+      .filter(Boolean);
+    expect(configs).toContain('vitest.setup.mjs');
+    expect(unrouted(configs, selfHost())).toEqual([]);
+  });
+
+  it("devkit's own config sends a shell hook it ships to the security reviewer", () => {
+    const hook = 'agents-hooks/decision-stop-check.sh';
+    const selection = selectReviewers([hook], selfHost());
+    expect(selection.find((s) => s.reviewer.name === 'api-security-reviewer')?.files).toEqual([
+      hook,
+    ]);
+  });
+
   it('names a root-level implementation file shipped beside a test under a domain root', () => {
     const staged = ['vitest.setup.mjs', 'cli/__tests__/vitest-setup-env-scrub.test.mts'];
-    expect(unrouted(staged, selfHost())).toEqual(['vitest.setup.mjs']);
+    expect(unrouted(staged, cliOnly())).toEqual(['vitest.setup.mjs']);
   });
 
   it('stays silent for prose, data and test files outside the domain roots', () => {
@@ -258,11 +298,7 @@ describe('filesRoutedToNoDomain', () => {
   });
 
   it('a remedy the notice names routes the file: an exact path under backendRoots', () => {
-    const cfg = selfHost();
-    const routed = {
-      ...cfg,
-      review: { ...cfg.review, backendRoots: [...cfg.review.backendRoots, 'vitest.setup.mjs'] },
-    };
+    const routed = cliOnly(['cli', 'vitest.setup.mjs']);
     const selection = selectReviewers(['vitest.setup.mjs'], routed);
     expect(selection.find((s) => s.reviewer.name === 'api-security-reviewer')?.files).toEqual([
       'vitest.setup.mjs',

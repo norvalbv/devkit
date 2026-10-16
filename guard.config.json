@@ -34,8 +34,24 @@
       "../search-code"
     ]
   },
+  "//review": "backendRoots covers code that runs in consumer repos (skills, agents-hooks, templates, devkit's own anti-slop rules) and devkit's build and test infrastructure. The pinned upstream anti-slop rules and docs/benchmarks/experiments get correctness review only; e2e/fixtures is deliberately bad code and is excluded.",
   "review": {
-    "backendRoots": ["cli", "gate-engine"],
+    "backendRoots": [
+      "cli",
+      "gate-engine",
+      "skills",
+      "agents-hooks",
+      "templates",
+      "anti-slop/src/devkit",
+      "anti-slop/src/index.ts",
+      "scripts",
+      "e2e/lib",
+      "vitest.config.mjs",
+      "vitest.setup.mjs",
+      "vitest.global-setup.mjs",
+      "vitest.e2e.config.mjs",
+      "eslint.config.mjs"
+    ],
     "frontendRoots": [],
     "paths": {
       "include": ["**"],
@@ -54,7 +70,8 @@
         "coverage/**",
         "*.lock",
         "**/*.lock",
-        "docs/benchmarks/decisions-brief/tasks/**"
+        "docs/benchmarks/decisions-brief/tasks/**",
+        "e2e/fixtures/**"
       ]
     },
     "trustBoundaries": "devkit is a CLI + portable gate-engine, not a hosted app — no server/client split. Its trust model is W-3: devkit ships inside the consumer's node_modules and EXECUTES in a repo it does not own, so every path it resolves must be consumer-cwd-relative, never __dirname, and synced assets (skills/agents/gate scripts) must read layout from the consumer's guard.config.json, never hardcode a stack's directory tree."
