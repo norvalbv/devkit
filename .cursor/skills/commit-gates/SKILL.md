@@ -43,7 +43,10 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
    For a failed `guard.config.json` `extraGates` command, ship re-runs that command at the commit the
    gate worktree was cut from. A line `ship: <label> also exits 1 at <sha> … Base run output: <path>`
    means the same command fails there too: read that file, and get the findings it lists fixed on
-   the base (or rebase onto a base that has them fixed) before chasing them in your change. No line
+   the base (or rebase onto a base that has them fixed) before chasing them in your change. The base
+   run links the untracked entries the gate worktree held before its gates ran, as they stand when it
+   reruns; an entry a gate added during the run is not linked, so a gate that reads an earlier gate's
+   output can fail there for that reason. No line
    is not evidence either way: the base run passed, ended some other way, ran out of its 120-second
    budget, or the gate is not a root-config `extraGates` entry. Start from your own change.
 4. Treat a bypass as an explicit operator decision. Never use `--no-verify`, silently disable a
