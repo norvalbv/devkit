@@ -24,7 +24,7 @@ describe('newBundledGates', () => {
   it('splits gates missing from a recorded selection into recommended vs opt-in', () => {
     const recorded = ['size', 'fanout', 'dup', 'clone', 'decisions']; // a pre-ui-evidence selection
     const { recommended, optIn } = newBundledGates(recorded);
-    expect(recommended).toEqual(['comments', 'ui-evidence']);
+    expect(recommended).toEqual(['whitespace', 'comments', 'ui-evidence']);
     expect(optIn).toEqual(['review', 'sentry', 'coverage']); // bundled but never selected
   });
 

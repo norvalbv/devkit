@@ -129,7 +129,13 @@ function slopes(change: StagedChange): Record<string, number> {
 
 describe('deterministic gate cost against the staged-set size', () => {
   it('names a reason for every registry gate it does not measure', () => {
-    expect(MEASURED.map((gate) => gate.id)).toEqual(['size', 'fanout', 'clone', 'comments']);
+    expect(MEASURED.map((gate) => gate.id)).toEqual([
+      'whitespace',
+      'size',
+      'fanout',
+      'clone',
+      'comments',
+    ]);
     for (const id of EXCLUDED.keys()) expect(DETERMINISTIC.map((gate) => gate.id)).toContain(id);
   });
 
