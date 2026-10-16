@@ -943,3 +943,158 @@ describe('ship --base: the hunk-level verdict is taken before any branch exists 
     expect(remoteBranchExists(bare, 'feat/again')).toBe(false);
   });
 });
+
+/** A caller commit on top of the fork point, with `.git/shallow` grafted at `graft`. Grafting at the
+ *  caller commit hides the fork point, so `merge-base` exits 1 exactly as in a depth-1 CI clone. */
+function shallowCaller(git: ReturnType<typeof seedForked>['git'], dir: string, graft?: string) {
+  writeFileSync(join(dir, 'other.txt'), 'caller commit\n');
+  git(['add', 'other.txt'], { stdio: 'ignore' });
+  git(['commit', '-q', '-m', 'caller commit'], { stdio: 'ignore' });
+  writeFileSync(join(dir, '.git', 'shallow'), `${graft ?? git(['rev-parse', 'HEAD']).trim()}\n`);
+  expect(git(['rev-parse', '--is-shallow-repository']).trim()).toBe('true');
+}
+
+function mergeBaseStatus(dir: string) {
+  execFileSync('git', ['fetch', '-q', 'origin', 'base'], {
+    cwd: dir,
+    env: { ...process.env, ...GIT_ENV },
+  });
+  return spawnSync('git', ['merge-base', 'FETCH_HEAD', 'HEAD'], { cwd: dir, encoding: 'utf8' })
+    .status;
+}
+
+describe('ship --base in a shallow clone (sc-3920)', () => {
+  it('REFUSES before any branch when the graft hides the fork point and the base moved', () => {
+    const { dir, env, git, bare } = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
+    advanceBase(bare, (c) => writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l10', 'l10-BASE')));
+    shallowCaller(git, dir);
+    expect(mergeBaseStatus(dir)).toBe(1); // non-vacuity: no fork point is visible
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
+
+    const r = ship(dir, env, 'feat/shallow', ['f.txt']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('cannot find where this checkout forked from origin/base');
+    expect(r.stderr).toContain('git fetch --unshallow');
+    expect(r.stderr).toContain(PREFLIGHT_BLOCK);
+    expect(localBranchExists(git, 'feat/shallow')).toBe(false);
+  });
+
+  it('REFUSES the same way when the base did NOT move — a shallow clone cannot tell the two apart', () => {
+    const { dir, env, git } = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
+    shallowCaller(git, dir);
+    expect(mergeBaseStatus(dir)).toBe(1);
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
+
+    const r = ship(dir, env, 'feat/shallowsync', ['f.txt']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('git fetch --unshallow');
+    expect(r.stderr).not.toContain('moved to'); // never claims a drift it cannot see
+    expect(localBranchExists(git, 'feat/shallowsync')).toBe(false);
+  });
+
+  it('three-way merges as usual when the fork point is still inside the shallow history', () => {
+    const { dir, env, git, bare, forkPoint } = seedForked((d) =>
+      writeFileSync(join(d, 'f.txt'), TEN_LINES),
+    );
+    advanceBase(bare, (c) => writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l10', 'l10-BASE')));
+    shallowCaller(git, dir, forkPoint);
+    expect(mergeBaseStatus(dir)).toBe(0);
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
+
+    const r = ship(dir, env, 'feat/shallowok', ['f.txt']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('anchored at the fork point');
+    const shipped = git(['show', 'feat/shallowok:f.txt']);
+    expect(shipped).toContain('l1-CALLER');
+    expect(shipped).toContain('l10-BASE');
+  });
+
+  it('never refuses a default-arm ship (no --base) from the same shallow clone', () => {
+    // BASE=HEAD there, so merge-base resolves even with every parent grafted away.
+    const { dir, env, git } = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
+    shallowCaller(git, dir);
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/shallowdef', 'ship it', '--', 'f.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toContain('cannot find where this checkout forked');
+    expect(git(['show', 'feat/shallowdef:f.txt'])).toContain('l1-CALLER');
+  });
+
+  it('does not claim "before creating a branch" when a preserved branch already exists', () => {
+    const { dir, env, git, bare } = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
+    advanceBase(bare, (c) => writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l10', 'l10-BASE')));
+    shallowCaller(git, dir);
+    git(['branch', 'feat/shallowagain']); // a prior attempt's branch
+    const before = git(['rev-parse', 'feat/shallowagain']).trim();
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
+
+    // Non-dry: a dry run refuses any existing branch before this check is reached.
+    const r = ship(dir, env, 'feat/shallowagain', ['f.txt'], { SHIP_DRY_RUN: '' });
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('git fetch --unshallow');
+    expect(r.stderr).not.toContain(PREFLIGHT_BLOCK);
+    expect(git(['rev-parse', 'feat/shallowagain']).trim()).toBe(before);
+    expect(remoteBranchExists(bare, 'feat/shallowagain')).toBe(false);
+  });
+
+  it('refuses rather than falling back to BASE when merge-base fails with an exit other than 1', () => {
+    // A full clone, so only the exit code separates this from the unrelated-histories fallback.
+    const { dir } = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
+    const bogus = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+    const probe = (base: string) =>
+      spawnSync(
+        '/bin/bash',
+        ['-c', '. "$1"; ship_patch_base "$2" "$3"', '_', anchorPath, dir, base],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, ...GIT_ENV },
+        },
+      );
+    expect(spawnSync('git', ['-C', dir, 'merge-base', bogus, 'HEAD']).status).toBe(128);
+
+    const r = probe(bogus);
+
+    expect(r.status).toBe(1);
+    expect(r.stdout).toBe('');
+  });
+});
+
+describe('ship --base: briefed paths only the base changed stay byte-identical to the base', () => {
+  it('keeps a base-modified, base-added and base-deleted file exactly as the base has them', () => {
+    const { dir, env, git, bare } = seedForked((d) => {
+      writeFileSync(join(d, 'f.txt'), TEN_LINES);
+      writeFileSync(join(d, 'm.txt'), 'fork\n');
+      writeFileSync(join(d, 'd.txt'), 'doomed\n');
+    });
+    const advancedTip = advanceBase(bare, (c) => {
+      writeFileSync(join(c, 'm.txt'), 'base edit\n');
+      writeFileSync(join(c, 'a.txt'), 'base add\n');
+      rmSync(join(c, 'd.txt'));
+    });
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
+
+    const r = ship(dir, env, 'feat/baseonly', ['f.txt', 'm.txt', 'a.txt', 'd.txt']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(git(['rev-parse', 'feat/baseonly^']).trim()).toBe(advancedTip);
+    // Every briefed path but the caller's own edit is byte-identical to the refreshed base.
+    expect(git(['diff', '--name-only', advancedTip, 'feat/baseonly']).trim()).toBe('f.txt');
+  });
+});
