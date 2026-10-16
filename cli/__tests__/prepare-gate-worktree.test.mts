@@ -19,6 +19,9 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { coverageMapSchema } from '../../gate-engine/coverage/fallow-copy.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../lib/ship/preflight/baseline-reader.mts'));
+
 // Gate dependencies (.husky/_, node_modules, coverage) are all GITIGNORED, so `git worktree add`
 // never brings them across. The consumer root can itself be a linked worktree — devkit's own stated
 // premise ("parallel agents share one working tree"), and what any tool spawning per-task worktrees

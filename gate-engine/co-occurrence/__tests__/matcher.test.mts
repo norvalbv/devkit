@@ -6,6 +6,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../matcher.mts'));
+
 // The gate's exit-code contract is what a pre-commit hook depends on — a flipped
 // code silently bricks every commit or stops blocking dups. Pin it with a fixture
 // index (SEARCH_CODE_DB seam) so the test is deterministic, no real index needed.

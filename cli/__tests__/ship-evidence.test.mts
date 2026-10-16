@@ -21,6 +21,9 @@ import {
   seedShipRepoLocalRemote,
 } from './_ship-branch-fixture.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../lib/ship/evidence/run.mts'));
+
 const RUN = fileURLToPath(new URL('../lib/ship/evidence/run.mts', import.meta.url));
 const VITEST = fileURLToPath(new URL('../../node_modules/vitest/vitest.mjs', import.meta.url));
 const COMMAND = [

@@ -11,6 +11,8 @@ function fakeExec(status: number | null) {
   }));
 }
 
+const REACH = 'cli/__tests__/test-graph-reach.test.mts';
+
 const dirs: string[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
@@ -78,9 +80,16 @@ describe('runRelatedTests', () => {
     expect(runRelatedTests('/repo', { staged: ['cli/a.mts'], exec })).toBe(1);
     expect(exec).toHaveBeenCalledWith(
       join('/repo', 'node_modules', '.bin', 'vitest'),
-      ['related', '--run', '--reporter=dot', 'cli/a.mts'],
+      ['related', '--run', '--reporter=dot', 'cli/a.mts', REACH],
       { cwd: '/repo', stdio: 'inherit' },
     );
+  });
+
+  it('passes the reach test once, even when it is itself staged', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exec = fakeExec(0);
+    runRelatedTests('/repo', { staged: [REACH], exec });
+    expect(exec.mock.calls[0][1]).toEqual(['related', '--run', '--reporter=dot', REACH]);
   });
 
   it('blocks when vitest is killed or cannot spawn', () => {
@@ -97,7 +106,7 @@ describe('runRelatedTests', () => {
     runRelatedTests(repo, { exec });
     expect(exec).toHaveBeenCalledWith(
       expect.any(String),
-      ['related', '--run', '--reporter=dot', 'a.mts'],
+      ['related', '--run', '--reporter=dot', 'a.mts', REACH],
       expect.anything(),
     );
   });
@@ -122,7 +131,7 @@ describe('runRelatedTests', () => {
     runRelatedTests(repo, { exec });
     expect(exec).toHaveBeenCalledWith(
       expect.any(String),
-      ['related', '--run', '--reporter=dot', 'b.mts'],
+      ['related', '--run', '--reporter=dot', 'b.mts', REACH],
       expect.anything(),
     );
   });

@@ -18,6 +18,9 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { testSpawnSync } from './_helpers.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../lib/ship/dependency-preflight.mts'));
+
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const PRE_PUSH_HOOK = join(REPO_ROOT, '.husky/pre-push');
 const ZERO_OID = '0000000000000000000000000000000000000000';

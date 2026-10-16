@@ -33,6 +33,9 @@ import {
 import { LOCK_TIMEOUT_PREFIX, reapIfDead, withQueueLock } from '../lib/ship/queue/queue-lock.mts';
 import { currentGate, formatShipQueue, readShipQueue } from '../lib/ship/queue/status.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../lib/ship/queue/slot.mts'));
+
 const HOLDER = fileURLToPath(new URL('./_ship-queue-holder.mts', import.meta.url));
 const ARGS_SH = fileURLToPath(new URL('../lib/ship/wait-ci/args.sh', import.meta.url));
 const SLOT_SH = fileURLToPath(new URL('../lib/ship/queue/slot.sh', import.meta.url));

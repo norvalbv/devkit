@@ -9,6 +9,9 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { stagedSet } from '../../../../gate-engine/ratchets/git-index.mts';
 
+// Runs with every selection: it fails when a module is left unreachable to `vitest related` itself.
+const REACH_TEST = 'cli/__tests__/test-graph-reach.test.mts';
+
 // vitest's forceRerunTriggers (**/package.json, **/{vitest,vite}.config.*, setupFiles) select the
 // whole suite, which CI already runs.
 const RERUN_TRIGGER_RE = /(^|\/)(package\.json|(vitest|vite)\.config\.[^/]*)$|^vitest\.setup\.mjs$/;
@@ -38,7 +41,7 @@ export function runRelatedTests(root: string, opts: RunOpts = {}): number {
   }
   console.log(`related-tests: ${paths.length} staged path(s)`);
   const vitest = join(root, 'node_modules', '.bin', 'vitest');
-  const args = ['related', '--run', '--reporter=dot', ...paths];
+  const args = ['related', '--run', '--reporter=dot', ...new Set([...paths, REACH_TEST])];
   const result = (opts.exec ?? spawnSync)(vitest, args, { cwd: root, stdio: 'inherit' });
   if (result.error) console.error(`✗ related-tests could not run vitest: ${result.error.message}`);
   // A null status is a signal kill or a failed spawn: nothing passed, so block.

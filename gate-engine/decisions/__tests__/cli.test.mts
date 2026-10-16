@@ -6,6 +6,9 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseIndex, renderIndex } from '../decision-format.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../cli.mts'));
+
 // cli.mts (not decisions.mts) is the real `guard-decisions` bin — `categories` is dispatched there
 // (see cli.mts's `run`), so this exercises the ACTUAL entrypoint a user invokes, not an internal fn.
 const SCRIPT = fileURLToPath(new URL('../cli.mts', import.meta.url));
