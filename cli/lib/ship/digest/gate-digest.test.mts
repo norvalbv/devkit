@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { blockingFields } from '../../../../gate-engine/review/evidence/items.mts';
 import { blockingNote } from '../../../../gate-engine/review/overrides.mts';
+import { summariseFallowAudit } from '../../../../gate-engine/judge/advisory/emit.mts';
 import { type GateEvent, readShipEvents, render, summarise } from './gate-digest.mts';
 
 const SHIP = 'ship-1';
@@ -455,6 +456,31 @@ describe('advisory_result', () => {
       expect(text).toContain(`⚠ ui-evidence — advisory, did NOT block this run: ${detail}`);
       expect(text).not.toContain('retrying');
     }
+  });
+
+  it("keeps the first introduced finding's name inside the row cap, however deep its path", () => {
+    const findings = [
+      {
+        path: 'gate-engine/review/eval/reviewers/scale/lens-run.mts',
+        name: 'runOne',
+        line: 366,
+        introduced: true,
+      },
+      { path: 'gate-engine/review/eval/reviewers/scale/lens-run.mts', name: 'b', introduced: true },
+    ];
+    const audit = {
+      verdict: 'fail',
+      attribution: { complexity_introduced: 2 },
+      complexity: { findings },
+    };
+    const detail = summariseFallowAudit(JSON.stringify(audit))?.detail ?? '';
+    const text = render(
+      summarise(
+        [ev({ type: 'ship_attempt' }), advisory('fallow-advisory', 'finding', detail)],
+        SHIP,
+      ),
+    );
+    expect(text).toContain('2 complexity introduced: lens-run.mts:366 runOne');
   });
 
   it('can never be rendered as the blocker, even when the run failed unattributably', () => {
