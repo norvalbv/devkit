@@ -100,13 +100,17 @@ describe('inspectSkillProjectionIntegrity', () => {
     write(root, '.claude/skills/review/SKILL.md', '# stale\n');
     write(root, '.cursor/skills/review/extra.md', 'orphan\n');
     rmSync(join(root, '.cursor/skills/review/references/checklist.md'));
-    write(root, 'dist/skills/review/references/checklist.md', 'stale\n');
+    write(root, 'dist/skills/review/references/checklist.md', 'lagging\n');
+    rmSync(join(root, 'dist/skills/review/SKILL.md'));
+    write(root, 'dist/skills/gone/SKILL.md', 'orphan\n');
 
+    // A tracked dist file lagging its source is release-only by design, so it is not drift.
     expect(inspectSkillProjectionIntegrity(root).findings.sort()).toEqual([
       'missing .cursor/skills/review/references/checklist.md',
+      'missing dist/skills/review/SKILL.md',
       'orphan .cursor/skills/review/extra.md',
+      'orphan dist/skills/gone/SKILL.md',
       'stale .claude/skills/review/SKILL.md',
-      'stale dist/skills/review/references/checklist.md',
     ]);
   });
 

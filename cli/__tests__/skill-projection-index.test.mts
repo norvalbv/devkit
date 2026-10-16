@@ -213,6 +213,12 @@ describe('skill projection advisory reads the commit index (sc-2759)', () => {
     expect(inspectSkillProjectionIntegrity(root).findings).toEqual([
       'unreadable skills/review/SKILL.md',
     ]);
+
+    // Without a packaged copy too, it stays one finding: `missing dist` needs a readable source.
+    git(root, ['rm', '-q', '--cached', 'dist/skills/review/SKILL.md']);
+    expect(inspectSkillProjectionIntegrity(root).findings).toEqual([
+      'unreadable skills/review/SKILL.md',
+    ]);
   });
 
   it('stands down with one unchecked finding when the index has unmerged paths', () => {
@@ -251,27 +257,45 @@ describe('skill projection advisory reads the commit index (sc-2759)', () => {
     expect(loud).toContain('then `git add` the result');
   });
 
-  it('never tells an agent to stage a rebuilt tracked dist file (release-only, sc-2467)', () => {
+  it('stays silent on a tracked dist file lagging its source (release-only dist)', () => {
     const root = devkitGitRepo();
-    write(root, 'dist/skills/review/SKILL.md', '# rebuilt\n');
-    git(root, ['add', 'dist']);
-    const stderr: string[] = [];
+    // What another PR's skills/ edit leaves behind until the next release rebuilds dist.
+    write(root, 'skills/review/SKILL.md', '# Review v2\n');
+    for (const target of ['claude', 'cursor'])
+      write(root, `${agentAssetDir(target, 'skills')}/review/SKILL.md`, '# Review v2\n');
+    git(root, ['add', '-A']);
+
+    expect(inspectSkillProjectionIntegrity(root).findings).toEqual([]);
+    // Empty output also means no advisory_result row: the emitter shares the empty-findings guard.
+    expect(
+      execFileSync('sh', ['-c', 'node "$0" --root "$1" 2>&1', script, root], {
+        encoding: 'utf8',
+        timeout: SPAWN_TIMEOUT_MS,
+      }),
+    ).toBe('');
+  });
+
+  it('names a byte copy, never a rebuild, for a new skill file missing its dist copy', () => {
+    const root = devkitGitRepo();
+    for (const dir of ['skills', ...['claude', 'cursor'].map((t) => agentAssetDir(t, 'skills'))])
+      write(root, `${dir}/fresh/SKILL.md`, '# Fresh\n');
+    git(root, ['add', '-A']);
     const report = inspectSkillProjectionIntegrity(root);
-    const spy = (line: string) => stderr.push(line);
+    expect(report.findings).toEqual(['missing dist/skills/fresh/SKILL.md']);
+
+    const stderr: string[] = [];
     const original = console.error;
-    console.error = spy;
+    console.error = (line: string) => stderr.push(line);
     try {
       printSkillProjectionWarning(report);
     } finally {
       console.error = original;
     }
-
     const output = stderr.join('\n');
-    expect(output).toContain('stale dist/skills/review/SKILL.md');
-    expect(output).toContain('release-only');
-    // Dist-only drift has no provider repair, so no sync line and no staging instruction at all.
+    expect(output).toContain('`git add -f`');
+    expect(output).not.toContain('bun run build');
+    // Dist-only drift has no provider repair, so no sync line.
     expect(output).not.toContain('sync-skills');
-    expect(output).not.toContain('git add');
   });
 
   it('classifies dist findings by their path, not a substring of a provider path', () => {

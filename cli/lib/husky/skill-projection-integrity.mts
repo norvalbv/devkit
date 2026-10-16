@@ -69,6 +69,7 @@ function readConfig(reader: SnapshotReader): SelfHostConfig | null {
   }
 }
 
+// Missing and orphan only: a tracked dist file lagging its source is release-only by design.
 function distDrift(reader: SnapshotReader): string[] {
   const sourceFiles = reader.list('skills');
   const expected = new Set(sourceFiles);
@@ -76,11 +77,8 @@ function distDrift(reader: SnapshotReader): string[] {
   const drift: string[] = [];
 
   for (const rel of sourceFiles) {
-    const source = reader.read(`skills/${rel}`);
-    if (!source) continue; // reported once as `unreadable` by projectionDrift
-    if (!present.has(rel)) drift.push(`missing dist/skills/${rel}`);
-    else if (!reader.read(`dist/skills/${rel}`)?.equals(source))
-      drift.push(`stale dist/skills/${rel}`);
+    // An unreadable source is reported once, as `unreadable`, by projectionDrift.
+    if (!present.has(rel) && reader.read(`skills/${rel}`)) drift.push(`missing dist/skills/${rel}`);
   }
   for (const rel of present) if (!expected.has(rel)) drift.push(`orphan dist/skills/${rel}`);
   return drift;
@@ -181,10 +179,10 @@ export function printSkillProjectionWarning(report: SkillProjectionIntegrityRepo
       `  Repair missing/stale provider files with \`${selfHostCommand(SYNC_SKILLS)}\`${stage}.`,
     );
   }
-  // Never `git add` a rebuilt tracked dist file: CI refuses a PR that rewrites one (sc-2467).
+  // Never a rebuild: CI refuses a PR that rewrites a tracked dist file.
   if (repairs.some(isDist))
     console.error(
-      '  dist/ is release-only: leave stale tracked dist files out of a PR (CI refuses the rewrite); stage only new ones.',
+      '  New dist/skills files ship with their source: copy skills/<rel> byte-for-byte to dist/skills/<rel> and `git add -f` it (dist/ is release-only; do not rebuild tracked dist).',
     );
   if (orphans.length) {
     console.error('  Orphans (sync never removes these; remove orphan files explicitly):');
