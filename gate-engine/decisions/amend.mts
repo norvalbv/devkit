@@ -19,6 +19,7 @@ import {
   warnIfFolded,
   whyHook,
 } from './decision-format.mts';
+import { noteTextWithRelation } from './recall/note-relations.mts';
 import { effectiveScope } from './recall/retrieval.mts';
 
 export interface DecisionPaths {
@@ -191,6 +192,17 @@ function warnTargetReplacement(
   }
 }
 
+/** Name the declared supersession a note amendment drops by not re-passing --supersedes. */
+function warnDroppedAmends(replacedText: string, supersedes: string | undefined) {
+  if (supersedes?.trim() || !replacedText.replace(NOTE_PREFIX_RE, '').startsWith('**Amends:**')) {
+    return;
+  }
+  console.error(
+    'warning: the replaced note carried **Amends:** and this amendment omits --supersedes; ' +
+      'pass the flag again to keep it.',
+  );
+}
+
 function regenerateIndex(paths: DecisionPaths) {
   const previous = existsSync(paths.indexPath)
     ? parseIndex(readFileSync(paths.indexPath, 'utf8'))
@@ -300,11 +312,13 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
   const source = workingParsed.body;
   const before = source.slice(0, selected.start).replace(TRAILING_WS_RE, '');
   if (!(options.isTarget && hasTargetFields(options))) {
-    const body = `${before}\n${renderNote(date, options.note ?? '')}\n`;
+    const note = noteTextWithRelation(options.note ?? '', options.supersedes, before, slug);
+    const body = `${before}\n${renderNote(date, note)}\n`;
     writeFileAtomic(
       file,
       renderDecision({ slug, created: workingParsed.fm.created || date }, body),
     );
+    warnDroppedAmends(selected.text, options.supersedes);
     console.log(`Amended draft note on "${slug}" (${date}).`);
     return;
   }

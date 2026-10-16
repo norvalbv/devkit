@@ -382,6 +382,79 @@ describe('guard-decisions add --note --supersedes (via cli.mts, the real bin)', 
     expect(run(['add', 'my-axis', '--note', 'plain convergence']).status).toBe(0);
     expect(readFileSync(join(dir, 'my-axis.md'), 'utf8')).not.toContain('**Amends:**');
   });
+
+  it('refuses a pointer qualified with the axis own slug that names no note on it', () => {
+    seed();
+    const r = run(['add', 'my-axis', '--note', 'nope', '--supersedes', 'my-axis#note:2020-01-01']);
+    expectRefusal(r);
+    expect(r.stderr).toContain('names no note on this axis');
+  });
+});
+
+// amend --note rewrites the newest draft note, so it must validate --supersedes exactly as add does,
+// against the history BEFORE that draft: the draft can never be named as its own predecessor.
+describe('guard-decisions amend --note --supersedes (via cli.mts, the real bin)', () => {
+  const file = () => readFileSync(join(dir, 'my-axis.md'), 'utf8');
+  // The reported shape: the superseded note is committed, the note being amended is still a draft.
+  const seedTwoNotes = () => {
+    const git = (args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+    git(['init', '-q']);
+    expect(run(['add', 'my-axis', '--target', '--new', ...reqFlags('my-axis')]).status).toBe(0);
+    expect(run(['add', 'my-axis', '--note', 'first']).status).toBe(0);
+    git(['add', '-A']);
+    git(['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'base']);
+    expect(run(['add', 'my-axis', '--note', 'draft']).status).toBe(0);
+  };
+
+  it.each(['note:2026-07-26', 'my-axis#note:2026-07-26'])(
+    'writes the Amends marker for %s on the amended draft note',
+    (id) => {
+      seedTwoNotes();
+      const r = run(['amend', 'my-axis', '--supersedes', id, '--note', 'draft v2']);
+      expect(r.status, r.stderr).toBe(0);
+
+      expect(file()).toContain(`- 2026-07-26 — **Amends:** ${id} — draft v2`);
+      expect(file()).not.toContain('— draft\n');
+      expect(run(['integrity']).status).toBe(0);
+    },
+  );
+
+  // Only the corpus-wide scan can read another axis, so the write must not refuse a foreign pointer.
+  it('still accepts a pointer into another axis unresolved', () => {
+    seedTwoNotes();
+    const r = run([
+      'amend',
+      'my-axis',
+      '--supersedes',
+      'other-axis#note:2020-01-01',
+      '--note',
+      'x',
+    ]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(file()).toContain('**Amends:** other-axis#note:2020-01-01 — x');
+  });
+
+  it.each([
+    ['a note the axis does not have', 'note:2020-01-01'],
+    ['the draft itself', 'note:2026-07-26~2'],
+    ['the draft itself, slug-qualified', 'my-axis#note:2026-07-26~2'],
+  ])('refuses %s and leaves the record unchanged', (_label, id) => {
+    seedTwoNotes();
+    const before = file();
+    const r = run(['amend', 'my-axis', '--supersedes', id, '--note', 'draft v2']);
+    expectRefusal(r);
+    expect(r.stderr).toContain('names no note on this axis');
+    expect(file()).toBe(before);
+  });
+
+  it('warns when re-amending a tagged draft drops its Amends marker', () => {
+    seedTwoNotes();
+    run(['amend', 'my-axis', '--supersedes', 'note:2026-07-26', '--note', 'draft v2']);
+    const r = run(['amend', 'my-axis', '--note', 'draft v3']);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('omits --supersedes');
+    expect(file()).not.toContain('**Amends:**');
+  });
 });
 
 describe('retrieval unavailable (the parser dependency cannot resolve)', () => {
