@@ -50,6 +50,25 @@ describe('prior-art agent: reference checkouts resolve from a linked worktree', 
   });
 });
 
+describe('prior-art agent: a layer standard travels as a note the skill relays', () => {
+  const flat = (rel: string) => read(rel).replace(/\s+/g, ' ');
+  const agent = flat('agents/prior-art.md');
+
+  it('emits the same Layer: sentence the skill relays to the user', () => {
+    expect(agent).toContain('`Layer: <seam> — <standard> (<url>)`');
+    expect(flat('skills/prior-art/SKILL.md')).toContain('A `Layer:` sentence in `summary`');
+  });
+
+  it('never lets the layer change a verdict, and stays silent once a ruling covers it', () => {
+    expect(agent).toContain(
+      'never by itself changes the verdict of a problem stated below the layer',
+    );
+    expect(agent).toContain(
+      'or when a Settled Axis or decision Target already rules on adopting it',
+    );
+  });
+});
+
 describe('resolveGuardConfig: research.referenceCheckouts', () => {
   /** The resolved list for a guard.config.json whose referenceCheckouts is this raw JSON text. */
   const resolve = (json: string) =>
