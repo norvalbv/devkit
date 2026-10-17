@@ -1017,3 +1017,86 @@ describe('a reviewer blocking on several fingerprints (sc-3212)', () => {
     expect(rows.map((r) => r.fp)).toEqual(THREE.map((b) => b.fp));
   });
 });
+
+describe('a finding that did not block says why', () => {
+  const ended = (blocked: string | null, exitCode: number) =>
+    ev({ type: 'ship_result', blocked_gate: blocked, exit_code: exitCode });
+  const line = (events: GateEvent[]) =>
+    render(summarise(events, SHIP))
+      .split('\n')
+      .find((l) => l.includes('⚠ completeness')) ?? '';
+
+  it('names the gate that stopped the run first', () => {
+    const text = line([
+      reviewFail('correctness', 'bug'),
+      completenessFail('gap'),
+      ended('review', 1),
+    ]);
+    expect(text).toBe(
+      '   ⚠ completeness — finding recorded, did NOT block this run only because review:correctness stopped it first — read it before retrying: gap',
+    );
+  });
+
+  it('names a reviewer with several blocking fingerprints once', () => {
+    const blocking = [
+      { lens: 'a', fp: 'aaaaaaaaaaaa' },
+      { lens: 'b', fp: 'bbbbbbbbbbbb' },
+    ];
+    const fail = ev({ type: 'review_result', reviewer: 'correctness', status: 'fail', blocking });
+    expect(line([fail, completenessFail('gap'), ended('review', 1)])).toContain(
+      'only because review:correctness stopped it first',
+    );
+  });
+
+  it('names a strict-mode inconclusive reviewer as the blocker', () => {
+    const inconclusive = ev({
+      type: 'review_result',
+      reviewer: 'security',
+      status: 'inconclusive',
+      inconclusive_cause: 'timeout',
+    });
+    expect(line([inconclusive, completenessFail('gap'), ended('review', 1)])).toContain(
+      'only because review:security stopped it first',
+    );
+  });
+
+  it('says the run ended on a non-gate cause when no row blocked', () => {
+    const text = line([completenessFail('gap'), ended('timeout', 124)]);
+    expect(text).toContain('did NOT block this run, which ended on timeout, not on a gate finding');
+    expect(text).not.toContain('stopped it first');
+  });
+
+  it('says the gate let a passing run through, without claiming the finding was cleared', () => {
+    const text = line([completenessFail('gap'), ended(null, 0)]);
+    expect(text).toContain(
+      'did NOT block this run (its gate let the run pass) — read it before merging',
+    );
+    expect(text).not.toContain('stopped it first');
+  });
+});
+
+describe('the why clause over real-world sink shapes', () => {
+  // A non-string blocked_gate reads as unattributed: a throw here silenced the whole digest.
+  it('survives a non-string blocked_gate', () => {
+    const sink = sinkWith([
+      `{"ship_id":"${SHIP}","type":"gate_result","gate":"completeness","family":"review","status":"fail","detail":"gap"}`,
+      `{"ship_id":"${SHIP}","type":"ship_result","blocked_gate":{"toString":1},"exit_code":1}`,
+    ]);
+    const text = render(summarise(readShipEvents(sink, SHIP), SHIP));
+    expect(text).toContain('⚠ completeness — finding recorded — read it before retrying: gap');
+    expect(text).not.toContain('did NOT block');
+  });
+
+  // The parallel judge often finishes before the fleet, so its row lands FIRST in the sink.
+  it('names the fleet blocker whichever row the sink recorded first', () => {
+    const rows = summarise(
+      [
+        completenessFail('gap'),
+        reviewFail('correctness', 'bug'),
+        ev({ type: 'ship_result', blocked_gate: 'review', exit_code: 1 }),
+      ],
+      SHIP,
+    );
+    expect(render(rows)).toContain('only because review:correctness stopped it first');
+  });
+});
