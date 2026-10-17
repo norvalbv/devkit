@@ -38,9 +38,11 @@ describe('prior-art agent: reference checkouts resolve from a linked worktree', 
   });
 
   it("reads the main worktree's config when a linked worktree lacks its git-ignored copy", () => {
-    const context = read('agents/prior-art.md').split('</architecture_context>')[0];
+    const context = read('agents/prior-art.md')
+      .split('</architecture_context>')[0]
+      .replace(/\s+/g, ' ');
     expect(context).toContain('`git check-ignore -q guard.config.json`');
-    expect(context).toContain('same directory of the\nmain worktree');
+    expect(context).toContain('same directory of the main worktree');
   });
 
   it('ships the same text to every synced agent surface', () => {

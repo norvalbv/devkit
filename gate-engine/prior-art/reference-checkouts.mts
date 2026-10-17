@@ -83,16 +83,18 @@ function worktreeRoots(cwd: string): WorktreeRoots {
   return { own, counterpart };
 }
 
+/** cwd's roots when it lacks its git-ignored guard.config.json, so the main worktree's copy is read. */
+function borrowedRoots(cwd: string): WorktreeRoots | null {
+  if (existsSync(path.join(cwd, CONFIG_FILENAME))) return null;
+  return git(cwd, ['check-ignore', '-q', CONFIG_FILENAME]) === null ? null : worktreeRoots(cwd);
+}
+
 /**
  * A linked worktree without its git-ignored guard.config.json reads the main worktree's, as
  * projection links it. A broken config throws: its 0 would not be an honest 0.
  */
 export function resolveReferenceCheckouts(cwd: string = process.cwd()): ReferenceCheckouts {
-  const borrowed =
-    !existsSync(path.join(cwd, CONFIG_FILENAME)) &&
-    git(cwd, ['check-ignore', '-q', CONFIG_FILENAME]) !== null
-      ? worktreeRoots(cwd)
-      : null;
+  const borrowed = borrowedRoots(cwd);
   const base = borrowed?.counterpart ?? cwd;
   const declared = resolveGuardConfig(base).research.referenceCheckouts;
   if (!declared.length) return { declared, resolved: [] };

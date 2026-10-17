@@ -185,7 +185,7 @@ describe('resolveReferenceCheckouts in a linked worktree without its git-ignored
     git(root, 'clone', '-q', '--bare', main, bare);
     git(bare, 'worktree', 'add', '-q', fromBare);
     appendFileSync(path.join(bare, 'info', 'exclude'), '\n/guard.config.json\n');
-    declare(['sib-a'], root);
+    declare(['sib-a'], root, bare);
     expect(resolveReferenceCheckouts(fromBare)).toEqual({ declared: [], resolved: [] });
   });
 
