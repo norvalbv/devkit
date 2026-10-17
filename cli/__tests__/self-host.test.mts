@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { configExtraGates } from '../../gate-engine/deterministic/command-gates.mts';
 import { projectionDrift } from '../lib/install/agent-assets/projection-parity.mts';
 import { FORMAT_TOOL_SETUP } from '../lib/husky/format-fragment.mts';
 import { BIN_DIRS } from '../lib/husky/gate-policy/block-helpers.mts';
@@ -39,7 +40,6 @@ import {
   buildSelfHostBlock,
   buildSelfHostHook,
   isDevkitRepo,
-  SELF_HOST_EXTRAS,
   SELF_HOST_STRUCTURE_CMD,
   selfHostSelection,
   sourceBinFor,
@@ -57,11 +57,7 @@ const TEMPLATE_UNFORMATTED = 'export default {answer:42}\n';
 const TEMPLATE_FORMATTED = 'export default { answer: 42 };\n';
 const TEMPLATE_GUARD_CONFIG = '{"//backends":"comment key","backends":{"vercel":true}}\n';
 
-const HOOK_SEL = {
-  ...selfHostSelection(),
-  structureCmd: SELF_HOST_STRUCTURE_CMD,
-  extras: SELF_HOST_EXTRAS,
-};
+const HOOK_SEL = { ...selfHostSelection(), structureCmd: SELF_HOST_STRUCTURE_CMD };
 
 /**
  * Runs the fallow advisory fragment for real, against a stub `fallow` and a per-test telemetry sink.
@@ -245,14 +241,12 @@ describe('selfHostSelection', () => {
 });
 
 describe('buildSelfHostHook', () => {
-  it('emits source gates + hard deterministic extras + the structure cmd; no package bins or self-dep', () => {
+  it('emits source gates + the structure cmd, no hook-baked --extra; no package bins or self-dep', () => {
     const hook = buildSelfHostHook(HOOK_SEL, '', ROOT);
     expect(hook).toContain('node gate-engine/deterministic/run.mts');
     expect(hook).toContain('node gate-engine/review/cli.mts --gate');
     expect(hook).toContain('node gate-engine/decisions/cli.mts detect --gate');
-    expect(hook).toContain('--extra "lint=bun run lint"');
-    expect(hook).not.toContain('--extra "anti-slop=');
-    expect(hook).toContain('--extra "benchmarks=bun run benchmarks:check -- --mode staged"');
+    expect(hook).not.toContain('--extra');
     expect(hook).toContain('--structure "bun run lint:structure"');
     expect(hook).toContain('node_modules/.bin/oxfmt --threads 1 --write');
     expect(hook).toContain('(cli|gate-engine)/');
@@ -376,11 +370,11 @@ describe('buildSelfHostHook', () => {
     else expect(r.stderr).not.toContain("Ship's exact staging");
   });
 
-  it('backs the lint extra with the native Oxlint policy only', () => {
+  it('backs the lint gate with the native Oxlint policy only', () => {
     const pkg: { scripts?: Record<string, string> } = JSON.parse(
       readFileSync(join(ROOT, 'package.json'), 'utf8'),
     );
-    expect(SELF_HOST_EXTRAS).toContainEqual({ label: 'lint', cmd: 'bun run lint' });
+    expect(configExtraGates(ROOT)).toContainEqual({ label: 'lint', cmd: 'bun run lint' });
     expect(pkg.scripts?.lint).toBe('bun run lint:oxlint');
     expect(pkg.scripts?.['lint:oxlint']).toContain('--deny-warnings');
     expect(pkg.scripts?.['lint:biome']).toBeUndefined();
@@ -578,18 +572,22 @@ describe('test timeout policy', () => {
   });
 });
 
-// A `--extra` command runs with failOpen2:false, so a path typo is exit 127 and blocks EVERY
+// A command gate runs with failOpen2:false, so a path typo is exit 127 and blocks EVERY
 // commit until someone reads the aggregated report closely enough to spot it. That is the loudest
 // false-block mode these gates could introduce, and this is the cheapest possible guard against it.
-describe('self-host --extra commands are runnable', () => {
-  it('every `node <path>` extra points at a file that exists', () => {
-    const missing = SELF_HOST_EXTRAS.filter((extra) => {
-      const [bin, arg] = extra.cmd.split(/\s+/);
-      return bin === 'node' && arg !== undefined && !existsSync(join(ROOT, arg));
-    }).map((extra) => `${extra.label}: ${extra.cmd}`);
-    expect(missing, 'a `--extra` whose script is absent exits 127 and blocks every commit').toEqual(
-      [],
-    );
+describe('devkit command gates are runnable', () => {
+  it('every `node <path>` extraGates command points at a file that exists', () => {
+    const missing = configExtraGates(ROOT)
+      .filter((extra) => {
+        if (!extra.cmd) return true;
+        const [bin, arg] = extra.cmd.split(/\s+/);
+        return bin === 'node' && arg !== undefined && !existsSync(join(ROOT, arg));
+      })
+      .map((extra) => `${extra.label}: ${extra.cmd}`);
+    expect(
+      missing,
+      'a command gate whose script is absent exits 127 and blocks every commit',
+    ).toEqual([]);
   });
 });
 

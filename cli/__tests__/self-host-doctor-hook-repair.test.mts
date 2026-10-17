@@ -20,7 +20,6 @@ import { HOOK_REL, selfHostHookParity } from '../lib/husky/hook-parity.mts';
 import { extractGuardBlock } from '../lib/husky/husky-block.mts';
 import {
   buildSelfHostHook,
-  SELF_HOST_EXTRAS,
   SELF_HOST_STRUCTURE_CMD,
   selfHostSelection,
 } from '../lib/husky/self-host.mts';
@@ -49,7 +48,6 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const HOOK_SEL = {
   ...selfHostSelection(),
   structureCmd: SELF_HOST_STRUCTURE_CMD,
-  extras: SELF_HOST_EXTRAS,
 };
 const CFG = { components: {} };
 /** Everything a hook repair must leave byte-identical. */
