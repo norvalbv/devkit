@@ -45,10 +45,12 @@ import {
 
 const overlayAll = () =>
   applyOverlayConstraints({ ...defaultSelection(), agentHooks: true, fallow: true }, 'react-app');
-// comments:preflight postdates the hook ledger, so no pre-ledger configuration can carry it.
+// comments:preflight and size:post-edit postdate the hook ledger, so no pre-ledger configuration
+// can carry either.
 const preLedgerAll = () => {
   const selection = overlayAll();
-  return { ...selection, guards: selection.guards.filter((guard) => guard !== 'comments') };
+  const postLedger = new Set(['comments', 'size']);
+  return { ...selection, guards: selection.guards.filter((guard) => !postLedger.has(guard)) };
 };
 
 // Stub fallow's external CLI (detect/install/baselines) so overlay's fallow flow runs without
@@ -980,9 +982,9 @@ describe('overlay (local-only) install', () => {
     applyOverlayConstraints({
       ...defaultSelection(),
       agentHooks: false,
-      // decisions and comments are the guards that own hooks.
+      // decisions, comments and size are the guards that own hooks.
       guards: RECOMMENDED_GUARD_IDS.filter(
-        (guard) => guard !== 'decisions' && guard !== 'comments',
+        (guard) => guard !== 'decisions' && guard !== 'comments' && guard !== 'size',
       ),
       ...extra,
     });
