@@ -7,10 +7,35 @@ import { structureCmdFor } from '../lib/components.mts';
 import { eslintOverlayContent } from '../lib/install/overlay-lint-configs.mts';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import { overlayStagedStep, runHookFragment } from './_husky-hook-harness.mts';
-import { linkStubIsolatedInstall } from './_install-layouts.mts';
+import { linkIsolatedInstall, linkStubIsolatedInstall } from './_install-layouts.mts';
 
 const DEVKIT_ROOT = realpathSync(join(dirname(fileURLToPath(import.meta.url)), '../..'));
 const roots: string[] = [];
+
+// Default parser so disable comments are read; reportUnusedDisableDirectives as a strict consumer sets it.
+const ISOLATED_CONFIG = `import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createFolderStructure, createIndependentModules, projectStructurePlugin } from 'eslint-plugin-project-structure';
+
+const structure = createFolderStructure({
+  structureRoot: 'src',
+  projectRoot: dirname(fileURLToPath(import.meta.url)),
+  structure: { name: 'src', children: [{ name: 'main', children: [{ name: '{kebab-case}.ts' }] }] },
+});
+const walls = createIndependentModules({
+  modules: [{ name: 'main', pattern: 'src/main/**', allowImportsFrom: ['src/main/**'] }],
+});
+
+export default [{
+  files: ['src/**/*.ts'],
+  linterOptions: { reportUnusedDisableDirectives: 'error' },
+  plugins: { 'project-structure': projectStructurePlugin },
+  rules: {
+    'project-structure/folder-structure': ['error', structure],
+    'project-structure/independent-modules': ['error', walls],
+  },
+}];
+`;
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -120,20 +145,71 @@ export default [{
     expect(result.stdout).toContain('wrong.ts');
   });
 
-  // Without --preserve-symlinks the plugin roots at the linked checkout and finds nothing here.
-  it('names a linked isolated install could-not-run instead of passing a lint that roots elsewhere', () => {
-    const worktree = realpathSync(mkdtempSync(join(tmpdir(), 'electron-structure-isolated-')));
-    roots.push(worktree, linkStubIsolatedInstall(worktree));
-    mkdirSync(join(worktree, 'src'));
-    writeElectronConfig(worktree, "{ name: 'src', children: [{ name: 'allowed.ts' }] }");
-    writeFileSync(join(worktree, 'src', 'wrong.ts'), 'export {};\n');
-    initializeGit(worktree);
-    stage(worktree, 'package.json', 'guard.config.json', 'eslint.config.mjs', 'src/wrong.ts');
+  // Without --preserve-symlinks the plugin roots import walls at the linked checkout, so they go off
+  // and are named could-not-run; folder rules still run (and can block) via an absolute projectRoot.
+  it.each([
+    [0, 2, 'import walls (independent-modules) did not run'],
+    [1, 1, 'import walls (independent-modules) did not run'],
+    [2, 2, 'local eslint exited abnormally (status 2)'],
+  ])(
+    'a linked isolated install whose eslint exits %i lints with walls off (gate %i)',
+    (eslintExit, gateExit, notice) => {
+      const worktree = realpathSync(mkdtempSync(join(tmpdir(), 'electron-structure-isolated-')));
+      roots.push(worktree, linkStubIsolatedInstall(worktree, eslintExit));
+      mkdirSync(join(worktree, 'src'));
+      writeElectronConfig(worktree, "{ name: 'src', children: [{ name: 'allowed.ts' }] }");
+      writeFileSync(join(worktree, 'src', 'wrong.ts'), 'export {};\n');
+      initializeGit(worktree);
+      stage(worktree, 'package.json', 'guard.config.json', 'eslint.config.mjs', 'src/wrong.ts');
 
-    const result = stagedGate(worktree);
-    expect(result.status, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(2);
-    expect(`${result.stdout}\n${result.stderr}`).toContain('linked isolated install');
-  });
+      const result = stagedGate(worktree);
+      const output = `${result.stdout}\n${result.stderr}`;
+      expect(result.status, output).toBe(gateExit);
+      expect(output).toContain(
+        '"--rule","{\\"project-structure/independent-modules\\":\\"off\\"}"',
+      );
+      expect(output).not.toContain('--preserve-symlinks');
+      expect(output).toContain(notice);
+    },
+  );
+
+  // Real eslint behind an isolated-shaped link. With walls off, a walls disable comment must not
+  // become an unused-directive error, and the absolute projectRoot must still block a misnamed file.
+  it.each([
+    [null, 2],
+    ['src/main/Bad_Name.ts', 1],
+  ])(
+    'real eslint on a linked isolated shape, extra staged file %s (gate %i)',
+    (extra, gateExit) => {
+      const worktree = realpathSync(
+        mkdtempSync(join(tmpdir(), 'electron-structure-isolated-real-')),
+      );
+      roots.push(worktree, linkIsolatedInstall(worktree, join(DEVKIT_ROOT, 'node_modules')));
+      mkdirSync(join(worktree, 'src', 'main'), { recursive: true });
+      writeElectronConfig(worktree, '{}');
+      writeFileSync(join(worktree, 'eslint.config.mjs'), ISOLATED_CONFIG);
+      writeFileSync(
+        join(worktree, 'src', 'main', 'entry.ts'),
+        '// eslint-disable-next-line project-structure/independent-modules\nexport const entry = 1;\n',
+      );
+      if (extra) writeFileSync(join(worktree, extra), 'export {};\n');
+      initializeGit(worktree);
+      const staged = [
+        'package.json',
+        'guard.config.json',
+        'eslint.config.mjs',
+        'src/main/entry.ts',
+      ];
+      stage(worktree, ...staged, ...(extra ? [extra] : []));
+
+      const result = stagedGate(worktree);
+      const output = `${result.stdout}\n${result.stderr}`;
+      expect(result.status, output).toBe(gateExit);
+      expect(output).not.toContain('Unused eslint-disable directive');
+      expect(output).toContain('import walls (independent-modules) did not run');
+      if (extra) expect(output).toContain('project-structure/folder-structure');
+    },
+  );
 
   it('probes a staged deletion so a missing required index still blocks', () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'electron-structure-deletion-')));

@@ -36,13 +36,27 @@ export function installLayout(layout: InstallLayout): string {
   return join(dir, 'node_modules');
 }
 
-/** Links cwd/node_modules to a stub isolated store (eslint itself a link); returns the donor to clean up. */
-export function linkStubIsolatedInstall(cwd: string): string {
+/** Links cwd/node_modules to a stub isolated store whose eslint echoes its argv and exits `exitCode`. */
+export function linkStubIsolatedInstall(cwd: string, exitCode = 0): string {
   const donor = mkdtempSync(join(tmpdir(), 'isolated-store-'));
   const eslint = join(donor, 'node_modules', '.bun', 'eslint', 'node_modules', 'eslint');
   mkdirSync(join(eslint, 'bin'), { recursive: true });
-  writeFileSync(join(eslint, 'bin', 'eslint.js'), "process.stdout.write('[]');\n");
+  writeFileSync(
+    join(eslint, 'bin', 'eslint.js'),
+    `process.stdout.write(JSON.stringify(process.argv.slice(2)));\nprocess.exitCode = ${exitCode};\n`,
+  );
   symlinkSync(eslint, join(donor, 'node_modules', 'eslint'));
+  symlinkSync(join(donor, 'node_modules'), join(cwd, 'node_modules'));
+  return donor;
+}
+
+/** Links cwd/node_modules to an isolated-shaped store whose eslint and plugin are links into `modules`. */
+export function linkIsolatedInstall(cwd: string, modules: string): string {
+  const donor = mkdtempSync(join(tmpdir(), 'isolated-store-'));
+  mkdirSync(join(donor, 'node_modules'));
+  for (const pkg of ['eslint', 'eslint-plugin-project-structure']) {
+    symlinkSync(join(modules, pkg), join(donor, 'node_modules', pkg));
+  }
   symlinkSync(join(donor, 'node_modules'), join(cwd, 'node_modules'));
   return donor;
 }
