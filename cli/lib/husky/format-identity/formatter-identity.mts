@@ -23,7 +23,9 @@ import { parseJsonc } from './jsonc.mts';
 import {
   CONSUMER_FORMATTER,
   type ConsumerFormatter,
+  OXFMT_STEP,
   renderAgentHookLines,
+  renderOverlayOxfmtHookLines,
 } from '../format-fragment.mts';
 
 const FRAGMENT_REL = 'cli/lib/husky/format-fragment.mts';
@@ -109,6 +111,37 @@ function logicalLines(lines: string[]): string[] {
   return out;
 }
 
+/** One agent hook's disagreements with the lines the descriptors render for it (`expected`). */
+function agentHookDrift(
+  path: string,
+  text: string,
+  expected: string[],
+  tools: string[],
+  consumerTool: string,
+): string[] {
+  const out: string[] = [];
+  const lines = text.split('\n');
+  for (const line of expected.filter((line) => !lines.includes(line)))
+    out.push(`${path} no longer carries \`${line.trim()}\`, which ${FRAGMENT_REL} renders`);
+  // Any code line naming a rendered tool must be one the descriptors render, verbatim — so a bare
+  // `biome check`, a `command biome` or a backslash-continued invocation cannot slip past.
+  for (const tool of tools) {
+    const names = new RegExp(`(?<![\\w-])${tool}(?![\\w-])`);
+    for (const line of logicalLines(lines).filter(
+      (l) => names.test(withoutComment(l)) && !expected.includes(l),
+    ))
+      out.push(`${path} runs ${tool} in a line the descriptor does not render: \`${line.trim()}\``);
+  }
+  const code = lines.map(withoutComment).join('\n');
+  for (const t of OTHER_FORMATTERS.filter(
+    (t) => !tools.includes(t) && new RegExp(`\\b${t}\\b`).test(code),
+  ))
+    out.push(
+      `${path} names ${t} outside a comment while the consumer formatter is ${consumerTool}`,
+    );
+  return out;
+}
+
 /** Every disagreement between CONSUMER_FORMATTER and what devkit ships; empty = agreement. */
 export function checkFormatterIdentity(input: FormatterIdentityInput): string[] {
   const { formatter: f } = input;
@@ -126,29 +159,18 @@ export function checkFormatterIdentity(input: FormatterIdentityInput): string[] 
       out.push(
         `${SCRIPTS_REL} writes ${name}: ${JSON.stringify(input.writtenScripts[name])}, not CONSUMER_FORMATTER's \`${f.scripts[name]}\``,
       );
-  const rendered = renderAgentHookLines(f);
-  const others = OTHER_FORMATTERS.filter((t) => t !== f.tool);
-  // Any code line naming the formatter must be one the descriptor renders, verbatim — so a bare
-  // `biome check`, a `command biome` or a backslash-continued invocation cannot slip past.
-  const names = new RegExp(`(?<![\\w-])${f.tool}(?![\\w-])`);
+  // The overlay Oxfmt arm is rendered too, so oxfmt is governed by the same verbatim rule.
+  const rendered = [renderAgentHookLines(f), renderOverlayOxfmtHookLines(f)];
+  const tools = [...new Set([f.tool, OXFMT_STEP.tool])];
   for (const { path, text } of input.agentHooks) {
-    if (text === null) {
-      out.push(`${path} is missing from the commit — a governed formatter input was removed`);
-      continue;
-    }
-    const lines = text.split('\n');
-    const expected = Object.entries(rendered).flatMap(([p, ls]) => (p === path ? ls : []));
-    for (const line of expected.filter((line) => !lines.includes(line)))
-      out.push(`${path} no longer carries \`${line.trim()}\`, which ${FRAGMENT_REL} renders`);
-    for (const line of logicalLines(lines).filter(
-      (l) => names.test(withoutComment(l)) && !expected.includes(l),
-    ))
-      out.push(
-        `${path} runs ${f.tool} in a line the descriptor does not render: \`${line.trim()}\``,
-      );
-    const code = lines.map(withoutComment).join('\n');
-    for (const t of others.filter((t) => new RegExp(`\\b${t}\\b`).test(code)))
-      out.push(`${path} names ${t} outside a comment while the consumer formatter is ${f.tool}`);
+    const expected = rendered.flatMap((r) =>
+      Object.entries(r).flatMap(([p, ls]) => (p === path ? ls : [])),
+    );
+    out.push(
+      ...(text === null
+        ? [`${path} is missing from the commit — a governed formatter input was removed`]
+        : agentHookDrift(path, text, expected, tools, f.tool)),
+    );
   }
   if (!input.presets.some((p) => p.path === `${PRESET_DIR}/base.jsonc`))
     out.push(

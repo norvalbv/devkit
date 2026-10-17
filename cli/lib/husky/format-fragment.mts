@@ -92,8 +92,11 @@ export interface AgentHookLines {
   'agents-hooks/lint-check.sh': string[];
 }
 
+const probeGroup = (probes: readonly string[]) =>
+  `{ ${probes.map((p) => `[ -f "${p}" ]`).join(' || ')}; }`;
+
 export function renderAgentHookLines(f: ConsumerFormatter): AgentHookLines {
-  const gate = `{ ${f.configProbes.map((p) => `[ -f "${p}" ]`).join(' || ')}; }`;
+  const gate = probeGroup(f.configProbes);
   const bin = `[ -x "./node_modules/.bin/${f.tool}" ]`;
   return {
     'agents-hooks/format-after-edit.sh': [
@@ -113,7 +116,30 @@ export function renderAgentHookLines(f: ConsumerFormatter): AgentHookLines {
  * Extension-only: devkit cannot know a consumer's authored-file boundary, and NOT derived from
  * `sourceExtensions`, whose edits would then each be a hook-drift event. self-host swaps in a scope.
  */
-export const FORMAT_EXTENSION_FILTER = "grep -E '\\.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$'";
+export const FORMAT_EXTENSIONS = '\\.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$';
+export const FORMAT_EXTENSION_FILTER = `grep -E '${FORMAT_EXTENSIONS}'`;
+
+export const OXFMT_CHECK_ARGS = '--no-error-on-unmatched-pattern --check';
+
+/**
+ * The overlay commit chain's Oxfmt arm, in the agent hooks: only with no `consumer` config, only in
+ * an overlay checkout (whose config lives at CONFIG_ROOT, the main checkout), via the repo's own bin.
+ */
+export function renderOverlayOxfmtHookLines(consumer: ConsumerFormatter): AgentHookLines {
+  const bin = `./node_modules/.bin/${OXFMT_STEP.tool}`;
+  const gate = `! ${probeGroup(consumer.configProbes)} && ${probeGroup(OXFMT_STEP.configProbes)} && [ -x "${bin}" ] && devkit_overlay "$CONFIG_ROOT"`;
+  return {
+    'agents-hooks/format-after-edit.sh': [
+      `if [[ "$file_path" =~ ${FORMAT_EXTENSIONS} ]] && ${gate}; then`,
+      `  "${bin}" ${OXFMT_STEP.stepArgs} "$file_path" >/dev/null 2>&1 || true`,
+    ],
+    'agents-hooks/lint-check.sh': [
+      `if ${gate}; then`,
+      `    lint_output=$("${bin}" ${OXFMT_CHECK_ARGS} "\${oxfmt_files[@]}" 2>&1)`,
+      `      echo "Run '${bin} --write <file>' to auto-fix." >&2`,
+    ],
+  };
+}
 
 /**
  * Consumer policy: REPORT, never block — the bin dir belongs to the consumer, so a hoisting quirk

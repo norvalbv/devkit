@@ -105,6 +105,12 @@ js_eval() {
   fi
 }
 
+# True when the checkout at $1 was installed in overlay mode. The path travels by env, not inline JS:
+# a path may hold quotes or spaces. The catch is load-bearing: `bun -e` exits 0 on a missing file.
+devkit_overlay() {
+  DK_CFG="$1/.devkit/config.json" js_eval 'try{process.exit(JSON.parse(require("fs").readFileSync(process.env.DK_CFG,"utf8")).overlay===true?0:1)}catch{process.exit(1)}' 2>/dev/null
+}
+
 # Echo the consumer's package manager (bun|pnpm|yarn|npm), or nothing when the resolved one is not
 # installed — callers fail open rather than run a manager the repo does not use. Order:
 # package.json#packageManager (corepack's own signal; a mismatch fails under corepack strict), then

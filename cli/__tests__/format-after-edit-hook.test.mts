@@ -9,11 +9,19 @@
  * Under cli/ because vitest's include glob is ['gate-engine/**\/*.test.mjs','cli/**\/*.test.mjs'].
  */
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { hasAnyCommand, rootRegistry } from './_helpers.mts';
+import { hasAnyCommand, rootRegistry, seedSessionLedger } from './_helpers.mts';
 import { mainWithWorktree } from './_worktree-fixture.mts';
 
 const HOOK = join(
@@ -134,5 +142,156 @@ describe('format-after-edit.sh on a single JS runtime', () => {
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe('{}');
     expect(r.stderr).not.toContain('ESLINT_RAN');
+  });
+});
+
+// Overlay repos that format with their own Oxfmt: the agent hooks mirror the overlay commit chain.
+const LINT_HOOK = join(dirname(HOOK), 'lint-check.sh');
+const OXFMT_CALLS = 'oxfmt-calls.txt';
+
+// A stub oxfmt that logs its argv, prints to stdout (which must not reach the hook's JSON) and exits
+// $OXFMT_RC; a checkout whose `.devkit/config.json` holds `config`.
+const overlayRepo = (root, config: string | null = '{"overlay":true}') => {
+  if (config !== null) {
+    mkdirSync(join(root, '.devkit'), { recursive: true });
+    writeFileSync(join(root, '.devkit', 'config.json'), config);
+  }
+  writeFileSync(join(root, '.oxfmtrc.json'), '{}\n');
+  writeFileSync(join(root, 'package.json'), '{"name":"fx"}\n');
+  mkdirSync(join(root, 'node_modules', '.bin'), { recursive: true });
+  const bin = join(root, 'node_modules', '.bin', 'oxfmt');
+  writeFileSync(
+    bin,
+    `#!/bin/sh\necho "$@" >> ${OXFMT_CALLS}\necho STUB_OUT\nexit \${OXFMT_RC:-0}\n`,
+  );
+  chmodSync(bin, 0o755);
+  return root;
+};
+const oxfmtCalls = (root) =>
+  existsSync(join(root, OXFMT_CALLS)) ? readFileSync(join(root, OXFMT_CALLS), 'utf8') : '';
+
+const stopHook = (root, rc: number, { projectDir = root, cwd = undefined } = {}) => {
+  mkdirSync(join(root, 'src'), { recursive: true });
+  writeFileSync(join(root, 'src', 'a.ts'), 'export {};\n');
+  writeFileSync(join(root, 'notes.md'), '# notes\n');
+  return spawnSync('bash', [LINT_HOOK], {
+    input: JSON.stringify({ session_id: 's1', cwd }),
+    env: {
+      ...process.env,
+      CLAUDE_PROJECT_DIR: projectDir,
+      TMPDIR: seedSessionLedger(root, 's1', ['src/a.ts', 'notes.md']),
+      OXFMT_RC: String(rc),
+    },
+    encoding: 'utf8',
+  });
+};
+
+describe('format-after-edit.sh — overlay Oxfmt', () => {
+  it.each(['src/a.ts', 'src/b.mts'])('formats %s with the repo oxfmt; stdout stays {}', (rel) => {
+    const root = overlayRepo(mkTmp('fae-oxfmt-'));
+    const r = editFile(root, rel);
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe('{}');
+    expect(oxfmtCalls(root)).toBe(`--no-error-on-unmatched-pattern --write ${join(root, rel)}\n`);
+  });
+
+  it.each([
+    ['self-host', '{"selfHost":true}'],
+    ['a string flag', '{"overlay":"true"}'],
+    ['corrupt', '{"overlay":tru'],
+    ['absent', null],
+  ])('never runs oxfmt when the config is %s (devkit writes .oxfmtrc.json itself)', (_, config) => {
+    const root = overlayRepo(mkTmp('fae-oxfmt-'), config);
+    expect(editFile(root, 'src/a.ts').status).toBe(0);
+    expect(oxfmtCalls(root)).toBe('');
+  });
+
+  it('leaves the file to biome when a biome config exists, even for an .mts biome skips', () => {
+    const root = overlayRepo(mkTmp('fae-oxfmt-'));
+    writeFileSync(join(root, 'biome.json'), '{}\n');
+    editFile(root, 'src/b.mts');
+    expect(oxfmtCalls(root)).toBe('');
+  });
+
+  it('reads the overlay flag from the main checkout when the agent edits a linked worktree', () => {
+    const { main, worktree } = mainWithWorktree((p) => mkTmp(`${p}with space-`));
+    overlayRepo(main);
+    overlayRepo(worktree, null);
+    const r = editFile(worktree, 'src/a.ts', { projectDir: main, cwd: worktree });
+    expect(r.status).toBe(0);
+    expect(oxfmtCalls(worktree)).toContain(join(worktree, 'src/a.ts'));
+  });
+
+  it('finds the flag from its own install dir when CLAUDE_PROJECT_DIR is unset (Codex, Cursor)', () => {
+    const root = overlayRepo(mkTmp('fae-oxfmt-'));
+    const hooks = join(root, '.codex', 'hooks');
+    mkdirSync(hooks, { recursive: true });
+    for (const f of ['format-after-edit.sh', 'session-edits-lib.sh'])
+      copyFileSync(join(dirname(HOOK), f), join(hooks, f));
+    const abs = join(root, 'src', 'a.ts');
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, 'export const x = 1;\n');
+    const { CLAUDE_PROJECT_DIR: _, ...env } = process.env;
+    const r = spawnSync('bash', [join(hooks, 'format-after-edit.sh')], {
+      input: JSON.stringify({ file_path: abs }),
+      env,
+      encoding: 'utf8',
+    });
+    expect(r.status).toBe(0);
+    expect(oxfmtCalls(root)).toContain(abs);
+  });
+});
+
+describe('lint-check.sh — overlay Oxfmt', () => {
+  it.each([1, 2])('blocks the stop on oxfmt exit %i with its output and the fix hint', (rc) => {
+    const root = overlayRepo(mkTmp('lc-oxfmt-'));
+    const r = stopHook(root, rc);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('STUB_OUT');
+    expect(r.stderr).toContain("Run './node_modules/.bin/oxfmt --write <file>' to auto-fix.");
+    expect(oxfmtCalls(root)).toBe('--no-error-on-unmatched-pattern --check src/a.ts\n');
+  });
+
+  it('stands down when the bin cannot run (exit 127), and passes a formatted set', () => {
+    for (const rc of [127, 0]) {
+      const root = overlayRepo(mkTmp('lc-oxfmt-'));
+      expect(stopHook(root, rc).status).toBe(0);
+    }
+  });
+
+  it('still checks when the declared package manager is not installed (the PM guard sits below)', () => {
+    const root = overlayRepo(mkTmp('lc-oxfmt-'));
+    writeFileSync(join(root, 'package.json'), '{"name":"fx","packageManager":"pnpm@9.0.0"}\n');
+    const tools = ['bun', 'node', 'mktemp', 'sort', 'rm'].filter((t) => hasAnyCommand(t));
+    mkdirSync(join(root, 'src'), { recursive: true });
+    writeFileSync(join(root, 'src', 'a.ts'), 'export {};\n');
+    const r = spawnSync('bash', [LINT_HOOK], {
+      input: JSON.stringify({ session_id: 's1' }),
+      env: {
+        ...process.env,
+        PATH: isolatedPath(root, tools),
+        CLAUDE_PROJECT_DIR: root,
+        TMPDIR: seedSessionLedger(root, 's1', ['src/a.ts']),
+        OXFMT_RC: '1',
+      },
+      encoding: 'utf8',
+    });
+    expect(r.status).toBe(2);
+    expect(oxfmtCalls(root)).toContain('src/a.ts');
+  });
+
+  it('never runs oxfmt outside overlay', () => {
+    const root = overlayRepo(mkTmp('lc-oxfmt-'), '{"selfHost":true}');
+    expect(stopHook(root, 1).status).toBe(0);
+    expect(oxfmtCalls(root)).toBe('');
+  });
+
+  it('reads the overlay flag from the main checkout in a linked worktree', () => {
+    const { main, worktree } = mainWithWorktree(mkTmp);
+    overlayRepo(main);
+    overlayRepo(worktree, null);
+    const r = stopHook(worktree, 1, { projectDir: main, cwd: worktree });
+    expect(r.status).toBe(2);
+    expect(oxfmtCalls(worktree)).toContain('src/a.ts');
   });
 });
