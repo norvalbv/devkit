@@ -281,7 +281,7 @@ else
             # Literal pathspec and the blob's oid: a `:path` revision misreads `0:a.ts` as stage 0 of a.ts.
             fmt_entry=$(git --literal-pathspecs ls-files -s -- "$fmt_path" </dev/null)
             fmt_mode=${fmt_entry%% *}; fmt_oid=${fmt_entry#* }; fmt_oid=${fmt_oid%% *}
-            case "$fmt_mode" in 100644 | 100755) ;; *) continue ;; esac
+            case "$fmt_mode" in 100644 | 100755) ;; *) printf '%s\n' "$fmt_path" >>"$FMT_TMP/left"; continue ;; esac
             # Biome applies its ignore config on stdin only to a path that exists on disk.
             if [ ! -e "$fmt_path" ]; then printf '%s\n' "$fmt_path" >>"$FMT_TMP/left"; continue; fi
             git cat-file blob "$fmt_oid" >"$FMT_TMP/in" </dev/null

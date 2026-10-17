@@ -683,8 +683,11 @@ describe('format re-stage step (real git)', () => {
       expect(existsSync(join(repo, 'argv.log'))).toBe(false); // the formatter never saw either
       expect(show(repo, 'link.mts')).toBe('target.mts');
       expect(show(repo, 'gone.mts')).toBe('const g  =  1\n');
-      expect(r.stdout).toContain('left 1 staged path(s)');
+      // Named rather than skipped silently, so a symlink-only set never reads as "already formatted".
+      expect(r.stdout).toContain('left 2 staged path(s)');
+      expect(r.stdout).toContain('     link.mts');
       expect(r.stdout).toContain('     gone.mts');
+      expect(r.stdout).not.toContain('already formatted');
     });
 
     // `echo | xargs` splits on whitespace: the formatter gets two paths that do not exist and
