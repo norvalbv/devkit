@@ -27,7 +27,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   createFolderStructure,
@@ -48,10 +48,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 // The package being linted: this config's own dir, unless cwd neither holds it nor sits inside it
 // (review's merge-base run lints a sibling checkout with this config).
-const cwdUnrelated = [relative(process.cwd(), HERE), relative(HERE, process.cwd())].every((path) =>
-  path.startsWith('..'),
-);
-const ROOT = cwdUnrelated ? process.cwd() : HERE;
+function isOutside(from, to) {
+  const path = relative(from, to);
+  return path === '..' || path.startsWith(`..${sep}`) || isAbsolute(path);
+}
+const ROOT =
+  isOutside(process.cwd(), HERE) && isOutside(HERE, process.cwd()) ? process.cwd() : HERE;
 
 // The plugin roots its paths above the FIRST node_modules in its own resolved path (else at cwd).
 function structurePluginRoot() {
