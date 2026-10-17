@@ -453,6 +453,7 @@ elif [ -n "$BASE_FLAG" ]; then
   # head is not a licence to judge a live one — the check is skipped, like every other cannot-tell.
   if [ -n "$CALLER_HEAD" ]; then
     ship_base_contains_branch_point "$ROOT" "$BASE_REF" "$BASE" "$CALLER_HEAD" || exit 1
+    ship_base_inbound_note "$ROOT" "$BASE" "$CALLER_HEAD" "${PATHS[@]}"
   fi
 
   # Which of the paths being shipped ALSO moved on the base since this branch diverged (sc-2297).
