@@ -265,6 +265,8 @@ const folderStructure = createFolderStructure({
     frozen_dir_migrate_to_lib: '^$',
   },
   structureRoot: 'src/renderer',
+  // Absolute, so it overrides the plugin root derived from its own realpath behind a linked node_modules.
+  projectRoot: HERE,
   ignorePatterns: [
     'assets/**',
     'public/**',
@@ -354,6 +356,7 @@ const mainStructure = createFolderStructure({
     main_lib_domain: MAIN_LIB_DOMAINS.length ? `^(${MAIN_LIB_DOMAINS.join('|')})$` : '^$',
   },
   structureRoot: 'src/main',
+  projectRoot: HERE,
   ignorePatterns: [...mainStructureBaseline, ...mainStructureExempt],
   structure: {
     name: 'main',
@@ -409,6 +412,7 @@ const sharedStructure = createFolderStructure({
     kebab_test: '^[a-z][a-z0-9-]*(\\.[a-z0-9-]+)*\\.(test|spec)\\.ts$',
   },
   structureRoot: 'src/shared',
+  projectRoot: HERE,
   ignorePatterns: [...sharedStructureBaseline],
   structure: {
     name: 'shared',
@@ -432,6 +436,7 @@ const preloadStructure = createFolderStructure({
     kebab_test: '^[a-z][a-z0-9-]*(\\.[a-z0-9-]+)*\\.(test|spec)\\.ts$',
   },
   structureRoot: 'src/preload',
+  projectRoot: HERE,
   ignorePatterns: [...preloadStructureBaseline],
   structure: {
     name: 'preload',
@@ -479,6 +484,7 @@ const socketStructure = createFolderStructure({
     socket_lib_domain: SOCKET_LIB_DOMAINS.length ? `^(${SOCKET_LIB_DOMAINS.join('|')})$` : '^$',
   },
   structureRoot: 'socket-server/src',
+  projectRoot: HERE,
   ignorePatterns: [...socketStructureBaseline],
   structure: {
     name: 'src',
@@ -545,6 +551,7 @@ const vercelStructure = createFolderStructure({
     vercel_lib_domain: VERCEL_LIB_DOMAINS.length ? `^(${VERCEL_LIB_DOMAINS.join('|')})$` : '^$',
   },
   structureRoot: 'vercel-serverless',
+  projectRoot: HERE,
   ignorePatterns: [...vercelStructureBaseline],
   structure: {
     name: 'vercel-serverless',
