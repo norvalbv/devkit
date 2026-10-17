@@ -1,8 +1,8 @@
-// doctor's prior-art advisory: gate on + no research.referenceCheckouts = a local leg that reads
-// nothing. Advisory only — the exit code never moves on it.
+// doctor's prior-art advisory: gate or prior-art agent installed + no resolved reference checkout =
+// a local leg that reads nothing. Advisory only — the exit code never moves on it.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runSelfHostDoctor } from '../lib/doctor/self-host-doctor.mts';
@@ -27,7 +27,10 @@ function repoWith(contents: string | null): string {
 }
 
 /** Everything printPriorArtAdvisoryHealth logged for this repo and selection. */
-function advisoryFor(root: string, sel: { priorArtGate?: boolean }): string {
+function advisoryFor(
+  root: string,
+  sel: { priorArtGate?: boolean; agents?: boolean; skills?: boolean },
+): string {
   const lines: string[] = [];
   vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
     lines.push(a.join(' '));
@@ -38,9 +41,18 @@ function advisoryFor(root: string, sel: { priorArtGate?: boolean }): string {
 }
 
 describe('printPriorArtAdvisoryHealth', () => {
-  it('stays silent when the prior-art gate is off, even with nothing declared', () => {
+  it('stays silent when neither the gate nor the prior-art agent is installed', () => {
     expect(advisoryFor(repoWith(null), { priorArtGate: false })).toBe('');
     expect(advisoryFor(repoWith(null), {})).toBe('');
+    // Skills alone only dispatch the agent; without it no prior-art run reads checkouts.
+    expect(advisoryFor(repoWith(null), { skills: true, agents: false })).toBe('');
+  });
+
+  it('advises once when the gate is off but the prior-art agent is synced', () => {
+    const out = advisoryFor(repoWith(null), { priorArtGate: false, skills: true, agents: true });
+    expect(out).toContain(ADVISORY);
+    expect(out).toContain('GENUINE_NEW_WORK');
+    expect(out.split('\n')).toHaveLength(1);
   });
 
   it.each([
@@ -62,11 +74,18 @@ describe('printPriorArtAdvisoryHealth', () => {
     expect(out.split('\n')).toHaveLength(1);
   });
 
-  it('stays silent once any pattern is declared, resolved or not', () => {
-    // Doctor deliberately does not resolve the globs: a fresh clone without the siblings is a
-    // valid state, and a second resolver here could disagree with the agent's.
-    const root = repoWith('{"research":{"referenceCheckouts":["", "../does-not-exist"]}}');
+  it('stays silent once any declared pattern resolves, even if another matches nothing', () => {
+    const root = repoWith('{"research":{"referenceCheckouts":["ref", "missing"]}}');
+    mkdirSync(join(root, 'ref'));
     expect(advisoryFor(root, { priorArtGate: true })).toBe('');
+  });
+
+  it('advises once, naming the patterns, when every declared pattern resolves to nothing', () => {
+    const root = repoWith('{"research":{"referenceCheckouts":["", "missing"]}}');
+    const out = advisoryFor(root, { priorArtGate: true });
+    expect(out).toContain('none of the 1 research.referenceCheckouts pattern(s)');
+    expect(out).toContain('(missing)');
+    expect(out.split('\n')).toHaveLength(1);
   });
 
   it('does not throw on a corrupt guard.config.json, and leaves that finding to its owner', () => {
@@ -99,19 +118,12 @@ describe('the advisory is wired into every doctor mode that can reach it', () =>
     ['package', []],
     ['overlay', ['--overlay']],
   ])(
-    '%s-mode doctor prints it, and declaring the key changes the output but not the exit code',
+    '%s-mode doctor prints it with the gate off, and a resolving checkout changes only the output',
     (_mode, flags) => {
       const root = repos.tmpRepo();
       execFileSync('git', ['init', '-q'], { cwd: root });
-      const init = repos.devkit(
-        root,
-        'init',
-        '--stack',
-        'generic',
-        '--yes',
-        '--prior-art-gate',
-        ...flags,
-      );
+      // No --prior-art-gate: the synced prior-art agent alone must reach the advisory.
+      const init = repos.devkit(root, 'init', '--stack', 'generic', '--yes', ...flags);
       expect(init.status).toBe(0);
 
       const before = repos.devkit(root, 'doctor');
@@ -120,10 +132,8 @@ describe('the advisory is wired into every doctor mode that can reach it', () =>
       // An overlay may leave guard.config.json unwritten; the key is declared either way.
       const cfgPath = join(root, 'guard.config.json');
       const cfg = existsSync(cfgPath) ? JSON.parse(readFileSync(cfgPath, 'utf8')) : {};
-      writeFileSync(
-        cfgPath,
-        JSON.stringify({ ...cfg, research: { referenceCheckouts: ['../x'] } }),
-      );
+      mkdirSync(join(root, 'ref'));
+      writeFileSync(cfgPath, JSON.stringify({ ...cfg, research: { referenceCheckouts: ['ref'] } }));
       const after = repos.devkit(root, 'doctor');
       expect(after.stdout).not.toContain(ADVISORY);
       expect(after.status).toBe(before.status);
