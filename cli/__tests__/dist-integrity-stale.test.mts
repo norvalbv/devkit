@@ -1,9 +1,10 @@
 /** A briefed NEW dist artifact must match a fresh build of its source; tracked dist is never compared. */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { inspectDistIntegrity, printDistIntegrityFailure } from '../lib/ship/dist-integrity.mts';
+import { staleNewDist } from '../lib/ship/preflight/stale-new-dist.mts';
 import { buildableFixture, rootRegistry } from './_helpers.mts';
 
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
@@ -140,5 +141,27 @@ describe('inspectDistIntegrity — stale new artifacts', () => {
     await expect(inspectDistIntegrity(root, base, NEW)).rejects.toThrow(
       'no TypeScript compiler in',
     );
+  });
+
+  it('kills a compiler that ignores SIGTERM at its bound, failing closed instead of stale', () => {
+    const root = mkTmp('dist-integrity-hung-tsc-');
+    const marker = join(root, 'finished');
+    write(root, 'package.json', '{}\n');
+    write(root, 'cli/new.mts', 'export const value = 2;\n');
+    write(root, 'dist/cli/new.mjs', 'export const value = 2;\n');
+    write(root, 'node_modules/@typescript/native/package.json', '{"name":"@typescript/native"}\n');
+    write(
+      root,
+      'node_modules/@typescript/native/bin/tsc',
+      `process.on('SIGTERM', () => {});
+setTimeout(() => { require('node:fs').writeFileSync(${JSON.stringify(marker)}, ''); process.exit(0); }, 5000);\n`,
+    );
+    const toArtifact = (source: string) =>
+      source === 'cli/new.mts' ? 'dist/cli/new.mjs' : undefined;
+
+    expect(() => staleNewDist(root, ['dist/cli/new.mjs'], new Map(), toArtifact, 300)).toThrow(
+      'tsc did not finish within 0.3s',
+    );
+    expect(existsSync(marker)).toBe(false);
   });
 });
