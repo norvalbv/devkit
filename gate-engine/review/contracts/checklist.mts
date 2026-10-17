@@ -74,9 +74,6 @@ export interface SpawnDenials {
 const DENIED_SHOWN = 3;
 const FAILED_SHOWN = 3;
 
-const lensTag = (reviewer: Reviewer): string =>
-  reviewer.lens?.length ? ` [${lensGroupId(reviewer.lens)}]` : '';
-
 /** Print the FAILED items behind a voided PASS, so a retry that passes cannot erase them. Display
  * only: the retry prompt keeps names alone, so the next judge is never asked to refute its finding. */
 export function reportFailedItems(reviewer: Reviewer, state: ChecklistState | null): void {
