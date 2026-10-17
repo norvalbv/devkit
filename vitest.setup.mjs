@@ -247,6 +247,17 @@ process.env.DEVKIT_NO_TELEMETRY = '1';
   process.env.DEVKIT_JUDGE_MCP_CONFIG = file;
 }
 
+// EEXIST: an earlier host dir (or an earlier setupFiles pass) already linked this runtime; first wins.
+function linkRuntimes(dir, shimDir) {
+  for (const tool of ['bun', 'bunx', 'node'].filter((t) => existsSync(path.join(dir, t)))) {
+    try {
+      symlinkSync(path.join(dir, tool), path.join(shimDir, tool));
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+    }
+  }
+}
+
 // A developer's global devkit (e.g. ~/.bun/bin/guard-deterministic) made hook tests green locally and red
 // on CI. Drop PATH dirs holding a devkit bin; the shim re-exposes only the runtimes they also held.
 export function hermeticPath(pathValue, binNames, shimDir) {
@@ -254,16 +265,7 @@ export function hermeticPath(pathValue, binNames, shimDir) {
   const hosts = dirs.filter((dir) => binNames.some((bin) => existsSync(path.join(dir, bin))));
   if (hosts.length === 0) return pathValue;
   mkdirSync(shimDir, { recursive: true });
-  for (const dir of hosts) {
-    for (const tool of ['bun', 'bunx', 'node']) {
-      if (!existsSync(path.join(dir, tool))) continue;
-      try {
-        symlinkSync(path.join(dir, tool), path.join(shimDir, tool));
-      } catch (err) {
-        if (err.code !== 'EEXIST') throw err;
-      }
-    }
-  }
+  for (const dir of hosts) linkRuntimes(dir, shimDir);
   return [shimDir, ...dirs.filter((dir) => !hosts.includes(dir))].join(path.delimiter);
 }
 
