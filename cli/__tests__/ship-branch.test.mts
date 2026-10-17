@@ -752,10 +752,9 @@ describe('ship-branch.sh — worktree integration', () => {
   // leader-only kill leaves the child holding the pipe. This runs on stock macOS since sc-1199
   // replaced the coreutils timeout dependency with Node + /bin/ps.
   it('bounds a hung gate: the backgrounded pipe-holder is reaped, the ship exits 124 fast (not hung)', () => {
-    // sleep 30 & → a grandchild inheriting the commit's stdout (the pipe) that outlives a kill-git-only;
-    // sleep 30 → the hook itself hangs so the test timeout fires while it is still running. Fifteen
-    // seconds leaves enough startup headroom under load while staying well below either sleep.
-    const { dir, env, git } = seedShipRepo({ hookBody: 'sleep 30 &\nsleep 30' });
+    // Both sleeps hold the commit's pipe past the 15s ceiling plus the supervisor's 20s forced cleanup,
+    // so a kill that spares the hook's group settles 1 and never prints the ceiling banner.
+    const { dir, env, git } = seedShipRepo({ hookBody: 'sleep 600 &\nsleep 600' });
     writeFileSync(join(dir, '.gitignore'), '.devkit/\n'); // recorded attempt → banner offers --resume
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/hung-gate', 't', 'note.txt'], {
@@ -766,7 +765,8 @@ describe('ship-branch.sh — worktree integration', () => {
     });
     dropWorktree(git, r.stderr);
 
-    expect(r.status, r.stderr).not.toBe(0); // bounded — the timed-out commit aborts the ship
+    expect(r.status, r.stderr).toBe(124); // bounded — the timed-out commit aborts the ship
+    expect(r.stderr).not.toMatch(/gate output drain exceeded/); // no pipe-holder outlived the reap
     // Ship's own expiry banner: the harness's linger reap also returns 124, but prints no banner.
     expect(r.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
     expect(r.stderr).toMatch(/devkit ship --resume .+ to converge/); // resume hint
