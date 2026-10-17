@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type RunRef, isUsableRun } from '../lib/baseline-status/gh.mts';
 import { reservesReporter, summarise } from '../lib/baseline-status/produce.mts';
-import { fileExistsAt, queryBaseline, resolveRef } from '../lib/baseline-status/query.mts';
+import { queryBaseline, resolveRef } from '../lib/baseline-status/query.mts';
+import { fileExistsAt } from '../lib/baseline-status/test-verdict.mts';
 import {
   API_BRANCH_HEAD,
   RUN_LIST_BY_COMMIT,

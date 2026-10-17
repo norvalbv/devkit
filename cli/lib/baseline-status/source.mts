@@ -1,13 +1,74 @@
 /**
  * Which CI workflow and artifact `devkit baseline-status` reads (sc-3445): the CONSUMER's
- * guard.config.json `baselineStatus` (W-3), else devkit's own gate.yml defaults.
+ * guard.config.json `baselineStatus` (W-3), else devkit's own gate.yml defaults — and one run's
+ * summary artifact, from cache or from GitHub.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { CONFIG_FILENAME } from '../../../gate-engine/config.mts';
 import { parseJsonObject } from '../../../gate-engine/config-json.mts';
+import { writeFileAtomic } from '../atomic-write.mts';
 import { detectGitRoot } from '../detect-git-root.mts';
-import { DEFAULT_ARTIFACT, DEFAULT_WORKFLOW, workflowSelector } from './query.mts';
+import { type RunRef, assertProvenance, downloadSummary, parseSummary } from './gh.mts';
+import type { TestReportSummary } from './produce.mts';
+
+export const CACHE_DIR = '.devkit/baseline-status';
+export const DEFAULT_WORKFLOW = 'gate.yml';
+export const DEFAULT_ARTIFACT = 'test-report-summary';
+
+/** Cache entry name: the artifact is part of the key, so a reconfigured artifact never reads another's. */
+export function cacheName(runId: number, attempt: number, artifact: string): string {
+  return `${runId}-${attempt}-${encodeURIComponent(artifact)}.json`;
+}
+
+/**
+ * The summary for one run, from cache or from GitHub. Keyed on runId + ATTEMPT, never sha: a re-run
+ * keeps the sha, so a sha key would serve the pre-re-run answer after main was made green.
+ */
+export function loadSummary({
+  cwd,
+  run,
+  artifact,
+}: {
+  cwd: string;
+  run: Pick<RunRef, 'databaseId' | 'attempt'>;
+  artifact: string;
+}): TestReportSummary {
+  const cacheFile = join(cwd, CACHE_DIR, cacheName(run.databaseId, run.attempt, artifact));
+  if (existsSync(cacheFile)) {
+    try {
+      // Re-validated, not trusted: `{}` parses, so JSON.parse alone would admit it.
+      const label = `cached run ${run.databaseId}`;
+      const cached = parseSummary(readFileSync(cacheFile, 'utf8'), label);
+      // The FILENAME is not provenance: a correctly named entry can describe another run.
+      assertProvenance(cached, { runId: run.databaseId, attempt: run.attempt }, label);
+      return cached;
+    } catch {
+      // unreadable or non-conforming — fall through and refetch
+    }
+  }
+  const summary = downloadSummary({
+    cwd,
+    runId: run.databaseId,
+    attempt: run.attempt,
+    artifact,
+  });
+  try {
+    mkdirSync(join(cwd, CACHE_DIR), { recursive: true });
+    writeFileAtomic(cacheFile, `${JSON.stringify(summary, null, 2)}\n`);
+  } catch {
+    // an unwritable cache costs a refetch, nothing more
+  }
+  return summary;
+}
+
+/**
+ * The workflow as gh's `--workflow` expects it: GitHub reads workflows only from the top of
+ * `.github/workflows/`, so a path is a filename in disguise — and gh 404s on the path form.
+ */
+export function workflowSelector(workflow: string): string {
+  return workflow.trim().split(/[\\/]/).pop() ?? '';
+}
 
 export interface BaselineSource {
   workflow: string;

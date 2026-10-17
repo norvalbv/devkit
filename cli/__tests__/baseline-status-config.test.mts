@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import baselineStatus from '../commands/baseline/status.mts';
 import type { RunRef } from '../lib/baseline-status/gh.mts';
-import { workflowSelector } from '../lib/baseline-status/query.mts';
+import { workflowSelector } from '../lib/baseline-status/source.mts';
 import { configuredSource } from '../lib/baseline-status/source.mts';
 import { API_BRANCH_HEAD, RUN_LIST_BY_COMMIT, seedBranch } from './_baseline-fixture.mts';
 
