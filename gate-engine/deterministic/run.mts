@@ -386,8 +386,11 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
       const rc = runArgv(cwd, gate.argv, exec, reasonFile);
       // Not an exit code, so no rcLabel, opt-out or strict rule applies: it blocks as could-not-run.
       if (typeof rc === 'string') {
+        const next = rc.startsWith('killed:')
+          ? 'Re-run it.'
+          : `${gate.argv[0]} did not start: check it is installed and on PATH.`;
         fail(gate, `(${rc})`, false, [
-          `${rc}: the gate never reached a verdict, so this is not a code finding. Re-run it.`,
+          `${rc}: the gate never reached a verdict, so this is not a code finding. ${next}`,
         ]);
         return;
       }

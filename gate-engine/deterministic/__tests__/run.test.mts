@@ -202,7 +202,7 @@ describe('runDeterministic — a gate that never reached an exit code', () => {
     const { rc, out, results } = run(['size'], { exec });
     expect(rc).toBe(1);
     expect(out).toContain('deterministic gates failed: guard-size(killed:SIGKILL)\n');
-    expect(out).toContain('not a code finding');
+    expect(out).toContain('not a code finding. Re-run it.');
     expect(results).toEqual([{ gate: 'size', status: 'could_not_run' }]);
   });
 
@@ -220,6 +220,10 @@ describe('runDeterministic — a gate that never reached an exit code', () => {
     expect(rc).toBe(1);
     expect(out).toContain('deterministic gates failed: nobin(spawn-failed:ENOENT)');
     expect(out).not.toContain('killed:');
+    expect(out).toContain(
+      'devkit-no-such-binary-xyz did not start: check it is installed and on PATH.',
+    );
+    expect(out).not.toContain('Re-run it');
     expect(results).toEqual([{ gate: 'nobin', status: 'could_not_run' }]);
   });
 
