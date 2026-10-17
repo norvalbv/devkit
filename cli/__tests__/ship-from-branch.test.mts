@@ -12,7 +12,8 @@ import {
   remoteBranchExists,
   scriptPath,
   seedShipRepoLocalRemote,
-  REAPED_15S_BANNER,
+  LEAK_CEILING,
+  REAPED_BANNER,
 } from './_ship-branch-fixture.mts';
 
 function commit(git, paths: string[], message: string): void {
@@ -598,11 +599,11 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
       cwd: dir,
       input: '',
       encoding: 'utf8',
-      env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
+      env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: LEAK_CEILING },
     });
 
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(REAPED_15S_BANNER);
+    expect(first.stderr).toMatch(REAPED_BANNER);
     const preserved = git(['rev-parse', 'feat/from-branch-formatter']).trim();
     expect(git(['show', `${preserved}:note.txt`])).toBe('gate-formatted\n');
     expect(git(['show', 'HEAD:note.txt'])).toBe('committed source bytes\n');
