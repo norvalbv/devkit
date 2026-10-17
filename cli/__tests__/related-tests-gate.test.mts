@@ -12,10 +12,8 @@ import {
 
 const GATE = join(import.meta.dirname, '..', 'lib', 'husky', 'gate-policy', 'related-tests.mts');
 
-function fakeExec(status: number | null) {
-  return vi.fn((_cmd: string, _args: string[], _opts: { cwd: string; stdio: 'inherit' }) => ({
-    status,
-  }));
+function fakeExec(code: number, interrupted = false) {
+  return vi.fn(async (_bin: string, _args: string[], _cwd: string) => ({ code, interrupted }));
 }
 
 const REACH = 'cli/__tests__/test-graph-reach.test.mts';
@@ -72,45 +70,49 @@ describe('relatedPaths', () => {
 });
 
 describe('runRelatedTests', () => {
-  it('passes without running vitest when nothing is staged', () => {
+  it('passes without running vitest when nothing is staged', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exec = fakeExec(0);
-    expect(runRelatedTests('/repo', { staged: null, exec })).toBe(0);
-    expect(runRelatedTests('/repo', { staged: ['package.json'], exec })).toBe(0);
+    const none = { code: 0, interrupted: false };
+    expect(await runRelatedTests('/repo', { staged: null, exec })).toEqual(none);
+    expect(await runRelatedTests('/repo', { staged: ['package.json'], exec })).toEqual(none);
     expect(exec).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith('related-tests: none selected');
   });
 
-  it('runs vitest related on the staged paths and propagates a failure', () => {
+  it('runs vitest related on the staged paths and propagates a failure', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const exec = fakeExec(1);
-    expect(runRelatedTests('/repo', { staged: ['cli/a.mts'], exec })).toBe(1);
+    expect((await runRelatedTests('/repo', { staged: ['cli/a.mts'], exec })).code).toBe(1);
     expect(exec).toHaveBeenCalledWith(
       join('/repo', 'node_modules', '.bin', 'vitest'),
       ['related', '--run', '--reporter=dot', 'cli/a.mts', REACH],
-      { cwd: '/repo', stdio: 'inherit' },
+      '/repo',
     );
   });
 
-  it('passes the reach test once, even when it is itself staged', () => {
+  it('passes the reach test once, even when it is itself staged', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const exec = fakeExec(0);
-    runRelatedTests('/repo', { staged: [REACH], exec });
+    await runRelatedTests('/repo', { staged: [REACH], exec });
     expect(exec.mock.calls[0][1]).toEqual(['related', '--run', '--reporter=dot', REACH]);
   });
 
-  it('blocks when vitest is killed or cannot spawn', () => {
+  it('passes an interrupted run through, so the entrypoint can skip the unmapped note', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    const exec = fakeExec(null);
-    expect(runRelatedTests('/repo', { staged: ['cli/a.mts'], exec })).toBe(1);
+    const exec = fakeExec(143, true);
+    expect(await runRelatedTests('/repo', { staged: ['cli/a.mts'], exec })).toEqual({
+      code: 143,
+      interrupted: true,
+    });
   });
 
-  it('selects from the index, never from unstaged edits', () => {
+  it('selects from the index, never from unstaged edits', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const repo = editedRepo();
     git(repo, 'add', 'a.mts');
     const exec = fakeExec(0);
-    runRelatedTests(repo, { exec });
+    await runRelatedTests(repo, { exec });
     expect(exec).toHaveBeenCalledWith(
       expect.any(String),
       ['related', '--run', '--reporter=dot', 'a.mts', REACH],
@@ -119,7 +121,7 @@ describe('runRelatedTests', () => {
   });
 
   // `commit -a` / `commit <path>` stage into an alternate index the hook hands over via the carrier.
-  it('selects from the commit index the hook carries, not the default index', () => {
+  it('selects from the commit index the hook carries, not the default index', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const repo = editedRepo();
     git(repo, 'add', 'a.mts');
@@ -135,7 +137,7 @@ describe('runRelatedTests', () => {
     vi.stubEnv('DEVKIT_COMMIT_INDEX_FILE', alt);
     vi.stubEnv('DEVKIT_COMMIT_GIT_DIR', join(repo, '.git'));
     const exec = fakeExec(0);
-    runRelatedTests(repo, { exec });
+    await runRelatedTests(repo, { exec });
     expect(exec).toHaveBeenCalledWith(
       expect.any(String),
       ['related', '--run', '--reporter=dot', 'b.mts', REACH],
