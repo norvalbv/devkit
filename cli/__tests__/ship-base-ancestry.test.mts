@@ -631,7 +631,9 @@ describe('ship_base_inbound_note — commits from another line entering through 
     const r = inboundNote(dir, parent, ['m1.txt']);
 
     expect(r.status).toBe(0);
-    expect(r.stderr).toContain('1 commit(s) on the briefed paths came from another origin line');
+    expect(r.stderr).toContain(
+      '1 commit(s) on the briefed paths are already on another origin branch',
+    );
     expect(r.stderr).toContain('(first is on origin/main)');
     expect(r.stderr).toMatch(/^ {2}[0-9a-f]+ m1\.txt$/m);
   });
@@ -741,9 +743,36 @@ describe('ship_base_inbound_note — commits from another line entering through 
       { cwd: dir, input: 'b\n', encoding: 'utf8', env: { ...env, SHIP_DRY_RUN: '1' } },
     );
 
+    expect(r.status, r.stderr).toBe(0);
     expect(r.stderr).not.toContain('is not contained in origin/');
-    expect(r.stderr).toContain('1 commit(s) on the briefed paths came from another origin line');
+    expect(r.stderr).toContain(
+      '1 commit(s) on the briefed paths are already on another origin branch',
+    );
     expect(r.stderr).toContain('(first is on origin/parent)');
     expect(r.stderr).toContain('parent adds p');
+  });
+
+  it("names the work's own earlier push without calling it a merged-in line", () => {
+    // A pushed branch that merged origin/main and ships again: its own commits are on origin too.
+    const { dir, git } = seedTwoLines();
+    git(['switch', '-q', '-c', 'feat', 'origin/main']);
+    commitFile(dir, git, 'x1.txt');
+    git(['push', '-q', 'origin', 'HEAD:feat']);
+    git(['switch', '-q', '-c', 'later', 'origin/main']);
+    commitFile(dir, git, 'later.txt');
+    git(['push', '-q', 'origin', 'HEAD:main']);
+    git(['switch', '-q', 'feat']);
+    git(['fetch', '-q', 'origin']);
+    git(['merge', '-q', '--no-edit', 'origin/main']);
+    const main = git(['rev-parse', 'origin/main']).trim();
+
+    const r = inboundNote(dir, main, ['x1.txt']);
+
+    expect(relatedness(dir, 'main', main).status).toBe(0);
+    expect(r.stderr).toContain(
+      '1 commit(s) on the briefed paths are already on another origin branch',
+    );
+    expect(r.stderr).toContain('(first is on origin/feat)');
+    expect(r.stderr).not.toContain('merged into this work');
   });
 });
