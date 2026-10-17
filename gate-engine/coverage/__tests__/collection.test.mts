@@ -10,13 +10,8 @@ import {
   missingDeclaredDependencies,
   missingModule,
 } from '../dependencies.mts';
-import {
-  formatClearMarker,
-  formatDiagnosis,
-  readClearMarker,
-  readDiagnosis,
-  writeClearMarker,
-} from '../failures.mts';
+import { readClearMarker, writeClearMarker } from '../clear-marker/store.mts';
+import { formatClearMarker, formatDiagnosis, readDiagnosis } from '../failures.mts';
 
 let roots: string[] = [];
 const makeRoot = () => {
