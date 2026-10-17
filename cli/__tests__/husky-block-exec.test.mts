@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -433,7 +434,8 @@ describe('format re-stage step (real git)', () => {
     return repo;
   }
 
-  function runInRepo(repo, { biome = '#!/bin/sh\nexit 0\n' } = {}) {
+  // `commitArgs` runs the hook through a real `git commit`, which re-reads the index afterwards.
+  function runInRepo(repo, { biome = '#!/bin/sh\nexit 0\n', commitArgs = null } = {}) {
     const home = mkdtempSync(join(tmpdir(), 'dk-hook-git-home-'));
     homes.push(home);
     const bin = join(home, '.bun', 'bin');
@@ -448,8 +450,12 @@ describe('format re-stage step (real git)', () => {
     }
     const hookPath = join(home, 'pre-commit');
     writeFileSync(hookPath, buildFullHook({ biome: true, guards: [] }));
+    chmodSync(hookPath, 0o755);
+    const [cmd, args] = commitArgs
+      ? ['git', ['-c', `core.hooksPath=${home}`, 'commit', '-q', '-m', 't', ...commitArgs]]
+      : ['sh', ['-e', hookPath]];
     try {
-      const stdout = execFileSync('sh', ['-e', hookPath], {
+      const stdout = execFileSync(cmd, args, {
         cwd: repo,
         env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin' },
         encoding: 'utf8',
@@ -512,29 +518,173 @@ describe('format re-stage step (real git)', () => {
       expect(r.stdout).toContain('🎨 biome: no staged formattable path');
     });
 
-    it('names the paths it skipped when every eligible one carries unstaged edits', () => {
+    // Formats stdin like a real formatter (collapses runs of spaces); path mode is a no-op.
+    const STDIN_STUB =
+      '#!/bin/sh\ncase "$*" in *--stdin-file-path=*) echo "STDIN[$*]" >> "$PWD/argv.log"; exec sed \'s/  */ /g\' ;; esac\nexit 0\n';
+    // `:0:` names the stage explicitly, so a path like `0:foo.mts` is not read as a stage number.
+    const show = (repo, name) =>
+      execFileSync('git', ['show', `:0:${name}`], { cwd: repo, encoding: 'utf8' });
+    // Literal pathspecs, or staging `a[1].mts` would also stage a1.mts.
+    const stagePartially = (repo, name, staged, working) => {
+      writeFileSync(join(repo, name), staged);
+      execFileSync('git', ['--literal-pathspecs', 'add', name], { cwd: repo });
+      writeFileSync(join(repo, name), working); // dirty AFTER staging
+    };
+
+    it('formats only the STAGED copy of a partially staged file, leaving the working copy alone', () => {
       const repo = initRepo();
-      stageFile(repo, 'a.mts');
-      writeFileSync(join(repo, 'a.mts'), 'const a = 2\n'); // dirty AFTER staging
-      const r = runInRepo(repo);
-      expect(r.status).toBe(0);
-      expect(r.stdout).toContain('every eligible path also carries unstaged edits');
-      expect(r.stdout).toContain('a.mts');
+      stagePartially(repo, 'a.mts', 'const a  =  1\n', 'const a  =  2\n');
+      const r = runInRepo(repo, { biome: STDIN_STUB });
+      expect(r.status, r.stdout).toBe(0);
+      expect(show(repo, 'a.mts')).toBe('const a = 1\n');
+      expect(readFileSync(join(repo, 'a.mts'), 'utf8')).toBe('const a  =  2\n');
+      expect(r.stdout).toContain('🎨 biome formatted the STAGED copy of 1 path(s)');
+      expect(r.stdout).toContain('     a.mts');
       // Indented so the listed path never looks like a stage anchor to ship's log scraper.
       expect(r.stdout).not.toMatch(/^a\.mts$/m);
     });
 
-    // The PARTIAL case is the one that bites: "formatted 3" over a staged set of 5 reads as a
-    // clean pass while two unformatted files ride into the commit.
-    it('names the skipped paths when only SOME eligible ones carry unstaged edits', () => {
+    it('reports fully and partially staged files separately', () => {
       const repo = initRepo();
       stageFile(repo, 'clean.mts');
-      stageFile(repo, 'dirty.mts');
-      writeFileSync(join(repo, 'dirty.mts'), 'const b = 9\n'); // dirty AFTER staging
-      const r = runInRepo(repo);
-      expect(r.status).toBe(0);
-      expect(r.stdout).toContain('dirty.mts');
+      stagePartially(repo, 'dirty.mts', 'const b  =  1\n', 'const b = 9\n');
+      const r = runInRepo(repo, { biome: STDIN_STUB });
+      expect(r.status, r.stdout).toBe(0);
       expect(r.stdout).toContain('🎨 biome formatted and re-staged 1 staged file(s).');
+      expect(r.stdout).toContain('STAGED copy of 1 path(s)');
+      expect(show(repo, 'dirty.mts')).toBe('const b = 1\n');
+    });
+
+    // `:0:foo.mts` as a revision is stage 0 of foo.mts, and `a[1].mts` as a pathspec also matches
+    // a1.mts, so each must be read by its literal path and its own blob.
+    it('gives every partially staged path its own bytes, whatever its name', () => {
+      const repo = initRepo();
+      const names = ['foo.mts', '0:foo.mts', 'a1.mts', 'a[1].mts', 'my file.mts', 'café.mts'];
+      for (const [i, name] of names.entries()) {
+        stagePartially(repo, name, `const v${i}  =  1\n`, `const v${i} = 2\n`);
+      }
+      const r = runInRepo(repo, { biome: STDIN_STUB });
+      expect(r.status, r.stdout).toBe(0);
+      for (const [i, name] of names.entries()) expect(show(repo, name)).toBe(`const v${i} = 1\n`);
+      expect(r.stdout).toContain('STAGED copy of 6 path(s)');
+    });
+
+    // The wiring the step depends on: git commits the index the hook rewrote, including under
+    // --include, where the hook's index is the commit's own lock file.
+    it.each([[[]], [['--include', 'other.txt']]])(
+      'commits the formatted staged copy through a real git commit %j',
+      (extra) => {
+        const repo = initRepo();
+        stageFile(repo, 'other.txt', 'x\n');
+        execFileSync('git', ['commit', '-qm', 'other'], { cwd: repo });
+        writeFileSync(join(repo, 'other.txt'), 'y\n');
+        stagePartially(repo, 'a.mts', 'const a  =  1\n', 'const a  =  2\n');
+        const r = runInRepo(repo, { biome: STDIN_STUB, commitArgs: extra });
+        expect(r.status, r.stdout).toBe(0);
+        const head = execFileSync('git', ['show', 'HEAD:a.mts'], { cwd: repo, encoding: 'utf8' });
+        expect(head).toBe('const a = 1\n');
+        expect(show(repo, 'a.mts')).toBe('const a = 1\n');
+        expect(readFileSync(join(repo, 'a.mts'), 'utf8')).toBe('const a  =  2\n');
+      },
+    );
+
+    // Catches a rewrite that drops the executable bit: update-index must reuse the entry's mode.
+    it('keeps an executable staged file executable', () => {
+      const repo = initRepo();
+      writeFileSync(join(repo, 'run.mjs'), 'const r  =  1\n');
+      chmodSync(join(repo, 'run.mjs'), 0o755);
+      execFileSync('git', ['add', 'run.mjs'], { cwd: repo });
+      writeFileSync(join(repo, 'run.mjs'), 'const r = 2\n');
+      const r = runInRepo(repo, { biome: STDIN_STUB });
+      expect(r.status, r.stdout).toBe(0);
+      const entry = execFileSync('git', ['ls-files', '-s', 'run.mjs'], {
+        cwd: repo,
+        encoding: 'utf8',
+      });
+      expect(entry).toMatch(/^100755 /);
+      expect(show(repo, 'run.mjs')).toBe('const r = 1\n');
+    });
+
+    // Every branch reports: an already-formatted staged copy must not read as silence.
+    it('says so when the staged copy is already formatted, and leaves it alone', () => {
+      const repo = initRepo();
+      stagePartially(repo, 'a.mts', 'const a = 1\n', 'const a  =  2\n');
+      const before = execFileSync('git', ['ls-files', '-s', 'a.mts'], {
+        cwd: repo,
+        encoding: 'utf8',
+      });
+      const r = runInRepo(repo, { biome: STDIN_STUB });
+      expect(r.status, r.stdout).toBe(0);
+      expect(r.stdout).toContain('is already formatted');
+      expect(
+        execFileSync('git', ['ls-files', '-s', 'a.mts'], { cwd: repo, encoding: 'utf8' }),
+      ).toBe(before);
+    });
+
+    // Catches dropping --path from hash-object: a CRLF-emitting formatter would then store CRLF
+    // where `git add` on the fully staged branch stores LF.
+    it('normalises the rewritten blob through .gitattributes, as git add does', () => {
+      const repo = initRepo();
+      writeFileSync(join(repo, '.gitattributes'), '*.mts text eol=crlf\n');
+      execFileSync('git', ['add', '.gitattributes'], { cwd: repo });
+      stagePartially(repo, 'a.mts', 'const a  =  1\n', 'const a = 2\n');
+      const crlfStub =
+        '#!/bin/sh\ncase "$*" in *--stdin-file-path=*) sed \'s/  */ /g\' | awk \'{ printf "%s\\r\\n", $0 }\' ;; esac\n';
+      const r = runInRepo(repo, { biome: crlfStub });
+      expect(r.status, r.stdout).toBe(0);
+      expect(show(repo, 'a.mts')).toBe('const a = 1\n');
+    });
+
+    // A held index lock (a concurrent git command) makes update-index fail; under `sh -e` that
+    // must be a named left-as-staged path, not an aborted commit.
+    it('leaves the staged copy and continues when the index cannot be written', () => {
+      const repo = initRepo();
+      stagePartially(repo, 'a.mts', 'const a  =  1\n', 'const a = 2\n');
+      writeFileSync(join(repo, '.git', 'index.lock'), '');
+      const r = runInRepo(repo, { biome: STDIN_STUB });
+      rmSync(join(repo, '.git', 'index.lock'));
+      expect(r.status, r.stdout).toBe(0);
+      expect(show(repo, 'a.mts')).toBe('const a  =  1\n');
+      expect(r.stdout).toContain('left 1 staged path(s)');
+    });
+
+    it('leaves the staged copy as staged and names it when the formatter fails on it', () => {
+      const repo = initRepo();
+      stagePartially(repo, 'a.mts', 'const a  =  1\n', 'const a = 2\n');
+      const r = runInRepo(repo, { biome: '#!/bin/sh\nexit 2\n' });
+      expect(r.status, r.stdout).toBe(0); // consumer policy: report, never block
+      expect(show(repo, 'a.mts')).toBe('const a  =  1\n');
+      expect(r.stdout).toContain(
+        '🎨 biome left 1 staged path(s) with unstaged edits exactly as staged',
+      );
+      expect(r.stdout).toContain('biome failed over the staged copies listed above (exit 2)');
+    });
+
+    it('never writes an empty formatter output over a staged copy', () => {
+      const repo = initRepo();
+      stagePartially(repo, 'a.mts', 'const a  =  1\n', 'const a = 2\n');
+      const r = runInRepo(repo); // the default stub prints nothing and exits 0
+      expect(r.status, r.stdout).toBe(0);
+      expect(show(repo, 'a.mts')).toBe('const a  =  1\n');
+      expect(r.stdout).toContain('left 1 staged path(s)');
+      expect(r.stdout).not.toContain('failed over');
+    });
+
+    it('leaves a symlink and a file deleted from the working tree untouched, without formatting them', () => {
+      const repo = initRepo();
+      symlinkSync('target.mts', join(repo, 'link.mts'));
+      execFileSync('git', ['add', 'link.mts'], { cwd: repo });
+      rmSync(join(repo, 'link.mts'));
+      symlinkSync('other.mts', join(repo, 'link.mts'));
+      stageFile(repo, 'gone.mts', 'const g  =  1\n');
+      rmSync(join(repo, 'gone.mts'));
+      const r = runInRepo(repo, { biome: STDIN_STUB });
+      expect(r.status, r.stdout).toBe(0);
+      expect(existsSync(join(repo, 'argv.log'))).toBe(false); // the formatter never saw either
+      expect(show(repo, 'link.mts')).toBe('target.mts');
+      expect(show(repo, 'gone.mts')).toBe('const g  =  1\n');
+      expect(r.stdout).toContain('left 1 staged path(s)');
+      expect(r.stdout).toContain('     gone.mts');
     });
 
     // `echo | xargs` splits on whitespace: the formatter gets two paths that do not exist and

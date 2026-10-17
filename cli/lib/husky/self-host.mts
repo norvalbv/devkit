@@ -144,15 +144,16 @@ type SelfHostHookInput = Selection & {
 const PACKAGE_GUARD_RE = /"\$__dk_package_bin_dir\/(guard-[a-z-]+)"/g;
 // Devkit formats with Oxfmt unconditionally, so the consumer's config detection is replaced
 // outright rather than left to resolve — no dead biome arm reaches Devkit's own hook.
-const SELF_HOST_TOOL_SETUP = `    FMT_TOOL=Oxfmt; FMT_BIN=node_modules/.bin/oxfmt
-    __dk_fmt_run() { xargs -0 node_modules/.bin/oxfmt --threads 1 --write; }`;
-// Swapping the WHOLE report branch (not appending `|| exit 1`) also drops the 127 message, the
+const SELF_HOST_TOOL_SETUP = `    FMT_TOOL=Oxfmt; FMT_BIN=node_modules/.bin/oxfmt; FMT_FIX_ARGS='--write'
+    __dk_fmt_run() { xargs -0 node_modules/.bin/oxfmt --threads 1 --write; }
+    __dk_fmt_stdin() { node_modules/.bin/oxfmt --threads 1 --stdin-filepath="$1"; }`;
+// Swapping the WHOLE report function (not appending `|| exit 1`) also drops the 127 message, the
 // fragment's only other `$__dk_package_bin_dir` mention; the rewritten hook must contain none.
-const SELF_HOST_FORMAT_FAILURE = `        if [ "$FMT_RC" -ne 0 ]; then
-            echo "🎨 Oxfmt failed over $FMT_N staged file(s) (xargs exit $FMT_RC) — blocking: devkit formats its own staged set hard." >&2
-${shipRehearsalHint('            ')}
-            exit 1
-        fi`;
+const SELF_HOST_FORMAT_FAILURE = `__dk_fmt_failed() {
+    echo "🎨 Oxfmt failed over $2 ($3 $1) — blocking: devkit formats its own staged set hard." >&2
+${shipRehearsalHint('    ')}
+    exit 1
+}`;
 // Keep the staged hook on the same authored-file boundary as package.json's format scripts. A
 // broad extension-only filter would let Oxfmt rewrite evidence, fixtures, vendored sources, or
 // generated output that the adopted 558-file parity experiment never selected.

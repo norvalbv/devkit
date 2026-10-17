@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -165,5 +166,32 @@ describe('overlay format step — real git and the real oxfmt binary', () => {
     );
     expect(existsSync(join(repo, 'node_modules'))).toBe(false);
     expect(git('show', ':a.ts')).toBe(UNFORMATTED);
+  });
+
+  // The chain arm's stdin runner, the real `--stdin-filepath=` flag, and the loop's POSIX parse.
+  it.each(hasDash ? ['sh', '/bin/dash'] : ['sh'])(
+    'formats only the staged copy of a partially staged file with the real oxfmt (%s)',
+    (shell) => {
+      const { repo, git } = repoWith({ '.oxfmtrc.json': '{}\n', 'a.ts': UNFORMATTED });
+      writeFileSync(join(repo, 'a.ts'), `${UNFORMATTED}const wip  =  1\n`);
+      const r = runStep(repo, { shell });
+      expect(r.status, r.stdout).toBe(0);
+      expect(git('show', ':a.ts')).toBe('const a = { b: 1 };\n');
+      expect(readFileSync(join(repo, 'a.ts'), 'utf8')).toBe(`${UNFORMATTED}const wip  =  1\n`);
+      expect(r.stdout).toContain('🎨 oxfmt formatted the STAGED copy of 1 path(s)');
+    },
+  );
+
+  // Our consumption of oxfmt's stdin contract: an ignored path passes through, so it is never rewritten.
+  it('never rewrites the staged copy of a partially staged path the repo ignores', () => {
+    const { repo, git } = repoWith({
+      '.oxfmtrc.json': '{ "ignorePatterns": ["gen/**"] }\n',
+      'gen/a.ts': UNFORMATTED,
+    });
+    writeFileSync(join(repo, 'gen', 'a.ts'), `${UNFORMATTED}// wip\n`);
+    const r = runStep(repo);
+    expect(r.status, r.stdout).toBe(0);
+    expect(git('show', ':gen/a.ts')).toBe(UNFORMATTED);
+    expect(r.stdout).not.toContain('STAGED copy of');
   });
 });

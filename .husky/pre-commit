@@ -235,7 +235,7 @@ __dk_block_ai() {
 # devkit:biome-format
 # Format staged files, then re-stage exactly those (scoped — never a blanket `git add -u`, which
 # would sweep unrelated working-tree changes into the commit). Only re-add files with NO unstaged
-# edits, so partially-staged files commit exactly as staged.
+# edits; a partially-staged file has only its staged copy formatted, in the index.
 #
 # EVERY branch reports, and each banner opens with the 🎨 stage anchor ship's log scraper keys on.
 # Silence used to be ambiguous: no staged match, a staged set entirely excluded by unstaged edits,
@@ -255,8 +255,17 @@ __dk_block_ai() {
 # A function so the "no formatter here" arm is an early `return`, not a branch wrapping the whole
 # body — self-host replaces the setup outright, and an unreachable arm must not survive into it.
 __dk_format_staged() {
-    FMT_TOOL=Oxfmt; FMT_BIN=node_modules/.bin/oxfmt
+    FMT_TOOL=Oxfmt; FMT_BIN=node_modules/.bin/oxfmt; FMT_FIX_ARGS='--write'
     __dk_fmt_run() { xargs -0 node_modules/.bin/oxfmt --threads 1 --write; }
+    __dk_fmt_stdin() { node_modules/.bin/oxfmt --threads 1 --stdin-filepath="$1"; }
+__dk_fmt_failed() {
+    echo "🎨 Oxfmt failed over $2 ($3 $1) — blocking: devkit formats its own staged set hard." >&2
+    if [ -n "${DEVKIT_SHIP_DRY_GATES_CMD:-}" ]; then
+        echo "   Ship's exact staging, no judges:" >&2
+        printf '     %s\n' "$DEVKIT_SHIP_DRY_GATES_CMD" >&2
+    fi
+    exit 1
+}
 STAGED_FMT=$(git diff --cached --name-only -z --diff-filter=ACM | tr '\0' '\n' | grep -E '^((cli|gate-engine)/.*\.(tsx?|jsx?|css|jsonc?|mjs|mts)|(tsconfig|biome)/.*\.jsonc?|skills/.*\.mjs|templates/.*\.mjs|\.co-occurrence-allowlist\.json|\.fallowrc\.jsonc|\.oxfmtrc\.json|biome\.jsonc|eslint\.config\.mjs|guard\.config(\.example)?\.json|package\.json|search-code\.config\.json|tsconfig(\.build)?\.json|vitest(\.e2e)?\.config\.mjs|vitest\.setup\.mjs)$' || true)
 if [ -z "$STAGED_FMT" ]; then
     echo "🎨 $FMT_TOOL: no staged formattable path — nothing to format."
@@ -266,27 +275,51 @@ else
     FMT_SAFE=$(printf '%s\n' "$STAGED_FMT" | grep -Fxvf "$UNSTAGED_FMT_FILE" || true)
     FMT_SKIP=$(printf '%s\n' "$STAGED_FMT" | grep -Fxf "$UNSTAGED_FMT_FILE" || true)
     rm -f "$UNSTAGED_FMT_FILE"
-    # Reported whether the exclusion is TOTAL or PARTIAL. A partial one is the dangerous shape: the
-    # success banner counts only what it formatted, so "formatted 3" over a staged set of 5 reads as
-    # a clean pass while two unformatted files ride into the commit.
     if [ -n "$FMT_SKIP" ]; then
-        echo "🎨 $FMT_TOOL: skipped $(printf '%s\n' "$FMT_SKIP" | grep -c '') staged path(s) that also carry unstaged edits, because formatting them would commit bytes you never staged:"
-        printf '%s\n' "$FMT_SKIP" | sed 's/^/     /'
+        FMT_TMP=$(mktemp -d); : >"$FMT_TMP/done"; : >"$FMT_TMP/left"; FMT_STDIN_RC=0
+        while IFS= read -r fmt_path; do
+            # Literal pathspec and the blob's oid: a `:path` revision misreads `0:a.ts` as stage 0 of a.ts.
+            fmt_entry=$(git --literal-pathspecs ls-files -s -- "$fmt_path" </dev/null)
+            fmt_mode=${fmt_entry%% *}; fmt_oid=${fmt_entry#* }; fmt_oid=${fmt_oid%% *}
+            case "$fmt_mode" in 100644 | 100755) ;; *) continue ;; esac
+            # Biome applies its ignore config on stdin only to a path that exists on disk.
+            if [ ! -e "$fmt_path" ]; then printf '%s\n' "$fmt_path" >>"$FMT_TMP/left"; continue; fi
+            git cat-file blob "$fmt_oid" >"$FMT_TMP/in" </dev/null
+            [ -s "$FMT_TMP/in" ] || continue
+            fmt_rc=0; __dk_fmt_stdin "$fmt_path" <"$FMT_TMP/in" >"$FMT_TMP/out" || fmt_rc=$?
+            if [ "$fmt_rc" -ne 0 ] || [ ! -s "$FMT_TMP/out" ]; then
+                [ "$fmt_rc" -eq 0 ] || FMT_STDIN_RC=$fmt_rc
+                printf '%s\n' "$fmt_path" >>"$FMT_TMP/left"; continue
+            fi
+            cmp -s "$FMT_TMP/in" "$FMT_TMP/out" && continue
+            if fmt_oid=$(git hash-object -w --path="$fmt_path" --stdin <"$FMT_TMP/out") &&
+                git update-index --cacheinfo "$fmt_mode,$fmt_oid,$fmt_path" </dev/null; then
+                printf '%s\n' "$fmt_path" >>"$FMT_TMP/done"
+            else
+                printf '%s\n' "$fmt_path" >>"$FMT_TMP/left"
+            fi
+        done <<EOF
+$FMT_SKIP
+EOF
+        if [ -s "$FMT_TMP/done" ]; then
+            echo "🎨 $FMT_TOOL formatted the STAGED copy of $(grep -c '' "$FMT_TMP/done") path(s) that also carry unstaged edits; their working copies are untouched (to format those too, run: $FMT_BIN $FMT_FIX_ARGS <path>):"
+            sed 's/^/     /' "$FMT_TMP/done"
+        fi
+        if [ -s "$FMT_TMP/left" ]; then
+            echo "🎨 $FMT_TOOL left $(grep -c '' "$FMT_TMP/left") staged path(s) with unstaged edits exactly as staged, possibly UNFORMATTED (deleted from the working tree, or not formattable):"
+            sed 's/^/     /' "$FMT_TMP/left"
+        fi
+        if [ ! -s "$FMT_TMP/done" ] && [ ! -s "$FMT_TMP/left" ]; then
+            echo "🎨 $FMT_TOOL: the staged copy of every path that also carries unstaged edits is already formatted."
+        fi
+        rm -rf "$FMT_TMP"
+        [ "$FMT_STDIN_RC" -eq 0 ] || __dk_fmt_failed "$FMT_STDIN_RC" "the staged copies listed above" "exit"
     fi
-    if [ -z "$FMT_SAFE" ]; then
-        echo "🎨 $FMT_TOOL: every eligible path also carries unstaged edits — nothing left to format."
-    else
+    if [ -n "$FMT_SAFE" ]; then
         FMT_N=$(printf '%s\n' "$FMT_SAFE" | grep -c '' || true)
         FMT_RC=0
         printf '%s\n' "$FMT_SAFE" | tr '\n' '\0' | __dk_fmt_run || FMT_RC=$?
-        if [ "$FMT_RC" -ne 0 ]; then
-            echo "🎨 Oxfmt failed over $FMT_N staged file(s) (xargs exit $FMT_RC) — blocking: devkit formats its own staged set hard." >&2
-            if [ -n "${DEVKIT_SHIP_DRY_GATES_CMD:-}" ]; then
-                echo "   Ship's exact staging, no judges:" >&2
-                printf '     %s\n' "$DEVKIT_SHIP_DRY_GATES_CMD" >&2
-            fi
-            exit 1
-        fi
+        [ "$FMT_RC" -eq 0 ] || __dk_fmt_failed "$FMT_RC" "$FMT_N staged file(s)" "xargs exit"
         printf '%s\n' "$FMT_SAFE" | tr '\n' '\0' | xargs -0 git add -f
         if [ "$FMT_RC" -eq 0 ]; then
             echo "🎨 $FMT_TOOL formatted and re-staged $FMT_N staged file(s)."

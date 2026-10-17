@@ -8,6 +8,8 @@ export interface ConsumerFormatter {
   /** Non-empty: an empty list would render `if ; then`. */
   configProbes: readonly [string, ...string[]];
   stepArgs: string;
+  /** Formats stdin as the named path; the step appends that path directly after this. */
+  stdinArgs: string;
   /** The formatter's arguments in the agent hooks: fix one edited file, and check without fixing. */
   agentArgs: { afterEdit: string; lintCheck: string };
   /** The devDependency that puts the formatter binary in a consumer's node_modules/.bin. */
@@ -19,13 +21,17 @@ export const CONSUMER_FORMATTER = {
   tool: 'biome',
   configProbes: ['biome.json', 'biome.jsonc'],
   stepArgs: 'format --write',
+  stdinArgs: 'format --stdin-file-path=',
   agentArgs: { afterEdit: 'check --write', lintCheck: 'check --no-errors-on-unmatched' },
   package: { name: '@biomejs/biome', range: '^2.5.0' },
   scripts: { lint: 'biome check .', format: 'biome check --write .' },
 } as const satisfies ConsumerFormatter;
 
 /** The part of a formatter the pre-commit step renders. */
-export type StepFormatter = Pick<ConsumerFormatter, 'tool' | 'configProbes' | 'stepArgs'>;
+export type StepFormatter = Pick<
+  ConsumerFormatter,
+  'tool' | 'configProbes' | 'stepArgs' | 'stdinArgs'
+>;
 
 // Exactly the names Oxfmt discovers; the Oxc lifecycle manages the same set.
 export const OXFMT_CONFIGS: [string, ...string[]] = [
@@ -40,6 +46,7 @@ export const OXFMT_STEP: StepFormatter = {
   tool: 'oxfmt',
   configProbes: OXFMT_CONFIGS,
   stepArgs: '--no-error-on-unmatched-pattern --write',
+  stdinArgs: '--stdin-filepath=',
 };
 
 /** Overlay's formatters in priority order: biome only when selected, then the repo's own Oxfmt. */
@@ -59,8 +66,14 @@ export function renderToolSetup(f: StepFormatter, binDir = '$__dk_package_bin_di
         echo "🎨 No ${f.tool} config here (${f.configProbes.join(' / ')}) — staged files left as authored."
         return 0
     fi
-    FMT_TOOL=${f.tool}; FMT_BIN=${bin}
-    __dk_fmt_run() { xargs -0 ${bin} ${f.stepArgs}; }`;
+${renderToolRunners(f, bin)}`;
+}
+
+/** The step's handles on one formatter: path mode over NUL-delimited paths, and stdin as one path. */
+function renderToolRunners(f: StepFormatter, bin: string, indent = '    '): string {
+  return `${indent}FMT_TOOL=${f.tool}; FMT_BIN=${bin}; FMT_FIX_ARGS='${f.stepArgs}'
+${indent}__dk_fmt_run() { xargs -0 ${bin} ${f.stepArgs}; }
+${indent}__dk_fmt_stdin() { ${bin} ${f.stdinArgs}"$1"; }`;
 }
 
 export const FORMAT_TOOL_SETUP = renderToolSetup(CONSUMER_FORMATTER);
@@ -74,8 +87,7 @@ export function renderToolChain(fs: StepFormatter[], binDir: string): string {
             echo "🎨 Found the ${f.tool} config but ${binDir}/${f.tool} is missing — install this repo's dependencies; staged files left as authored."
             return 0
         fi
-        FMT_TOOL=${f.tool}; FMT_BIN=${bin}
-        __dk_fmt_run() { xargs -0 ${bin} ${f.stepArgs}; }`;
+${renderToolRunners(f, bin, '        ')}`;
   });
   const probes = fs.flatMap((f) => f.configProbes).join(' / ');
   return `    ${arms.join('\n    el')}
@@ -120,19 +132,64 @@ export const FORMAT_EXTENSION_FILTER = "grep -E '\\.(tsx?|jsx?|mts|cts|mjs|css|j
  * must not become a commit outage. self-host replaces this whole branch with a hard `exit 1`.
  */
 
-// FMT_RC is XARGS's status, not the formatter's (xargs collapses 1-125 into one code of its own),
-// so the report points at the tool's diagnostics rather than claiming the number is its exit code.
-export const FORMAT_FAILURE_REPORT = `        if [ "$FMT_RC" -eq 127 ]; then
-            echo "🎨 $FMT_TOOL is not installed at $FMT_BIN — $FMT_N staged file(s) left UNFORMATTED. Run \\\`devkit doctor --fix\\\`; this commit continues."
-        elif [ "$FMT_RC" -ne 0 ]; then
-            echo "🎨 $FMT_TOOL failed over $FMT_N staged file(s) (xargs exit $FMT_RC) — some may be UNFORMATTED; its diagnostics are above. This commit continues."
-        fi`;
+// Defined ONCE so self-host's single replace converts every caller. Args: status, what, status label;
+// the path branch labels xargs's status, which collapses 1-125, so it is not the tool's exit code.
+export const FORMAT_FAILURE_REPORT = `__dk_fmt_failed() {
+    if [ "$1" -eq 127 ]; then
+        echo "🎨 $FMT_TOOL is not installed at $FMT_BIN — $2 left UNFORMATTED. Run \\\`devkit doctor --fix\\\`; this commit continues."
+    else
+        echo "🎨 $FMT_TOOL failed over $2 ($3 $1) — some may be UNFORMATTED; its diagnostics are above. This commit continues."
+    fi
+}`;
+
+// Index-blob rewrite (the git-format-staged technique): the bytes being committed are formatted
+// through stdin and written back to the index, so the working copy and its unstaged edits stay put.
+const STAGED_COPY_STEP = `    if [ -n "$FMT_SKIP" ]; then
+        FMT_TMP=$(mktemp -d); : >"$FMT_TMP/done"; : >"$FMT_TMP/left"; FMT_STDIN_RC=0
+        while IFS= read -r fmt_path; do
+            # Literal pathspec and the blob's oid: a \`:path\` revision misreads \`0:a.ts\` as stage 0 of a.ts.
+            fmt_entry=$(git --literal-pathspecs ls-files -s -- "$fmt_path" </dev/null)
+            fmt_mode=\${fmt_entry%% *}; fmt_oid=\${fmt_entry#* }; fmt_oid=\${fmt_oid%% *}
+            case "$fmt_mode" in 100644 | 100755) ;; *) continue ;; esac
+            # Biome applies its ignore config on stdin only to a path that exists on disk.
+            if [ ! -e "$fmt_path" ]; then printf '%s\\n' "$fmt_path" >>"$FMT_TMP/left"; continue; fi
+            git cat-file blob "$fmt_oid" >"$FMT_TMP/in" </dev/null
+            [ -s "$FMT_TMP/in" ] || continue
+            fmt_rc=0; __dk_fmt_stdin "$fmt_path" <"$FMT_TMP/in" >"$FMT_TMP/out" || fmt_rc=$?
+            if [ "$fmt_rc" -ne 0 ] || [ ! -s "$FMT_TMP/out" ]; then
+                [ "$fmt_rc" -eq 0 ] || FMT_STDIN_RC=$fmt_rc
+                printf '%s\\n' "$fmt_path" >>"$FMT_TMP/left"; continue
+            fi
+            cmp -s "$FMT_TMP/in" "$FMT_TMP/out" && continue
+            if fmt_oid=$(git hash-object -w --path="$fmt_path" --stdin <"$FMT_TMP/out") &&
+                git update-index --cacheinfo "$fmt_mode,$fmt_oid,$fmt_path" </dev/null; then
+                printf '%s\\n' "$fmt_path" >>"$FMT_TMP/done"
+            else
+                printf '%s\\n' "$fmt_path" >>"$FMT_TMP/left"
+            fi
+        done <<EOF
+$FMT_SKIP
+EOF
+        if [ -s "$FMT_TMP/done" ]; then
+            echo "🎨 $FMT_TOOL formatted the STAGED copy of $(grep -c '' "$FMT_TMP/done") path(s) that also carry unstaged edits; their working copies are untouched (to format those too, run: $FMT_BIN $FMT_FIX_ARGS <path>):"
+            sed 's/^/     /' "$FMT_TMP/done"
+        fi
+        if [ -s "$FMT_TMP/left" ]; then
+            echo "🎨 $FMT_TOOL left $(grep -c '' "$FMT_TMP/left") staged path(s) with unstaged edits exactly as staged, possibly UNFORMATTED (deleted from the working tree, or not formattable):"
+            sed 's/^/     /' "$FMT_TMP/left"
+        fi
+        if [ ! -s "$FMT_TMP/done" ] && [ ! -s "$FMT_TMP/left" ]; then
+            echo "🎨 $FMT_TOOL: the staged copy of every path that also carries unstaged edits is already formatted."
+        fi
+        rm -rf "$FMT_TMP"
+        [ "$FMT_STDIN_RC" -eq 0 ] || __dk_fmt_failed "$FMT_STDIN_RC" "the staged copies listed above" "exit"
+    fi`;
 
 /** The format step, running the consumer formatter from `binDir`, the consumer's own bin dir. */
 export const formatFragment = (binDir: string, chain?: StepFormatter[]) => `# devkit:biome-format
 # Format staged files, then re-stage exactly those (scoped — never a blanket \`git add -u\`, which
 # would sweep unrelated working-tree changes into the commit). Only re-add files with NO unstaged
-# edits, so partially-staged files commit exactly as staged.
+# edits; a partially-staged file has only its staged copy formatted, in the index.
 #
 # EVERY branch reports, and each banner opens with the 🎨 stage anchor ship's log scraper keys on.
 # Silence used to be ambiguous: no staged match, a staged set entirely excluded by unstaged edits,
@@ -153,6 +210,7 @@ export const formatFragment = (binDir: string, chain?: StepFormatter[]) => `# de
 # body — self-host replaces the setup outright, and an unreachable arm must not survive into it.
 __dk_format_staged() {
 ${chain ? renderToolChain(chain, binDir) : renderToolSetup(CONSUMER_FORMATTER, binDir)}
+${FORMAT_FAILURE_REPORT}
 STAGED_FMT=$(git diff --cached --name-only -z --diff-filter=ACM | tr '\\0' '\\n' | ${FORMAT_EXTENSION_FILTER} || true)
 if [ -z "$STAGED_FMT" ]; then
     echo "🎨 $FMT_TOOL: no staged formattable path — nothing to format."
@@ -162,20 +220,12 @@ else
     FMT_SAFE=$(printf '%s\\n' "$STAGED_FMT" | grep -Fxvf "$UNSTAGED_FMT_FILE" || true)
     FMT_SKIP=$(printf '%s\\n' "$STAGED_FMT" | grep -Fxf "$UNSTAGED_FMT_FILE" || true)
     rm -f "$UNSTAGED_FMT_FILE"
-    # Reported whether the exclusion is TOTAL or PARTIAL. A partial one is the dangerous shape: the
-    # success banner counts only what it formatted, so "formatted 3" over a staged set of 5 reads as
-    # a clean pass while two unformatted files ride into the commit.
-    if [ -n "$FMT_SKIP" ]; then
-        echo "🎨 $FMT_TOOL: skipped $(printf '%s\\n' "$FMT_SKIP" | grep -c '') staged path(s) that also carry unstaged edits, because formatting them would commit bytes you never staged:"
-        printf '%s\\n' "$FMT_SKIP" | sed 's/^/     /'
-    fi
-    if [ -z "$FMT_SAFE" ]; then
-        echo "🎨 $FMT_TOOL: every eligible path also carries unstaged edits — nothing left to format."
-    else
+${STAGED_COPY_STEP}
+    if [ -n "$FMT_SAFE" ]; then
         FMT_N=$(printf '%s\\n' "$FMT_SAFE" | grep -c '' || true)
         FMT_RC=0
         printf '%s\\n' "$FMT_SAFE" | tr '\\n' '\\0' | __dk_fmt_run || FMT_RC=$?
-${FORMAT_FAILURE_REPORT}
+        [ "$FMT_RC" -eq 0 ] || __dk_fmt_failed "$FMT_RC" "$FMT_N staged file(s)" "xargs exit"
         printf '%s\\n' "$FMT_SAFE" | tr '\\n' '\\0' | xargs -0 git add -f
         if [ "$FMT_RC" -eq 0 ]; then
             echo "🎨 $FMT_TOOL formatted and re-staged $FMT_N staged file(s)."
