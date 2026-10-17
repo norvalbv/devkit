@@ -132,8 +132,20 @@ fi
 DIFF_FILE="$(mktemp)"
 FALLOW_OUT="$(mktemp)"
 DIFF_ERR="$(mktemp)"
-cleanup() { rm -f "$DIFF_FILE" "$FALLOW_OUT" "$DIFF_ERR"; }
+COV=""
+cleanup() { rm -f "$DIFF_FILE" "$FALLOW_OUT" "$DIFF_ERR" "$COV"; }
 trap cleanup EXIT
+
+# fallow's base snapshot is itself a git worktree and has clobbered a ship worktree's HEAD before
+# (the reason husky-block.mts wraps it in __dk_no_git_env), so it and guard-coverage run without them.
+no_git_env() {
+  env -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_CONFIG -u GIT_CONFIG_PARAMETERS \
+    -u GIT_CONFIG_COUNT -u GIT_OBJECT_DIRECTORY -u GIT_DIR -u GIT_WORK_TREE \
+    -u GIT_IMPLICIT_WORK_TREE -u GIT_GRAFT_FILE -u GIT_INDEX_FILE -u GIT_NO_REPLACE_OBJECTS \
+    -u GIT_REPLACE_REF_BASE -u GIT_PREFIX -u GIT_SHALLOW_FILE -u GIT_COMMON_DIR \
+    -u GIT_GLOB_PATHSPECS -u GIT_NOGLOB_PATHSPECS -u GIT_LITERAL_PATHSPECS -u GIT_ICASE_PATHSPECS \
+    "$@"
+}
 
 # sc-1366: an EMPTY staged diff and an UNREADABLE one are different facts. This used to be
 # `2>/dev/null || true`, which collapsed both into the "nothing to audit" line below — so a staged
@@ -186,15 +198,20 @@ if [ "$DIFF_BYTES" -gt "$FALLOW_DIFF_STDIN_MAX_BYTES" ]; then
   exit 0
 fi
 
-# fallow runs WITHOUT git's environment: its base snapshot is itself a git worktree, and it has
-# clobbered a ship worktree's HEAD before (the same reason husky-block.mts wraps it in
-# __dk_no_git_env). The diff is already captured, so scrubbing here costs nothing.
-env -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_CONFIG -u GIT_CONFIG_PARAMETERS \
-    -u GIT_CONFIG_COUNT -u GIT_OBJECT_DIRECTORY -u GIT_DIR -u GIT_WORK_TREE \
-    -u GIT_IMPLICIT_WORK_TREE -u GIT_GRAFT_FILE -u GIT_INDEX_FILE -u GIT_NO_REPLACE_OBJECTS \
-    -u GIT_REPLACE_REF_BASE -u GIT_PREFIX -u GIT_SHALLOW_FILE -u GIT_COMMON_DIR \
-    -u GIT_GLOB_PATHSPECS -u GIT_NOGLOB_PATHSPECS -u GIT_LITERAL_PATHSPECS -u GIT_ICASE_PATHSPECS \
-    fallow audit --diff-stdin --format json --quiet <"$DIFF_FILE" >"$FALLOW_OUT" 2>/dev/null || true
+# fallow rejects a coverage map holding a negative hit, so it gets the same clamped copy the git
+# pre-commit gate hands it. An operator's FALLOW_COVERAGE is kept; any guard-coverage failure is skipped.
+if [ -z "${FALLOW_COVERAGE:-}" ]; then
+  if [ -x ./node_modules/.bin/guard-coverage ]; then
+    GUARD_COVERAGE=./node_modules/.bin/guard-coverage
+  else
+    GUARD_COVERAGE="$(command -v guard-coverage || true)"
+  fi
+  [ -z "$GUARD_COVERAGE" ] || COV="$(no_git_env "$GUARD_COVERAGE" fallow-copy 2>/dev/null)" || COV=""
+fi
+
+# The diff is already captured, so scrubbing git's environment here costs nothing.
+no_git_env ${COV:+"FALLOW_COVERAGE=$COV"} \
+  fallow audit --diff-stdin --format json --quiet <"$DIFF_FILE" >"$FALLOW_OUT" 2>/dev/null || true
 
 # Gate policy — the one judgement devkit owns. `verdict` alone is NOT a faithful "blockable" signal:
 # a duplication-only staged set returns warn (and --gate all does not change that, measured), so an
@@ -219,7 +236,7 @@ if [ "$1" = "BLOCK" ]; then
   echo "fallow-staged-gate: blocked — the STAGED diff introduces findings (verdict=$2, introduced duplication=$3)." >&2
   # sc-1192's lesson: never block with only a code. Show fallow's own explanation, bounded so a
   # PreToolUse hook cannot flood the agent's context.
-  env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_PREFIX \
+  no_git_env ${COV:+"FALLOW_COVERAGE=$COV"} \
     fallow audit --diff-stdin --quiet <"$DIFF_FILE" 2>&1 | head -40 >&2 || true
   exit 2
 fi

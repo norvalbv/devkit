@@ -29,18 +29,16 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { rootRegistry } from './_helpers.mts';
 import { mainWithWorktree } from './_worktree-fixture.mts';
 
-const GATE = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '..',
-  '..',
-  'agents-hooks',
-  'fallow-staged-gate.sh',
-);
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const GATE = join(REPO, 'agents-hooks', 'fallow-staged-gate.sh');
 
 const { mkTmp, cleanup } = rootRegistry();
 afterEach(cleanup);
 
-/** A stub `fallow` that records its argv and stdin, and replies with the given audit JSON. */
+/**
+ * A stub `fallow` that records its argv, stdin and FALLOW_COVERAGE (`unset` apart from empty, which
+ * real fallow rejects), keeps a copy of that file, and replies with the given audit JSON.
+ */
 function stubFallow(dir: string, auditJson: string, { version = '3.6.0' } = {}) {
   const binDir = join(dir, 'stub-bin');
   mkdirSync(binDir, { recursive: true });
@@ -51,6 +49,8 @@ function stubFallow(dir: string, auditJson: string, { version = '3.6.0' } = {}) 
 if [ "$1" = "--version" ]; then echo "fallow ${version}"; exit 0; fi
 echo "$@" >> "${join(dir, 'argv.log')}"
 cat >> "${join(dir, 'stdin.log')}"
+echo "COV=\${FALLOW_COVERAGE-unset}" >> "${join(dir, 'cov.log')}"
+[ -z "\${FALLOW_COVERAGE:-}" ] || cp "$FALLOW_COVERAGE" "${join(dir, 'cov-seen.json')}"
 cat <<'JSON'
 ${auditJson}
 JSON
@@ -61,6 +61,41 @@ exit 0
   if (!existsSync(join(binDir, 'node'))) symlinkSync(process.execPath, join(binDir, 'node'));
   return binDir;
 }
+
+/** A `guard-coverage` running `body`, in the repo's ./node_modules/.bin or a PATH dir. */
+function stubGuardCoverage(binDir: string, body: string) {
+  mkdirSync(binDir, { recursive: true });
+  const stub = join(binDir, 'guard-coverage');
+  writeFileSync(stub, `#!/bin/sh\necho "$@" >> "${join(binDir, 'guard-coverage.log')}"\n${body}\n`);
+  chmodSync(stub, 0o755);
+  return join(binDir, 'guard-coverage.log');
+}
+
+/** A guard-coverage that writes a copy named `name` into `dir` and prints its path. */
+function printsCopy(dir: string, name: string) {
+  const copy = join(dir, name);
+  return { copy, body: `echo '{}' > "${copy}"\necho "${copy}"` };
+}
+
+/** A vitest-v8-shaped coverage-final.json under `root` whose a.ts entry holds a negative branch hit. */
+function negativeHitArtifact(root: string) {
+  const file = join(root, 'a.ts');
+  const entry = { path: file, statementMap: {}, fnMap: {}, branchMap: {}, s: { 0: 1 }, f: {} };
+  mkdirSync(join(root, 'coverage'));
+  writeFileSync(
+    join(root, 'coverage', 'coverage-final.json'),
+    JSON.stringify({ [file]: { ...entry, b: { 0: [3, -2] } } }),
+  );
+  return file;
+}
+
+/** The real guard-coverage from this checkout, as the repo's ./node_modules/.bin bin. */
+function realGuardCoverage(dir: string) {
+  const runner = join(REPO, 'gate-engine', 'coverage', 'run.mts');
+  stubGuardCoverage(join(dir, 'node_modules', '.bin'), `exec node "${runner}" "$@"`);
+}
+
+const covLines = (dir: string) => readFileSync(join(dir, 'cov.log'), 'utf8').trim().split('\n');
 
 /** A repo with a .fallowrc and one staged file, so the gate has something to scope. */
 function repoWithStaged(dir: string) {
@@ -93,7 +128,8 @@ function run(
     cwd: dir,
     encoding: 'utf8',
     input: input ?? JSON.stringify(cursor ? { command } : { tool_input: { command } }),
-    env: { ...process.env, PATH, CLAUDE_PROJECT_DIR: dir, ...env },
+    // A FALLOW_COVERAGE inherited from a ship or vitest parent would skip the wrapper's own copy.
+    env: { ...process.env, FALLOW_COVERAGE: undefined, PATH, CLAUDE_PROJECT_DIR: dir, ...env },
   });
   return { status: r.status, stderr: r.stderr ?? '', stdout: r.stdout ?? '' };
 }
@@ -131,8 +167,10 @@ describe('fallow-staged-gate.sh', () => {
     const dir = mkTmp('staged-gate-');
     repoWithStaged(dir);
     const binDir = stubFallow(dir, '{"verdict":"fail","attribution":{"duplication_introduced":0}}');
+    const coverageLog = stubGuardCoverage(join(dir, 'node_modules', '.bin'), 'exit 0');
     expect(run(dir, binDir, { command }).status).toBe(0);
     expect(existsSync(join(dir, 'argv.log'))).toBe(false);
+    expect(existsSync(coverageLog)).toBe(false);
   });
 
   it.each([
@@ -254,10 +292,12 @@ describe('fallow-staged-gate.sh', () => {
     writeFileSync(join(dir, '.fallowrc.jsonc'), '{}\n');
     spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
     const binDir = stubFallow(dir, PASS);
+    const coverageLog = stubGuardCoverage(join(dir, 'node_modules', '.bin'), 'exit 0');
     const r = run(dir, binDir);
     expect(r.status).toBe(0);
     expect(r.stderr).toMatch(/no staged added lines/);
     expect(existsSync(join(dir, 'argv.log'))).toBe(false);
+    expect(existsSync(coverageLog)).toBe(false);
   });
 
   /**
@@ -347,5 +387,106 @@ describe('fallow-staged-gate.sh', () => {
     spawnSync('rm', [join(dir, '.fallowrc.jsonc')]);
     const binDir = stubFallow(dir, '{"verdict":"fail","attribution":{"duplication_introduced":9}}');
     expect(run(dir, binDir).status).toBe(0);
+  });
+});
+
+// The git pre-commit gate hands fallow a clamped coverage copy, so this wrapper must too: without
+// it fallow rejects a map holding a negative hit and estimates CRAP the git hook then measures.
+describe('fallow-staged-gate.sh coverage input', () => {
+  const FAIL = '{"verdict":"fail","attribution":{"duplication_introduced":0}}';
+
+  it('hands fallow a clamped copy of a coverage map holding a negative hit, then deletes it', () => {
+    const dir = mkTmp('staged-gate-');
+    repoWithStaged(dir);
+    const binDir = stubFallow(dir, PASS);
+    const file = negativeHitArtifact(dir);
+    realGuardCoverage(dir);
+
+    expect(run(dir, binDir).status).toBe(0);
+
+    const [line] = covLines(dir);
+    const copy = line.slice('COV='.length);
+    expect(copy).toMatch(/devkit-fallow-coverage-.*\.json$/);
+    const seen = JSON.parse(readFileSync(join(dir, 'cov-seen.json'), 'utf8'));
+    expect(seen).toMatchObject({ [file]: { b: { 0: [3, 0] } } });
+    expect(existsSync(copy)).toBe(false);
+  });
+
+  it("does not follow an exported GIT_WORK_TREE to another tree's coverage artifact", () => {
+    const dir = mkTmp('staged-gate-');
+    repoWithStaged(dir);
+    const binDir = stubFallow(dir, PASS);
+    const decoy = mkTmp('staged-gate-decoy-');
+    negativeHitArtifact(decoy);
+    realGuardCoverage(dir);
+
+    const env = { GIT_DIR: join(dir, '.git'), GIT_WORK_TREE: decoy };
+    expect(run(dir, binDir, { env }).status).toBe(0);
+    expect(covLines(dir)).toEqual(['COV=unset']);
+  });
+
+  it('hands both the verdict run and the block explanation the same copy, then deletes it', () => {
+    const dir = mkTmp('staged-gate-');
+    repoWithStaged(dir);
+    const binDir = stubFallow(dir, FAIL);
+    const { copy, body } = printsCopy(dir, 'clamped copy.json');
+    stubGuardCoverage(join(dir, 'node_modules', '.bin'), body);
+
+    expect(run(dir, binDir).status).toBe(2);
+    expect(covLines(dir)).toEqual([`COV=${copy}`, `COV=${copy}`]);
+    expect(existsSync(copy)).toBe(false);
+  });
+
+  it("leaves an operator's FALLOW_COVERAGE in place and never runs guard-coverage", () => {
+    const dir = mkTmp('staged-gate-');
+    repoWithStaged(dir);
+    const binDir = stubFallow(dir, PASS);
+    const coverageLog = stubGuardCoverage(join(dir, 'node_modules', '.bin'), 'exit 0');
+    const operator = join(dir, 'operator.json');
+    writeFileSync(operator, '{}');
+
+    expect(run(dir, binDir, { env: { FALLOW_COVERAGE: operator } }).status).toBe(0);
+    expect(covLines(dir)).toEqual([`COV=${operator}`]);
+    expect(existsSync(coverageLog)).toBe(false);
+    expect(existsSync(operator)).toBe(true);
+  });
+
+  it.each([
+    ['exits 1 after printing', `echo /tmp/partial-copy.json\nexit 1`],
+    ['predates fallow-copy (exit 2)', 'echo "usage: guard-coverage [gate]" >&2\nexit 2'],
+    ['is absent', null],
+  ])('still audits without coverage when guard-coverage %s', (_label, body) => {
+    const dir = mkTmp('staged-gate-');
+    repoWithStaged(dir);
+    const binDir = stubFallow(dir, FAIL);
+    if (body !== null) stubGuardCoverage(join(dir, 'node_modules', '.bin'), body);
+
+    expect(run(dir, binDir).status).toBe(2);
+    expect(covLines(dir)).toEqual(['COV=unset', 'COV=unset']);
+  });
+
+  it('prefers the repo-local guard-coverage over one on PATH', () => {
+    const dir = mkTmp('staged-gate-');
+    repoWithStaged(dir);
+    const binDir = stubFallow(dir, PASS);
+    const local = printsCopy(dir, 'local.json');
+    stubGuardCoverage(join(dir, 'node_modules', '.bin'), local.body);
+    const pathLog = stubGuardCoverage(binDir, printsCopy(dir, 'global.json').body);
+
+    expect(run(dir, binDir).status).toBe(0);
+    expect(covLines(dir)).toEqual([`COV=${local.copy}`]);
+    expect(existsSync(pathLog)).toBe(false);
+  });
+
+  it('uses a guard-coverage on PATH when the repo has none', () => {
+    const dir = mkTmp('staged-gate-');
+    repoWithStaged(dir);
+    const binDir = stubFallow(dir, PASS);
+    const global = printsCopy(dir, 'global.json');
+    stubGuardCoverage(binDir, global.body);
+
+    expect(run(dir, binDir).status).toBe(0);
+    expect(covLines(dir)).toEqual([`COV=${global.copy}`]);
+    expect(existsSync(global.copy)).toBe(false);
   });
 });
