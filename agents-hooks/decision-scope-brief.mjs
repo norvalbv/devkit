@@ -30,12 +30,15 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { patchTargets } from './edit-targets-lib.mjs';
 
-const MUTATING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
+const MUTATING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'apply_patch']);
 const PATH_KEYS = ['file_path', 'path', 'target_file', 'target_path'];
 /** Keep a brief short enough to be read: the ruling is the payload, the rest is a pointer. */
 const RULING_CHARS = 320;
 const MAX_AXES = 3;
+/** One retrieval spawn per file runs before the edit, so a large Codex patch is briefed on its first few. */
+const MAX_FILES = 5;
 
 function readInput() {
   try {
@@ -112,8 +115,10 @@ function claimed(stamp) {
   }
 }
 
-/** The ONLY output channel. Advisory by construction: additionalContext, never permissionDecision. */
-function emit(text) {
+/** The ONLY output channel, written once per run. Advisory: additionalContext, never permissionDecision. */
+function emit(texts) {
+  const text = texts.filter(Boolean).join('\n\n');
+  if (!text) return;
   process.stdout.write(
     `${JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: text } })}\n`,
   );
@@ -123,32 +128,50 @@ function main() {
   const input = readInput();
   if (!input || !MUTATING_TOOLS.has(input.tool_name)) return;
   const file = filePathOf(input);
-  if (!file) return;
-
+  const files = file ? [file] : patchTargets(input).slice(0, MAX_FILES);
   const root = workspaceRoot(input);
+  emit(files.map((f) => briefFor(input, root, f)));
+}
+
+/** Briefed already, so no retrieval. Only the first return to the file is recorded, with its age. */
+function recordReturn(root, rel, tool, stamp, briefedAt) {
+  const bin = claimed(`${stamp}.again`) ? null : resolveBin(root);
+  if (!bin) return;
+  const secs = Math.max(0, Math.round((Date.now() - briefedAt) / 1000));
+  spawnSync(bin, ['scoped-targets', '--files', rel, '--brief-again', `${tool},${secs}`], {
+    cwd: root,
+    stdio: 'ignore',
+    timeout: 10_000,
+  });
+}
+
+/** The retrieved axes, or null when the run's output is not a JSON array (an outage, not an answer). */
+function axesFrom(run) {
+  if (run.status !== 0 || !run.stdout?.trim()) return null;
+  try {
+    const parsed = JSON.parse(run.stdout);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The brief or retrieval-outage notice for one file, or null when there is nothing to say. */
+function briefFor(input, root, file) {
   const rel = path.isAbsolute(file) ? path.relative(root, file) : file;
   // Outside the project (or above it) is not ours to brief on.
-  if (!rel || rel.startsWith('..')) return;
+  if (!rel || rel.startsWith('..')) return null;
 
   const tool = input.tool_name;
   const stamp = stampPath(input.session_id, root, rel);
   const briefedAt = claimedAt(stamp);
   if (briefedAt !== null) {
-    // Briefed already, so no retrieval. Only the first return to the file is recorded, with its age.
-    const bin = claimed(`${stamp}.again`) ? null : resolveBin(root);
-    if (bin) {
-      const secs = Math.max(0, Math.round((Date.now() - briefedAt) / 1000));
-      spawnSync(bin, ['scoped-targets', '--files', rel, '--brief-again', `${tool},${secs}`], {
-        cwd: root,
-        stdio: 'ignore',
-        timeout: 10_000,
-      });
-    }
-    return;
+    recordReturn(root, rel, tool, stamp, briefedAt);
+    return null;
   }
 
   const bin = resolveBin(root);
-  if (!bin) return;
+  if (!bin) return null;
 
   const spec = `${tool},${MAX_AXES},${RULING_CHARS}`;
   const run = spawnSync(bin, ['scoped-targets', '--files', rel, '--brief', spec], {
@@ -162,31 +185,22 @@ function main() {
   // that is retrieval running and answering "nothing governs". These were one branch and they are
   // not one fact: staying silent for an outage reads to an agent as a clean bill of health, which is
   // the failure this hook exists to prevent.
-  let axes = null;
-  if (run.status === 0 && run.stdout?.trim()) {
-    try {
-      const parsed = JSON.parse(run.stdout);
-      if (Array.isArray(parsed)) axes = parsed;
-    } catch {
-      // axes stays null — malformed output is an outage, not an answer.
-    }
-  }
+  const axes = axesFrom(run);
   if (axes === null) {
     // A sentinel key, never a relative path: the notice fires once per session WITHOUT burning this
     // file's brief slot, so the first governed edit after the tool is fixed is still briefed.
-    if (claimed(stampPath(input.session_id, root, '\u0000retrieval-unavailable'))) return;
-    emit(
+    if (claimed(stampPath(input.session_id, root, '\u0000retrieval-unavailable'))) return null;
+    return (
       `Decision retrieval DID NOT RUN for \`${rel}\` — \`guard-decisions scoped-targets\` failed, so ` +
-        `this edit is UNBRIEFED, not ungoverned. Do not read the absence of a brief as "nothing rules ` +
-        `here". Check by hand before deciding: list the decisions directory (guard.config.json → ` +
-        `\`decisionsDir\`, default \`docs/decisions/\`) and grep it for \`**Scope:**\` globs covering this ` +
-        `path. Diagnose with \`guard-decisions scoped-targets --files ${rel}\`.`,
+      `this edit is UNBRIEFED, not ungoverned. Do not read the absence of a brief as "nothing rules ` +
+      `here". Check by hand before deciding: list the decisions directory (guard.config.json → ` +
+      `\`decisionsDir\`, default \`docs/decisions/\`) and grep it for \`**Scope:**\` globs covering this ` +
+      `path. Diagnose with \`guard-decisions scoped-targets --files ${rel}\`.`
     );
-    return;
   }
-  if (axes.length === 0) return; // nothing governs this file — stay quiet
+  if (axes.length === 0) return null; // nothing governs this file — stay quiet
 
-  if (claimed(stamp)) return;
+  if (claimed(stamp)) return null;
 
   const lines = axes.slice(0, MAX_AXES).map((a) => {
     const ruling = String(a.ruling ?? '').trim();
@@ -198,13 +212,12 @@ function main() {
       ? `\n(${axes.length - MAX_AXES} more — \`guard-decisions scoped-targets --files ${rel}\`)`
       : '';
 
-  const brief =
+  return (
     `Decision records already govern \`${rel}\`. These are settled rulings, not suggestions — ` +
     `follow them, or re-open the axis deliberately via \`guard-decisions add <slug> --target … ` +
     `--evidence-change "<what shifted>"\`. Full text: \`guard-decisions show <slug>\`.\n\n` +
-    `${lines.join('\n')}${more}`;
-
-  emit(brief);
+    `${lines.join('\n')}${more}`
+  );
 }
 
 try {

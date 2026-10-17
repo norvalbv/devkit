@@ -110,6 +110,17 @@ describe('e2e: guard-owned decision records', () => {
     expect(denied.status).toBe(0);
     expect(JSON.parse(denied.stdout).hookSpecificOutput.permissionDecision).toBe('deny');
 
+    // A Codex apply_patch names its files only in the patch text, read by the co-installed lib.
+    expect(existsSync(join(fx.repoDir, '.claude/hooks/edit-targets-lib.mjs'))).toBe(true);
+    const patched = runNodeHook(fx, 'decision-edit-guard.mjs', {
+      tool_name: 'apply_patch',
+      tool_input: {
+        command: '*** Begin Patch\n*** Update File: docs/decisions/axis.md\n*** End Patch',
+      },
+      cwd: fx.repoDir,
+    });
+    expect(JSON.parse(patched.stdout).hookSpecificOutput.permissionDecision).toBe('deny');
+
     const allowed = runNodeHook(fx, 'decision-edit-guard.mjs', {
       tool_name: 'Write',
       tool_input: { file_path: join(fx.repoDir, 'docs/notes.md') },

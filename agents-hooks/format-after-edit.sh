@@ -16,6 +16,15 @@ js=$(command -v bun || command -v node)
 # Claude sends tool_input.file_path; Cursor afterFileEdit sends it top-level.
 file_path=$(printf '%s' "$input" | "$js" -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));const f=p?.tool_input?.file_path??p?.file_path;if(typeof f==="string")process.stdout.write(f)' 2>/dev/null)
 
+# Codex apply_patch carries no file_path: re-run this hook once per patched file, as a one-file edit.
+if [ -z "$file_path" ] && [ -z "$DEVKIT_PATCH_FANOUT" ]; then
+  rc=0
+  while IFS= read -r payload; do
+    printf '%s' "$payload" | DEVKIT_PATCH_FANOUT=1 "${BASH:-bash}" "$0" >/dev/null || { [ $? -eq 2 ] && rc=2; }
+  done < <(printf '%s' "$input" | "$js" "$(dirname "$0")/edit-targets-lib.mjs" --payloads 2>/dev/null)
+  [ "$rc" -eq 2 ] && exit 2
+fi
+
 if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
   echo '{}'
   exit 0
@@ -33,7 +42,8 @@ WORKSPACE=$(pwd)
 # is working on in the same session) whose files live outside the workspace and have their own
 # toolchain — running THIS repo's biome/eslint on them errors (eslint resolves its config from the
 # edited file's own tree, not cwd) and spams the conversation. That repo runs its own hooks.
-if [ -n "$CLAUDE_PROJECT_DIR" ] && [[ "$file_path" != "$WORKSPACE"/* ]]; then
+# A Codex patch child checks too: CLAUDE_PROJECT_DIR is unset there and patch paths can be absolute.
+if [ -n "$CLAUDE_PROJECT_DIR$DEVKIT_PATCH_FANOUT" ] && [[ "$file_path" != "$WORKSPACE"/* ]]; then
   echo '{}'
   exit 0
 fi
