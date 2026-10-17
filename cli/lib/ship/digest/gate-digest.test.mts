@@ -1060,10 +1060,14 @@ describe('a finding that did not block says why', () => {
     );
   });
 
-  it('says the run ended on a non-gate cause when no row blocked', () => {
+  it('names what the run ended on when no row blocked, gate or not', () => {
     const text = line([completenessFail('gap'), ended('timeout', 124)]);
-    expect(text).toContain('did NOT block this run, which ended on timeout, not on a gate finding');
+    expect(text).toContain('did NOT block this run — the run ended on timeout — read it before');
     expect(text).not.toContain('stopped it first');
+    // A gate family whose own rows never reached the sink is still a gate: never "not a gate".
+    const silent = line([completenessFail('gap'), ended('decisions', 1)]);
+    expect(silent).toContain('did NOT block this run — the run ended on decisions — read it');
+    expect(silent).not.toContain('not on a gate finding');
   });
 
   it('says the gate let a passing run through, without claiming the finding was cleared', () => {
