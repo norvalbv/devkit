@@ -120,10 +120,15 @@ export function stageBaselineMigration(root: string, from: string, to: string): 
   if (!indexTracksBaseline(root, to)) {
     throw new Error(`Git did not stage migrated ratchet baseline ${to}.`);
   }
-  if (!legacyWasTracked) return;
-  stagePathStrict(root, from, { missingIsSuccess: true });
-  if (indexTracksBaseline(root, from)) {
-    throw new Error(`Git did not stage removal of legacy ratchet baseline ${from}.`);
+  if (legacyWasTracked) stageBaselineRemoval(root, from);
+}
+
+/** Strictly stage the deletion of a tracked legacy baseline; an untracked one needs nothing. */
+export function stageBaselineRemoval(root: string, rel: string): void {
+  if (!isGitWorktree(root) || !indexTracksBaseline(root, rel)) return;
+  stagePathStrict(root, rel, { missingIsSuccess: true });
+  if (indexTracksBaseline(root, rel)) {
+    throw new Error(`Git did not stage removal of legacy ratchet baseline ${rel}.`);
   }
 }
 

@@ -283,8 +283,9 @@ ship_record_gate_adds() {
   git -C "$wt" diff --no-renames --name-only -z "$base" HEAD \
     -- ${exclude[@]+"${exclude[@]}"} > "$out" || return 1
   # Resume drops these from its rebuild: the caller's checkout still holds what the gate removed.
-  git -C "$wt" diff --no-renames --name-only -z --diff-filter=D "$tree" HEAD |
-    while IFS= read -r -d '' path; do
-      git -C "$wt" cat-file -e "$base:$path" 2>/dev/null || printf '%s\0' "$path"
-    done >> "$out"
+  ( set -o pipefail
+    git -C "$wt" diff --no-renames --name-only -z --diff-filter=D "$tree" HEAD |
+      while IFS= read -r -d '' path; do
+        git -C "$wt" cat-file -e "$base:$path" 2>/dev/null || printf '%s\0' "$path"
+      done ) >> "$out"
 }
