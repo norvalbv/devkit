@@ -12,7 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   FANOUT_BASELINE,
   IMPORT_WALL_BASELINE,
@@ -20,6 +20,7 @@ import {
   migrateRatchetBaselines,
   readRatchetBaseline,
   removeRatchetBaseline,
+  reportRatchetBaselineMigration,
   SIZE_BASELINE,
   STRUCTURE_BASELINE_DIR,
   STRUCTURE_EXEMPT,
@@ -616,5 +617,70 @@ describe('ratchet baseline paths', () => {
     ]);
     expect(existsSync(join(root, 'eslint/baselines/size.json'))).toBe(true);
     expect(existsSync(join(root, SIZE_BASELINE))).toBe(false);
+  });
+
+  // The size gate deletes a zero-disable legacy baseline on the next commit, so moving it only
+  // hands that commit a briefed path its own gate removes.
+  it('drops a zero-disable legacy size baseline and stages its deletion instead of moving it', () => {
+    const root = makeRoot();
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 't@t.t'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: root });
+    write(root, 'eslint/baselines/size.json', '{"fileDisables":0,"fnDisables":0}\n');
+    execFileSync('git', ['add', 'eslint/baselines/size.json'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'legacy baseline'], { cwd: root });
+
+    expect(migrateRatchetBaselines(root)).toEqual([
+      { from: 'eslint/baselines/size.json', kind: 'dropped-empty', to: SIZE_BASELINE },
+    ]);
+    expect(existsSync(join(root, 'eslint/baselines/size.json'))).toBe(false);
+    expect(existsSync(join(root, SIZE_BASELINE))).toBe(false);
+    expect(
+      execFileSync('git', ['diff', '--cached', '--name-status'], { cwd: root, encoding: 'utf8' }),
+    ).toBe('D\teslint/baselines/size.json\n');
+    expect(migrateRatchetBaselines(root)).toEqual([]);
+  });
+
+  it('drops a zero-disable legacy size baseline beside real canonical debt without a conflict', () => {
+    const root = makeRoot();
+    const canonical = '{"files":{"src/a.ts":{"file":1,"fn":0}}}\n';
+    write(root, SIZE_BASELINE, canonical);
+    write(root, 'eslint/baselines/size.json', '{"fileDisables":0,"fnDisables":0}\n');
+
+    expect(migrateRatchetBaselines(root)).toEqual([
+      { from: 'eslint/baselines/size.json', kind: 'dropped-empty', to: SIZE_BASELINE },
+    ]);
+    expect(readFileSync(join(root, SIZE_BASELINE), 'utf8')).toBe(canonical);
+    expect(existsSync(join(root, 'eslint/baselines/size.json'))).toBe(false);
+  });
+
+  // The report's fallback label is 'remove duplicate', which would describe a drop as a move target.
+  it('reports a dry-run drop by name and leaves the legacy file in place', () => {
+    const root = makeRoot();
+    write(root, 'eslint/baselines/size.json', '{"fileDisables":0,"fnDisables":0}\n');
+    const lines: string[] = [];
+    const log = vi
+      .spyOn(console, 'log')
+      .mockImplementation((...args: unknown[]) => void lines.push(args.join(' ')));
+    try {
+      reportRatchetBaselineMigration(root, true);
+    } finally {
+      log.mockRestore();
+    }
+
+    expect(lines).toContain('  [dry-run] drop empty eslint/baselines/size.json');
+    expect(lines.join('\n')).not.toContain('remove duplicate');
+    expect(existsSync(join(root, 'eslint/baselines/size.json'))).toBe(true);
+  });
+
+  it('still moves a legacy size baseline that records disables byte for byte', () => {
+    const root = makeRoot();
+    const bytes = '{"fileDisables":2,"fnDisables":0}\n';
+    write(root, 'eslint/baselines/size.json', bytes);
+
+    expect(migrateRatchetBaselines(root)).toEqual([
+      { from: 'eslint/baselines/size.json', kind: 'moved', to: SIZE_BASELINE },
+    ]);
+    expect(readFileSync(join(root, SIZE_BASELINE), 'utf8')).toBe(bytes);
   });
 });
