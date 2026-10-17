@@ -67,18 +67,26 @@ import { parseReviewVerdict } from '../contracts/response.mts';
  * spells out bare generate/check-item/finalize with NO `--lens`, so lens judges following it would
  * every one write the same un-lensed artifact, clobber each other, and leave every group-scoped
  * artifact missing — a guaranteed contract retry then error. A lens judge therefore gets the exact
- * commands spelled out even in review mode. The un-split text is byte-stable on purpose: the
- * monolith is the A/B's control arm and must stay comparable to its own history.
+ * commands spelled out even in review mode. Every branch ends with the spelling rule, because the
+ * judge's Bash grant matches each subcommand literally and refuses any other spelling.
  */
 export function checklistContractFor(
   reviewer: ChecklistReviewer,
   script: string,
   assetRoot?: string,
 ): string {
+  return `${checklistWorkflow(reviewer, script, assetRoot)}${CHECKLIST_SPELLING_RULE}\n`;
+}
+
+/** How every checklist judge must spell its calls; a denied judge's retry reason points back here. */
+export const CHECKLIST_SPELLING_RULE =
+  'Run each checklist command as its own Bash call, starting `node <script path>` exactly as printed: no `;`, `&&`, `|`, loops, variables or `cd`, and no `echo $?` (the script reports its own result). Keep backticks and `$` out of a `--fail` reason. Command lines in the skill docs are reference only. Any other spelling is refused by your tool allowlist.';
+
+function checklistWorkflow(reviewer: ChecklistReviewer, script: string, assetRoot?: string) {
   const steps =
-    `1. \`node ${script} ${reviewer.cmds.gen}\` — enumerates the review items for this diff.\n` +
-    `2. Review each item against the brief, then mark it: \`node ${script} ${reviewer.cmds.check} <name> --pass\` or \`--fail "<reason>"\`. Every item, one at a time — no batch claims.\n` +
-    `3. \`node ${script} ${reviewer.cmds.fin ?? 'finalize'}\` — refuses if any item is unresolved.\n`;
+    `1. \`${scriptCommand(script)} ${reviewer.cmds.gen}\` — enumerates the review items for this diff.\n` +
+    `2. Review each item against the brief, then mark it: \`${scriptCommand(script)} ${reviewer.cmds.check} <name> --pass\` or \`--fail "<reason>"\`. Every item, one at a time — no batch claims.\n` +
+    `3. \`${scriptCommand(script)} ${reviewer.cmds.fin ?? 'finalize'}\` — refuses if any item is unresolved.\n`;
   if (reviewer.lens)
     return (
       "MANDATORY CHECKLIST WORKFLOW — use EXACTLY these commands (they scope the checklist to your lens group and keep your artifact separate from the other judges'; ignore any un-scoped command lines in the brief):\n" +
@@ -87,6 +95,27 @@ export function checklistContractFor(
   if (assetRoot)
     return 'The reviewer brief owns checklist enumeration and the exact generate/check/finalize commands. That workflow is mandatory and its resulting artifact is independently verified by the gate.\n';
   return `MANDATORY CHECKLIST WORKFLOW — this stops coverage hallucination and is independently verified:\n${steps}`;
+}
+
+/** The script as a judge types it and as the grant names it; Claude Code matches a quoted path only quoted. */
+export const scriptCommand = (script: string): string =>
+  /\s/.test(script) ? `node "${script}"` : `node ${script}`;
+
+const INTERACTIVE_ONLY_RE = /<!-- interactive-only -->[\s\S]*?<!-- \/interactive-only -->\n?/g;
+const PROVIDER_SKILL_PREFIXES = ['.agents/skills/', '.claude/skills/', '.cursor/skills/'];
+const SCRIPT_SUFFIX = '/scripts/checklist.mjs';
+
+/** A brief as a gate judge sees it: interactive setup gone, every path the granted literal. */
+export function gateBrief(brief: string, script: string): string {
+  const skillDir = script.slice(0, -SCRIPT_SUFFIX.length);
+  const skillPrefix = skillDir.slice(0, skillDir.lastIndexOf('/') + 1);
+  // Function replacers: a `$` in a consumer's path must not read as a replacement pattern.
+  return PROVIDER_SKILL_PREFIXES.reduce(
+    (body, prefix) => body.replaceAll(prefix, () => skillPrefix),
+    brief.replace(INTERACTIVE_ONLY_RE, ''),
+  )
+    .replaceAll('node $SCRIPT', () => scriptCommand(script))
+    .replaceAll('$SKILL_DIR', () => skillDir);
 }
 
 /**
