@@ -54,6 +54,12 @@ export const REVIEWER_TARGETS_FRAMING: TargetsFraming = Object.freeze({
     'the checklist alone; do not claim Target-alignment you did not check.',
 });
 
+/** `capBytes` for the decision judge (`detect`); skills/decisions/SKILL.md states it. */
+export const DETECT_TARGETS_BYTES = 4096;
+
+/** `capBytes` for the domain reviewers; skills/decisions/SKILL.md states it. */
+export const REVIEWER_TARGETS_BYTES = 8_192;
+
 /**
  * Render the governing-Targets block (the consumer prep-critique shape) or its SKIP note.
  *
@@ -178,11 +184,11 @@ export async function loadReviewerTargetsBlocks(
   // file reads; scopedTargets already survives semantic-tier errors internally).
   if (targets === null) targets = await scopedTargets(files, '', 6, cwd).catch(() => []);
   const scoped = targets.filter((t) => t.via === 'scope-match');
-  const saltBlock = renderTargets(scoped, REVIEWER_TARGETS_FRAMING, 8_192);
+  const saltBlock = renderTargets(scoped, REVIEWER_TARGETS_FRAMING, REVIEWER_TARGETS_BYTES);
   const promptBlock =
     scoped.length === targets.length
       ? saltBlock
-      : renderTargets(targets, REVIEWER_TARGETS_FRAMING, 8_192);
+      : renderTargets(targets, REVIEWER_TARGETS_FRAMING, REVIEWER_TARGETS_BYTES);
   return { saltBlock, promptBlock, semantic: scoped.length !== targets.length };
 }
 
