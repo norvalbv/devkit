@@ -24,7 +24,6 @@ import {
 import {
   buildSelfHostBlock,
   buildSelfHostHook,
-  SELF_HOST_EXTRAS,
   SELF_HOST_STRUCTURE_CMD,
   selfHostSelection,
 } from '../lib/husky/self-host.mts';
@@ -35,7 +34,6 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const HOOK_SEL = {
   ...selfHostSelection(),
   structureCmd: SELF_HOST_STRUCTURE_CMD,
-  extras: SELF_HOST_EXTRAS,
 };
 const cleanup: string[] = [];
 afterEach(() => {
@@ -269,7 +267,6 @@ describe('judgeHookParity — attribution edge cases', () => {
     const noBiome = {
       ...selfHostSelection({ biome: false }),
       structureCmd: SELF_HOST_STRUCTURE_CMD,
-      extras: SELF_HOST_EXTRAS,
     };
     writeFileSync(
       join(root, '.devkit', 'config.json'),

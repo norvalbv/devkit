@@ -1,5 +1,5 @@
 /** A gate's own GUARD_*_OK bypass must reach every site that acts on it: the prefix-cache salt,
- * cache-hit telemetry, the test-suite env scrub, and `devkit ship --help` for a self-host extra.
+ * cache-hit telemetry, the test-suite env scrub, and `devkit ship --help` for a devkit command gate.
  * devkit's own declared extra gates must all load, and its typecheck must reach e2e/. */
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -9,7 +9,6 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SCRUBBED_ENV } from '../../../vitest.setup.mjs';
 import { meta } from '../../../cli/commands/ship.mts';
-import { SELF_HOST_EXTRAS } from '../../../cli/lib/husky/self-host.mts';
 import { configExtraGates, GATE_BYPASSES } from '../command-gates.mts';
 import { DETERMINISTIC } from '../registry.mts';
 import { runDeterministic } from '../run.mts';
@@ -17,7 +16,7 @@ import { runDeterministic } from '../run.mts';
 const REPO = join(import.meta.dirname, '../../..');
 const REMEDY =
   "a gate's own bypass belongs in GATE_BYPASSES (gate-engine/deterministic/command-gates.mts) and " +
-  'vitest.setup.mjs BYPASS_ENV; a self-host extra also documents it in the `devkit ship --help` Env block';
+  'vitest.setup.mjs BYPASS_ENV; a devkit command gate also documents it in the `devkit ship --help` Env block';
 
 describe('gate bypass parity', () => {
   it('maps every module-declared BYPASS_SUFFIX to its gate', async () => {
@@ -36,9 +35,9 @@ describe('gate bypass parity', () => {
   });
 
   it.each(Object.entries(GATE_BYPASSES))('%s → GUARD_%s is wired everywhere', (gate, suffix) => {
-    const extra = SELF_HOST_EXTRAS.some((x) => x.label === gate);
+    const extra = configExtraGates(REPO).some((x) => x.label === gate);
     const registered = DETERMINISTIC.some((g) => g.id === gate);
-    expect(extra || registered, `${gate}: neither a self-host extra nor a registry gate`).toBe(
+    expect(extra || registered, `${gate}: neither a devkit command gate nor a registry gate`).toBe(
       true,
     );
     if (extra) expect(meta.help, REMEDY).toContain(`GUARD_${suffix}=1`);
@@ -88,6 +87,18 @@ describe('a prefix-cached retry still records a gate bypass', () => {
     ]);
   });
 
+  it('emits the bypass for a gate guard.config.json declares, the shape devkit itself uses', () => {
+    const config = { extraGates: { 'hook-parity': 'true' } };
+    writeFileSync(join(dir, 'guard.config.json'), JSON.stringify(config));
+    execFileSync('git', ['add', '.'], { cwd: dir });
+    const opts = { exec: vi.fn() };
+    expect(runDeterministic(dir, opts)).toBe(0);
+    expect(runDeterministic(dir, opts)).toBe(0);
+    expect(bypasses()).toEqual([
+      expect.objectContaining({ gate: 'hook-parity', bypass: 'GUARD_HOOK_PARITY_OK' }),
+    ]);
+  });
+
   it('names each bypass canonically, including one exported under the FRINK_ alias', () => {
     vi.stubEnv('FRINK_DECISIONS_INTEGRITY_OK', '1');
     const extra = [
@@ -128,9 +139,26 @@ describe('a prefix-cached retry still records a gate bypass', () => {
 });
 
 describe('self-host gate coverage', () => {
+  // The config is the only source of devkit's command gates, so this pins each one and its order.
   it('runs every extra gate guard.config.json declares', () => {
-    const labels = configExtraGates(REPO).map((g) => g.label);
-    expect(labels).toEqual(['git-pathspec', 'related-tests', 'typecheck']);
+    expect(configExtraGates(REPO)).toEqual([
+      { label: 'lint', cmd: 'bun run lint' },
+      { label: 'hook-parity', cmd: 'node cli/lib/husky/hook-parity.mts --gate' },
+      {
+        label: 'formatter-identity',
+        cmd: 'node cli/lib/husky/format-identity/formatter-identity.mts --gate',
+      },
+      {
+        label: 'decisions-integrity',
+        cmd: 'node gate-engine/decisions/cli.mts integrity --staged',
+      },
+      { label: 'release-only-dist', cmd: 'node cli/lib/ship/dist-integrity.mts --ship-staged' },
+      { label: 'benchmarks', cmd: 'bun run benchmarks:check -- --mode staged' },
+      { label: 'corpus-lint', cmd: 'bun run benchmarks:corpus' },
+      { label: 'git-pathspec', cmd: 'node scripts/git-pathspec-check.mts' },
+      { label: 'related-tests', cmd: 'node cli/lib/husky/gate-policy/related-tests.mts' },
+      { label: 'typecheck', cmd: 'bun run typecheck' },
+    ]);
   });
 
   it('typechecks the e2e suites, which no test run covers', () => {
