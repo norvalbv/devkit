@@ -20,6 +20,7 @@ import { parseArgs } from 'node:util';
 import { cancel, confirm, isCancel } from '@clack/prompts';
 import { branchHead, type CommitCi, commitCi, GhUnavailable } from '../lib/baseline-status/gh.mts';
 import { configuredSource } from '../lib/baseline-status/source.mts';
+import { shellQuote } from '../lib/ship/dist-integrity.mts';
 import ship from './ship.mts';
 
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
@@ -57,6 +58,38 @@ export function remoteTagExists(tag: string, cwd: string): boolean {
   } catch {
     return false;
   }
+}
+
+function mergeShaLine(releaseBranch: string): string {
+  return `merge_sha=$(gh pr view ${releaseBranch} --json state,mergeCommit --jq 'select(.state == "MERGED") | .mergeCommit.oid')`;
+}
+
+/** The --ci-override fallback: tags the merge commit without reading its CI, which the override waived. */
+export function overrideTagLine(o: { releaseBranch: string; tag: string }): string {
+  return `${mergeShaLine(o.releaseBranch)} && test -n "$merge_sha" && git tag -a ${o.tag} "$merge_sha" -m "devkit ${o.tag}" && git push origin ${o.tag}`;
+}
+
+/** The post-merge paste: tags the squash-merge commit only once its own push run of `workflow` passed. */
+export function tagRecipe(o: {
+  releaseBranch: string;
+  tag: string;
+  workflow: string;
+  baseBranch: string;
+}): string[] {
+  const [wf, base] = [shellQuote(o.workflow), shellQuote(o.baseBranch)];
+  return [
+    '(',
+    '  set -e',
+    `  ${mergeShaLine(o.releaseBranch)}`,
+    `  test -n "$merge_sha" || { echo "${o.releaseBranch} is not merged"; exit 1; }`,
+    `  run_id=$(gh run list --workflow ${wf} --branch ${base} --event push --commit "$merge_sha" --limit 1 --json databaseId --jq '.[0].databaseId // empty')`,
+    `  test -n "$run_id" || { echo "no push run of" ${wf} "on" ${base} "for $merge_sha yet; paste again once it starts"; exit 1; }`,
+    `  git fetch --quiet origin ${base}`,
+    '  gh run watch "$run_id" --exit-status',
+    `  git tag -a ${o.tag} "$merge_sha" -m "devkit ${o.tag}"`,
+    `  git push origin ${o.tag}`,
+    ')',
+  ];
 }
 
 /** Whether GitHub's tip of `base` is `sha`, printing why not: CI is read for that tip. */
@@ -155,8 +188,9 @@ Refuses outside the devkit repo, on a dirty tree, or if the target tag already e
 refuses unless HEAD is origin's tip of the base branch and that commit's newest completed run of the
 CI workflow (guard.config.json baselineStatus.workflow, default gate.yml) passed; that needs an
 authenticated gh, and a base branch the workflow never runs on needs --ci-override. The tag is
-created only after the PR is squash-merged; the command prints the exact post-merge steps. Release
-files remain in the working tree until \`devkit reconcile --apply\` after the PR merges.`,
+created only after the PR is squash-merged; the command prints the exact post-merge steps, which tag
+only after the merge commit's own CI run passes. Release files remain in the working tree until
+\`devkit reconcile --apply\` after the PR merges.`,
 };
 
 // Reason: flat release orchestration: independent guard early-returns followed by sequential
@@ -381,12 +415,18 @@ export default async function release(args: string[], cwd: string): Promise<numb
   console.log(`✓ Opened release PR ${releaseBranch} → ${baseBranch}; no tag created.`);
   console.log('Release files remain in this working tree; after the PR merges, run:');
   console.log('  devkit reconcile --apply');
-  console.log('After the PR is squash-merged, tag its merge commit:');
   console.log(
-    `  merge_sha=$(gh pr view ${releaseBranch} --json state,mergeCommit --jq 'select(.state == "MERGED") | .mergeCommit.oid')`,
+    "After the PR is squash-merged, paste this; it waits for the merge commit's own CI run and tags only if it passed:",
   );
-  console.log(`  test -n "$merge_sha" || { echo "${releaseBranch} is not merged"; exit 1; }`);
-  console.log(`  git tag -a ${tag} "$merge_sha" -m "devkit ${tag}"`);
-  console.log(`  git push origin ${tag}`);
+  const { workflow } = configuredSource(cwd);
+  for (const line of tagRecipe({ releaseBranch, tag, workflow, baseBranch })) {
+    console.log(`  ${line}`);
+  }
+  if (!baseCi.green) {
+    console.log(
+      `Released under --ci-override: the merge commit's ${workflow} run may be red, or never start on a base it does not run on, so that paste can stop. Only then, to tag without it:`,
+    );
+    console.log(`  ${overrideTagLine({ releaseBranch, tag })}`);
+  }
   return 0;
 }
