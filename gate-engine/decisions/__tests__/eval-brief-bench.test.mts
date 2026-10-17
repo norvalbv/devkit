@@ -87,6 +87,7 @@ describe('delivery parity with the shipped hooks', () => {
     expect(decisionHookScripts().sort()).toEqual([
       'decision-edit-guard.mjs',
       'decision-scope-brief.mjs',
+      'edit-targets-lib.mjs',
     ]);
     for (const name of decisionHookScripts())
       expect(readFileSync(join(scratch, '.claude', 'hooks', name))).toEqual(
@@ -236,6 +237,7 @@ describe('checkpoint identity', () => {
         'bench.mts',
         'decision-edit-guard.mjs',
         'decision-scope-brief.mjs',
+        'edit-targets-lib.mjs',
         'stub.mts',
         'tap.mts',
       ].sort(),
