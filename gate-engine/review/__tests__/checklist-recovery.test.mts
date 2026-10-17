@@ -478,6 +478,45 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
     );
   });
 
+  it('a lens refused on the wave that skips again with no refusal fails closed on the same model', async () => {
+    delete process.env.GUARD_CORRECTNESS_SPLIT;
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const skipLens = 'writer-reader-contracts';
+    const attempts: { prompt: string; model: string }[] = [];
+    const exec = mkExec(async ({ label, args, onPermissionDenials }) => {
+      writeArtifact(repo, label);
+      const group = FOUR_WAY_LENS_GROUPS.find((g) => args[1].includes(g[0]));
+      if (label !== 'review:correctness-reviewer' || !group) return 'VERDICT: PASS';
+      if (group[0] === skipLens) {
+        attempts.push({ prompt: args[1], model: args[args.indexOf('--model') + 1] });
+        onPermissionDenials?.(attempts.length === 1 ? [DENIED] : []);
+        return 'No blocking defects found.\nVERDICT: PASS';
+      }
+      writeFileSync(
+        join(repo, `.claude/.correctness-review-${lensGroupId(group)}.json`),
+        JSON.stringify({ items: [{ name: group[0], category: 'X', status: 'pass', issues: [] }] }),
+      );
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    const row = events(repo).find(
+      (e) => e.type === 'review_result' && e.reviewer === 'correctness-reviewer',
+    );
+    expect(row?.status).toBe('inconclusive');
+    // The retry's own measured zero explains the outcome, not the wave attempt's refusal.
+    expect(row?.reason).toContain(
+      'contract failed after one retry — checklist artifact missing — the judge skipped the checklist workflow (no tool call was denied)',
+    );
+    // SAFETY: a split correctness row always carries its settled lens parts.
+    const parts = row?.lens_parts as { lens: string; status: string }[];
+    expect(parts.filter((p) => p.status !== 'pass').map((p) => p.lens)).toEqual([skipLens]);
+    expect(attempts).toHaveLength(2); // one solo retry, no third attempt
+    expect(attempts[1].prompt).toContain(COUNTED);
+    expect(attempts[1].model).toBe(attempts[0].model); // the retry never switches model
+  });
+
   it('the log claims a retry only where a judge actually re-ran', async () => {
     const repo = consumerRepo({ backend: true });
     shipEnv(repo);
