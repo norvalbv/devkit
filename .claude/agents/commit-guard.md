@@ -58,22 +58,24 @@ is unset, treat all staged source files as in scope.
 # Provider projections install this skill under `.agents` (Codex), `.claude`, or `.cursor`.
 # The checklist is the only provider-projected script. Duplication and allowlist commands are the
 # installed devkit bins (`guard-dup`, `guard-clone`, and `guard-dup-allowlist`).
-COMMIT_GUARD_SKILL=""
+<!-- interactive-only -->
+SKILL_DIR=""
 for candidate in \
   .agents/skills/commit-guard \
   .claude/skills/commit-guard \
   .cursor/skills/commit-guard
 do
   if [ -f "$candidate/scripts/checklist.mjs" ]; then
-    COMMIT_GUARD_SKILL="$candidate"
+    SKILL_DIR="$candidate"
     break
   fi
 done
-if [ -z "$COMMIT_GUARD_SKILL" ]; then
+if [ -z "$SKILL_DIR" ]; then
   echo "commit-guard checklist unavailable: run devkit sync-skills" >&2
   exit 2
 fi
-SCRIPT="$COMMIT_GUARD_SKILL/scripts/checklist.mjs"
+SCRIPT="$SKILL_DIR/scripts/checklist.mjs"
+<!-- /interactive-only -->
 
 ## 2. Setup
 ```bash
