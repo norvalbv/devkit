@@ -196,6 +196,56 @@ function runRealGates(guards, files, guardConfig) {
   }
 }
 
+describe('runDeterministic — the failure footer names what runs next in each mode', () => {
+  const STOPS = '   On commit or ship, decision and reviewer gates run only after these pass.';
+  const CONTINUES =
+    '   This run continues through the remaining selected gates, then exits non-zero.';
+  const footer = (mode, guards) => {
+    if (mode) process.env.DEVKIT_RUN_MODE = mode;
+    if (guards) process.env.DEVKIT_REVIEW_GUARDS = guards;
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(
+      runDeterministic(repo(['comments'], true), {
+        exec: mkExec({ 'cli/index.mts': 1, 'comment-firewall/cli': 1 }),
+      }),
+    ).toBe(1);
+    return err.mock.calls.flat();
+  };
+
+  it.each([[undefined], ['ship']])('mode %s keeps the commit/ship footer in order', (mode) => {
+    const lines = footer(mode);
+    const at = lines.indexOf(STOPS);
+    expect(lines.slice(at - 1, at + 2)).toEqual([
+      '   Fix every failure above together, then commit once.',
+      STOPS,
+      '   Re-check a fix locally (seconds, no judges) — stage it, then run:',
+    ]);
+    expect(lines).not.toContain(CONTINUES);
+  });
+
+  it('prints the footer when no failed gate has a re-check command', () => {
+    process.env.DEVKIT_RUN_MODE = 'dry-gates';
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(
+      runDeterministic(repo(['comments']), { exec: mkExec({}), extra: [{ label: 'lint' }] }),
+    ).toBe(1);
+    const lines = err.mock.calls.flat();
+    expect(lines).toContain(CONTINUES);
+    expect(lines.some((l) => l.includes('Re-check a fix locally'))).toBe(false);
+  });
+
+  it.each([
+    ['dry-gates', 'comments'],
+    ['dry-gates', 'comments,review'],
+    ['review', 'comments,review'],
+  ])('mode %s (guards %s) says the run continues, without promising reviewers', (mode, guards) => {
+    const lines = footer(mode, guards);
+    expect(lines).toContain(CONTINUES);
+    expect(lines).not.toContain(STOPS);
+    expect(lines.filter((l) => /reviewer/.test(l))).toEqual([]);
+  });
+});
+
 // sc-2753: the judge-free comment budget aggregates here, so one fix pass sees every cheap finding.
 describe('runDeterministic — comments joins the aggregated set', () => {
   const eventsOf = (sink) =>

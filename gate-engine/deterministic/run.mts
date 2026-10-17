@@ -65,7 +65,7 @@ import {
   type ExtraGate,
   structureBypassed,
 } from './command-gates.mts';
-import { printRecheckFooter, recheckCommand, recheckLines, registryRecheck } from './recheck.mts';
+import { printFailureFooter, recheckCommand, recheckLines, registryRecheck } from './recheck.mts';
 import { type ConfigComponent, DETERMINISTIC, type RawDevkitComponents } from './registry.mts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -452,9 +452,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     }
     console.error(`✗ deterministic gates failed:${fails.map((f) => ` ${f.label}`).join('')}`);
     for (const line of reasonReport(fails)) console.error(line);
-    console.error('   Fix every failure above together, then commit once.');
-    console.error('   On commit or ship, decision and reviewer gates run only after these pass.');
-    printRecheckFooter(rechecks);
+    printFailureFooter(rechecks);
     if (fails.some((f) => f.label.startsWith('structure-lint'))) {
       console.error(
         '   Base branch structure debt that your diff did not cause? Re-run with the explicit',
