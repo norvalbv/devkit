@@ -53,7 +53,7 @@ describe('inspectDistIntegrity — stale new artifacts', () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(printDistIntegrityFailure(report)).toBe(1);
     expect(errors.mock.calls.flat().join('\n')).toContain(
-      "run `bun run build`, then re-brief these: -- 'dist/cli/new.mjs'",
+      "run `bun run build:new` on these, then re-brief them: -- 'dist/cli/new.mjs'",
     );
     errors.mockRestore();
   });

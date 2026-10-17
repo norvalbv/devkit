@@ -76,7 +76,8 @@
     "typecheck": "node ./node_modules/@typescript/native/bin/tsc -p tsconfig.json --noEmit",
     "prepare": "husky",
     "guard:freeze": "node gate-engine/ratchets/folder-fanout.mjs freeze && node gate-engine/ratchets/size-disable.mjs freeze",
-    "build": "node ./node_modules/@typescript/native/bin/tsc -p tsconfig.build.json && node scripts/copy-dist-assets.mjs"
+    "build": "node ./node_modules/@typescript/native/bin/tsc -p tsconfig.build.json && node scripts/copy-dist-assets.mjs",
+    "build:new": "node scripts/build-new-dist.mts"
   },
   "devDependencies": {
     "@babel/core": "^8.0.0",
