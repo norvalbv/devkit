@@ -12,8 +12,8 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ResolvedConfig, Vitest } from 'vitest/node';
+import { readClearMarker, writeClearMarker } from '../clear-marker/store.mts';
 import {
-  type ClearMarker,
   formatClearMarker,
   formatDiagnosis,
   formatRerunNotice,
@@ -21,9 +21,7 @@ import {
   headSha,
   humanAge,
   passEnv,
-  readClearMarker,
   readDiagnosis,
-  removeClearMarker,
   stagedFiles,
   stagedIntersection,
   RERUN_FLOOR_MS,
@@ -31,7 +29,6 @@ import {
   raisedTimeoutMs,
   TL_SCALE_SNIPPET,
   TIMEOUT_FINGERPRINT,
-  writeClearMarker,
 } from '../failures.mts';
 import UnhandledReporter, { UNHANDLED_NAME, type UnhandledError } from '../unhandled-reporter.mts';
 
@@ -220,29 +217,6 @@ describe('formatDiagnosis', () => {
 });
 
 describe('the clear marker', () => {
-  it('round-trips, and is removable', () => {
-    const root = makeRoot();
-    const marker: ClearMarker = {
-      clearedAt: '2026-08-30T09:00:00.000Z',
-      previousMtime: 1234.5,
-      head: 'da19b37c',
-      failedFiles: ['/repo/a.test.ts'],
-    };
-    writeClearMarker(root, marker);
-    expect(readClearMarker(root)).toEqual(marker);
-    removeClearMarker(root);
-    expect(readClearMarker(root)).toBeNull();
-  });
-
-  // The gate's verdict must never depend on this file. A corrupt marker is a missing marker.
-  it('reads a corrupt marker as absent instead of throwing', () => {
-    const root = makeRoot();
-    writeFileSync(join(root, '.last-clear.json'), 'not json');
-    expect(readClearMarker(root)).toBeNull();
-    writeFileSync(join(root, '.last-clear.json'), '{"nope":1}');
-    expect(readClearMarker(root)).toBeNull();
-  });
-
   it('dates itself so the reader can judge whether it is still relevant', () => {
     const now = Date.parse('2026-08-30T10:00:00.000Z');
     const lines = formatClearMarker(
@@ -336,17 +310,6 @@ describe('a marker that is not the one we wrote', () => {
     ).join('\n');
     expect(lines).not.toMatch(/NaN/);
     expect(lines).toMatch(/last Tuesday/);
-  });
-
-  // 0 is a legitimate mtime (epoch), and `||` here would silently rewrite it to null — losing the
-  // one field that says WHICH artifact was discarded.
-  it('keeps a previousMtime of 0 instead of collapsing it to null', () => {
-    const root = makeRoot();
-    writeFileSync(
-      join(root, '.last-clear.json'),
-      JSON.stringify({ clearedAt: '2026-08-30T09:00:00.000Z', previousMtime: 0, failedFiles: [] }),
-    );
-    expect(readClearMarker(root)?.previousMtime).toBe(0);
   });
 
   // An older vitest ignores --outputFile.json, so a genuine clear can happen with no failed-file list
@@ -888,36 +851,6 @@ describe('a run that exits non-zero with no failed test', () => {
       '   No test failed; the run ended on:',
       '     late.test.ts — Error: boom',
     ]);
-  });
-
-  it('reads a marker written before the field existed', () => {
-    const root = makeRoot();
-    writeFileSync(
-      join(root, '.last-clear.json'),
-      JSON.stringify({ clearedAt: new Date().toISOString(), failedFiles: [] }),
-    );
-
-    expect(readClearMarker(root)?.unhandledErrors).toBeUndefined();
-  });
-});
-
-describe('a marker whose unhandledErrors we did not write', () => {
-  // coverage/ is shared and symlinked into ship worktrees; a hand-edited entry must not crash the gate
-  // message that explains the block.
-  it('keeps only well-formed entries', () => {
-    const root = makeRoot();
-    const good = { file: null, message: 'Error: boom' };
-    writeFileSync(
-      join(root, '.last-clear.json'),
-      JSON.stringify({
-        clearedAt: '2026-10-06T09:00:00.000Z',
-        failedFiles: [],
-        unhandledErrors: [null, 'Error: bare string', { file: 3, message: 'x' }, good],
-      }),
-    );
-
-    const marker = readClearMarker(root);
-    expect(marker?.unhandledErrors).toEqual([good]);
   });
 });
 
