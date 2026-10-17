@@ -15,6 +15,7 @@ import type { CachedHit } from '../lens/split.mts';
 import { overriddenLine } from '../overrides.mts';
 import type { Reviewer, ReviewerSelection } from '../reviewers.mts';
 import {
+  type ChecklistItem,
   type ChecklistState,
   cleanupChecklistState,
   deniedCalls,
@@ -77,8 +78,7 @@ const FAILED_SHOWN = 3;
 /** Print the FAILED items behind a voided PASS, so a retry that passes cannot erase them. Display
  * only: the retry prompt keeps names alone, so the next judge is never asked to refute its finding. */
 export function reportFailedItems(reviewer: Reviewer, state: ChecklistState | null): void {
-  const items = state?.items ?? state?.files;
-  const failed = Array.isArray(items) ? items.filter((i) => i.status === 'fail') : [];
+  const failed = failedItems(state);
   for (const item of failed.slice(0, FAILED_SHOWN)) {
     const issue = Array.isArray(item.issues) ? boundedCause(String(item.issues[0] ?? '')) : '';
     console.error(
@@ -91,21 +91,36 @@ export function reportFailedItems(reviewer: Reviewer, state: ChecklistState | nu
     );
 }
 
+/** The artifact's failed items (`items[]`, or commit-guard's `files[]`); none when it is absent. */
+function failedItems(state: ChecklistState | null): ChecklistItem[] {
+  const items = state?.items ?? state?.files;
+  return Array.isArray(items) ? items.filter((i) => i.status === 'fail') : [];
+}
+
 /** ` [lens]` for a split lens part, so its log lines match its completion line; '' otherwise. */
 const lensTag = (reviewer: Reviewer): string =>
   reviewer.lens?.length ? ` [${lensGroupId(reviewer.lens)}]` : '';
 
-/** Name the refused tool calls beside a non-pass outcome; a PASS that lost a test run stays quiet. */
+/**
+ * Name the refused tool calls beside a non-pass outcome; a PASS that lost a test run stays quiet.
+ * A checklist FAIL with no failed item also gets the likely cause, but keeps its block.
+ */
 export function reportDeniedCalls(
   reviewer: Reviewer,
-  status: ReviewOutcome['status'],
+  res: Pick<ReviewOutcome, 'status'>,
   denied: string[] | null,
+  state: ChecklistState | null = null,
 ): void {
-  if (status === 'pass' || !denied?.length) return;
+  if (res.status === 'pass' || !denied?.length) return;
   const more = denied.length > DENIED_SHOWN ? ` (+${denied.length - DENIED_SHOWN} more)` : '';
   const shown = denied.slice(0, DENIED_SHOWN).map(boundedCause).join(' | ');
+  const prefix = `⚠️  guard-review: ${reviewer.name}${lensTag(reviewer)} —`;
+  console.error(`${prefix} ${deniedCalls(denied)}: ${shown}${more}`);
+  if (res.status !== 'fail' || !reviewer.stateFile || failedItems(state).length > 0) return;
+  // Only a pinned reviewer's FAIL reaches the override valve, so only it can be waived.
+  const waive = reviewer.model ? ', and if it repeats, waive it citing the refusal' : '';
   console.error(
-    `⚠️  guard-review: ${reviewer.name}${lensTag(reviewer)} — ${deniedCalls(denied)}: ${shown}${more}`,
+    `${prefix} no checklist item failed: if the reason cites no file:line defect, the refused calls are the likely cause — re-run${waive}`,
   );
 }
 
