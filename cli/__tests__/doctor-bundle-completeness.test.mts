@@ -212,7 +212,8 @@ describe('doctor decisions hook completeness', () => {
 describe('doctor provider hook ownership', () => {
   it('accepts an exact pre-ledger configuration and migrates it on re-init', () => {
     const root = tmpRepo();
-    // comments:preflight postdates the ledger, so no pre-ledger configuration can carry it.
+    // comments:preflight and size:post-edit postdate the ledger, so no pre-ledger configuration
+    // can carry them.
     const init = [
       'init',
       '--stack',
@@ -221,6 +222,7 @@ describe('doctor provider hook ownership', () => {
       '--agent-hooks',
       '--no-codex',
       '--no-comments',
+      '--no-size',
     ];
     expect(devkit(root, ...init).status).toBe(0);
     const ledger = join(root, '.devkit/agent-hook-registrations-manifest.json');

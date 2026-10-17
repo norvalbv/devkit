@@ -32,8 +32,8 @@ export interface HookRegistration {
   event: string;
   matcher: string;
   command: string;
-  /** Cursor can expose the same capability under a different native event/matcher pair. */
-  cursorEvent?: string;
+  /** Cursor can expose the same capability under a different native event/matcher pair; null = none. */
+  cursorEvent?: string | null;
   cursorMatcher?: string;
   /** Package-relative target of a command that runs a file inside the installed package, carried as
    * data so doctor resolves it without parsing shell. Absent = a consumer-anchored .claude/hooks script. */
@@ -234,6 +234,17 @@ export const HOOK_REGISTRATIONS: Record<string, HookRegistration[]> = {
       event: 'PostToolUse',
       matcher: 'Edit|Write|MultiEdit',
       command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/comment-budget-preflight.mjs"',
+    },
+  ],
+  // size: reports an edit that left a file over its line ceiling. No Cursor projection, because
+  // Cursor's afterFileEdit has no output field to carry the advisory.
+  size: [
+    {
+      registrationId: 'size:post-edit',
+      event: 'PostToolUse',
+      matcher: 'Edit|Write|MultiEdit',
+      command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/size-headroom-check.mjs"',
+      cursorEvent: null,
     },
   ],
   // fallow: devkit's staged-scope wrapper. Bound to the FALLOW component, not agentHooks — a repo
