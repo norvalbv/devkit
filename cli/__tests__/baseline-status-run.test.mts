@@ -132,6 +132,15 @@ describe('baseline-status --run', () => {
     ).toBe('excluded');
   });
 
+  it('refuses to judge an uncollected path when a pull_request summary recorded no tested sha', () => {
+    putRun();
+    putSummary(null, { 'cli/a.test.mts': 'failed' });
+    // The PR head is not what the run tested, so `absent` there would be a guess about the merge.
+    const { file } = json('--run', String(PR_RUN), '--file', 'cli/gone.test.mts').answer;
+    expect(file.status).toBe('unknown');
+    expect(file.reason).toContain('did not record');
+  });
+
   it('names the fetch that brings a tested merge into the checkout', () => {
     const missing = 'f'.repeat(40);
     putRun();

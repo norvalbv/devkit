@@ -119,12 +119,19 @@ export function statusOf({
 }: {
   cwd: string;
   summary: TestReportSummary;
-  sha: string;
+  /** null when the tested commit is unknown: a pull_request summary that recorded no sha. */
+  sha: string | null;
   path: string;
 }): FileVerdict {
   // hasOwn, not truthiness: `files.toString` is a FUNCTION on any JSON-parsed object, so a query
   // for a file named `toString` was answered with an inherited member instead of a real outcome.
   if (Object.hasOwn(summary.files, path)) return { status: summary.files[path] };
+  if (sha === null) {
+    return {
+      status: 'unknown',
+      reason: 'the run tested a merge commit its summary did not record',
+    };
+  }
 
   // Not collected by the runner. WHY matters: an agent reads an undifferentiated "did not run" as
   // reassurance, and a path typo would land in exactly that bucket.
