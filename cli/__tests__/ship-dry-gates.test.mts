@@ -167,7 +167,7 @@ function linkedWorktrees(git, dir) {
 }
 
 /** A `node` shim that records each judge-preflight invocation's args. With `remedy`, the preflight
- *  prints it as a dark judge's family move instead of running; otherwise the real node runs. */
+ *  prints it as its remedy line instead of running; otherwise the real node runs. */
 function preflightSpyEnv(dir, env, remedy?: string) {
   const bin = join(dir, 'preflight-spy-bin');
   const calls = join(dir, 'preflight-calls.log');
@@ -178,7 +178,7 @@ function preflightSpyEnv(dir, env, remedy?: string) {
       '#!/bin/bash',
       'if [[ $1 == */preflight/judge.* ]]; then',
       '  echo "${*:2}" >> "$PREFLIGHT_CALLS"',
-      remedy === undefined ? '' : `  echo ${remedy}; exit 0`,
+      remedy === undefined ? '' : `  echo '${remedy}'; exit 0`,
       'fi',
       'exec "$REAL_NODE" "$@"',
     ].join('\n'),
@@ -357,11 +357,35 @@ test -z "\${DEVKIT_SHIP_DRY_REVIEWERS:-}" || exit 92`,
 
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).not.toContain('DARK_JUDGE_REMEDY');
-    const tail = r.stderr.trimEnd().split('\n').slice(-2).join('\n');
-    expect(tail).toContain('Ship dry gates passed');
-    expect(tail).toContain("found a dark judge — the real ship's uncached judges will fail closed");
-    expect(tail).toContain('DARK_JUDGE_REMEDY');
+    const tail = r.stderr.trimEnd().split('\n').slice(-2);
+    expect(tail[0]).toContain('Ship dry gates passed');
+    // The preflight's line is printed verbatim: no prefix or period of the shell's own around it.
+    expect(tail[1]).toMatch(
+      /found a dark judge — the real ship's uncached judges will fail closed\. DARK_JUDGE_REMEDY$/,
+    );
   });
+
+  // With no single family move, the preflight's line is a warning, not a remedy — still the tail.
+  for (const arm of [[], ['--with-reviewers']]) {
+    it(`a green ${['--dry-gates', ...arm].join(' ')} with both judge CLIs dark ends saying so`, () => {
+      const { dir, env } = seedShipRepo();
+      writeFileSync(join(dir, 'note.txt'), 'x\n');
+      const bothDark =
+        'Both judge CLIs are dark, so no family move helps — install or authenticate one of them.';
+      const spy = preflightSpyEnv(dir, env, bothDark);
+      const r = spawnSync(
+        '/bin/bash',
+        [scriptPath, 'feat/dry-both-dark', 't', '--dry-gates', ...arm, '--', 'note.txt'],
+        { cwd: dir, input: '', encoding: 'utf8', env: spy.env },
+      );
+
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).not.toContain(bothDark);
+      expect(r.stderr.trimEnd().split('\n').at(-1)).toBe(
+        `⚠️  ship: the judge preflight found a dark judge — the real ship's uncached judges will fail closed. ${bothDark}`,
+      );
+    });
+  }
 
   it('a reachable judge — credit-backed included — adds nothing to the rehearsal tail', () => {
     const { dir, env } = seedShipRepo();
