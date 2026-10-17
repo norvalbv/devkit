@@ -410,14 +410,14 @@ export function printDistIntegrityFailure(report: DistIntegrityReport): number {
     console.error('  New sources whose build output exists nowhere:');
     for (const file of report.missing) console.error(`    ${file}`);
     console.error(
-      `  Fix: run \`bun run build\`, then brief ONLY these (ordinary dist churn stays release-only): -- ${report.missing.map(shellQuote).join(' ')}`,
+      `  Fix: run \`bun run build:new\` on these, which writes only them, then brief them (ordinary dist churn stays release-only): -- ${report.missing.map(shellQuote).join(' ')}`,
     );
   }
   if (report.stale.length > 0) {
     console.error('  New dist artifacts that differ from a fresh build of their source:');
     for (const file of report.stale) console.error(`    ${file}`);
     console.error(
-      `  Fix: run \`bun run build\`, then re-brief these: -- ${report.stale.map(shellQuote).join(' ')}`,
+      `  Fix: run \`bun run build:new\` on these, then re-brief them: -- ${report.stale.map(shellQuote).join(' ')}`,
     );
   }
   if (report.untracked.length > 0 || report.unbriefed.length > 0) {
