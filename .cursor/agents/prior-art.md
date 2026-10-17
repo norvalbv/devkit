@@ -101,7 +101,16 @@ Reading existing code to understand a still-unplanned problem is valid step-0 wo
 ### Phase 1: Restate and interrogate the frame
 
 Restate the problem in your own words. List the **assumed constraints** baked into its framing —
-the things the problem statement treats as fixed. Then work through the seven research questions.
+the things the problem statement treats as fixed.
+
+**Step back to the layer** (Step-Back Prompting, arXiv 2310.06117). A narrow bug inherits the frame
+of the layer it sits in, and that layer's own history is invisible from inside the bug. Name the
+integration seam the problem sits in — a client, adapter, transport, runner or protocol bridge
+between this repo and an external system — in `restatedFrame`, by its vendor-neutral class ("a
+desktop host driving coding-agent CLIs", not "our Codex client"). UI and domain code have no
+seam: skip the layer clauses in Q5 and Q7.
+
+Then work through the seven research questions.
 Each gets an id; every id appears in the response with a status, even when NOT_APPLICABLE:
 
 - **Q1 — Peer consumers.** Who else consumes this same dependency/SDK/API, and how do THEY handle
@@ -116,12 +125,18 @@ Each gets an id; every id appears in the response with a status, even when NOT_A
   changelog entry, or documentation you actually read that shows it does not exist — rather than
   merely "I did not find it"? Absence of evidence from an unreached leg is NEVER evidence of absence.
 - **Q5 — Peer class solutions.** How do comparable projects (peers solving the same class of
-  problem, not necessarily consumers of the same dependency) solve it?
+  problem, not necessarily consumers of the same dependency) solve it? When a seam was named,
+  include peers connecting to the same class of external system.
 - **Q6 — Cost symmetry.** What does the failure actually cost (frequency × severity), and what new
   failure surface would each candidate fix add? A repeat-patch history on one axis is itself
   evidence the frame is wrong.
 - **Q7 — Upstream choice.** Is this problem downstream of an earlier, unexamined decision — an
-  architecture choice that, revisited, makes the problem vanish?
+  architecture choice that, revisited, makes the problem vanish? When a seam was named, always run
+  one search, even when the problem is already solved, and quote it in this finding:
+  `open protocol for <seam class>` with no words from the narrow feature (not "hook
+  standard", not "session resume"), and ask whether a protocol it finds would replace the
+  hand-built code. Report one you find even when it does not bear on this problem, as the
+  `Layer:` sentence Phase 3 defines.
 
 ### Phase 2: Research legs (MANDATED order; attest every leg)
 
@@ -168,6 +183,14 @@ set `frameChallenge.framing: "NARROWS"` and return `GENUINE_NEW_WORK` scoped to 
 or `github` evidence item, and name both the residual path and that fix in the first `summary`
 sentence and in `suggestedNextStep.detail`. A residual buried in a Q finding while the headline
 says solved closes real work: callers act on the verdict alone.
+
+**A layer standard is a note, not a verdict.** A standard found for the named seam never by itself
+changes the verdict of a problem stated below the layer; `DISSOLVE_FRAME` on that ground is for a
+problem stated at the layer ("how should we connect to X"). When one is found, the `summary`
+sentence right after the verdict basis reads `Layer: <seam> — <standard> (<url>)`, and
+`suggestedNextStep.detail` ends with the same sentence. With no standard found, or when a Settled
+Axis or decision Target already rules on adopting it, write no `Layer:` sentence; cite the ruling
+in Q7 instead.
 
 Then apply the **burden-of-proof coupling** (the response contract enforces these; violating them
 makes the response invalid):
