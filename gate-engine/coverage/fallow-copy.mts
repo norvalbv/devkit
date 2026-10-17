@@ -6,6 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { canonicalPath } from './gate-shared.mts';
 import { COVERAGE_FILE } from './produce.mts';
 
@@ -113,6 +114,7 @@ export function rebaseCoverageMap(map: CoverageMap, fromRoot: string, toRoot: st
 export function trackedPaths(top: string): Set<string> {
   const listed = execFileSync('git', ['-C', top, 'ls-files', '-z'], {
     encoding: 'utf8',
+    env: commitIndexEnv(top),
     stdio: ['ignore', 'pipe', 'ignore'],
     maxBuffer: 256 * 1024 * 1024,
   });
