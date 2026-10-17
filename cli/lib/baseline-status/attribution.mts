@@ -2,21 +2,34 @@
  * Which of a red PR's failures its base already had: the PR run's per-file summary against the run
  * on its merge commit's first parent. Never guesses; an unreadable input is a named reason.
  */
+// Types only: wait.mts imports this module from its top-level await, so a value import deadlocks it.
 import type { CheckRow } from '../ship/wait-ci/wait.mts';
-import { GhUnavailable, commitCi, gh, runView } from './gh.mts';
+import { type CommitCi, GhUnavailable, commitCi, gh, runView } from './gh.mts';
 import type { TestReportSummary } from './produce.mts';
 import { loadSummary, workflowSelector } from './query.mts';
 import { configuredSource } from './source.mts';
 
 export type AttributionToken = 'inherited-only' | 'new' | 'unknown';
 
-export interface Attribution {
+/** The base run compared against, once one is found. */
+interface BaseFields {
+  baseRun: number;
+  baseCi: CommitCi['verdict'];
+}
+
+/** The line's values, uncapped, for `--json`; a field is absent when the comparison stopped short. */
+export interface Attribution extends Partial<BaseFields> {
   token: AttributionToken;
   /** Failing test files, or null when the comparison could not run. */
   inherited: number | null;
   fresh: number | null;
   /** The ` key=value` fields appended to the verdict line. */
   line: string;
+  reason?: string;
+  newFailing?: string[];
+  newSteps?: string[];
+  unsure?: string[];
+  unattributed?: string[];
 }
 
 export interface FileComparison {
@@ -77,11 +90,16 @@ export function capped(values: string[]): string {
   return rest > 0 ? `${shown.join(',')},+${rest}` : shown.join(',');
 }
 
-const unknown = (reason: string, base = ''): Attribution => ({
+const baseText = (base?: BaseFields) =>
+  base ? ` base-run=${base.baseRun} base-ci=${base.baseCi}` : '';
+
+export const unknownAttribution = (reason: string, base?: BaseFields): Attribution => ({
   token: 'unknown',
   inherited: null,
   fresh: null,
-  line: `attribution=unknown reason=${reason}${base}`,
+  line: `attribution=unknown reason=${reason}${baseText(base)}`,
+  reason,
+  ...base,
 });
 
 const RUN_ID = /\/actions\/runs\/(\d+)/;
@@ -121,22 +139,22 @@ export function attributeFailures({
   failures: CheckRow[];
 }): Attribution {
   const { workflow, artifact } = configuredSource(cwd);
-  let base = ''; // named once known, so a later unreadable artifact still reports the base's state
+  let base: BaseFields | undefined; // kept once known, so a later unreadable artifact still names it
   try {
     const run = workflowRun(cwd, failures, workflow);
-    if (!run) return unknown('no-workflow-run');
+    if (!run) return unknownAttribution('no-workflow-run');
     const unattributed = failures.filter((f) => runIdOf(f) !== run.databaseId).map((f) => f.name);
     const prSummary = loadSummary({ cwd, run, artifact });
-    if (!prSummary.sha) return unknown('base-unknown');
+    if (!prSummary.sha) return unknownAttribution('base-unknown');
     const ref = gh(['pr', 'view', pr, '--json', 'baseRefName', '--jq', '.baseRefName'], cwd).trim();
     const sha = gh(
       ['api', `repos/{owner}/{repo}/commits/${prSummary.sha}`, '--jq', '.parents[0].sha'],
       cwd,
     ).trim();
-    if (!ref || !sha) return unknown('base-unknown');
+    if (!ref || !sha) return unknownAttribution('base-unknown');
     const ci = commitCi({ cwd, workflow, ref, sha });
-    if (!ci.run || !ci.failing) return unknown(`base-${ci.verdict}`);
-    base = ` base-run=${ci.run.databaseId} base-ci=${ci.verdict}`;
+    if (!ci.run || !ci.failing) return unknownAttribution(`base-${ci.verdict}`);
+    base = { baseRun: ci.run.databaseId, baseCi: ci.verdict };
     const files = compareSummaries(prSummary, loadSummary({ cwd, run: ci.run, artifact }));
     const baseSteps = ci.failing;
     const newSteps = runView(cwd, run.databaseId).failing.filter((s) => !baseSteps.includes(s));
@@ -149,10 +167,15 @@ export function attributeFailures({
       fresh: files.fresh.length,
       line:
         `attribution=${token} inherited=${files.inherited.length} new=${files.fresh.length}${unsure}` +
-        ` new-failing=${capped(files.fresh)} new-steps=${capped(newSteps)}${other}${base}`,
+        ` new-failing=${capped(files.fresh)} new-steps=${capped(newSteps)}${other}${baseText(base)}`,
+      newFailing: files.fresh,
+      newSteps,
+      unsure: files.unsure,
+      unattributed,
+      ...base,
     };
   } catch (e) {
-    if (e instanceof GhUnavailable) return unknown(e.reason, base);
+    if (e instanceof GhUnavailable) return unknownAttribution(e.reason, base);
     throw e;
   }
 }
