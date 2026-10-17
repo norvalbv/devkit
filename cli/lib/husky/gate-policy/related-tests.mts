@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { runVitestDetailed, type VitestRun } from '../../../../gate-engine/coverage/vitest-cli.mts';
 import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mts';
 import { stagedSet } from '../../../../gate-engine/ratchets/git-index.mts';
 
@@ -90,35 +91,32 @@ export function noteUnmapped(root: string, paths: string[], grep: Grep = gitGrep
   }
 }
 
-type Exec = (
-  cmd: string,
-  args: string[],
-  opts: { cwd: string; stdio: 'inherit' },
-) => { status: number | null; error?: Error };
+type Exec = (bin: string, args: string[], cwd: string) => Promise<VitestRun>;
 
 interface RunOpts {
   staged?: Iterable<string> | null;
   exec?: Exec;
 }
 
-/** Exit code of the related-tests run: 0 when nothing is selected, vitest's status otherwise. */
-export function runRelatedTests(root: string, opts: RunOpts = {}): number {
+// Grouped, so a signal to this gate also ends vitest's fork workers rather than orphaning them.
+const runGrouped: Exec = (bin, args, cwd) =>
+  runVitestDetailed(bin, args, cwd, process.env, { group: true });
+
+/** The related-tests run: code 0 when nothing is selected, vitest's outcome otherwise. */
+export async function runRelatedTests(root: string, opts: RunOpts = {}): Promise<VitestRun> {
   const paths = relatedPaths(('staged' in opts ? opts.staged : stagedSet(root)) ?? []);
   if (!paths.length) {
     console.log('related-tests: none selected');
-    return 0;
+    return { code: 0, interrupted: false };
   }
   console.log(`related-tests: ${paths.length} staged path(s)`);
   const vitest = join(root, 'node_modules', '.bin', 'vitest');
   const args = ['related', '--run', '--reporter=dot', ...new Set([...paths, REACH_TEST])];
-  const result = (opts.exec ?? spawnSync)(vitest, args, { cwd: root, stdio: 'inherit' });
-  if (result.error) console.error(`✗ related-tests could not run vitest: ${result.error.message}`);
-  // A null status is a signal kill or a failed spawn: nothing passed, so block.
-  return result.status ?? 1;
+  return (opts.exec ?? runGrouped)(vitest, args, root);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-  const code = runRelatedTests(process.cwd());
-  noteUnmapped(process.cwd(), relatedPaths(stagedSet(process.cwd()) ?? []));
-  process.exitCode = code;
+  const run = await runRelatedTests(process.cwd());
+  if (!run.interrupted) noteUnmapped(process.cwd(), relatedPaths(stagedSet(process.cwd()) ?? []));
+  process.exitCode = run.code;
 }
