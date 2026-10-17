@@ -351,7 +351,10 @@ function answerFromRun(
   const path = normaliseFilePath(cwd, file);
   // git resolves `<sha>:<path>` from the REPO ROOT, so the existence probe must run there too.
   const { gitRoot } = detectGitRoot(cwd);
-  const verdict = statusOf({ cwd: gitRoot, summary, sha: tested ?? run.headSha, path });
+  // A pull_request run tests a merge, so with no recorded sha its head is not the tree it tested.
+  const unrecorded = !summary.sha && run.event.startsWith('pull_request');
+  const sha = tested ?? (unrecorded ? null : run.headSha);
+  const verdict = statusOf({ cwd: gitRoot, summary, sha, path });
   answer.file = { path, ...verdict, ...failingTestsOf(summary, path), ...lastPassedFor(path) };
   if (test) answer.file.test = testVerdict(summary, verdict.status, path, test);
   return answer;
