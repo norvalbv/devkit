@@ -3,7 +3,7 @@ import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { canonicalPath, type CollectionError, collectionRemedy } from './dependencies.mts';
+import { canonicalPath, type CollectionError, collectionRemedies } from './dependencies.mts';
 import { readUnhandled, UNHANDLED_NAME, type UnhandledError } from './unhandled-reporter.mts';
 
 /**
@@ -421,7 +421,7 @@ function stagedSentence(files: string[], staged: string[] | null, cwd: string): 
   ];
 }
 
-/** Files vitest could not load: the first cause, and the install that fixes it when one is named. */
+/** Files vitest could not load: the first cause, and every install that fixes one of them. */
 function formatCollectionErrors(errors: CollectionError[], cwd: string): string[] {
   const [first] = errors;
   if (!first) return [];
@@ -430,8 +430,13 @@ function formatCollectionErrors(errors: CollectionError[], cwd: string): string[
     `🚫 ${errors.length} test file(s) failed to COLLECT — no test in them ran. First cause:`,
     `     ${displayPath(first.file, cwd)} — ${cause}`,
   ];
-  const remedy = collectionRemedy(first.message, cwd);
-  if (remedy) lines.push(`   A dependency is not installed. Run: ${remedy}`);
+  for (const [remedy, file] of collectionRemedies(errors, cwd)) {
+    const lead =
+      file === first.file
+        ? 'A dependency is not installed. Run'
+        : `For ${displayPath(file, cwd)}, run`;
+    lines.push(`   ${lead}: ${remedy}`);
+  }
   return lines;
 }
 
