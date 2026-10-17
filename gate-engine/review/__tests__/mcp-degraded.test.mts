@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCache, loadCache, savePasses } from '../cache.mts';
 import { MCP_DEGRADED_REMEDY } from '../evidence/base-context.mts';
+import { parseClaudeArgv } from '../../judge/codex/result.mts';
 import { FOUR_WAY_LENS_GROUPS, lensGroupId } from '../lens/split.mts';
 import { runReviewGate } from '../run-review.mts';
 import {
@@ -139,6 +140,12 @@ describe('reviewer fleet without the codebase MCP server (sc-2837)', () => {
         .filter((tool: string) => tool.startsWith('Bash'));
       expect(bash.length, label).toBeLessThanOrEqual(1);
       for (const rule of bash) expect(rule, label).toMatch(/^Bash\(node \S+\/checklist\.mjs:\*\)$/);
+      // The prompt this same spawn carries must print only the spelling that rule grants.
+      const prompt = parseClaudeArgv(args).prompt ?? '';
+      const printed = prompt.match(/node \S+\/checklist\.mjs/g) ?? [];
+      expect(printed.length > 0, label).toBe(bash.length === 1);
+      for (const command of printed) expect(`Bash(${command}:*)`, label).toBe(bash[0]);
+      expect(prompt, label).not.toContain('$SCRIPT');
     }
   });
 

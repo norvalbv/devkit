@@ -17,7 +17,7 @@ import { devkitVersion } from '../devkit-version.mts';
 import { JUDGE_READ_TOOLS, LIGHT_JUDGE_MODEL } from '../judge/judge-isolation.mts';
 import { withNamedAgentMcpTools } from '../judge/mcp/profile.mts';
 import type { ReviewerResponseContractName } from './contracts/registry.mts';
-import { checklistContractFor } from './lens/split.mts';
+import { checklistContractFor, gateBrief, scriptCommand } from './lens/split.mts';
 import { reviewerFilesAcrossPolicies } from './scope/policy.mts';
 
 export { declaredRoots, rootsFor, underRoot } from './scope/policy.mts';
@@ -261,7 +261,7 @@ export function allowedToolsFor(
 ): string {
   // A skill-less reviewer has no checklist script; its evidence is pre-rendered onto stdin/prompt.
   if (!hasChecklist(reviewer)) return withNamedAgentMcpTools(JUDGE_READ_TOOLS);
-  const tools = `${JUDGE_READ_TOOLS},Bash(node ${checklistScriptAt(reviewer, assetRoot)}:*)`;
+  const tools = `${JUDGE_READ_TOOLS},Bash(${scriptCommand(checklistScriptAt(reviewer, assetRoot))}:*)`;
   if (reviewer.domain === 'code') return withNamedAgentMcpTools(tools, cfg.searchTool);
   // The correctness reviewer's writer/reader-contract lens benefits from semantic search, but
   // only when the consumer actually wired an index (indexPath set) — otherwise cfg.searchTool is
@@ -325,13 +325,8 @@ export function wrapPrompt(
   { targetsBlock = '', commitMsgBlock = '', alsoStagedBlock = '' }: PromptExtras = {},
   checklistRoot = assetRoot ?? '.claude',
 ): string {
-  const effectiveAssetRoot = checklistRoot;
-  const skillPrefix = `${effectiveAssetRoot.replace(TRAILING_SLASH_RE, '')}/skills/`;
-  const brief = ['.agents/skills/', '.claude/skills/', '.cursor/skills/'].reduce(
-    (body, providerPrefix) => body.replaceAll(providerPrefix, skillPrefix),
-    stripFrontmatter(agentBody),
-  );
-  const script = checklistScriptAt(reviewer, effectiveAssetRoot);
+  const script = checklistScriptAt(reviewer, checklistRoot);
+  const brief = gateBrief(stripFrontmatter(agentBody), script);
   const checklistContract = checklistContractFor(reviewer, script, assetRoot);
   return (
     'You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +

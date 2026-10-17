@@ -46,7 +46,9 @@ Once the gate has invoked you, always run the workflow below: the gate already d
 ## 1. Read skill for detailed rules:
 - `.claude/skills/frontend-accessibility/SKILL.md`
 
+<!-- interactive-only -->
 SCRIPT=".claude/skills/frontend-accessibility/scripts/checklist.mjs"
+<!-- /interactive-only -->
 
 ## 2. Generate the checklist
 ```bash
