@@ -1,5 +1,6 @@
-/** The coverage map fallow can read: a private, hit-clamped copy of coverage-final.json for its
- * CRAP join (FALLOW_COVERAGE). The artifact itself is never rewritten; the coverage gate binds it. */
+/** fallow's CRAP input (FALLOW_COVERAGE): a private copy of coverage-final.json, hits clamped and
+ * keys moved onto this checkout. The artifact itself is never rewritten; the coverage gate binds it. */
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,7 +15,7 @@ const hitSchema = z.int().transform((hits) => Math.max(0, hits));
 const hitsSchema = z.record(z.string(), hitSchema).optional();
 
 /**
- * One istanbul file entry. `path` is rekeyed by ship and the s/f/b hit counts are clamped; every
+ * One istanbul file entry. `path` is rekeyed onto this checkout and the s/f/b hit counts are clamped; every
  * other field (statementMap, fnMap, branchMap, …) passes through untouched.
  */
 const coverageEntrySchema = z.looseObject({
@@ -53,7 +54,80 @@ function hasNegativeHit(map: z.infer<typeof rawHitsSchema>): boolean {
   );
 }
 
-/** Write the clamped copy of `<top>`'s artifact to a new temp file and return its path. Null when
+/** `/a/b` → `/a/b/`, and `/` stays `/` — the boundary a key must start with to sit under `root`. */
+const boundary = (root: string): string => `${root.replace(/\/+$/, '')}/`;
+
+/** The SHORTEST prefix of `key` whose remainder is tracked — a root `index.ts` cannot claim
+ * `/prod/src/index.ts` as `/prod/src`. */
+function producingPrefix(key: string, tracked: ReadonlySet<string>): string | null {
+  const parts = key.split('/');
+  for (let i = 1; i < parts.length; i++) {
+    if (tracked.has(parts.slice(i).join('/'))) return parts.slice(0, i).join('/') || '/';
+  }
+  return null;
+}
+
+/**
+ * The root the map's absolute keys were produced under, or null when there is nothing to rebase: no
+ * key joins a tracked path, the keys are relative, or the majority already sits at `wtRoot`.
+ */
+export function deriveForeignRoot(
+  keys: Iterable<string>,
+  tracked: ReadonlySet<string>,
+  wtRoot: string,
+): string | null {
+  const votes = new Map<string, number>();
+  for (const key of keys) {
+    if (!key.startsWith('/')) continue;
+    const prefix = producingPrefix(key, tracked);
+    if (prefix !== null) votes.set(prefix, (votes.get(prefix) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  let bestVotes = 0;
+  for (const [prefix, count] of votes) {
+    if (count > bestVotes) [best, bestVotes] = [prefix, count];
+  }
+  return best === null || boundary(best) === boundary(wtRoot) ? null : best;
+}
+
+/** Move every key and istanbul `path` under `fromRoot` to `toRoot`; others stay. On a collision the
+ * key already at `toRoot` wins — it was produced from this tree. */
+export function rebaseCoverageMap(map: CoverageMap, fromRoot: string, toRoot: string): CoverageMap {
+  const from = boundary(fromRoot);
+  const to = boundary(toRoot);
+  const move = (path: string): string =>
+    path.startsWith(from) ? to + path.slice(from.length) : path;
+  const out: CoverageMap = {};
+  const moved: Array<[string, CoverageMap[string]]> = [];
+  for (const [key, original] of Object.entries(map)) {
+    const path = original.path === undefined ? undefined : move(original.path);
+    const entry = path === original.path ? original : { ...original, path };
+    if (key.startsWith(from)) moved.push([move(key), entry]);
+    else out[key] = entry;
+  }
+  for (const [key, entry] of moved) if (!(key in out)) out[key] = entry;
+  return out;
+}
+
+/** Every path git tracks in `top`, repo-relative. */
+export function trackedPaths(top: string): Set<string> {
+  const listed = execFileSync('git', ['-C', top, 'ls-files', '-z'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  return new Set(listed.split('\0').filter(Boolean));
+}
+
+/** The root `top`'s artifact keys were produced under when that is another checkout, else null. A
+ * key under `top` can still be foreign: a worktree nested in the checkout shares its prefix. */
+function foreignRoot(keys: string[], top: string): string | null {
+  const root = canonicalPath(top);
+  const foreign = deriveForeignRoot(keys, trackedPaths(top), root);
+  return foreign === null || canonicalPath(foreign) === root ? null : foreign;
+}
+
+/** Write fallow's copy of `<top>`'s artifact to a new temp file and return its path. Null when
  * fallow reads the artifact unaided or there is none; throws on a map that does not parse. */
 export function writeFallowCopy(top: string, cwd: string): string | null {
   const report = join(top, COVERAGE_FILE);
@@ -61,8 +135,12 @@ export function writeFallowCopy(top: string, cwd: string): string | null {
   const raw: unknown = JSON.parse(readFileSync(report, 'utf8'));
   const counts = rawHitsSchema.safeParse(raw);
   if (!counts.success) throw new Error(`${report}: ${z.prettifyError(counts.error)}`);
-  if (canonicalPath(cwd) === canonicalPath(top) && !hasNegativeHit(counts.data)) return null;
+  const foreign = foreignRoot(Object.keys(counts.data), top);
+  const atTop = canonicalPath(cwd) === canonicalPath(top);
+  if (foreign === null && atTop && !hasNegativeHit(counts.data)) return null;
+  const map = coverageMapSchema.parse(raw);
   const out = join(tmpdir(), `devkit-fallow-coverage-${randomUUID()}.json`);
-  writeFileSync(out, JSON.stringify(coverageMapSchema.parse(raw)), { flag: 'wx', mode: 0o600 });
+  const copy = foreign === null ? map : rebaseCoverageMap(map, foreign, canonicalPath(top));
+  writeFileSync(out, JSON.stringify(copy), { flag: 'wx', mode: 0o600 });
   return out;
 }
