@@ -11,6 +11,7 @@ describe('parseFindings verdict line', () => {
     '⚠️ **VERDICT**: FAIL',
     '> **VERDICT:** FAIL',
     '✅ VERDICT: PASS\r',
+    '\rVERDICT: FAIL',
   ])('skips %s instead of reading it as finding context', (line) => {
     expect(contextAfter(line)).toEqual([]);
   });
