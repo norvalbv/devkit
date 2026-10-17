@@ -450,8 +450,8 @@ ship_base_contains_branch_point() {
 }
 
 # ship_base_inbound_note <repo> <base-oid> <head> <path>...
-# ADVISORY: pushed commits on the briefed paths that HEAD merged in from another origin line. A
-# squashed copy already in the base looks the same to ancestry, so the wording stays conditional.
+# ADVISORY: commits on the briefed paths already pushed to another origin branch — a merged-in line,
+# a squashed parent's stale ref, or this work's own earlier push — so the wording stays conditional.
 ship_base_inbound_note() {
   local repo=$1 base_oid=$2 head=$3 p all own inbound n ref first on=
   shift 3
@@ -471,7 +471,7 @@ ship_base_inbound_note() {
     on=origin/${ref#refs/remotes/origin/}
     break
   done < <(git -C "$repo" for-each-ref --contains "$first" --format='%(refname)' refs/remotes/origin 2>/dev/null)
-  echo "note: $n commit(s) on the briefed paths came from another origin line merged into this work${on:+ (first is on $on)};" >&2
+  echo "note: $n commit(s) on the briefed paths are already on another origin branch${on:+ (first is on $on)};" >&2
   echo "  any change of theirs the base lacks ships in this PR:" >&2
   printf '%s\n' "$inbound" | head -n 5 | git -C "$repo" log --no-walk=unsorted --stdin --format='  %h %s' >&2 2>/dev/null || true
   [ "$n" -le 5 ] || echo "  (+$((n - 5)) more)" >&2
