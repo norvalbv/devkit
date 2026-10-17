@@ -364,7 +364,7 @@ function notBlockingWhy(stoppers: string[], blocked: string, exitCode: number | 
   if (exitCode === 0) return ' (its gate let the run pass) — read it before merging';
   if (stoppers.length)
     return ` only because ${stoppers.join(', ')} stopped it first — read it before retrying`;
-  return `, which ended on ${oneLine(blocked)}, not on a gate finding — read it before retrying`;
+  return ` — the run ended on ${oneLine(blocked)} — read it before retrying`;
 }
 
 /** A cache_hit's gate label; completeness's intent key reports under the judge's own gate name. */
