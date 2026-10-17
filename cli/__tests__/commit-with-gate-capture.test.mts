@@ -545,6 +545,30 @@ describe('commit_with_gate_capture — executable hook proof', () => {
       blocked_gate: 'hook_proof',
     });
   });
+
+  // The block's opening marker arms the check, so an old block that never prints the sentinel blocks.
+  it.each([
+    ['a root devkit block', ''],
+    ['a monorepo package block', ': packages/app'],
+  ])('rewinds and records gate_no_output when %s never prints the sentinel', (_, scope) => {
+    const body = `# >>> devkit-guards${scope} >>>\nexit 0\n# <<< devkit-guards${scope} <<<\n`;
+    const { root, wt, base } = fixture(true, body);
+
+    const result = runCommit(root, wt, base);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/NO gate output captured/);
+    expect(git(wt, 'rev-parse', 'HEAD')).toBe(base);
+    const events = readFileSync(join(root, 'telemetry/gate-events.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(events.at(-1)).toMatchObject({
+      type: 'ship_result',
+      exit_code: 1,
+      blocked_gate: 'gate_no_output',
+    });
+  });
 });
 
 // sc-3443: ship hands guard-deterministic the exact --dry-gates invocation; the gate prints it in its

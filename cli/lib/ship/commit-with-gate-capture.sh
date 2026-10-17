@@ -272,10 +272,12 @@ SHIP_HOOK_WRAPPER
   if [ -n "$msgf" ]; then rm -f -- "$msgf" 2>/dev/null || true; fi
   unset DEVKIT_COMMIT_MSG_FILE
 
-  # A zero-exit commit is provisional until ship proves its wrapper ran and, for sentinel-aware
-  # overlays, that the real gate chain emitted output. Rewind before telemetry so the terminal row
+  # A zero-exit commit is provisional until ship proves its wrapper ran and, for a hook carrying a
+  # devkit block, that the block started. Rewind before telemetry so the terminal row
   # records the actual failed ship rather than a success that callers will never publish.
-  local ship_abort_reported=0 blocked_override=""
+  local ship_abort_reported=0 blocked_override="" husky_script=""
+  # husky's runner (`_/h`) runs `<dir>/<hook>` for a stub at `<dir>/_/<hook>`, so grep that script too.
+  case $real_hooks_dir in */_) husky_script="${real_hooks_dir%/_}/pre-commit" ;; esac
   if [ "$rc" -eq 0 ] && [ "$ship_hook_proved" -ne 1 ]; then
     [ "$ship_dry_gates" -eq 1 ] || git -C "$wt" reset --soft HEAD~1 2>/dev/null || true
     {
@@ -285,16 +287,17 @@ SHIP_HOOK_WRAPPER
     rc=1
     blocked_override='"hook_proof"'
     ship_abort_reported=1
-  elif [ "$rc" -eq 0 ] && [ -x "$(gate_overlay_root "$root")/.devkit/hooks/pre-commit" ] \
-     && grep -q 'devkit-gates: chain start' "$(gate_overlay_root "$root")/.devkit/hooks/pre-commit" \
+  elif [ "$rc" -eq 0 ] \
+     && grep -qsE '^# >>> devkit-guards|devkit-gates: chain start' "$real_pre_commit" ${husky_script:+"$husky_script"} \
      && ! grep -q 'devkit-gates: chain start' "$log"; then
     [ "$ship_dry_gates" -eq 1 ] || git -C "$wt" reset --soft HEAD~1 2>/dev/null || true
     {
-      echo "⚠️  ship: NO gate output captured — overlay hook chain appears to have no-op'd"
-      echo "    (expected .devkit/hooks/pre-commit to run). Ship aborted; nothing pushed. Log: $log"
+      echo "⚠️  ship: NO gate output captured — devkit's pre-commit block never started. Ship aborted; nothing pushed."
+      echo "    HUSKY=0 (in the env or ~/.config/husky/init.sh) makes husky skip it: unset HUSKY or delete that line."
+      echo "    A hook that predates this check: run \`devkit init --force\` (or \`devkit upgrade\`). Log: $log"
     } >&2
     rc=1
-    blocked_override='"overlay_no_output"'
+    blocked_override='"gate_no_output"'
     ship_abort_reported=1
   fi
 

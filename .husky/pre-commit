@@ -39,6 +39,8 @@ __dk_commit_index_capture() {
 __dk_commit_index_capture || true
 # /devkit:commit-index
 
+[ -n "${DEVKIT_SHIP:-}" ] && echo 'devkit-gates: chain start' >&2
+
 # devkit:commit-terminal
 if [ -z "${DEVKIT_SHIP_ID:-}" ] && [ -z "${DEVKIT_REVIEW_ID:-}" ] && [ -z "${DEVKIT_NO_TELEMETRY:-}" ]; then
     __dk_nonce="$(uuidgen 2>/dev/null || true)"
