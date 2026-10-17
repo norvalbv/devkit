@@ -20,7 +20,8 @@ import {
   remoteBranchExists,
   scriptPath,
   seedShipRepoLocalRemote,
-  REAPED_15S_BANNER,
+  LEAK_CEILING,
+  REAPED_BANNER,
 } from './_ship-branch-fixture.mts';
 
 /** The path a real ratchet gate stages into the commit it is gating. */
@@ -78,12 +79,12 @@ describe('ship-branch.sh — resume past a gate-widened scope', () => {
       cwd: dir,
       input: 'pr body\n',
       encoding: 'utf8',
-      env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
+      env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: LEAK_CEILING },
     });
 
     expect(first.status, first.stderr).toBe(124);
     // Pair every 124 with OUR banner: testSpawnSync's linger reap also returns 124.
-    expect(first.stderr).toMatch(REAPED_15S_BANNER);
+    expect(first.stderr).toMatch(REAPED_BANNER);
     const preserved = git(['rev-parse', 'feat/gate-widened']).trim();
     // The precondition: the gate really did widen the commit past the brief.
     expect(
@@ -367,11 +368,11 @@ describe('ship-branch.sh — resume scope edge cases', () => {
       cwd: dir,
       input: 'pr body\n',
       encoding: 'utf8',
-      env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
+      env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: LEAK_CEILING },
     });
 
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(REAPED_15S_BANNER);
+    expect(first.stderr).toMatch(REAPED_BANNER);
     const preserved = git(['rev-parse', 'feat/gate-deleted']).trim();
     // The precondition: the commit really does carry an unbriefed DELETION the gate made.
     expect(git(['diff', '--name-only', '--diff-filter=D', `${preserved}^`, preserved]).trim()).toBe(

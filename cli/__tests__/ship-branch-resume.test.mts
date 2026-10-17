@@ -18,7 +18,8 @@ import {
   scriptPath,
   seedBaseRepo,
   seedShipRepoLocalRemote,
-  REAPED_15S_BANNER,
+  LEAK_CEILING,
+  REAPED_BANNER,
 } from './_ship-branch-fixture.mts';
 
 /** createPreservedCommit leaves note.txt UNTRACKED in $ROOT, and git refuses a checkout/merge that
@@ -63,13 +64,13 @@ describe('ship-branch.sh — resume when the base moved', () => {
       cwd: dir,
       input: 'pr body\n',
       encoding: 'utf8',
-      env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
+      env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: LEAK_CEILING },
     });
 
     expect(first.status, first.stderr).toBe(124);
     // Pair every 124 with OUR banner: testSpawnSync's linger reap also returns 124, so an
     // unpaired status assertion cannot say which supervisor fired.
-    expect(first.stderr).toMatch(REAPED_15S_BANNER);
+    expect(first.stderr).toMatch(REAPED_BANNER);
     const preserved = git(['rev-parse', 'feat/base-advance']).trim();
     expect(git(['rev-parse', 'refs/devkit/ship-receipts/feat/base-advance']).trim()).toBe(
       preserved,
@@ -140,11 +141,11 @@ describe('ship-branch.sh — resume when the base moved', () => {
       cwd: dir,
       input: 'pr body\n',
       encoding: 'utf8',
-      env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
+      env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: LEAK_CEILING },
     });
 
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(REAPED_15S_BANNER);
+    expect(first.stderr).toMatch(REAPED_BANNER);
     const preserved = git(['rev-parse', 'feat/head-advance']).trim();
     expect(git(['rev-parse', 'refs/devkit/ship-receipts/feat/head-advance']).trim()).toBe(
       preserved,
@@ -340,11 +341,11 @@ describe('ship-branch.sh — resume refusals that name their own cause', () => {
       cwd: dir,
       input: 'pr body\n',
       encoding: 'utf8',
-      env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
+      env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: LEAK_CEILING },
     });
 
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(REAPED_15S_BANNER);
+    expect(first.stderr).toMatch(REAPED_BANNER);
     const preserved = git(['rev-parse', 'feat/formatter-drift']).trim();
     expect(git(['show', `${preserved}:note.txt`])).toBe('formatted\n'); // the hook's bytes were committed
     expect(readFileSync(join(dir, 'note.txt'), 'utf8')).toBe('hi\n'); // $ROOT was never formatted
@@ -395,10 +396,10 @@ describe('ship-branch.sh — resume refusals that name their own cause', () => {
       cwd: dir,
       input: 'pr body\n',
       encoding: 'utf8',
-      env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
+      env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: LEAK_CEILING },
     });
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(REAPED_15S_BANNER);
+    expect(first.stderr).toMatch(REAPED_BANNER);
 
     const refused = spawnSync('/bin/bash', argv, {
       cwd: dir,
