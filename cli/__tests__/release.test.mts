@@ -522,7 +522,7 @@ describe('release publishing', () => {
     it('releases a red base under --ci-override and records the reason, sha and run', async () => {
       const cwd = checkout();
       ci.conclusion = 'failure';
-      vi.spyOn(console, 'log').mockImplementation(() => {});
+      const logs = vi.spyOn(console, 'log').mockImplementation(() => {});
       const reason = 'main red: Linux-only flake';
 
       expect(await release(['minor', '--ci-override', reason, '--yes'], cwd)).toBe(0);
@@ -530,6 +530,9 @@ describe('release publishing', () => {
       expect(shipBody()).toContain('## Base CI override');
       expect(shipBody()).toContain(`gate.yml failed on ${SHA} (gate › Tests) — ${RUN_URL}`);
       expect(shipBody()).toContain(`Reason given with --ci-override: ${reason}`);
+      const printed = logs.mock.calls.flat().join('\n');
+      expect(printed).toContain('Released under --ci-override');
+      expect(printed).toContain('&& git tag -a v0.48.0 "$merge_sha"');
     });
 
     it('does not record an override the green base did not need', async () => {
@@ -539,6 +542,7 @@ describe('release publishing', () => {
       expect(await release(['minor', '--ci-override=unneeded', '--yes'], cwd)).toBe(0);
       expect(shipBody()).not.toContain('unneeded');
       expect(logs.mock.calls.flat().join('\n')).toContain('--ci-override is not recorded');
+      expect(logs.mock.calls.flat().join('\n')).not.toContain('Released under --ci-override');
     });
 
     it('requires a reason with --ci-override', async () => {
@@ -558,12 +562,13 @@ describe('release publishing', () => {
         join(cwd, 'guard.config.json'),
         JSON.stringify({ baselineStatus: { workflow: 'ci.yml' } }),
       );
-      vi.spyOn(console, 'log').mockImplementation(() => {});
+      const logs = vi.spyOn(console, 'log').mockImplementation(() => {});
 
       expect(await release(['minor', '--yes'], cwd)).toBe(0);
       const list = mockExec.mock.calls.find(([cmd, args]) => cmd === 'gh' && args?.[1] === 'list');
       expect(list?.[1]).toEqual(expect.arrayContaining(['--workflow', 'ci.yml']));
       expect(shipBody()).toContain('Base CI: ci.yml passed');
+      expect(logs.mock.calls.flat().join('\n')).toContain("--workflow 'ci.yml' --branch 'main'");
     });
   });
 });
