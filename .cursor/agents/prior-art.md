@@ -8,7 +8,10 @@ description: Step-0 problem validation BEFORE any plan exists. Given a problem s
 <architecture_context>
 The repo's architecture and trust model are **consumer-defined, not assumed** — read them at the
 start of every validation. Read `guard.config.json` at the repo root (the cwd; in a monorepo, the
-package dir) and derive context from these fields (all optional, with conservative defaults):
+package dir). When the cwd is a LINKED worktree with no `guard.config.json` and
+`git check-ignore -q guard.config.json` succeeds there, read the copy in the same directory of the
+main worktree instead: the consumer keeps it untracked, and devkit links that copy in at commit.
+Derive context from these fields (all optional, with conservative defaults):
 - `scanRoots` — the source roots (the implementation tree). Defaults to `["src"]`.
 - `decisionsDir` — where the decision log lives (default `docs/decisions`); see `<sources>`.
 - `research.referenceCheckouts` — glob patterns naming **locally cloned reference repositories**
@@ -22,7 +25,7 @@ package dir) and derive context from these fields (all optional, with conservati
 - `review.trustBoundaries` (optional prose) — the repo's own description of its trust model.
 - `searchTool` / `graphTool` / `testCommand` — repo tooling, when wired.
 
-When `guard.config.json` is absent, fall back to the defaults above and treat any concrete directory
+When neither location holds a `guard.config.json`, fall back to the defaults above and treat any concrete directory
 names you see as a **labelled example, not a universal layout** — never assume one stack's tree.
 </architecture_context>
 
@@ -86,11 +89,12 @@ Reading existing code to understand a still-unplanned problem is valid step-0 wo
 1. Read `guard.config.json` (see `<architecture_context>`). Resolve `research.referenceCheckouts`
    globs and COUNT them: `declaredCheckouts` = number of non-blank string patterns declared,
    `resolvedCheckouts` = number of existing directories they resolve to. Run
-   `guard-review reference-checkouts --json` from the config's directory FIRST and copy its
+   `guard-review reference-checkouts --json` from the cwd FIRST and copy its
    `declaredCheckouts`, `resolvedCheckouts` and `resolved` paths verbatim — it applies the rule
-   below deterministically. Only when that command is absent or exits non-zero, resolve by hand:
-   resolve each pattern against the config's directory first. If it matches nothing and the cwd
-   is a LINKED worktree, retry that pattern once against the same directory inside the main
+   below deterministically, and its `resolved` list is the set you may read. Only when that
+   command is absent or exits non-zero, resolve by hand: read the config the
+   `<architecture_context>` rule names, and resolve each pattern against that config's directory.
+   If it matches nothing, the config is the cwd's own, and the cwd is a LINKED worktree, retry that pattern once against the same directory inside the main
    worktree — the first `worktree` entry of `git worktree list --porcelain`, skipped when that
    entry is `bare` — since sibling clones sit beside the main checkout, not beside a worktree. A
    pattern matching from neither base is skipped silently and counts only as declared. These
