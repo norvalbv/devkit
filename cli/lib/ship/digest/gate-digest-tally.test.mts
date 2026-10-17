@@ -27,7 +27,7 @@ describe('a completeness FAIL whose judge listed several findings', () => {
     const text = digest(FLEET, completeness('{"critical":1,"important":1}'), RESULT);
     expect(text).toContain('Gate findings this run (2 gate(s) / 3 finding(s))');
     expect(text).toContain(
-      `⚠ completeness — finding recorded, did NOT block this run — read it before retrying: ${HEADLINE} · 2 findings (1 critical, 1 important), ${SUFFIX}`,
+      `⚠ completeness — finding recorded, did NOT block this run only because review:correctness stopped it first — read it before retrying: ${HEADLINE} · 2 findings (1 critical, 1 important), ${SUFFIX}`,
     );
   });
 
