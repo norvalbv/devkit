@@ -42,7 +42,9 @@ describe('uiPaths', () => {
     ];
     expect(uiPaths(staged, DEFAULT_UI_PATHS)).toEqual([]);
   });
+});
 
+describe('uiPathReason', () => {
   it('ignores UI extensions inside agent-tool and devkit dirs, at the root or nested', () => {
     const staged = [
       '.claude/skills/x/eval-viewer/viewer.html',
@@ -50,16 +52,20 @@ describe('uiPaths', () => {
       'packages/app/.agents/skills/x/page.html',
       '.devkit/report.html',
     ];
-    expect(uiPaths(staged, DEFAULT_UI_PATHS)).toEqual([]);
+    expect(uiPathReason(staged, [])).toBeNull();
+  });
+
+  it('still counts an agent dir that uiEvidence.paths names', () => {
+    expect(uiPathReason(['.agents/ui/page.ts', '.claude/x.html'], ['.agents/ui/**'])).toBe(
+      'UI paths changed: .agents/ui/page.ts',
+    );
   });
 
   it("still counts an app's own agents/ or dot-lookalike dirs as UI", () => {
     const staged = ['src/agents/AgentCard.tsx', 'src/.claude-theme/a.css', 'app/my.devkit/x.tsx'];
-    expect(uiPaths(staged, DEFAULT_UI_PATHS)).toEqual(staged);
+    expect(uiPathReason(staged, [])).toBe(`UI paths changed: ${staged.join(', ')}`);
   });
-});
 
-describe('uiPathReason', () => {
   it('names at most three UI files and counts the rest', () => {
     const staged = ['a.tsx', 'b.tsx', 'c.tsx', 'd.css', 'e.css'];
     expect(uiPathReason(staged, [])).toBe('UI paths changed: a.tsx, b.tsx, c.tsx, +2 more');

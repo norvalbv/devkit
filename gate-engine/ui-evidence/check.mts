@@ -25,13 +25,8 @@ export const DEFAULT_UI_PATHS = [
   'less',
 ].map((ext) => `**/*.${ext}`);
 
-/** Tests, stories, fixtures and agent-tool or devkit dirs can carry UI extensions; none is a screen. */
+/** Test, story and fixture files carry UI extensions but change nothing a user sees. */
 const NON_UI_PATHS = [
-  '**/.claude/**',
-  '**/.cursor/**',
-  '**/.codex/**',
-  '**/.agents/**',
-  '**/.devkit/**',
   '**/*.test.*',
   '**/*.spec.*',
   '**/*.stories.*',
@@ -48,16 +43,27 @@ const NON_UI_PATHS = [
 /** Never worth a model call: prose and generated dependency pins. */
 const NOT_JUDGED = ['**/*.md', '**/*.lock', '**/package-lock.json', '**/pnpm-lock.yaml'];
 
+/** Agent-tool dirs devkit syncs, and its own state: no screen unless uiEvidence.paths names one. */
+const AGENT_ASSET_PATHS = [
+  '**/.claude/**',
+  '**/.cursor/**',
+  '**/.codex/**',
+  '**/.agents/**',
+  '**/.devkit/**',
+];
+
 const PATHS_SHOWN = 3;
 
+const anyGlob = (path: string, list: string[]) => list.some((glob) => matchesRepoGlob(path, glob));
+
 export function uiPaths(staged: string[], globs: string[]): string[] {
-  const any = (path: string, list: string[]) => list.some((glob) => matchesRepoGlob(path, glob));
-  return staged.filter((path) => any(path, globs) && !any(path, NON_UI_PATHS));
+  return staged.filter((path) => anyGlob(path, globs) && !anyGlob(path, NON_UI_PATHS));
 }
 
 /** Why this commit deserves screenshots by path alone, or null when no UI file is staged. */
 export function uiPathReason(staged: string[], globs: string[]): string | null {
-  const paths = uiPaths(staged, [...DEFAULT_UI_PATHS, ...globs]);
+  const own = staged.filter((path) => anyGlob(path, globs) || !anyGlob(path, AGENT_ASSET_PATHS));
+  const paths = uiPaths(own, [...DEFAULT_UI_PATHS, ...globs]);
   if (paths.length === 0) return null;
   const more = paths.length > PATHS_SHOWN ? `, +${paths.length - PATHS_SHOWN} more` : '';
   return `UI paths changed: ${paths.slice(0, PATHS_SHOWN).join(', ')}${more}`;
@@ -65,8 +71,8 @@ export function uiPathReason(staged: string[], globs: string[]): string | null {
 
 /** The judged paths, listed in full, then their staged diff capped at DIFF_CAP; '' when none. */
 export function judgeInput(cwd: string, staged: string[]): string {
-  const skip = [...NON_UI_PATHS, ...NOT_JUDGED];
-  const paths = staged.filter((path) => !skip.some((g) => matchesRepoGlob(path, g)));
+  const skip = [...NON_UI_PATHS, ...AGENT_ASSET_PATHS, ...NOT_JUDGED];
+  const paths = staged.filter((path) => !anyGlob(path, skip));
   if (paths.length === 0) return '';
   const prefixes = ['-c', 'diff.noprefix=false', '-c', 'diff.mnemonicPrefix=false'];
   const pathspecs = paths.map((path) => `:(literal)${path}`);
