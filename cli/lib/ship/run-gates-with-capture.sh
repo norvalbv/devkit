@@ -213,7 +213,7 @@ run_gates_with_capture() {
   # private capture dir, where gate output cannot forge it. 137 means the supervisor itself was killed.
   if [ "$rc" -eq 124 ]; then
     local last_stage unfinished
-    last_stage=$(grep -E '^(🎨|📏|🗂|🔁|🧭|🔍|⚡)|^guard-prefix:|[Gg]ates?( \([^)]*\))?\.\.\.[[:space:]]*$' "$log" 2>/dev/null | tail -1 || true)
+    last_stage=$(grep -E '^(🎨|📏|🗂|🔁|🧭|🔍|⚡)|^guard-prefix:|^▶ [a-z-]+: |[Gg]ates?( \([^)]*\))?\.\.\.[[:space:]]*$' "$log" 2>/dev/null | tail -1 || true)
     {
       if [ "$reaped" -eq 1 ]; then
         echo "⏱  $label: the gate chain exited cleanly, but a process it started outlived it and was reaped after $((SECONDS - gate_started))s (exit 124) — NOT the ${secs}s ceiling."
