@@ -412,17 +412,19 @@ describe('fallow-staged-gate.sh coverage input', () => {
     expect(existsSync(copy)).toBe(false);
   });
 
-  it("does not follow an exported GIT_WORK_TREE to another tree's coverage artifact", () => {
+  it("copies the audited repo's artifact, not an exported GIT_WORK_TREE's", () => {
     const dir = mkTmp('staged-gate-');
     repoWithStaged(dir);
     const binDir = stubFallow(dir, PASS);
+    const file = negativeHitArtifact(dir);
     const decoy = mkTmp('staged-gate-decoy-');
     negativeHitArtifact(decoy);
     realGuardCoverage(dir);
 
     const env = { GIT_DIR: join(dir, '.git'), GIT_WORK_TREE: decoy };
     expect(run(dir, binDir, { env }).status).toBe(0);
-    expect(covLines(dir)).toEqual(['COV=unset']);
+    const seen = JSON.parse(readFileSync(join(dir, 'cov-seen.json'), 'utf8'));
+    expect(seen).toEqual({ [file]: expect.anything() });
   });
 
   it('hands both the verdict run and the block explanation the same copy, then deletes it', () => {
