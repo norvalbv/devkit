@@ -1,7 +1,17 @@
-import { readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { COVERAGE_DIR, RUNS_DIR } from '../../gate-engine/coverage/produce.mts';
 import { testSpawnSync } from './_helpers.mts';
 
@@ -35,6 +45,29 @@ const coverageBlock = (marker?: string): CoverageBlock => {
   return block;
 };
 
+// Records its argv and the reports dir, leaves vitest's leftovers (tmp/<uuid>, .tmp) there, then fails.
+const FAKE_VITEST = `#!/bin/sh
+echo "$@" > argv
+for a; do case $a in --coverage.reportsDirectory=*) d=\${a#*=};; esac; done
+echo "$d" > reports-dir
+mkdir -p "$d/tmp/uuid" "$d/.tmp" && touch "$d/tmp/uuid/x" "$d/.tmp/y"
+exit 3
+`;
+
+// Runs the real script text in `root`, with FAKE_VITEST first on PATH and a test file appended.
+const runScript = (root: string) => {
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'vitest'), FAKE_VITEST, { mode: 0o755 });
+  return testSpawnSync('/bin/sh', ['-c', `${script} a.test.mts`], {
+    cwd: root,
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    encoding: 'utf8',
+  });
+};
+// 2^22 + 1: above Linux's PID_MAX_LIMIT and macOS's pid ceiling, so no process can ever hold it.
+const DEAD_PID = '4194305';
+
 const ignored = (path: string): boolean =>
   testSpawnSync('git', ['check-ignore', '--no-index', '-q', path], { cwd: ROOT }).status === 0;
 
@@ -66,7 +99,7 @@ describe('test:run:coverage:changed', () => {
 
   it('leaves the reporter to the config, which only this script switches on', () => {
     // A CLI --coverage.reporter replaces the config tuple, and the CLI cannot carry its options.
-    expect(script.startsWith('DEVKIT_COVERAGE_CHANGED=1 vitest run ')).toBe(true);
+    expect(script).toContain('; DEVKIT_COVERAGE_CHANGED=1 vitest run ');
     expect(script).not.toContain('--coverage.reporter');
   });
 
@@ -81,5 +114,42 @@ describe('test:run:coverage:changed', () => {
   it('leaves its report gitignored without ignoring the gate-engine/coverage source dir', () => {
     expect(ignored(`${reportsDir()}/coverage-final.json`)).toBe(true);
     expect(ignored('gate-engine/coverage/new-module.mts')).toBe(false);
+  });
+
+  describe('cleanup', () => {
+    let root = '';
+    afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+    it("removes its own reports dir and a dead run's, keeps a live run's, and passes args and status through", () => {
+      root = mkdtempSync(join(tmpdir(), 'coverage-changed-'));
+      const changed = join(root, 'coverage', '.changed');
+      for (const pid of [String(process.pid), DEAD_PID]) {
+        mkdirSync(join(changed, pid, '.tmp'), { recursive: true });
+        writeFileSync(join(changed, pid, '.tmp', 'f'), '');
+      }
+
+      const run = runScript(root);
+
+      expect(run.status, run.stderr).toBe(3);
+      expect(readFileSync(join(root, 'argv'), 'utf8')).toContain('a.test.mts');
+      const own = readFileSync(join(root, 'reports-dir'), 'utf8').trim();
+      expect(own.startsWith('coverage/.changed/')).toBe(true);
+      expect(existsSync(join(root, own))).toBe(false);
+      expect(readdirSync(changed)).toEqual([String(process.pid)]);
+      expect(existsSync(join(changed, String(process.pid), '.tmp', 'f'))).toBe(true);
+    });
+
+    it('removes a dead-PID symlink without deleting the directory it points at', () => {
+      // `rm -rf link/` resolves the link, so a trailing slash would delete the target instead.
+      root = mkdtempSync(join(tmpdir(), 'coverage-changed-'));
+      mkdirSync(join(root, 'outside'));
+      writeFileSync(join(root, 'outside', 'keep'), '');
+      mkdirSync(join(root, 'coverage', '.changed'), { recursive: true });
+      symlinkSync(join(root, 'outside'), join(root, 'coverage', '.changed', DEAD_PID));
+
+      expect(runScript(root).status).toBe(3);
+      expect(existsSync(join(root, 'outside', 'keep'))).toBe(true);
+      expect(readdirSync(join(root, 'coverage', '.changed'))).toEqual([]);
+    });
   });
 });
