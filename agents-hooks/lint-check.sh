@@ -18,6 +18,8 @@ echo "$input" | grep -q '"stop_hook_active":[[:space:]]*true' && exit 0
 HOOK_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
 source "$HOOK_DIR/session-edits-lib.sh" 2>/dev/null || true
 WORKSPACE="${CLAUDE_PROJECT_DIR:-$HOOK_DIR/../..}"
+# The checkout holding devkit's own (overlay: git-excluded) config, before WORKSPACE follows a worktree.
+CONFIG_ROOT="$WORKSPACE"
 declare -F hook_workspace &>/dev/null && WORKSPACE=$(hook_workspace "$input" "$WORKSPACE")
 cd "$WORKSPACE" 2>/dev/null || exit 0
 
@@ -31,10 +33,6 @@ LEDGER=$(clean_session_ledger "$(session_edits_file "$input")")
 trap 'rm -f "$LEDGER"' EXIT
 
 [ -f "package.json" ] || exit 0
-# The consumer's own package manager (sc-1054) — a bun requirement skipped every npm/pnpm/yarn repo.
-PM=$(resolve_pm)
-[ -n "$PM" ] || exit 0
-
 # Does package.json define a given npm-script? (degrade-skip guard.) js_eval, never a bare node
 # probe — that silently skips in a bun-only toolchain (sc-1043).
 has_script() { js_eval "process.exit(((require('./package.json').scripts||{})['$1'])?0:1)" 2>/dev/null; }
@@ -66,6 +64,31 @@ if [ -x "./node_modules/.bin/biome" ] && { [ -f "biome.json" ] || [ -f "biome.js
     fi
   fi
 fi
+
+# 1b. Overlay repos formatting with their own Oxfmt (no biome config). Exit 1 (unformatted, bad config)
+# or 2 (syntax error) is a finding; any other (126/127: no node for its shebang) stands down.
+if ! { [ -f "biome.json" ] || [ -f "biome.jsonc" ]; } && { [ -f ".oxfmtrc.json" ] || [ -f ".oxfmtrc.jsonc" ] || [ -f "oxfmt.config.ts" ] || [ -f "oxfmt.config.mts" ]; } && [ -x "./node_modules/.bin/oxfmt" ] && devkit_overlay "$CONFIG_ROOT"; then
+  oxfmt_files=()
+  while IFS= read -r f; do
+    [[ "$f" =~ \.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$ ]] && oxfmt_files+=("$f")
+  done < "$LEDGER"
+  if [ ${#oxfmt_files[@]} -gt 0 ]; then
+    lint_output=$("./node_modules/.bin/oxfmt" --no-error-on-unmatched-pattern --check "${oxfmt_files[@]}" 2>&1)
+    rc=$?
+    if [ "$rc" -eq 1 ] || [ "$rc" -eq 2 ]; then
+      echo "Oxfmt format errors detected in files you edited. Please fix these issues:" >&2
+      echo "" >&2
+      truncate "$lint_output" >&2
+      echo "" >&2
+      echo "Run './node_modules/.bin/oxfmt --write <file>' to auto-fix." >&2
+      exit 2
+    fi
+  fi
+fi
+
+# The consumer's own package manager (sc-1054) — a bun requirement skipped every npm/pnpm/yarn repo.
+PM=$(resolve_pm)
+[ -n "$PM" ] || exit 0
 
 # 2. Structure/size ESLint — only if the consumer defines a `lint:structure` script.
 # Project-wide tool → run whole-repo, then filter the report to this session's files.

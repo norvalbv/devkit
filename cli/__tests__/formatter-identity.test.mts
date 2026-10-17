@@ -11,8 +11,10 @@ import { defaultSelection } from '../lib/components.mts';
 import {
   CONSUMER_FORMATTER,
   type ConsumerFormatter,
+  FORMAT_EXTENSION_FILTER,
   FORMAT_TOOL_SETUP,
   renderAgentHookLines,
+  renderOverlayOxfmtHookLines,
   renderToolSetup,
 } from '../lib/husky/format-fragment.mts';
 import {
@@ -84,6 +86,39 @@ describe('the gate — exact comparisons', () => {
     for (const [path, lines] of Object.entries(renderAgentHookLines(CONSUMER_FORMATTER)))
       for (const line of lines)
         expect(readFileSync(join(REPO, path), 'utf8').split('\n'), path).toContain(line);
+  });
+
+  it('both agent hooks carry every rendered overlay Oxfmt line, verbatim', () => {
+    for (const [path, lines] of Object.entries(renderOverlayOxfmtHookLines(CONSUMER_FORMATTER)))
+      for (const line of lines)
+        expect(readFileSync(join(REPO, path), 'utf8').split('\n'), path).toContain(line);
+    expect(FORMAT_EXTENSION_FILTER).toBe("grep -E '\\.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$'");
+  });
+
+  it.each([
+    ['the overlay check', ' && devkit_overlay "$CONFIG_ROOT"'],
+    ['the biome-config negation', '! { [ -f "biome.json" ] || [ -f "biome.jsonc" ]; } && '],
+  ])(
+    'an oxfmt arm that drops %s is drift (package mode would format to a devkit config)',
+    (_, cut) => {
+      for (const path of ['agents-hooks/format-after-edit.sh', 'agents-hooks/lint-check.sh']) {
+        const out = checkFormatterIdentity(withHook(path, (t) => t.replace(cut, ''))).join('\n');
+        expect(out, path).toMatch(
+          /no longer carries `if .*devkit_overlay|no longer carries `if .*biome\.json/,
+        );
+        expect(out, path).toMatch(/runs oxfmt in a line the descriptor does not render/);
+      }
+    },
+  );
+
+  it('an added oxfmt invocation is not a rendered line', () => {
+    const bad = withHook(
+      'agents-hooks/lint-check.sh',
+      (t) => `${t}\n./node_modules/.bin/oxfmt --write .\n`,
+    );
+    expect(checkFormatterIdentity(bad).join('\n')).toMatch(
+      /runs oxfmt in a line the descriptor does not render: `\.\/node_modules\/\.bin\/oxfmt --write \.`/,
+    );
   });
 
   it('an invocation with an extra flag is not the rendered line (`check --unsafe` fails)', () => {
