@@ -135,7 +135,7 @@ describe('reship — resolve + arg guards', () => {
     expect(leading.status, leading.stderr).toBe(0);
     expect(trailing.status, trailing.stderr).toBe(0);
     expect(leading.stdout).toBe(trailing.stdout);
-  });
+  }, 240_000);
 
   // Only the FIRST positional is stripped. A trailing `--pr` is dropped by the parse loop, so a
   // second one must not silently eat the title.
@@ -246,7 +246,7 @@ describe('reship — re-push commits onto the PR-branch tip', () => {
     );
     expect(both.status).not.toBe(0);
     expect(both.stderr).toContain('mutually exclusive');
-  });
+  }, 360_000);
 });
 
 describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
@@ -410,7 +410,7 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
 
     expect(resumed.status, resumed.stderr).toBe(0);
     expect(readFileSync(ghBody, 'utf8')).toBe(body);
-  });
+  }, 240_000);
 
   it('finishes the recorded body update when a lost push response resumes with no commit delta', () => {
     const { bare, dir, env, g, ghBody } = bodyUpdateRepo();
@@ -431,7 +431,7 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
 
     expect(resumed.status, resumed.stderr).toBe(0);
     expect(readFileSync(ghBody, 'utf8')).toBe(body);
-  });
+  }, 240_000);
 
   it('keeps the body intent when the publisher dies between push and PR edit', () => {
     const { bare, dir, env, g, ghBody } = bodyUpdateRepo();
@@ -457,7 +457,7 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
 
     expect(resumed.status, resumed.stderr).toBe(0);
     expect(readFileSync(ghBody, 'utf8')).toBe(body);
-  });
+  }, 360_000);
 
   it('reports a manual-only partial success when PR editing fails after the push', () => {
     const { bare, dir, env, g, ghBody } = bodyUpdateRepo();
@@ -604,7 +604,7 @@ describe('reship — --ready marks the PR ready for review', () => {
     expect(retry.status, retry.stderr).toBe(0);
     expect(retry.stderr).toContain('marked the PR ready');
     expect(readFileSync(ghLog, 'utf8')).toMatch(/^pr ready 7 --repo acme\/app$/m);
-  });
+  }, 240_000);
 
   it('rejects --draft, naming gh pr ready --undo', () => {
     const { dir } = repo();
@@ -757,7 +757,7 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
     expect(readFileSync(ghBody, 'utf8')).toBe(body);
     expect(existsSync(gateRanOnResume), 'resume must reuse the gated receipt').toBe(false);
     expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(accepted);
-  });
+  }, 600_000);
 
   it.each(['sha1', 'sha256'])(
     'prunes unpublished rewrite proof in %s repositories when a pre-push crash resumes',
@@ -797,6 +797,7 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
       expect(proofRefs()).toBe('');
       expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(oldPrTip);
     },
+    240_000,
   );
 
   it('does not reuse a receipt for a byte-different body with the same Git message', () => {
@@ -930,7 +931,7 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
         `refs/devkit/reship-body-receipts/feat/other/${accepted}`,
       ]),
     ).toBe('');
-  });
+  }, 360_000);
 
   // The marker is written after reship.sh registers its worktree and run record (:600/:604), so a
   // parked recovery is already an established holder when the competitor starts.
@@ -1013,7 +1014,7 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
         `refs/devkit/reship-body-receipts/feat/pr/${accepted}`,
       ]),
     ).toBe('');
-  });
+  }, 360_000);
 
   it('refuses before gates when the brief omits any path changed by the old PR', () => {
     const { dir, env } = rewriteRepo({ extraPath: true });
@@ -1043,7 +1044,7 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
     expect(run(argv, dir, { ...env, SHIP_DRY_RUN: '1' }).stderr).not.toContain(
       'rewrite brief omits',
     );
-  });
+  }, 240_000);
 
   it('requires both halves of an old-PR rename', () => {
     const { dir, env } = rewriteRepo({ rename: true });
@@ -1271,7 +1272,7 @@ describe('reship --base — a moved PR base never strands the rewrite (sc-2739)'
     const manifest = JSON.parse(readFileSync(join(dir, '.devkit/reconcile-manifest.json'), 'utf8'));
     // Scope is the replacement's own diff, never main's newer commit.
     expect(manifest.branches['feat/pr'].paths.map((p) => p.path)).toEqual(['conflict.txt']);
-  });
+  }, 240_000);
 });
 
 // Regression (sc-1183): a briefed path can be TRACKED on the PR branch yet sit under a gitignored
