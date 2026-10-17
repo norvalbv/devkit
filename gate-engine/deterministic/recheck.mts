@@ -69,8 +69,16 @@ export function recheckLines(
 /** The lead before ship's exact `--dry-gates` command; the hook's overlay arms print it too (sc-2695). */
 export const SHIP_REHEARSAL_LEAD = "Ship's exact staging, no judges:";
 
-/** Footer lines after the aggregated failure: one re-check per failed gate, then ship's exact one. */
-export function printRecheckFooter(rechecks: string[]): void {
+/** Footer after the aggregated failure: what runs next, one re-check per failed gate, then ship's. */
+export function printFailureFooter(rechecks: string[]): void {
+  console.error('   Fix every failure above together, then commit once.');
+  // review and dry-gates defer this block (`__dk_block_deterministic`), so the selected gates still run.
+  const deferred = ['review', 'dry-gates'].includes(process.env.DEVKIT_RUN_MODE ?? '');
+  console.error(
+    deferred
+      ? '   This run continues through the remaining selected gates, then exits non-zero.'
+      : '   On commit or ship, decision and reviewer gates run only after these pass.',
+  );
   if (rechecks.length === 0) return;
   console.error('   Re-check a fix locally (seconds, no judges) — stage it, then run:');
   for (const line of rechecks) console.error(line);
