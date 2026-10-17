@@ -383,8 +383,9 @@ describe('renderPreflight', () => {
     expect(remedyLine([...locked, claudeOut])).toBe(
       'Both judge CLIs are dark, so no family move helps — install or authenticate one of them.',
     );
-    expect(remedyLine([{ ...locked[0], bin: 'codex+claude' }])).toContain(
-      'this judge spans both families',
+    // A compound bin names no move, so it must not open with "To ship inside this window".
+    expect(remedyLine([{ ...locked[0], bin: 'codex+claude' }])).toBe(
+      `This${familyOverrideRemedy('codex+claude').slice(4)}.`,
     );
   });
 

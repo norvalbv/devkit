@@ -9,6 +9,7 @@ import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mts';
 import {
   isCodexModel,
   judgeBinForModel,
+  judgeProviderOfBin,
   parseModelSpec,
 } from '../../../../gate-engine/judge/codex/result.mts';
 import { formatResetDelta } from '../../../../gate-engine/judge/outage/classify.mts';
@@ -251,9 +252,12 @@ export function remedyLine(statuses: ModelStatus[]): string {
   // Naming the override, never taking it: a runtime cross-family swap moves spend to an unwatched
   // subscription and puts its verdicts outside the model-keyed cache salt (review-gate-in-chain).
   const dark = singleDarkBin(blocked);
-  return dark === undefined
-    ? 'Both judge CLIs are dark, so no family move helps — install or authenticate one of them.'
-    : `To ship inside this window, ${familyOverrideRemedy(dark.bin, dark.present)}.`;
+  if (dark === undefined)
+    return 'Both judge CLIs are dark, so no family move helps — install or authenticate one of them.';
+  const move = familyOverrideRemedy(dark.bin, dark.present);
+  // A compound bin names no move, so a "to ship inside this window" lead-in would contradict it.
+  if (judgeProviderOfBin(dark.bin) === null) return `${move[0].toUpperCase()}${move.slice(1)}.`;
+  return `To ship inside this window, ${move}.`;
 }
 
 const darkStatuses = (statuses: ModelStatus[]): ModelStatus[] =>
