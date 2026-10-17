@@ -259,14 +259,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-chained-type-assertions",
-      "file": "gate-engine/qavis-advisory/__tests__/qavis-advisory.test.mts",
-      "diagnostic": "This assertion chain discards type evidence. Keep the original precise type, or parse untrusted input at its boundary before narrowing it.",
-      "context": "(console.error as unknown as ReturnType<typeof vi.fn>).mock.calls",
-      "fingerprint": "0811dece7a77fbfecf8bce704a84181fc52f5bdbf864acf9cb4740946e6187fe",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/eval/__tests__/review-fixes.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -320,14 +312,6 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "else if (item && typeof item === \"object\") collectPaths(item, out);",
       "fingerprint": "08f38769bfc7b874a42b48d40368bd3ffa1c4933eab2689eb51e5f4ca80c0dc0",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/commands/init.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const { content: newBlock, removed } = removeFragment(block, id as string);",
-      "fingerprint": "09072e1b0b4ea92c42b69df79a74b4b2a64741bf8c109c0fddbef2334e0436ba",
       "count": 1
     },
     {
@@ -403,14 +387,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/review/eval/bench.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const labels = parseCasesText(labelsText) as { caseId: string; slotId: string; match: string }[];",
-      "fingerprint": "0a7d8ef085fecf4f065714432fab1281cf501fc36852c8039043bc7a721b7fc2",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-known-value-widening",
       "file": "gate-engine/critique/eval/bench.mts",
       "diagnostic": "The explicit anonymous object type on binding `tag` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
@@ -440,14 +416,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "parsed = JSON.parse(line) as unknown;",
       "fingerprint": "0af6e3550869458bc746ac7e29b7545a4ea8b50be078e23eca6d85ed3e652ade",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/coverage/run.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "console.error(` ${m}: ${computed[m]}% (min ${coverage[m] as number}%)`);",
-      "fingerprint": "0afccd4d5a143eb3f5a06559cc3acc03672981c87fd85f8ce9347b0921337d7f",
       "count": 1
     },
     {
@@ -571,14 +539,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unknown-parameters",
-      "file": "gate-engine/review/evidence/items.mts",
-      "diagnostic": "Parameter `issue` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
-      "context": ".map((issue: unknown) => String(issue).slice(0, ISSUE_CHARS));",
-      "fingerprint": "0d9493ff7b5362da182ee6520be91f6973728ff343b90e24484c8db41cdf2b60",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unsafe-external-record-access",
       "file": "gate-engine/edge-cases/eval/lib/sources.mts",
       "diagnostic": "Computed access on this JSON-derived record can read inherited Object.prototype members. Guard this exact object and key with Object.hasOwn, or use a Map/null-prototype record.",
@@ -691,14 +651,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/lib/ship/dependency-preflight.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "dependencies?: Record<string, unknown>;",
-      "fingerprint": "10a392b9f1866486fd33fd88539eb097bb49c2fc5295637829185ee2dd6b03af",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/eval/publish-lock.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -795,14 +747,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-shape-in-symbol-names",
-      "file": "gate-engine/review/evidence/commit-message.mts",
-      "diagnostic": "Rename symbol \"INSTRUCTION_SHAPED_LINE\" for its domain role; \"shape\" describes structure rather than ownership.",
-      "context": "const INSTRUCTION_SHAPED_LINE = /^\\s*(?:#{1,6}\\s|[\\s>*#-]*\\**(?:VERDICT|OFFENDING|VIOLATION)\\b)/i;",
-      "fingerprint": "124be3bcf2fd32f73f9514dd3fa0851e10894912767eddb6ef013dc8c88fec39",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
       "file": "cli/__tests__/reconcile.test.mts",
       "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
@@ -875,14 +819,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "cli/lib/overlay.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `syncOverlayHook` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "return { missing, drift };",
-      "fingerprint": "13ff2947f1055061f5ba97fce796a948263dc5cb23d67a15693b1c22bd3b2d52",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/coverage/run.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -912,22 +848,6 @@
       "diagnostic": "Parameter `input` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
       "context": "export function parseBaseline(adapter: string, input: unknown): ParsedBaseline {",
       "fingerprint": "15269c560c2baea15c206f44aa8a691321f7fa5a2c589d4f83883fd19f0bdc77",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/review/__tests__/run-review-fixtures.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "while (trackedDirs.length) rmSync(trackedDirs.pop() as string, { recursive: true, force: true });",
-      "fingerprint": "156693afb23dff3ad5ed0c416d494788c0f3064731f8cd8499d35d37b5a9db34",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/lib/ship/dependency-preflight.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "(parts.length === 1 && !name.startsWith('@') && validPart(parts[0] as string)) ||",
-      "fingerprint": "15a01dc9c49dd2e4a7bfd90b2d8602a734826d80a9d78b01a6c275c67498e04f",
       "count": 1
     },
     {
@@ -992,14 +912,6 @@
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
       "context": "function bail(value: unknown): value is symbol {",
       "fingerprint": "16ee71442ca7b8bf31164b79f9b701aeb974a97904b79cda32d022bad64c299d",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "gate-engine/review/eval/reviewers/bench.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "...(cascade",
-      "fingerprint": "177b8a979c0bcfc2727e0b9ac2b8cb7c133f24b910ab757956475b7d021c31c5",
       "count": 1
     },
     {
@@ -1129,14 +1041,6 @@
       "context": "(record as unknown as Record<string, unknown>).unexpected = true;",
       "fingerprint": "1a5366c1e64c0ead2270b4bc6f2eb666894c1f3561b9d3f9ae65555cb4511d79",
       "count": 2
-    },
-    {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "gate-engine/review/cli.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "...(disposition !== undefined && DISPOSITIONS.has(disposition) ? { disposition } : {}),",
-      "fingerprint": "1a9425e43a834c75075ddbbb5823275a874cdc4bfe39335c17c5647ef1585b99",
-      "count": 1
     },
     {
       "ruleId": "anti-slop/no-known-value-widening",
@@ -1456,14 +1360,6 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "if (typeof stopHookActive !== 'boolean') return skipped('continuation_state_unavailable');",
       "fingerprint": "2344e433bfdfdaa15591b8800b827986c11d23b265bb730751863b4889e44051",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/eval/cli.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const mode = (values.mode ?? (values.tree ? 'tree' : 'working')) as TrackerMode;",
-      "fingerprint": "235f4517eb199b9a6dcb446e1cb4b262ca0ed3f4ec9ba04cf0afe89b356e8950",
       "count": 1
     },
     {
@@ -1939,14 +1835,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "cli/lib/install/package-json.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "...(sel.biome ? { '@biomejs/biome': '^2.5.0' } : {}),",
-      "fingerprint": "2d21bdd976b40a8dcca57dc0e856b5b6db89471a9cdeff138da8964f2b66d9c1",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unknown-parameters",
       "file": "anti-slop/src/shared/lexical-type-parameters.ts",
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
@@ -1992,14 +1880,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "const canonical = resolvePlanCritiqueEvidenceRoot({ root }, true) as string;",
       "fingerprint": "2df9eda7d168e3ab6823885ccd9cc5afed20b8e55d498bd1f879390a93211ecc",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/lib/ship/dependency-preflight.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "(parts[0] as string).startsWith('@') &&",
-      "fingerprint": "2e29bf5010caa55daa3cb0089b655819c0314afd4b31edc1545b37ebd1bc1eca",
       "count": 1
     },
     {
@@ -2080,14 +1960,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "const manifest = parsed as DependencyRuntimeManifest;",
       "fingerprint": "2f6167f9a6e34fe9b862050638ea0dc2368e247e0cc140b5e587e6a9a89fa9ee",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unknown-parameters",
-      "file": "gate-engine/judge/run-judge.mts",
-      "diagnostic": "Parameter `e` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
-      "context": "function isJudgeTimeout(e: unknown): boolean {",
-      "fingerprint": "2fd4b2cc28290afad07040e68497da10eae65d51b1a0ae6a673f2c1bdefe37ba",
       "count": 1
     },
     {
@@ -2280,14 +2152,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "e instanceof Error && 'stderr' in e ? String((e as { stderr?: unknown }).stderr ?? '') : '';",
       "fingerprint": "346df9ae977e5192d0201d104a2e666a1e8b0052875b48b16b3723ce8a3a3386",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/__tests__/decision-scope-brief.test.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "function run(toolInput: Record<string, unknown>, toolName = 'Edit', session?: string) {",
-      "fingerprint": "34bb99a79f7490e28df8ca7de625d1639a8be878ba10168aa66afe50da7fea5d",
       "count": 1
     },
     {
@@ -2715,14 +2579,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/qavis-advisory/__tests__/qavis-advisory.test.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "execFileSync(executable as string, args, { cwd: repo });",
-      "fingerprint": "3e56edf6beef522a11696f5e90dfe61ccebc89590a44595e703198e24102f024",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unknown-parameters",
       "file": "gate-engine/review/__tests__/run-review.test.mts",
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
@@ -2960,14 +2816,6 @@
       "diagnostic": "The explicit anonymous object type on return value of `extractOutput` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "return { text: out.slice(0, OUTPUT_CAP), ts };",
       "fingerprint": "4241d0a5744e35bf162004e238eb585356247b1c97a5a7f4b93f4d72ea0e6ac6",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-shape-in-symbol-names",
-      "file": "cli/commands/clean.mts",
-      "diagnostic": "Rename symbol \"SettingsShape\" for its domain role; \"shape\" describes structure rather than ownership.",
-      "context": "interface SettingsShape {",
-      "fingerprint": "42588b59ea9f40559aad77b361eb934e529c50e781dfe34b734b3b3d4fdf1fb0",
       "count": 1
     },
     {
@@ -3291,14 +3139,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "gate-engine/judge/claude-result.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "typeof value === 'object' && value !== null && !Array.isArray(value);",
-      "fingerprint": "49291061080f2532eea58b38565da5979c1da2267bb3869a6c3f741340378f24",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/critique/eval/bench.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -3315,27 +3155,11 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-shape-in-symbol-names",
-      "file": "cli/commands/clean.mts",
-      "diagnostic": "Rename symbol \"SettingsShape\" for its domain role; \"shape\" describes structure rather than ownership.",
-      "context": "const claude = readJson(claudeP) as SettingsShape | null;",
-      "fingerprint": "49d013d5142ba95f7bfcb874e8d7a7e3b2a56289b00d5be2f850a9e91f885a37",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/judge/verdict-store.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return null;",
       "fingerprint": "49d3bbade63c45361197d49a1d67d1cf0b47895a2c661b89746b7ed91f1b5f74",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/review/__tests__/run-review.test.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const parts = rows[0].lens_parts as { lens: string; retried?: boolean; status: string }[];",
-      "fingerprint": "4a2fc9fac63bc5e1e03d0bcdc0cc2fce158a5365632cf9638bc7eba2e3e23fcb",
       "count": 1
     },
     {
@@ -3369,14 +3193,6 @@
       "context": "expect(Object.keys(got).sort()).toEqual(Object.keys(want).sort());",
       "fingerprint": "4ace98a11d796102a3abca8f491208f757a22128438c4c972858bcba47a42d83",
       "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/qavis-advisory/__tests__/qavis-advisory.test.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "(console.error as unknown as ReturnType<typeof vi.fn>).mock.calls",
-      "fingerprint": "4b0caf1c76cd7a97dd02303a0bade95652e8e9341a2c2cc627a953af75c751ed",
-      "count": 2
     },
     {
       "ruleId": "anti-slop/no-known-value-widening",
@@ -3416,14 +3232,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "const packageJson = JSON.parse(",
       "fingerprint": "4be82facc65eb84bf2507989825a19d1064d9e048522cc59be0278b996f9a6df",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/qavis-advisory/cli.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "console.error(`guard-qavis-advisory: ${(e as Error)?.message ?? e}`);",
-      "fingerprint": "4bf53e2308f8e3d8c2a3ba5e419d0f04b999b5096b062cc322d72fb76e29f49a",
       "count": 1
     },
     {
@@ -3556,14 +3364,6 @@
     },
     {
       "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "gate-engine/review/evidence/items.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "export function itemFields(res: ReviewOutcome): Record<string, unknown> {",
-      "fingerprint": "4eeedfeab1753dbb9610a8435a2fd3bbf682e5b929ecf98aae320726c4898a8b",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
       "file": "gate-engine/eval/cli.mts",
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
       "context": "const parsed = JSON.parse(raw) as { sections?: Record<string, unknown> };",
@@ -3627,14 +3427,6 @@
       "count": 3
     },
     {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "gate-engine/review/cli.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "...(reason ? { disposition_reason: reason } : {}),",
-      "fingerprint": "51b0a00a306b61c8775a7b0ea6e15334fe113b813469f85e94d6fd9f3a0b4719",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/eval/schema.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -3648,14 +3440,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "const paths = Object.fromEntries(",
       "fingerprint": "51ceee57bf93d24e485f3d5b5cc873f8fe2698379fc5442cb85dc778137a26fc",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/__tests__/atomic-write-lock.test.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "if (typeof p.pid !== 'number') throw new Error('could not obtain a pid');",
-      "fingerprint": "51f18372ee5591792b02ead4a75724b33908a33b2ab8330fa33a951dea65299f",
       "count": 1
     },
     {
@@ -3723,14 +3507,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/commands/clean.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "[key: string]: unknown;",
-      "fingerprint": "548d5f75c29f20f66b6d18b12417a76c19cdbd62203b273fb832a80c979fbf62",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/judge/claude-result.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -3761,14 +3537,6 @@
       "context": "argsOrOptions: readonly string[] | Record<string, unknown> | undefined,",
       "fingerprint": "556393cbb0cc82f8dfcffbfbe6602cf56eecf5205c95904f0c1dbc68371806c4",
       "count": 2
-    },
-    {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/ship/dependency-preflight.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "if (section === null || typeof section !== 'object' || Array.isArray(section)) {",
-      "fingerprint": "55726409b20dd7e2b3bbf9a0e12b654b1326d8aba915f3bb3e39fef1623b489a",
-      "count": 1
     },
     {
       "ruleId": "anti-slop/no-unsafe-external-record-access",
@@ -4035,14 +3803,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/qavis-advisory/check.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const err = e as NodeJS.ErrnoException;",
-      "fingerprint": "5c20f0165d11295e9eaa02f7455a450794434527942ac620cf17d63b8138093c",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unknown-parameters",
       "file": "cli/lib/install/hook-registration-ledger/install-support.mts",
       "diagnostic": "Parameter `document` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
@@ -4259,14 +4019,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "gate-engine/judge/claude-result.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "const isRecord = (value: unknown): value is Record<string, unknown> =>",
-      "fingerprint": "5ffa9e44fcff979b83e245d898c2cb397d367f9524c6714e43de2bf31b1a5894",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "cli/lib/ship/review/repository/manifest.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -4320,14 +4072,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "vi.mocked(rankAxes).mockResolvedValue({ rows: [{ slug: 'bar' }, { slug: 'foo' }] } as never);",
       "fingerprint": "60f42d540b938eb1d1716be23275c9dc847d3e3761fe35479c891599cc965403",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "gate-engine/review/evidence/items.mts",
-      "diagnostic": "The explicit open dictionary type on return value of `itemFields` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "return {",
-      "fingerprint": "610a5234c49ba0e7b0431479a4b574d8b08cb98101f35b0303c4f3167d895d11",
       "count": 1
     },
     {
@@ -4387,27 +4131,11 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/__tests__/test-subprocess.test.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "options: Record<string, unknown>,",
-      "fingerprint": "6217a13e2d6a79ca6175f23f8c6f1c25c175a0eb73382e72501afd9ee320b7cf",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/review/baseline-gate.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "const parsed = JSON.parse(stdout) as unknown;",
       "fingerprint": "6247ed0b2592542c0359c0f46df13adfe2299d1e6955c443efeb212b94e8e1a0",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/config.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "return parsed as RawGuardConfigFile;",
-      "fingerprint": "629fb328feb9fbf6f90d4d50aa7e120fd42bef4e1281ff474d7484bad25ae922",
       "count": 1
     },
     {
@@ -4491,14 +4219,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/commands/clean.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const codex = readJson(codexP) as SettingsShape | null;",
-      "fingerprint": "64b0e09cdb31b1f8c212cf42aaa60585271dceeb8b169b518451eddd87de7ec4",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-known-value-widening",
       "file": "cli/lib/install/flags/review-profile.mts",
       "diagnostic": "The explicit anonymous object type on return value of `reviewPlanFromFlags` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
@@ -4536,14 +4256,6 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "if (typeof f?.text !== 'string' || !f.text) err(`${fid}: missing text`);",
       "fingerprint": "656f07ce935d6d45dbbb1a17e49ad4ab2648196eac98403c42e7a5f9706674ce",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/commands/clean.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const cursor = readJson(cursorP) as SettingsShape | null;",
-      "fingerprint": "65ab999ebefc3846486bbf6027137eb1f6d1eea337166c62a5a3e6239f1ed683",
       "count": 1
     },
     {
@@ -4667,14 +4379,6 @@
       "count": 2
     },
     {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "cli/lib/install/package-json.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "...(sel.biome ? { lint: 'biome check .', format: 'biome check --write .' } : {}),",
-      "fingerprint": "684fd04d43b2d5cbc3cd0165ae05b84860c8214447478efb4ac8d06fbd88e72e",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unsafe-dictionary-type",
       "file": "cli/lib/ship/review/setup-runtime-format.mts",
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
@@ -4764,14 +4468,6 @@
     },
     {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/__tests__/ship-branch.test.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "(block as RegExpExecArray)[1]",
-      "fingerprint": "69ecd15e70735e628b65a0bbf6cca5e9bd0bbd938e1f60bd39af146b64606cd2",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/eval/catalog.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "if (!(EVIDENCE_MODES as readonly string[]).includes(subject.evidence))",
@@ -4808,14 +4504,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "const candidate = value as Partial<ConfigOwnership>;",
       "fingerprint": "6aa6021ca53125a0a9bf05c54c36532574693070fc7c80fed972aaa3d73a5b06",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/lib/ship/dependency-preflight.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as PackageManifest;",
-      "fingerprint": "6ac376c8d912ea74fc235eca98aa07398ce7b87f9c28ad540409be20f1213e0e",
       "count": 1
     },
     {
@@ -4944,14 +4632,6 @@
       "diagnostic": "The explicit open dictionary type on binding `SIGNAL_STATUS` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "const SIGNAL_STATUS: Record<ForwardedSignal, number> = {",
       "fingerprint": "6c96c8a08f44d8a5be19052b493a3c2cfac570eaef4b469e5d53419b7395f9e4",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unknown-parameters",
-      "file": "gate-engine/judge/claude-result.mts",
-      "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
-      "context": "const isRecord = (value: unknown): value is Record<string, unknown> =>",
-      "fingerprint": "6d5d29a17d29094432b9735dd6c8566cbf8ce18d01d03e5b3d3db4c8525c4a6c",
       "count": 1
     },
     {
@@ -5187,14 +4867,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/__tests__/test-subprocess.test.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "timeoutStatus: (command: string, args: readonly string[], options: Record<string, unknown>) =>",
-      "fingerprint": "7193677b83f659320174d8fbaca496c493cebd75ef90af383db006345404a682",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unknown-returns",
       "file": "cli/lib/install/hook-registration-ledger/install-support.mts",
       "diagnostic": "This function exposes `unknown` to its caller. Parse the value at its boundary and return a named domain type.",
@@ -5273,14 +4945,6 @@
       "context": "const promiseAction = (() => Promise.resolve('async')) as unknown as () => string;",
       "fingerprint": "733cc0c3bcd7acf992101e97575feec922ccfbc3f7d7e0f0ccc687e55150f065",
       "count": 2
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/prior-art/eval/bench.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const items = projectResponse(run.raw as string);",
-      "fingerprint": "7401c37d8def85069c2a83f5029191a8befebe9f5d0caac91fb6a5d6cfde26ce",
-      "count": 1
     },
     {
       "ruleId": "anti-slop/no-unknown-parameters",
@@ -5707,14 +5371,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-shape-in-symbol-names",
-      "file": "gate-engine/review/evidence/commit-message.mts",
-      "diagnostic": "Rename symbol \"INSTRUCTION_SHAPED_LINE\" for its domain role; \"shape\" describes structure rather than ownership.",
-      "context": ".map((line) => (INSTRUCTION_SHAPED_LINE.test(line) ? `¦ ${line}` : line))",
-      "fingerprint": "7d5abe8e7beaa2368d3430ccf4973f730e419ee3e5b4b318d0582b7517453e70",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/lib/wizard.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -5779,14 +5435,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "gate-engine/co-occurrence/chunk-index.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `partitionFresh` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "return {",
-      "fingerprint": "7f50bf8262d2301b5256edd176d70d18599f3a76199fb98c850e7fc679d54771",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-conditional-empty-object-spread",
       "file": "cli/lib/install/package-json.mts",
       "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
@@ -5833,14 +5481,6 @@
       "context": "): value is Record<string, unknown> & ReviewManifestRoots {",
       "fingerprint": "804a962edc08071ce0fccdcc360a2284b6d7e851e382bca3265f672b56e5d9b8",
       "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/commands/init.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "const cfg: Record<string, unknown> = (readJson(path) as Record<string, unknown> | null) ?? {};",
-      "fingerprint": "805c6244b3c6fcac74eb76a4abc78e3478adcc30fe4dd2f4c8584f64f8533506",
-      "count": 2
     },
     {
       "ruleId": "anti-slop/no-unknown-parameters",
@@ -6008,14 +5648,6 @@
       "diagnostic": "The explicit anonymous object type on return value of `roots` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "return {",
       "fingerprint": "8307ea3efb63ca636c872232d748f6df0554f2aaacd0fc69779cfa638fb88fff",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "cli/__tests__/_ship-branch-fixture.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "return { ...seedShipRepo({ origin: bare, ...(hookBody ? { hookBody } : {}) }), bare };",
-      "fingerprint": "837705fc0ff7064ddfe80b746f9992313fafc0392084d476e82bb5fdd286dbfb",
       "count": 1
     },
     {
@@ -6272,14 +5904,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "const raw = parsed as Record<string, unknown>;",
       "fingerprint": "8894ff6062215b70a6329d13397c8cbcd95536413f7a0e5a7dac8f2697f36483",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/prior-art/eval/bench.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "await scoreRow(row, runsByRow.get(row.id) as RunRecord[], outagesByRow.get(row.id) ?? 0),",
-      "fingerprint": "88b9460bde83674a9fe60f057e96432d58db1e18c1cf74eebd95dbabc46f4b80",
       "count": 1
     },
     {
@@ -6619,27 +6243,11 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "cli/lib/install/hook-registration-ledger/install-support.mts",
-      "diagnostic": "The explicit open dictionary type on binding `RETIRED_COMMANDS` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "{",
-      "fingerprint": "8f08ed0284d66ba3f3642431dae782d449f4c77c542f333a856f45547cb8cafc",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unknown-parameters",
       "file": "gate-engine/critique/response-contract.mts",
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
       "context": "function parseEdgeCase(value: unknown, path: string): PlanCritiqueEdgeCase {",
       "fingerprint": "8f15539e8d2ba56586187e0f748624a391f207b6d18c5d53539359eab1a61af5",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/ratchets/folder-fanout.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const over = inCommit ? overCap(indexCounts as FanoutCounts, cap) : offenders;",
-      "fingerprint": "8f29c726e41a3e55ae6e39f179922b0aeca9e3dc27b7630386e1e1508e6e4c2e",
       "count": 1
     },
     {
@@ -7219,14 +6827,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "cli/lib/ship/dist-integrity.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `parseArgs` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "return { base, paths: argv.slice(i), root };",
-      "fingerprint": "99225119bec9059a106e1c5bbc470589ddd3a6b6f8dad58c72c351c8b3f61422",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/co-occurrence/__tests__/remedy-contract.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -7627,14 +7227,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-shape-in-symbol-names",
-      "file": "cli/commands/clean.mts",
-      "diagnostic": "Rename symbol \"SettingsShape\" for its domain role; \"shape\" describes structure rather than ownership.",
-      "context": "const onlyEmptyHooks = (obj: SettingsShape, allowed: string[]): boolean =>",
-      "fingerprint": "a1afd8043eb228602248919089972283b8a1302d3a7a8acb01779740efcde358",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/lib/ship/review/setup-profile.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -7683,14 +7275,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/lib/git-tracked.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "if ((error as { status?: number }).status === 1) return false;",
-      "fingerprint": "a33a3d4833ccdf1835abd084d5633dc08f0ea1e5175478c3eec5fa2e22e23330",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-known-value-widening",
       "file": "cli/lib/husky/commit-msg-block.mts",
       "diagnostic": "The explicit open dictionary type on binding `FRAGMENT_ID` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
@@ -7704,14 +7288,6 @@
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
       "context": "function exactObject(value: unknown, fields: readonly string[]): Record<string, unknown> | null {",
       "fingerprint": "a3c72077201eff8e655a29b78dcbb361fca1ed13bd8ddcabb3e9b8e2347a8e6a",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unknown-parameters",
-      "file": "gate-engine/judge/run-judge.mts",
-      "diagnostic": "Parameter `err` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
-      "context": "const fail = (err: unknown) => {",
-      "fingerprint": "a3f53abe7b2f227a77f981a80bc493dc3b6e0ebc42843282c42d9012eb2870cc",
       "count": 1
     },
     {
@@ -8067,28 +7643,12 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "gate-engine/judge/gate-events.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "export function emitGateEvent(ev: Record<string, unknown>): void {",
-      "fingerprint": "ab2d8fb0d40bd3ebd79410853bdf233bffc881ce426942b3181c1b6ff2859e2a",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/lib/ship/review/projection/runtime.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "verifyProjectionRuntime(args[1] as string, args[2] as string, args[3] as string);",
       "fingerprint": "ab5ec182322bcfefa0afd295daa94f11e05ec28fc76cbf8a1ce581620bbed1c5",
       "count": 3
-    },
-    {
-      "ruleId": "anti-slop/no-shape-in-symbol-names",
-      "file": "cli/commands/clean.mts",
-      "diagnostic": "Rename symbol \"SettingsShape\" for its domain role; \"shape\" describes structure rather than ownership.",
-      "context": "const cursor = readJson(cursorP) as SettingsShape | null;",
-      "fingerprint": "ab6847d3d520a00099754daf11b7610786460ff8e14544925617b1f788789369",
-      "count": 1
     },
     {
       "ruleId": "anti-slop/no-chained-type-assertions",
@@ -8136,14 +7696,6 @@
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
       "context": "function sha256(value: unknown, at: string): Sha256 {",
       "fingerprint": "abf8dab211573bfaa1b7e0ee1eaf7845b80ef6be219bc187411621d18abf69c6",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "gate-engine/review/runtime.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "typeof state?.skipped === 'string' &&",
-      "fingerprint": "abfb568ca50fce4b973b633b4208110b8518110698d119f8426c7e57e4496cb0",
       "count": 1
     },
     {
@@ -8491,14 +8043,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/commands/init.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const cfg: Record<string, unknown> = (readJson(path) as Record<string, unknown> | null) ?? {};",
-      "fingerprint": "b2270649aabbd10ec67f0d29331d6283e1bc9b0ce349c3af7cd38662d7aea1fe",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unknown-parameters",
       "file": "gate-engine/prior-art/response-contract.mts",
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
@@ -8667,14 +8211,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "gate-engine/review/__tests__/consumer-identity.test.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `consumerFixture` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "return { root, packaged };",
-      "fingerprint": "b5a368e7f2cb74c3c034b42597a11db99f8f770e29b900391656f3d5fc7fd195",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unsafe-dictionary-type",
       "file": "gate-engine/critique/eval/run-critic.mts",
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
@@ -8696,14 +8232,6 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "if (typeof input === 'string') console.log(input);",
       "fingerprint": "b5d6d648501bbe36d4ebeb6b7743067f4ae98f4bb0d8e0ff0fab244f82e32535",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "gate-engine/search-tool/search-tool-lib.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `classifyOperands` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "return { patternValues, positionals };",
-      "fingerprint": "b5ec976a020d5b36777598c5d343272b97982faff19dd1b9e3d2287293f3a0a4",
       "count": 1
     },
     {
@@ -8784,14 +8312,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "expect(unofferedComponents({ [id]: false } as Partial<Selection>).map((c) => c.id)).toEqual(",
       "fingerprint": "b7c28c54eaf8703ca21fc2e9d6d3d6c6a9ffac61496f5daf035fff98a1b11235",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "cli/lib/install/hook-registration-ledger/install-support.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `stripRetiredRegistrations` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "if (!root || !hooks) return { document, changed: false };",
-      "fingerprint": "b7eb668e1ab081c58927a04ce955f860fbd86c5b403e2b27b1e8ee3295300533",
       "count": 1
     },
     {
@@ -8888,14 +8408,6 @@
       "diagnostic": "The explicit anonymous object type on return value of `reviewPlanFromFlags` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "return { error: `devkit init: invalid --review-guards (${details}).` };",
       "fingerprint": "ba265d9151e29e4cdb4fa86592c1a1acff5426874b2a9e61232260546cbdb30d",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/commands/clean.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const claude = readJson(claudeP) as SettingsShape | null;",
-      "fingerprint": "baa442bcdcf64391908f9c82b4fa8e4322c736505de197771ae19ae60927e96d",
       "count": 1
     },
     {
@@ -9131,27 +8643,11 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/lib/ship/dependency-preflight.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "(parts[0] as string).length > 1 &&",
-      "fingerprint": "be5e8f8cdf34b89af3b0e76e4484f9d6932ddbe9318728ee8d351b97812036d1",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-conditional-empty-object-spread",
       "file": "cli/__tests__/review-setup-runtime.test.mts",
       "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
       "context": "...(pkgRel ? { pkgRel } : {}),",
       "fingerprint": "be648abda75ae071793a8bb4d97a021092b9820ff893a41282e00121ecb926ec",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "gate-engine/co-occurrence/chunk-index.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `partitionFresh` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "if (!verifier.enabled) return { fresh: pairs, dropped: [] };",
-      "fingerprint": "beb8ef605a83edf8926b3f323646845e3b4e875d5a00b74aabace30767540b81",
       "count": 1
     },
     {
@@ -9200,14 +8696,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "typeof (value as { then?: unknown }).then === 'function'",
       "fingerprint": "c093c1a7f8808c71f078d2ae5fb8ff911e28eb071f6014175d3ecf705277a623",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-shape-in-symbol-names",
-      "file": "cli/commands/clean.mts",
-      "diagnostic": "Rename symbol \"SettingsShape\" for its domain role; \"shape\" describes structure rather than ownership.",
-      "context": "const codex = readJson(codexP) as SettingsShape | null;",
-      "fingerprint": "c0a8030d4c95d9ca5bcfec43f10bbf91e583ac44308ddc7be89afe6f4f7b0c42",
       "count": 1
     },
     {
@@ -9451,14 +8939,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/lib/ship/dependency-preflight.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "devDependencies?: Record<string, unknown>;",
-      "fingerprint": "c63009cf1996ec1c8f360af5a7ed860ce448996602405e93d4823e7a00efd776",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/review/baseline-gate.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -9624,14 +9104,6 @@
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
       "context": "export function dropUndecided<T extends Record<string, unknown>>(",
       "fingerprint": "c8043c557060b3074a2e0e886cc156ea0bc5c8bd9856d6c57c77555f9731ba3c",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/review/run-review.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "emitCacheHit(`review:${c.name}`, c.model as string, c.duration);",
-      "fingerprint": "c813d5e48cee47a27d80fdcb04960f731f666e1550b1279da35bad673172a34e",
       "count": 1
     },
     {
@@ -9915,22 +9387,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "cli/lib/install/install-fallow.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `wireFallowGate` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "return { ok: status === 0 };",
-      "fingerprint": "cf7a6907e55ac3fe9a6ba6bea6e9b3cdb3b6f1dd26ff849b74a7eb4cce299186",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "gate-engine/config.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {",
-      "fingerprint": "cfa6cf950c2a663d4f0a6402c2273870323e0f04544c2436547b5f97398a5f75",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-module-mocking",
       "file": "cli/__tests__/overlay.test.mts",
       "diagnostic": "Replace module mocking with dependency injection through a real interface, service layer, or faithful test implementation.",
@@ -10144,14 +9600,6 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "expect(typeof env.branch).toBe('string');",
       "fingerprint": "d54c3d314f6b51d5996b5fdaabda54668f59344125b487d318a76d03e971947e",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-object-parameters",
-      "file": "gate-engine/review/eval/bench.mts",
-      "diagnostic": "Parameter `entry` uses the broad `object` type. Accept a named owner type; parse external input at its boundary before calling this function.",
-      "context": "function appendLedger(entry: object) {",
-      "fingerprint": "d58e8da1519f8c457685085f1bc790e4528f350b81b0655a3d7de6632d7a2220",
       "count": 1
     },
     {
@@ -10547,14 +9995,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "gate-engine/judge/run-judge.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "...(usage ? { extra: { ...usage } } : {}),",
-      "fingerprint": "ded0fc08edaaf9cd92a5233f45e3df791ccb5911fe24baec44da8c172158e547",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-known-value-widening",
       "file": "gate-engine/review/evidence/items.mts",
       "diagnostic": "The explicit open dictionary type on return value of `tally` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
@@ -10923,14 +10363,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-object-parameters",
-      "file": "gate-engine/review/eval/conventions/bench.mts",
-      "diagnostic": "Parameter `entry` uses the broad `object` type. Accept a named owner type; parse external input at its boundary before calling this function.",
-      "context": "function appendLedger(entry: object) {",
-      "fingerprint": "e61400e91a2647287d932f4a05edc7e8faf9b6b5abe534a4a4ee802e424f0ab8",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/lib/ship/review/projection/runtime.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -11016,14 +10448,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "rows = parseCasesText(readFileSync(casesPath, 'utf8')) as Row[];",
       "fingerprint": "e8737331addca0923aa6be1c66dd3c561992790e9c1f241ab97993cd6e32104c",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "cli/lib/install/hook-registration-ledger/install-support.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `stripRetiredRegistrations` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "if (!commands.size || provider === 'codex') return { document, changed: false };",
-      "fingerprint": "e873d75c60cabc153c0b3df407776348915b1a4d7e485c8f0c3b7de9f3f9d36b",
       "count": 1
     },
     {
@@ -11355,14 +10779,6 @@
       "count": 2
     },
     {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/commands/init.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "return (e as ExecError).status != null; // non-zero exit → debt; ENOENT (status null) → treat as none",
-      "fingerprint": "eedfb56925f01e47beb06f631c6ac5e89a5f46cd400ae5f5992b08e41558518a",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/critique/lifecycle/work-quarantine.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -11659,14 +11075,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/review/cascade/reviewer.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "return {",
-      "fingerprint": "f3cbf358342917f3c8afc9330d84c8d87c73ffe884d7a4b8390350290cd1ff58",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-known-value-widening",
       "file": "cli/lib/doctor/extends-checks.mts",
       "diagnostic": "The explicit open dictionary type on binding `EXTENDS_REPAIRABLE` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
@@ -11955,14 +11363,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "cli/lib/install/install-fallow.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `wireFallowHooks` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "return { ok: git.ok, log };",
-      "fingerprint": "f953db6ecf8179c9420418e6840daebdbb79c12a401a5740f8248d7927fff19a",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unknown-parameters",
       "file": "gate-engine/critique/evidence-record.mts",
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
@@ -12008,14 +11408,6 @@
       "diagnostic": "The explicit anonymous object type on return value of `checkpointArtifact` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "return { content, sha256: digest, path: `${CHECKPOINT_DIR}/${digest}.json` };",
       "fingerprint": "faa32d112a5006185e2a58ed75c3343b7ca4df00900f92fda57768a03f5bc1c3",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/commands/clean.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "hooks?: Record<string, unknown>;",
-      "fingerprint": "faab1d843d2397d9893bd42e07b2e9524de9ec0392ad9f7e738c3c248859e6ef",
       "count": 1
     },
     {
