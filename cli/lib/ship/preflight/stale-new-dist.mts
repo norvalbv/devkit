@@ -39,7 +39,7 @@ function freshEmit(
   try {
     // The exit code is ignored: noEmitOnError is unset, so another file's type error still emits.
     // SIGKILL, because native tsc ignores SIGTERM mid-compile and spawnSync waits for it to exit.
-    const { error } = spawnSync(
+    const { error, signal } = spawnSync(
       process.execPath,
       [checkoutTsc(root), '-p', path.join(root, 'tsconfig.build.json'), '--outDir', out],
       { cwd: root, stdio: 'ignore', timeout: timeoutMs, killSignal: 'SIGKILL' },
@@ -52,6 +52,7 @@ function freshEmit(
           : `tsc could not run: ${error.message}`,
       );
     }
+    if (signal) throw new Error(`tsc was killed by ${signal}`);
     const emitted = (file: string): Buffer | undefined => {
       const absolute = path.join(out, file.slice('dist/'.length));
       return existsSync(absolute) ? readFileSync(absolute) : undefined;
