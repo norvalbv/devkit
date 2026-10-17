@@ -3,7 +3,7 @@
  * bump the version → run tests → build dist → open a release PR. After its squash merge, tag the
  * merge commit (never the release branch commit, which does not land on main).
  *
- *   devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes] [--ci-override "<reason>"]
+ *   devkit release [patch|minor|major|<x.y.z>] [--base <branch>] [--dry-run] [--yes] [--ci-override "<reason>"]
  *
  * Refuses outside the devkit repo (it would bump a consumer's package.json) and refuses on a
  * dirty tree (feature work must be committed first — release only bumps the version + dist).
@@ -20,6 +20,7 @@ import { parseArgs } from 'node:util';
 import { cancel, confirm, isCancel } from '@clack/prompts';
 import { branchHead, type CommitCi, commitCi, GhUnavailable } from '../lib/baseline-status/gh.mts';
 import { configuredSource } from '../lib/baseline-status/source.mts';
+import { shellQuote } from '../lib/ship/dist-integrity.mts';
 import ship from './ship.mts';
 
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
@@ -60,7 +61,7 @@ export function remoteTagExists(tag: string, cwd: string): boolean {
 }
 
 /** Whether GitHub's tip of `base` is `sha`, printing why not: CI is read for that tip. */
-function onOriginTip(cwd: string, base: string, sha: string): boolean {
+function onOriginTip(cwd: string, base: string, sha: string, detached: boolean): boolean {
   let tip: string;
   try {
     tip = branchHead({ cwd, ref: base });
@@ -70,9 +71,13 @@ function onOriginTip(cwd: string, base: string, sha: string): boolean {
     return false;
   }
   if (tip === sha) return true;
+  // A detached worktree cannot check out `base` while another worktree holds it.
+  const remedy = detached
+    ? `Run \`git fetch origin && git checkout --detach origin/${base}\` and re-run.`
+    : `Check out ${base} at ${tip} and re-run.`;
   console.error(
     `devkit release: HEAD is ${sha} but origin's ${base} is ${tip}; CI and the build must ` +
-      `describe the commit the release PR lands on. Check out ${base} at ${tip} and re-run.`,
+      `describe the commit the release PR lands on. ${remedy}`,
   );
   return false;
 }
@@ -138,12 +143,14 @@ export const meta = {
     'MAINTAINER-ONLY, run by a human inside the devkit repo itself. Not a consumer-repo verb ' +
     'at all, so no consumer-facing skill should route to it.',
   summary: 'MAINTAINER-ONLY: bump version, test, and open a release PR.',
-  valueFlags: ['--ci-override'],
+  valueFlags: ['--base', '--ci-override'],
   help: `devkit release — MAINTAINER-ONLY (run inside the devkit repo): bump version, test, build, and open a release PR.
 
 Usage:
-  devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes] [--ci-override "<reason>"]
+  devkit release [patch|minor|major|<x.y.z>] [--base <branch>] [--dry-run] [--yes] [--ci-override "<reason>"]
 
+  --base         The branch the release PR targets; defaults to the current branch. Required on a
+                 detached HEAD.
   --dry-run      Print the plan; change nothing.
   --yes          Skip the release-PR confirm prompt.
   --ci-override  Release although the base commit's CI is not green. The reason is required and is
@@ -156,7 +163,13 @@ refuses unless HEAD is origin's tip of the base branch and that commit's newest 
 CI workflow (guard.config.json baselineStatus.workflow, default gate.yml) passed; that needs an
 authenticated gh, and a base branch the workflow never runs on needs --ci-override. The tag is
 created only after the PR is squash-merged; the command prints the exact post-merge steps. Release
-files remain in the working tree until \`devkit reconcile --apply\` after the PR merges.`,
+files remain in the working tree until \`devkit reconcile --apply\` after the PR merges.
+
+To release from a clean worktree at origin's tip (the shared main checkout may be dirty), run from
+source, since a published devkit may predate --base:
+  git fetch origin && git worktree add --detach <dir> origin/main && cd <dir>
+  bun install --frozen-lockfile && node cli/index.mts release minor --base main
+Then remove that worktree after the PR merges instead of reconciling.`,
 };
 
 // Reason: flat release orchestration: independent guard early-returns followed by sequential
@@ -169,6 +182,7 @@ export default async function release(args: string[], cwd: string): Promise<numb
     options: {
       'dry-run': { type: 'boolean' },
       yes: { type: 'boolean' },
+      base: { type: 'string' },
       'ci-override': { type: 'string' },
     },
   });
@@ -209,10 +223,12 @@ export default async function release(args: string[], cwd: string): Promise<numb
     return 1;
   }
   const tag = `v${target}`;
-  const baseBranch = git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
-  if (baseBranch === 'HEAD') {
+  const head = git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
+  const detached = head === 'HEAD';
+  const baseBranch = (values.base ?? '').replace(/^origin\//, '') || (detached ? '' : head);
+  if (!baseBranch) {
     console.error(
-      'devkit release: detached HEAD — run from the branch the release PR should target.',
+      'devkit release: detached HEAD — pass --base <branch>, the branch the PR targets.',
     );
     return 1;
   }
@@ -225,7 +241,8 @@ export default async function release(args: string[], cwd: string): Promise<numb
     return 1;
   }
   const sha = git(['rev-parse', 'HEAD'], cwd);
-  const baseCi = onOriginTip(cwd, baseBranch, sha) && baseCiLines(cwd, baseBranch, sha, override);
+  const baseCi =
+    onOriginTip(cwd, baseBranch, sha, detached) && baseCiLines(cwd, baseBranch, sha, override);
   if (!baseCi) return 1;
   const suite = baseCi.green ? 'tests already passed in CI' : 'run tests';
   const releaseBranch = `release/${tag}`;
@@ -349,7 +366,7 @@ export default async function release(args: string[], cwd: string): Promise<numb
     ...baseCi.lines,
   ].join('\n');
   // ship cuts the PR from origin's tip, so a base that moved since the CI read is refused.
-  if (!onOriginTip(cwd, baseBranch, sha)) {
+  if (!onOriginTip(cwd, baseBranch, sha, detached)) {
     console.error(
       'devkit release: nothing was published; release files remain in the working tree.',
     );
@@ -379,8 +396,11 @@ export default async function release(args: string[], cwd: string): Promise<numb
   }
 
   console.log(`✓ Opened release PR ${releaseBranch} → ${baseBranch}; no tag created.`);
-  console.log('Release files remain in this working tree; after the PR merges, run:');
-  console.log('  devkit reconcile --apply');
+  // reconcile ends in `git pull --ff-only`, which a detached HEAD cannot do.
+  if (!detached) {
+    console.log('Release files remain in this working tree; after the PR merges, run:');
+    console.log('  devkit reconcile --apply');
+  }
   console.log('After the PR is squash-merged, tag its merge commit:');
   console.log(
     `  merge_sha=$(gh pr view ${releaseBranch} --json state,mergeCommit --jq 'select(.state == "MERGED") | .mergeCommit.oid')`,
@@ -388,5 +408,10 @@ export default async function release(args: string[], cwd: string): Promise<numb
   console.log(`  test -n "$merge_sha" || { echo "${releaseBranch} is not merged"; exit 1; }`);
   console.log(`  git tag -a ${tag} "$merge_sha" -m "devkit ${tag}"`);
   console.log(`  git push origin ${tag}`);
+  // Last: the tag commands above run in this directory.
+  if (detached) {
+    console.log('Then remove this throwaway worktree:');
+    console.log(`  git worktree remove --force ${shellQuote(cwd)}`);
+  }
   return 0;
 }

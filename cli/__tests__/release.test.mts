@@ -565,5 +565,85 @@ describe('release publishing', () => {
       expect(list?.[1]).toEqual(expect.arrayContaining(['--workflow', 'ci.yml']));
       expect(shipBody()).toContain('Base CI: ci.yml passed');
     });
+
+    /** The branch `git rev-parse --abbrev-ref HEAD` reports; `HEAD` is a detached checkout. */
+    const onBranch = (branch: string) => {
+      const base = mockExec.getMockImplementation();
+      mockExec.mockImplementation((command: string, args: string[]) =>
+        command === 'git' && args.join(' ') === 'rev-parse --abbrev-ref HEAD'
+          ? `${branch}\n`
+          : (base?.(command, args) ?? ''),
+      );
+    };
+    const shipBase = () => {
+      const args = mockShip.mock.calls[0]?.[0] ?? [];
+      return args[args.indexOf('--base') + 1];
+    };
+
+    it('targets --base over the checked-out branch, and keeps the reconcile step', async () => {
+      const cwd = checkout();
+      onBranch('feature');
+      const logs = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      expect(await release(['minor', '--base', 'main', '--yes'], cwd)).toBe(0);
+      const api = mockExec.mock.calls.find(([cmd, args]) => cmd === 'gh' && args?.[0] === 'api');
+      expect(api?.[1]?.[1]).toBe('repos/{owner}/{repo}/branches/main');
+      expect(shipBase()).toBe('main');
+      expect(logs.mock.calls.flat().join('\n')).toContain('devkit reconcile --apply');
+    });
+
+    describe('from a detached worktree at origin/main', () => {
+      beforeEach(() => onBranch('HEAD'));
+
+      it('releases against --base and points at the worktree, not reconcile, afterwards', async () => {
+        const cwd = checkout();
+        const logs = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+        expect(await release(['minor', '--base', 'main', '--yes'], cwd)).toBe(0);
+        expect(shipBase()).toBe('main');
+        const said = logs.mock.calls.flat().join('\n');
+        expect(said).not.toContain('reconcile --apply');
+        // Removing the worktree first would delete the directory the tag commands run in.
+        const removal = said.indexOf(`git worktree remove --force '${cwd}'`);
+        expect(removal).toBeGreaterThan(said.indexOf('git push origin v0.48.0'));
+      });
+
+      it.each([[[]], [['--base=']]])('refuses without a base (%j), naming --base', async (flag) => {
+        const cwd = checkout();
+        const errors = stderr();
+
+        expect(await release(['minor', '--yes', ...flag], cwd)).toBe(1);
+        expect(errors()).toContain('pass --base <branch>');
+        refusedEarly(cwd);
+      });
+
+      it.each([
+        ['before the build', ['b'.repeat(40)]],
+        ['while the release built', [SHA, 'b'.repeat(40)]],
+      ])(
+        "refuses when origin's tip moved %s, with a remedy a worktree can run",
+        async (_when, tips) => {
+          const cwd = checkout();
+          ci.tips = tips;
+          const errors = stderr();
+          vi.spyOn(console, 'log').mockImplementation(() => {});
+
+          expect(await release(['minor', '--base', 'main', '--yes'], cwd)).toBe(1);
+          expect(errors()).toContain('git checkout --detach origin/main');
+          expect(errors()).not.toContain('Check out main');
+          expect(mockShip).not.toHaveBeenCalled();
+        },
+      );
+
+      it('reads --base origin/main as main', async () => {
+        const cwd = checkout();
+        vi.spyOn(console, 'log').mockImplementation(() => {});
+
+        expect(await release(['minor', '--base', 'origin/main', '--yes'], cwd)).toBe(0);
+        const api = mockExec.mock.calls.find(([cmd, args]) => cmd === 'gh' && args?.[0] === 'api');
+        expect(api?.[1]?.[1]).toBe('repos/{owner}/{repo}/branches/main');
+        expect(shipBase()).toBe('main');
+      });
+    });
   });
 });
