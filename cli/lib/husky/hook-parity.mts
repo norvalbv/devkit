@@ -158,7 +158,7 @@ export function selfHostHookParity(
 /*
  * `--gate`: the pre-commit half.
  *
- * `--extra` gates run with failOpen2:false in the deterministic orchestrator, so EVERY non-zero exit
+ * Command gates run with failOpen2:false in the deterministic orchestrator, so EVERY non-zero exit
  * blocks the commit. Non-zero is therefore reserved for a hook that is genuinely absent, or drifted
  * because of this change; every environmental condition returns 0.
  */
