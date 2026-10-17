@@ -48,6 +48,32 @@ export function configExtraGates(cwd: string): ExtraGate[] {
   return Object.entries(parsed.data ?? {}).map(([label, cmd]) => ({ label, cmd }));
 }
 
+// gate_result rows strip this prefix, so `guard-lint` and `lint` are recorded under one name.
+const GUARD_PREFIX_RE = /^guard-/;
+
+/**
+ * The hook's `--extra` gates, then the config's. A name both record under runs neither: it blocks as
+ * one command-less `<name>(duplicate)`, a name no config key can take, so no reader pairs it with a command.
+ */
+export function extraGatesFor(flagExtras: ExtraGate[], cwd: string): ExtraGate[] {
+  const config = configExtraGates(cwd);
+  const flagged = new Set(flagExtras.map((g) => g.label.replace(GUARD_PREFIX_RE, '')));
+  const clashes = new Set(config.filter((g) => flagged.has(g.label)).map((g) => g.label));
+  for (const label of clashes) {
+    console.error(
+      `✗ gate '${label}' is declared by both the hook's --extra and ${CONFIG_FILENAME} extraGates — rename one`,
+    );
+  }
+  const reported = new Set<string>();
+  return [...flagExtras, ...config].flatMap((g) => {
+    const name = g.label.replace(GUARD_PREFIX_RE, '');
+    if (!clashes.has(name)) return [g];
+    if (reported.has(name)) return [];
+    reported.add(name);
+    return [{ label: `${name}(duplicate)` }];
+  });
+}
+
 /**
  * Is structure lint bypassed for THIS run? The orchestrator owns this predicate rather than
  * guard-structure because Electron consumers supply their own arbitrary eslint command through

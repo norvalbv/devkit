@@ -21,7 +21,6 @@ import { extractGuardBlock } from './husky-block.mts';
 import {
   buildSelfHostBlock,
   isDevkitRepo,
-  SELF_HOST_EXTRAS,
   SELF_HOST_STRUCTURE_CMD,
   selfHostSelection,
 } from './self-host.mts';
@@ -132,7 +131,6 @@ export function selfHostHookParity(
     {
       ...selfHostSelection(components),
       structureCmd: SELF_HOST_STRUCTURE_CMD,
-      extras: SELF_HOST_EXTRAS,
     },
     pkgRel,
     cwd,

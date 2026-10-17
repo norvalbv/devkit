@@ -41,35 +41,9 @@ import {
   FORMAT_TOOL_SETUP,
 } from './format-fragment.mts';
 
-// Structure-lint and the hard Biome lint/assist gate fold into the deterministic orchestrator via
-// `--extra`. Self-host-only for formatting: its SCOPE (proven allowlist) and hard FAILURE POLICY.
+// Structure-lint folds into the deterministic orchestrator via `--structure`; devkit's other
+// command gates live in guard.config.json `extraGates`, the way a consumer declares them.
 export const SELF_HOST_STRUCTURE_CMD = 'bun run lint:structure';
-// Extras follow guard.config.example.json's //extraGates contract. A node extra reads the index
-// via commitIndexEnv(root), salts env inputs in prefixCacheScope; a GUARD_*_OK needs GATE_BYPASSES.
-export const SELF_HOST_EXTRAS: Array<{ label: string; cmd: string }> = [
-  { label: 'lint', cmd: 'bun run lint' },
-  // sc-2198. Both are pure content comparisons — no spawn, no tmp dir, no model call — and both
-  // already ran, in the 11-minute pre-push suite, which is where they caught a generator edit that
-  // had been sitting on main for five hours. Running them here makes the author who breaks parity
-  // the one who pays, instead of the next person to push. Two labels, not one: runDeterministic
-  // attributes gate_result per label, so a merged label makes a blocked commit unattributable.
-  // Self-host only: a consumer generates their hook from THEIR devkit version, so comparing it
-  // against this generator is meaningless, and `guard-decisions integrity` already ships as a bin
-  // for consumers who want the whole-corpus check.
-  { label: 'hook-parity', cmd: 'node cli/lib/husky/hook-parity.mts --gate' },
-  // sc-2701: the consumer formatter's identity, decided here instead of by the completeness judge.
-  {
-    label: 'formatter-identity',
-    cmd: 'node cli/lib/husky/format-identity/formatter-identity.mts --gate',
-  },
-  { label: 'decisions-integrity', cmd: 'node gate-engine/decisions/cli.mts integrity --staged' },
-  // CI's release-only dist check, run by the ship worktree's own copy so a stale caller can't skip it.
-  { label: 'release-only-dist', cmd: 'node cli/lib/ship/dist-integrity.mts --ship-staged' },
-  { label: 'benchmarks', cmd: 'bun run benchmarks:check -- --mode staged' },
-  // sc-2496: the structural half of `bench.mts validate` (0 model calls, ~1 s); nothing in the
-  // benchmark stage opened a cases-*.jsonl before. The deep validate stays manual until sharded.
-  { label: 'corpus-lint', cmd: 'bun run benchmarks:corpus' },
-];
 
 // The hand hook ended with an ADVISORY fallow audit (dead-code / duplication / complexity on the
 // changed set; command-v-guarded so it no-ops without fallow, `|| true` so it never blocks). The
@@ -131,12 +105,9 @@ if [ "\${DEVKIT_RUN_MODE:-}" != "review" ]; then
 fi
 # /devkit:self-host-skill-projection-advisory`;
 
-// The hook-builder's view of the self-host selection (Selection + the two hook-only fields the
-// generator reads). structureCmd/extras are constant for self-host — seeded here, never persisted.
-type SelfHostHookInput = Selection & {
-  structureCmd?: string;
-  extras?: Array<{ label: string; cmd: string }>;
-};
+// The hook-builder's view of the self-host selection (Selection + the hook-only field the
+// generator reads). structureCmd is constant for self-host — seeded here, never persisted.
+type SelfHostHookInput = Selection & { structureCmd?: string };
 
 // Matches the package-local `guard-<x>` bins the generator emits. `guard-ui-evidence` (inner hyphen) is
 // covered by `[a-z-]+`. The formatter bin gets its own exact rewrite below, because
@@ -213,7 +184,7 @@ export function toSelfHost(hookText: string, cwd: string): string {
 /**
  * The canonical devkit-dogfood selection: every recommended component + guard, PLUS `review` (the
  * in-chain reviewer fleet — the whole point of self-host is that devkit gates its own commits with
- * its own reviewers). structureCmd/extras are added at hook-build time (constants above), not here.
+ * its own reviewers). structureCmd is added at hook-build time (constants above), not here.
  */
 export function selfHostSelection(recorded?: Partial<Selection>): Selection {
   return {
@@ -289,7 +260,6 @@ export function installSelfHostHook(
   const hookSel: SelfHostHookInput = {
     ...sel,
     structureCmd: SELF_HOST_STRUCTURE_CMD,
-    extras: SELF_HOST_EXTRAS,
   };
   const hookPath = join(gitRoot, '.husky', 'pre-commit');
   const exists = existsSync(hookPath);
