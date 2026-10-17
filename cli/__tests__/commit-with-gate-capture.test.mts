@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -640,5 +641,63 @@ describe('_ship_sh_word — quoting round-trips any argument', () => {
     const script = `. "$1"; w=$(_ship_sh_word "$2"; printf x); w=\${w%x}; eval "got=$w"; printf '%s' "$got"`;
     const r = testSpawnSync('/bin/bash', ['-c', script, 'rt', helper, input], { encoding: 'utf8' });
     expect(r.stdout).toBe(input);
+  });
+});
+
+describe('commit_with_gate_capture — a failed config gate that also fails at the cut commit', () => {
+  // The gate chain's own shape: the failed verdict row, the summary line the shell classifies on.
+  const RED_GATE_HOOK =
+    `printf '%s\\n' '{"ship_id":"sc1537-test","type":"gate_result","gate":"always-red","family":"deterministic","status":"fail"}' >> "$DEVKIT_GATE_EVENTS"\n` +
+    "echo '✗ deterministic gates failed: always-red' >&2\nexit 1\n";
+  const LINE =
+    /ship: always-red also exits 1 at [0-9a-f]{7}, the commit this gate worktree was cut from/;
+
+  function redGateFixture(declared: boolean, prefix?: string) {
+    const made = fixture(true, RED_GATE_HOOK, prefix);
+    if (declared) {
+      const config = join(made.root, 'guard.config.json');
+      writeFileSync(config, JSON.stringify({ extraGates: { 'always-red': 'false' } }));
+      symlinkSync(config, join(made.wt, 'guard.config.json'));
+    }
+    const callerVars = { DK_TEST_CALLER_VARS: `BASE=${made.base}; PATHS=(note.txt)` };
+    return { ...made, callerVars };
+  }
+
+  it('says so above the brief footer and in the retained log, without touching the exit code', () => {
+    const red = redGateFixture(true);
+    const undeclared = redGateFixture(false);
+
+    const result = runCommit(red.root, red.wt, red.base, false, false, '', red.callerVars);
+    const control = runCommit(
+      undeclared.root,
+      undeclared.wt,
+      undeclared.base,
+      false,
+      false,
+      '',
+      undeclared.callerVars,
+    );
+
+    expect(result.stderr).toMatch(LINE);
+    expect(result.stderr.search(LINE)).toBeLessThan(
+      result.stderr.indexOf('ship: the gates judged'),
+    );
+    expect(readFileSync(join(red.root, '.devkit/last-ship-gates-feat-sc1537.log'), 'utf8')).toMatch(
+      LINE,
+    );
+    expect(control.stderr).toContain('ship: the gates judged');
+    expect(control.stderr).not.toMatch(LINE);
+    expect(result.status).toBe(control.status);
+    expect(result.status).not.toBe(0);
+  });
+
+  it('says so on a --dry-gates run too, under repo and worktree paths containing a space', () => {
+    const red = redGateFixture(true, 'ship hook proof ');
+
+    expect(red.wt).toContain(' ');
+    const result = runCommit(red.root, red.wt, red.base, false, true, '', red.callerVars);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(LINE);
   });
 });
