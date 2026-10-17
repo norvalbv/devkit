@@ -15,6 +15,7 @@ import { noUnknownTypeAliasesRule } from "./rules/no-unknown-type-aliases.ts";
 import { noUnsafeDictionaryTypeRule } from "./rules/no-unsafe-dictionary-type.ts";
 import { noWidenThenAssertRule } from "./rules/no-widen-then-assert.ts";
 import { requireSafetyCommentForTypeAssertionRule } from "./rules/require-safety-comment-for-type-assertion.ts";
+import { noElapsedTimeAssertionsRule } from "./devkit/rules/no-elapsed-time-assertions.ts";
 import { noUnsafeExternalRecordAccessRule } from "./devkit/rules/no-unsafe-external-record-access.ts";
 import { noUnsafeExternalRecordEnumerationRule } from "./devkit/rules/no-unsafe-external-record-enumeration.ts";
 
@@ -39,6 +40,7 @@ const antiSlopPlugin = eslintCompatPlugin({
 		"require-safety-comment-for-type-assertion": requireSafetyCommentForTypeAssertionRule,
 		"no-unsafe-external-record-access": noUnsafeExternalRecordAccessRule,
 		"no-unsafe-external-record-enumeration": noUnsafeExternalRecordEnumerationRule,
+		"no-elapsed-time-assertions": noElapsedTimeAssertionsRule,
 	},
 });
 

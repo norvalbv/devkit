@@ -12,7 +12,7 @@ A versioned developer toolkit that keeps agent instructions, project conventions
 | Shared configuration | Biome and strict TypeScript presets for common stacks | Stable package export paths |
 | Portable gate engine | Decision, review, duplication, structure, size, fan-out, Sentry, and advisory gates | `guard-*` command-line tools |
 | Repository setup | Stack detection, idempotent installation, upgrades, diagnostics, and cleanup | The `devkit` CLI |
-| Oxc + anti-slop | Exact Oxlint/Oxfmt pins, 15 vendored rules, 2 Devkit extensions, and incremental debt adoption | Opt-in managed capability |
+| Oxc + anti-slop | Exact Oxlint/Oxfmt pins, 15 vendored rules, 3 Devkit extensions, and incremental debt adoption | Opt-in managed capability |
 
 The package and agent assets use the same release tag. A prompt or skill cannot silently drift away from the installer and gate implementation that consumes it.
 

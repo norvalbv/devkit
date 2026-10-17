@@ -40,7 +40,8 @@ describe('vendored anti-slop source', () => {
     expect(ANTI_SLOP_DEVKIT_RULE_IDS).toEqual([
       'anti-slop/no-unsafe-external-record-access',
       'anti-slop/no-unsafe-external-record-enumeration',
+      'anti-slop/no-elapsed-time-assertions',
     ]);
-    expect(ANTI_SLOP_RULE_IDS).toHaveLength(17);
+    expect(ANTI_SLOP_RULE_IDS).toHaveLength(18);
   });
 });

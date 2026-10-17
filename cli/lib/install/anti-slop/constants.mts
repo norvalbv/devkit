@@ -37,6 +37,7 @@ export const ANTI_SLOP_UPSTREAM_RULE_NAMES = [
 export const ANTI_SLOP_DEVKIT_RULE_NAMES = [
   'no-unsafe-external-record-access',
   'no-unsafe-external-record-enumeration',
+  'no-elapsed-time-assertions',
 ] as const;
 
 export const ANTI_SLOP_RULE_NAMES = [
@@ -52,6 +53,13 @@ export const ANTI_SLOP_DEVKIT_RULE_IDS = ANTI_SLOP_DEVKIT_RULE_NAMES.map(
   (name) => `anti-slop/${name}`,
 );
 
+/** The 17-rule surface Devkit emitted from v0.60.0 until the elapsed-time rule was added. */
+export const ANTI_SLOP_V060_RULE_IDS = [
+  ...ANTI_SLOP_UPSTREAM_RULE_IDS,
+  'anti-slop/no-unsafe-external-record-access',
+  'anti-slop/no-unsafe-external-record-enumeration',
+];
+
 /**
  * Every managed rule-surface/default pair Devkit has emitted. Keep this append-only when rules or
  * defaults change: upgrade evidence is trusted only when both sets match a known profile, never
@@ -63,8 +71,12 @@ const ANTI_SLOP_MANAGED_ACTIVATION_PROFILES = [
     activeRuleIds: ANTI_SLOP_UPSTREAM_RULE_IDS,
   },
   {
-    ruleIds: ANTI_SLOP_RULE_IDS,
+    ruleIds: ANTI_SLOP_V060_RULE_IDS,
     activeRuleIds: ANTI_SLOP_UPSTREAM_RULE_IDS,
+  },
+  {
+    ruleIds: ANTI_SLOP_V060_RULE_IDS,
+    activeRuleIds: ANTI_SLOP_V060_RULE_IDS,
   },
   {
     ruleIds: ANTI_SLOP_RULE_IDS,
