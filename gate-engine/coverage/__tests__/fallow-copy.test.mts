@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { deriveForeignRoot, rebaseCoverageMap, writeFallowCopy } from '../fallow-copy.mts';
 import { computePercentages } from '../run.mts';
+import { entry } from './_provenance-fixtures.mts';
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -22,7 +23,7 @@ afterAll(() => {
 
 const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 
-/** A git repo holding `coverage/coverage-final.json` with the given body; `track` adds `src/a.ts`. */
+/** A git repo whose coverage/coverage-final.json holds `body`; `track` adds `src/a.ts`. */
 function seed(body?: string, { track = false } = {}) {
   const top = realpathSync(mkdtempSync(join(tmpdir(), 'fallow-copy-')));
   dirs.push(top);
@@ -86,7 +87,7 @@ describe('writeFallowCopy', () => {
     expect(JSON.parse(readCopy(writeFallowCopy(top, pkg)))).toEqual(JSON.parse(map(4)));
   });
 
-  it('moves keys produced in another checkout onto this one, and leaves the artifact as it was', () => {
+  it('moves keys produced in another checkout onto this one and keeps the artifact', () => {
     const { top, report } = seed(map(4), { track: true });
 
     const copy = readCopy(writeFallowCopy(top, top));
@@ -143,17 +144,6 @@ describe('writeFallowCopy', () => {
     const { top } = seed(body);
     expect(() => writeFallowCopy(top, top)).toThrow(/coverage-final\.json/);
   });
-});
-
-/** A minimal istanbul entry: one statement, one function, one branch pair, all hit `hits` times. */
-const entry = (path: string, hits = 1) => ({
-  path,
-  statementMap: { 0: { start: { line: 1, column: 0 }, end: { line: 1, column: 1 } } },
-  fnMap: { 0: { name: 'f', line: 1 } },
-  branchMap: { 0: { type: 'if', line: 1 } },
-  s: { 0: hits },
-  f: { 0: hits },
-  b: { 0: [hits, 0] },
 });
 
 describe('deriveForeignRoot', () => {

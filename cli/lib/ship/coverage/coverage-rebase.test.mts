@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { computePercentages } from '../../../../gate-engine/coverage/run.mts';
+import { entry } from '../../../../gate-engine/coverage/__tests__/_provenance-fixtures.mts';
 import { coverageMapSchema } from '../../../../gate-engine/coverage/fallow-copy.mts';
 import { rebaseWorktreeCoverage } from './coverage-rebase.mts';
 
@@ -24,17 +25,6 @@ const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYS
 const dirs: string[] = [];
 afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
-});
-
-/** A minimal istanbul entry: one statement, one function, one branch pair, all hit `hits` times. */
-const entry = (path: string, hits = 1) => ({
-  path,
-  statementMap: { 0: { start: { line: 1, column: 0 }, end: { line: 1, column: 1 } } },
-  fnMap: { 0: { name: 'f', line: 1 } },
-  branchMap: { 0: { type: 'if', line: 1 } },
-  s: { 0: hits },
-  f: { 0: hits },
-  b: { 0: [hits, 0] },
 });
 
 /** A git worktree with tracked src/a.ts, plus a producer checkout's coverage dir keyed under `producer`. */
