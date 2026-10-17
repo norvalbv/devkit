@@ -10,8 +10,7 @@ import {
   type TestReportSummary,
   summarise,
 } from '../lib/baseline-status/produce.mts';
-import type { FileStatus } from '../lib/baseline-status/query.mts';
-import { testVerdict } from '../lib/baseline-status/test-verdict.mts';
+import { type FileStatus, testVerdict } from '../lib/baseline-status/test-verdict.mts';
 import { ghHarness, runRef, summaryFor } from './_baseline-fixture.mts';
 
 const FIXTURES = join(import.meta.dirname, 'fixtures');
