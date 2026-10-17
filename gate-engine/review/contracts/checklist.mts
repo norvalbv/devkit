@@ -42,6 +42,7 @@ export async function enforceChecklistContract(
   const initialState = readChecklistState(cwd, selection.reviewer);
   const hole = verifyChecklist(initialState, 'PASS', denied);
   if (hole) reportFailedItems(selection.reviewer, initialState);
+  const refused = refusedCalls(initialState, denied);
   if (hole && recoveryScheduled) {
     // No "retrying" here: the callback runs no judge, and the solo phase announces itself.
     console.error(
@@ -57,13 +58,26 @@ export async function enforceChecklistContract(
     // Only when the retry left the cause open: an outage/timeout carries its own, and the operator
     // needs its auth/quota remedy rather than an artifact one.
     if (result.status === 'inconclusive' && result.inconclusiveCause === undefined)
-      result.inconclusiveCause = 'response-contract';
+      markContractMiss(result, refused);
   } else if (hole) {
     result.status = 'inconclusive';
     result.reason = hole;
-    result.inconclusiveCause = 'response-contract';
+    markContractMiss(result, refused);
   }
   return result;
+}
+
+function markContractMiss(result: ReviewOutcome, refused: number | undefined): void {
+  result.inconclusiveCause = 'response-contract';
+  if (refused) result.refusedCalls = refused;
+}
+
+/** The refused-call count a contract miss carries; a FAILED item keeps the violation remedy. */
+function refusedCalls(state: ChecklistState | null, denied?: string[] | null): number | undefined {
+  const items = state?.items ?? state?.files;
+  if (!denied?.length || (Array.isArray(items) && items.some((i) => i.status === 'fail')))
+    return undefined;
+  return denied.length;
 }
 
 /** The refused tool calls of a cascade's latest spawn; null until a spawn measures them. */

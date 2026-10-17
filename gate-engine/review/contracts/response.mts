@@ -109,7 +109,10 @@ export const ENGINE_ERROR_REMEDY =
   'the gate itself failed before or around the judge — this is NOT an auth/quota problem. The ' +
   'error is quoted above; re-run devkit ship, and if it repeats, report it against devkit';
 
-/** Remedy for any healthy judge whose response failed its declared machine contract. */
-export const RESPONSE_CONTRACT_REMEDY =
+/** What a contract miss asks of the author; fail-open prints it without the ship re-run. */
+export const CONTRACT_MISS =
   'the judge response did not satisfy its declared contract; inspect the transcript or checklist ' +
-  'above, fix a real violation if present, then re-run devkit ship';
+  'above, fix a real violation if present';
+
+/** Remedy for any healthy judge whose response failed its declared machine contract. */
+export const RESPONSE_CONTRACT_REMEDY = `${CONTRACT_MISS}, then re-run devkit ship`;
