@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   ANTI_SLOP_PREFLIGHT_HOOK,
+  EDIT_TARGETS_LIB,
   hookScriptsFor,
 } from '../lib/install/hook-registration-ledger/selection.mts';
 import { HOOK_REGISTRATIONS } from '../lib/install/hook-registration-ledger/registrations.mts';
@@ -34,7 +35,9 @@ describe('hookScriptsFor ownership', () => {
     expect(hookScriptsFor({ ...base, agentHooks: true, antiSlop: false })).not.toContain(
       ANTI_SLOP_PREFLIGHT_HOOK,
     );
-    expect(hookScriptsFor({ ...base, antiSlop: true })).toEqual([ANTI_SLOP_PREFLIGHT_HOOK]);
+    expect(hookScriptsFor({ ...base, antiSlop: true }).sort()).toEqual(
+      [ANTI_SLOP_PREFLIGHT_HOOK, EDIT_TARGETS_LIB].sort(),
+    );
   });
 
   it('registers on the edit tools Claude uses, so the Cursor mirror maps it to afterFileEdit', () => {

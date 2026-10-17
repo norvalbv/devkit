@@ -101,7 +101,7 @@ interface HookSpec {
 function hookSpec(raw: string | undefined, arity: number, min: number): HookSpec | null {
   const [tool = '', ...nums] = raw?.split(',') ?? [];
   const valid =
-    /^[A-Za-z]{1,32}$/.test(tool) &&
+    /^[A-Za-z_]{1,32}$/.test(tool) &&
     nums.length === arity &&
     nums.every((n) => /^\d{1,9}$/.test(n) && Number(n) >= min);
   return valid ? { tool, ints: nums.map(Number) } : null;

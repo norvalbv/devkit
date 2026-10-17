@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 /**
- * PostToolUse advisory: what guard-comments will block at commit, read from the file just written.
+ * PostToolUse advisory: what guard-comments will block at commit, read from the file(s) just written.
  * Never blocks and never auto-approves: additionalContext only, and every failure is silent.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { patchTargets } from './edit-targets-lib.mjs';
 
-const MUTATING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
+const MUTATING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'apply_patch']);
 const CHECKED_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.mts', '.cts']);
 /** Keeps the advisory far below Claude Code's 10,000-character context limit, past which it is cut. */
 const MAX_ITEMS = 10;
@@ -79,20 +80,28 @@ function check(bin, cwd, file) {
   }
 }
 
+/** guard-comments' verdict on one file inside the project, or null (outside it, or no bin). */
+function checkFile(root, file) {
+  const rel = path.relative(root, file);
+  if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return null;
+  const cwd = packageDirOf(file, root);
+  const bin = resolveBin([cwd, root]);
+  return (bin && check(bin, cwd, file)) || null;
+}
+
 function main() {
   const input = readInput();
   if (!input || !MUTATING_TOOLS.has(input.tool_name)) return;
-  const raw = String(input.tool_input?.file_path ?? '');
-  if (!CHECKED_EXTENSIONS.has(path.extname(raw).toLowerCase())) return;
   const root = real(process.env.CLAUDE_PROJECT_DIR || process.cwd());
-  const file = real(path.resolve(root, raw));
-  const rel = path.relative(root, file);
-  if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return;
-
-  const cwd = packageDirOf(file, root);
-  const bin = resolveBin([cwd, root]);
-  const result = bin && check(bin, cwd, file);
-  if (!result) return;
+  // A patch's deleted files and move sources are gone by PostToolUse.
+  const patched = patchTargets(input).filter((file) => existsSync(file));
+  const results = [String(input.tool_input?.file_path ?? ''), ...patched]
+    .filter((raw) => CHECKED_EXTENSIONS.has(path.extname(raw).toLowerCase()))
+    .map((raw) => checkFile(root, real(path.resolve(root, raw))))
+    .filter(Boolean);
+  if (results.length === 0) return;
+  const remedies = new Set(results.map((r) => r.remedy).filter(Boolean));
+  const result = { items: results.flatMap((r) => r.items), remedy: [...remedies].join('\n\n') };
   const unseen = result.items.filter((item) => !existsSync(stampOf(input.session_id, item.key)));
   const fresh = [];
   for (const item of unseen) {
@@ -102,7 +111,7 @@ function main() {
   if (fresh.length === 0) return;
   const more = unseen.length - fresh.length;
   const text = [
-    `guard-comments will block the commit on ${result.items.length} comment(s) in the file just written:`,
+    `guard-comments will block the commit on ${result.items.length} comment(s) in the file(s) just written:`,
     ...fresh.map((item) => `  • ${item.line}`),
     ...(more > 0
       ? [`  … ${more} more, shown after the next edit or listed by the commit gate.`]

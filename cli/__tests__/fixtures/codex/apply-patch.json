@@ -1,0 +1,10 @@
+{
+  "capturedWith": "codex-cli 0.162.1 `codex exec`, session cwd = <repo>/pkg; machine-local fields removed",
+  "payload": {
+    "hook_event_name": "PostToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+      "command": "*** Begin Patch\n*** Add File: src/a.test.ts\n+import { vi } from 'vitest';\n+vi.mock('./b');\n*** Update File: src/b.ts\n@@\n-export const b = 1;\n+export const b = 2;\n*** Delete File: src/c.ts\n*** Update File: src/m.ts\n*** Move to: src/n.ts\n@@\n-m\n+n\n*** End Patch"
+    }
+  }
+}

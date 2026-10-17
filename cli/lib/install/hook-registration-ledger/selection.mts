@@ -17,6 +17,8 @@ export const BASE_DRIFT_LIB = 'base-drift-lib.mjs';
 export const ANTI_SLOP_PREFLIGHT_HOOK = 'anti-slop-preflight.sh';
 /** The edit-time guard-comments advisory; owned by the comments guard whose verdict it previews. */
 export const COMMENT_PREFLIGHT_HOOK = 'comment-budget-preflight.mjs';
+/** Codex apply_patch → edited paths; imported by edit hooks of five components, never wired alone. */
+export const EDIT_TARGETS_LIB = 'edit-targets-lib.mjs';
 
 export function bundledHookNames(): string[] {
   return readdirSync(join(packageDir(), 'agents-hooks'), {
@@ -67,10 +69,12 @@ export function hookScriptsFor({
     PRIOR_ART_GATE_HOOK,
     ANTI_SLOP_PREFLIGHT_HOOK,
     COMMENT_PREFLIGHT_HOOK,
+    EDIT_TARGETS_LIB,
     ...decisionsOwned,
     ...adhdOwned,
     ...baseDriftOwned,
   ]);
+  const editHooks = agentHooks || decisions || baseDrift || antiSlop || comments;
   return all.filter(
     (name) =>
       (agentHooks && !independentlyOwned.has(name)) ||
@@ -80,7 +84,8 @@ export function hookScriptsFor({
       (priorArtGate && name === PRIOR_ART_GATE_HOOK) ||
       (baseDrift && baseDriftOwned.has(name)) ||
       (antiSlop && name === ANTI_SLOP_PREFLIGHT_HOOK) ||
-      (comments && name === COMMENT_PREFLIGHT_HOOK),
+      (comments && name === COMMENT_PREFLIGHT_HOOK) ||
+      (editHooks && name === EDIT_TARGETS_LIB),
   );
 }
 
