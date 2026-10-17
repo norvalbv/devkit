@@ -10,7 +10,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { scopedTargets } from '../../decisions/scoped-targets.mts';
 import { parseReviewVerdict } from '../contracts/response.mts';
 import { loadCommitMessage, renderCommitMessageBlock } from '../evidence/commit-message.mts';
-import { loadReviewerTargetsBlocks } from '../evidence/targets-block.mts';
+import {
+  DETECT_TARGETS_BYTES,
+  loadReviewerTargetsBlocks,
+  REVIEWER_TARGETS_BYTES,
+} from '../evidence/targets-block.mts';
 
 vi.mock('../../decisions/scoped-targets.mts', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../../decisions/scoped-targets.mts')>();
@@ -151,6 +155,17 @@ describe('loadReviewerTargetsBlocks — dual render (salt vs prompt, sc-1442)', 
     const res = await loadReviewerTargetsBlocks('/tmp', ['src/main/db.ts'], 'some query');
     expect(res.semantic).toBe(false);
     expect(res.promptBlock).toBe(res.saltBlock);
+  });
+
+  it('caps both renders at REVIEWER_TARGETS_BYTES, not the smaller detect cap', async () => {
+    const mid = { ...SCOPE_HIT, slug: 'mid', ruling: 'm'.repeat(DETECT_TARGETS_BYTES + 500) };
+    const huge = { ...SCOPE_HIT, slug: 'huge', ruling: 'h'.repeat(REVIEWER_TARGETS_BYTES) };
+    vi.mocked(scopedTargets).mockResolvedValue([mid, huge]);
+    const { saltBlock, promptBlock } = await loadReviewerTargetsBlocks('/tmp', ['src/a.ts'], 'q');
+    for (const block of [saltBlock, promptBlock]) {
+      expect(block).toContain('### mid');
+      expect(block).toContain('OMITTED: 1 further governing Target(s) over the size cap — huge');
+    }
   });
 
   it('a wedged semantic load times out to the scope-only render — salt-safe by construction', async () => {

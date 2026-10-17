@@ -401,7 +401,7 @@ async function runGate() {
       import('./scoped-targets.mts'),
       import('../review/evidence/targets-block.mts'),
     ])
-      .then(async ([{ scopedTargets }, { renderTargets }]) =>
+      .then(async ([{ scopedTargets }, { renderTargets, DETECT_TARGETS_BYTES }]) =>
         renderTargets(
           await scopedTargets(
             entries.map((e) => e.path),
@@ -414,7 +414,7 @@ async function runGate() {
             skipHeader: '## RECORDED TARGETS — NONE',
             skipNote: 'No scoped Target matches. Judge the diff without assuming prior approval.',
           },
-          4096,
+          DETECT_TARGETS_BYTES,
         ),
       )
       .catch(
