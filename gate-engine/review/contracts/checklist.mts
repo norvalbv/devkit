@@ -109,7 +109,7 @@ export function reportDeniedCalls(
   reviewer: Reviewer,
   res: Pick<ReviewOutcome, 'status'>,
   denied: string[] | null,
-  state: ChecklistState | null = null,
+  state: ChecklistState | null,
 ): void {
   if (res.status === 'pass' || !denied?.length) return;
   const more = denied.length > DENIED_SHOWN ? ` (+${denied.length - DENIED_SHOWN} more)` : '';
@@ -120,7 +120,7 @@ export function reportDeniedCalls(
   // Only a pinned reviewer's FAIL reaches the override valve, so only it can be waived.
   const waive = reviewer.model ? ', and if it repeats, waive it citing the refusal' : '';
   console.error(
-    `${prefix} no checklist item failed: if the reason cites no file:line defect, the refused calls are the likely cause — re-run${waive}`,
+    `${prefix} no failed checklist item was recorded: if the reason cites no file:line defect, the refused calls are the likely cause — re-run${waive}`,
   );
 }
 
