@@ -41,6 +41,7 @@ export interface GateEvent {
   /** judge_exec only: `ok` or the classified outage kind, and on failure the provider's own words. */
   outcome?: string;
   outage_detail?: string;
+  lens?: string;
   bypass?: string;
   blocked_gate?: string | null;
   exit_code?: number;
@@ -183,15 +184,17 @@ function providerMessage(text: string): string {
   }
 }
 
-/** The provider's own words per judge — the LAST failed spawn's, keyed by reviewer, not by pass. */
+/** The provider's own words per reviewer: each (judge, lens) keeps only its LAST spawn's, so a later
+ *  wordless failure clears them while one lens's `ok` cannot erase a concurrent lens's outage. */
 function outageWordsByJudge(events: GateEvent[]): Map<string, string> {
-  const words = new Map<string, string>();
+  const last = new Map<string, [string, string]>();
   for (const e of events) {
-    const detail = oneLine(providerMessage(textOf(e.outage_detail)));
-    if (e.type !== 'judge_exec' || e.outcome === 'ok' || !detail) continue;
-    words.set(textOf(e.judge).replace(/:escalate$/, ''), detail);
+    if (e.type !== 'judge_exec') continue;
+    const judge = textOf(e.judge).replace(/:escalate$/, '');
+    const detail = e.outcome === 'ok' ? '' : oneLine(providerMessage(textOf(e.outage_detail)));
+    last.set(`${judge}\0${textOf(e.lens)}`, [judge, detail]);
   }
-  return words;
+  return new Map([...last.values()].filter(([, detail]) => detail));
 }
 
 /** Pure: events → the rows the terminus should show. No IO, so the interesting cases unit-test. */
