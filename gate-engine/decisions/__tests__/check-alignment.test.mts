@@ -76,6 +76,19 @@ describe('parseAlignVerdict', () => {
     );
     expect(parseAlignVerdict('Could ALIGN, but no.\n- VERDICT: **CONTRADICT**')).toBe('CONTRADICT');
   });
+  it('emoji-dressed VERDICT lines parse (LF and CRLF) — a CONTRADICT must not fall to the ambiguous fallback and pass', () => {
+    const contradict = 'rationale mentions ALIGN\n❌ **VERDICT: CONTRADICT**';
+    expect(parseAlignVerdict(contradict)).toBe('CONTRADICT');
+    expect(gateExit(parseAlignVerdict(contradict))).toBe(1);
+    expect(parseAlignVerdict(`${contradict.replace('\n', '\r\n')}\r\n`)).toBe('CONTRADICT');
+    expect(parseAlignVerdict('Could CONTRADICT at a glance.\n✅ VERDICT: ALIGN')).toBe('ALIGN');
+    expect(parseAlignVerdict('Might ALIGN.\n⚠️ VERDICT: UNCLEAR')).toBe('UNCLEAR');
+  });
+  it('a VERDICT token mid-line is prose, not a verdict line', () => {
+    expect(parseAlignVerdict('VERDICT: CONTRADICT\nthe verdict ✅ VERDICT: ALIGN')).toBe(
+      'CONTRADICT',
+    );
+  });
   it('no VERDICT line → strict single-word fallback (case/punct-insensitive)', () => {
     expect(parseAlignVerdict('CONTRADICT')).toBe('CONTRADICT');
     expect(parseAlignVerdict('align.')).toBe('ALIGN');
@@ -483,6 +496,14 @@ describe('judge cascade (in-process, stubbed claude on PATH)', () => {
     useStub('echo "$*" >> "$CLAUDE_STUB_LOG"\nprintf "VERDICT: CONTRADICT\\n"\n');
     expect(judge(['rogue.ts'], target, repo)).toBe('CONTRADICT');
     expect(calls().match(/--model haiku/g)).toHaveLength(1);
+    expect(calls().match(/--model opus/g)).toHaveLength(1);
+  });
+
+  it('an emoji-dressed haiku CONTRADICT survives the spawn and still escalates → CONTRADICT', () => {
+    useStub(
+      'echo "$*" >> "$CLAUDE_STUB_LOG"\nprintf "It might ALIGN, but no.\\n❌ **VERDICT: CONTRADICT**\\n"\n',
+    );
+    expect(judge(['rogue.ts'], target, repo)).toBe('CONTRADICT');
     expect(calls().match(/--model opus/g)).toHaveLength(1);
   });
 
