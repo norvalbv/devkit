@@ -338,7 +338,7 @@ if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; then
        if [ -z "$PR_CLOSED" ] && [ -n "$LOCAL_BRANCH_EXISTS" ] &&
          [ "${remote_line%%[[:space:]]*}" = "$(git rev-parse -q --verify "refs/heads/$BR")" ]; then
          if [ -n "$PR_UNREAD" ] && ! pr_absent; then
-           echo "could not confirm origin/$BR has no merged or closed PR (gh pr view and gh pr list gave no answer) — refusing to adopt it" >&2
+           echo "could not confirm origin/$BR has no merged or closed PR (gh could not read its PR state) — refusing to adopt it" >&2
            echo "  re-run once gh answers, or check by hand: gh pr view $(ship_shell_quote "$BR") --repo $(ship_shell_quote "$REPO")" >&2
            exit 1
          fi
