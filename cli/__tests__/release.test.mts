@@ -592,6 +592,18 @@ describe('release publishing', () => {
       expect(logs.mock.calls.flat().join('\n')).toContain('devkit reconcile --apply');
     });
 
+    it.each([['--base='], ['--base=origin/']])(
+      'refuses an empty %s on a branch rather than targeting that branch',
+      async (flag) => {
+        const cwd = checkout();
+        const errors = stderr();
+
+        expect(await release(['minor', '--yes', flag], cwd)).toBe(1);
+        expect(errors()).toContain('--base is empty');
+        refusedEarly(cwd);
+      },
+    );
+
     describe('from a detached worktree at origin/main', () => {
       beforeEach(() => onBranch('HEAD'));
 

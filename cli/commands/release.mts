@@ -225,11 +225,11 @@ export default async function release(args: string[], cwd: string): Promise<numb
   const tag = `v${target}`;
   const head = git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
   const detached = head === 'HEAD';
-  const baseBranch = (values.base ?? '').replace(/^origin\//, '') || (detached ? '' : head);
+  const flag = values.base?.replace(/^origin\//, '');
+  const baseBranch = flag ?? (detached ? '' : head);
   if (!baseBranch) {
-    console.error(
-      'devkit release: detached HEAD — pass --base <branch>, the branch the PR targets.',
-    );
+    const why = flag === undefined ? 'detached HEAD' : '--base is empty';
+    console.error(`devkit release: ${why} — pass --base <branch>, the branch the PR targets.`);
     return 1;
   }
   if (git(['tag', '--list', tag], cwd)) {
