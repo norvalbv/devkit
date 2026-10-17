@@ -1,5 +1,5 @@
 // A briefed NEW dist artifact must match a fresh build of its source; tracked dist stays release-only.
-// Ship never builds: it compares, so a caller's stale or re-checked-out artifact cannot pass.
+// Ship only compares; the caller builds one with `bun run build:new`, which writes via writeNewDist.
 import { spawnSync } from 'node:child_process';
 import {
   copyFileSync,
@@ -54,6 +54,22 @@ function freshEmit(root: string, artifacts: string[]): Map<string, Buffer | unde
   }
 }
 
+/** A dist path untracked at base whose source is on disk and builds to exactly that path. */
+function newArtifact(
+  root: string,
+  artifact: string,
+  atBase: Map<string, unknown>,
+  distArtifact: (source: string) => string | undefined,
+): boolean {
+  const source = distSource(artifact);
+  return (
+    artifact.startsWith('dist/') &&
+    !atBase.has(artifact) &&
+    distArtifact(source) === artifact &&
+    existsSync(path.join(root, source))
+  );
+}
+
 /** Briefed new dist artifacts whose bytes differ from a fresh build of their on-disk source. */
 export function staleNewDist(
   root: string,
@@ -62,11 +78,9 @@ export function staleNewDist(
   distArtifact: (source: string) => string | undefined,
 ): string[] {
   const pairs = shipping
-    .filter((file) => file.startsWith('dist/') && !atBase.has(file))
+    .filter((file) => newArtifact(root, file, atBase, distArtifact))
     .filter((file) => existsSync(path.join(root, file)))
-    .map((artifact) => ({ artifact, source: distSource(artifact) }))
-    .filter(({ artifact, source }) => distArtifact(source) === artifact)
-    .filter(({ source }) => existsSync(path.join(root, source)));
+    .map((artifact) => ({ artifact, source: distSource(artifact) }));
   const compiled = pairs
     .filter(({ artifact, source }) => artifact !== `dist/${source}`)
     .map(({ artifact }) => artifact);
@@ -82,23 +96,6 @@ export function staleNewDist(
     .sort();
 }
 
-/** A path this writer may create: canonical, built from a source on disk, and untracked at base. */
-function writable(
-  root: string,
-  artifact: string,
-  atBase: Map<string, unknown>,
-  distArtifact: (source: string) => string | undefined,
-): boolean {
-  const source = distSource(artifact);
-  return (
-    artifact.startsWith('dist/') &&
-    path.posix.normalize(artifact) === artifact &&
-    distArtifact(source) === artifact &&
-    existsSync(path.join(root, source)) &&
-    !atBase.has(artifact)
-  );
-}
-
 /**
  * Writes exactly the named NEW dist artifacts from the same fresh build the stale check compares
  * against, so the result passes it. Tracked dist is refused: rebuilding it is release-only.
@@ -109,7 +106,9 @@ export function writeNewDist(
   atBase: Map<string, unknown>,
   distArtifact: (source: string) => string | undefined,
 ): void {
-  const refused = artifacts.filter((file) => !writable(root, file, atBase, distArtifact));
+  const refused = artifacts.filter(
+    (file) => path.posix.normalize(file) !== file || !newArtifact(root, file, atBase, distArtifact),
+  );
   if (refused.length > 0) {
     throw new Error(
       `not a new dist artifact with a source on disk (tracked dist is release-only): ${refused.join(', ')}`,
