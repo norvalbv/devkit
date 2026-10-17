@@ -734,7 +734,8 @@ describe('--gate (integration, real git repo)', () => {
           join(dir, 'small.md'),
           target('Adopt dependency b for the existing direction'),
         );
-        writeFileSync(join(dir, 'large.md'), target('Oversized ruling. '.repeat(600)));
+        // 5,400 bytes: over detect's 4,096 cap but under the reviewers' 8,192, so a swap fails here.
+        writeFileSync(join(dir, 'large.md'), target('Oversized ruling. '.repeat(300)));
         stageDepChange();
         const result = gateStubbed(judgeRecordedTarget);
         expect(result.status).toBe(0);
