@@ -53,6 +53,17 @@ _ship_path_matches_base() {
   [ -z "$status" ]
 }
 
+# A briefed NEW path is a legitimate no-op only when pre-commit removed it from index AND disk (a
+# ratchet heal-delete). A clobbered index leaves the file on disk, so status still names it.
+_ship_path_removed_new() {
+  local wt=$1 base=$2 path=$3 status
+  git -C "$wt" cat-file -e "$base:$path" 2>/dev/null && return 1
+  [ ! -e "$wt/$path" ] && [ ! -L "$wt/$path" ] || return 1
+  status=$(git -C "$wt" status --porcelain=v1 --untracked-files=all --ignored=matching -- ":(top,literal)$path") \
+    || return 2
+  [ -z "$status" ]
+}
+
 # _ship_staged_missing_objects <worktree>
 # Print "<oid>\t<path>" for every index entry whose object is absent from the object database.
 #
@@ -185,6 +196,14 @@ ship_assert_commit_scope() {
             printf '↳ ship: %q normalized to its base content during pre-commit; treating it as a no-op.\n' "$path" >&2
             continue
           fi
+          if [ "$rc" -eq 1 ]; then
+            rc=0
+            _ship_path_removed_new "$wt" "$base" "$path" || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              printf '↳ ship: %q was removed during pre-commit; absent from base and commit, treating it as a no-op.\n' "$path" >&2
+              continue
+            fi
+          fi
         fi
         if [ "$rc" -gt 1 ]; then
           printf '🛑 ship: could not verify the post-commit state of %q.\n' "$path" >&2
@@ -219,10 +238,17 @@ ship_assert_commit_scope() {
     } >&2
     return 1
   fi
+
+  # (3) git commits an empty tree when pre-commit unstages every briefed change; never publish that.
+  if [ "$(git -C "$wt" rev-parse 'HEAD^{tree}')" = "$(git -C "$wt" rev-parse "$base^{tree}")" ]; then
+    echo "🛑 ship: ABORTED — pre-commit gates reduced every briefed change to a no-op; nothing to commit. Nothing pushed." >&2
+    return 1
+  fi
 }
 
 # ship_record_gate_adds <worktree> <base> <state-file> <out-file>
-# Write, NUL-delimited, every path the GATE CHAIN put in the commit that the caller never briefed.
+# Write, NUL-delimited, every path the GATE CHAIN authored: what it put in the commit that the caller
+# never briefed, plus briefed NEW paths it removed (absent from base, staged tree only, and HEAD).
 #
 # WHY: the check above deliberately TOLERATES a ratchet gate staging a lowered baseline so it rides
 # the same commit (see this file's header). ship-branch.sh's resume path did not, so a commit whose
@@ -255,5 +281,10 @@ ship_record_gate_adds() {
   # entries means "everything except these", so an empty briefed set correctly records the whole
   # changed set rather than nothing.
   git -C "$wt" diff --no-renames --name-only -z "$base" HEAD \
-    -- ${exclude[@]+"${exclude[@]}"} > "$out"
+    -- ${exclude[@]+"${exclude[@]}"} > "$out" || return 1
+  # Resume drops these from its rebuild: the caller's checkout still holds what the gate removed.
+  git -C "$wt" diff --no-renames --name-only -z --diff-filter=D "$tree" HEAD |
+    while IFS= read -r -d '' path; do
+      git -C "$wt" cat-file -e "$base:$path" 2>/dev/null || printf '%s\0' "$path"
+    done >> "$out"
 }

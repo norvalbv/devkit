@@ -115,7 +115,21 @@ function createBaselineExclusively(path: string, contents: Buffer): void {
 export interface RatchetBaselineMigration {
   from: string;
   to: string;
-  kind: 'moved' | 'removed-duplicate';
+  kind: 'moved' | 'removed-duplicate' | 'dropped-empty';
+}
+
+// A pre-per-file size baseline recording zero disables carries no debt; the gate deletes it on the
+// next commit, so migration drops it instead of moving it.
+function isEmptyLegacyDisableBaseline(from: string, bytes: Buffer): boolean {
+  if (from !== LEGACY_SIZE_BASELINE) return false;
+  try {
+    return isDeepStrictEqual(JSON.parse(bytes.toString('utf8')), {
+      fileDisables: 0,
+      fnDisables: 0,
+    });
+  } catch {
+    return false;
+  }
 }
 
 export interface ReadRatchetBaseline {
@@ -247,7 +261,7 @@ export function migrateRatchetBaselines(
   const legacyBaselines = legacyDevkitBaselines(root);
   const present = legacyBaselines.flatMap(({ from, to }) => {
     const bytes = readExisting(join(root, from));
-    return bytes ? [{ bytes, from, to }] : [];
+    return bytes ? [{ empty: isEmptyLegacyDisableBaseline(from, bytes), from, to }] : [];
   });
   // Recover cleanly if a prior run moved the file but Git staging was interrupted: the old index
   // entry still protects the debt, and this pass finishes the tracked rename.
@@ -256,8 +270,8 @@ export function migrateRatchetBaselines(
       ? [{ from, to }]
       : [],
   );
-  const conflicts = present.filter(({ from, to }) => {
-    return hasStableBaselineConflict(join(root, to), join(root, from));
+  const conflicts = present.filter(({ empty, from, to }) => {
+    return !empty && hasStableBaselineConflict(join(root, to), join(root, from));
   });
   if (conflicts.length > 0) {
     const details = conflicts
@@ -269,12 +283,12 @@ export function migrateRatchetBaselines(
   }
 
   const planned = [
-    ...present.map(({ from, to }) => ({
+    ...present.map(({ empty, from, to }) => ({
       reconcileIndexOnly: false,
       action: {
         from,
         to,
-        kind: existsSync(join(root, to)) ? 'removed-duplicate' : 'moved',
+        kind: empty ? 'dropped-empty' : existsSync(join(root, to)) ? 'removed-duplicate' : 'moved',
       } satisfies RatchetBaselineMigration,
     })),
     ...pendingIndexMoves.map(({ from, to }) => ({
@@ -286,11 +300,18 @@ export function migrateRatchetBaselines(
   if (dryRun) return actions;
 
   // Preflight every destination before the first filesystem mutation.
-  for (const { action } of planned) assertBaselineTrackable(root, action.to);
+  for (const { action } of planned) {
+    if (action.kind !== 'dropped-empty') assertBaselineTrackable(root, action.to);
+  }
 
   for (const { action, reconcileIndexOnly } of planned) {
     if (reconcileIndexOnly) {
       stageBaselineMigration(root, action.from, action.to);
+      continue;
+    }
+    if (action.kind === 'dropped-empty') {
+      rmSync(join(root, action.from), { force: true });
+      stageBaseline(root, action.from);
       continue;
     }
     const legacy = join(root, action.from);
@@ -360,8 +381,13 @@ export function reportRatchetBaselineMigration(root: string, dryRun: boolean): v
   if (migrations.length === 0) return;
   console.log('0. devkit baseline storage');
   for (const migration of migrations) {
+    const prefix = dryRun ? '[dry-run] ' : '✓ ';
+    if (migration.kind === 'dropped-empty') {
+      console.log(`  ${prefix}drop empty ${migration.from}`);
+      continue;
+    }
     const action = migration.kind === 'moved' ? 'move' : 'remove duplicate';
-    console.log(`  ${dryRun ? '[dry-run] ' : '✓ '}${action} ${migration.from} → ${migration.to}`);
+    console.log(`  ${prefix}${action} ${migration.from} → ${migration.to}`);
   }
   console.log('');
 }
