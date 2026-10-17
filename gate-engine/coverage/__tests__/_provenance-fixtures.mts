@@ -1,4 +1,4 @@
-/** Real-git fixtures shared by the provenance and review coverage suites. */
+/** Fixtures shared by the coverage suites: real-git repos, runs and istanbul entries. */
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -81,3 +81,14 @@ export function gate(cwd: string) {
   vi.restoreAllMocks();
   return { code, out: lines.join('\n') };
 }
+
+/** A minimal istanbul entry: one statement, one function, one branch pair, all hit `hits` times. */
+export const entry = (path: string, hits = 1) => ({
+  path,
+  statementMap: { 0: { start: { line: 1, column: 0 }, end: { line: 1, column: 1 } } },
+  fnMap: { 0: { name: 'f', line: 1 } },
+  branchMap: { 0: { type: 'if', line: 1 } },
+  s: { 0: hits },
+  f: { 0: hits },
+  b: { 0: [hits, 0] },
+});

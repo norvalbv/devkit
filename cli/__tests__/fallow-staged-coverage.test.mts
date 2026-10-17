@@ -184,6 +184,31 @@ describe.skipIf(!hasFallow)('staged fallow gate — measured CRAP at commit', ()
     expect(gate.out).toMatch(BLOCKED);
   });
 
+  // No negative count here, so only the rekey can turn fallow's estimate into the measured block.
+  it.each(['', 'packages/app'])(
+    'rekeys an artifact produced in another checkout, as ship does (package dir %j)',
+    (pkgRel) => {
+      const foreign = join('/elsewhere/checkout', pkgRel, 'src/a.js');
+      const f = fixture(pkgRel, () => coverageOf(foreign, 0));
+      const before = readFileSync(f.report, 'utf8');
+      const diff = execFileSync('git', ['diff', '--cached'], { cwd: f.top, env: GIT_ENV });
+      const unaided = spawnSync('fallow', ['audit', '--diff-stdin', '--no-cache'], {
+        cwd: f.cwd,
+        encoding: 'utf8',
+        input: diff,
+        env: { ...BASE_ENV, FALLOW_COVERAGE: f.report },
+      });
+
+      const gate = runGate(f);
+
+      expect(unaided.status).toBe(0);
+      expect(gate.status).toBe(1);
+      expect(gate.out).toMatch(BLOCKED);
+      expect(gate.out).toContain('CRAP scores use Istanbul coverage');
+      expect(readFileSync(f.report, 'utf8')).toBe(before);
+    },
+  );
+
   it('still audits, and says CRAP is estimated, when the artifact cannot be read', () => {
     const f = fixture('', () => '{"/x/a.js":{"s":{"0":"many"}}}');
 
