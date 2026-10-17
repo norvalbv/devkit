@@ -27,11 +27,7 @@ import { z } from 'zod';
 import { resolveGuardConfig } from '../config.mts';
 import { gitPrefix, splitNul } from '../ratchets/git-index.mts';
 import { buildStructureConfigs } from './eslint-config.mts';
-import {
-  eslintNodeFlags,
-  LINKED_ISOLATED_STORE,
-  linkedIsolatedStore,
-} from './eslint-node-flags.mts';
+import { eslintNodeFlags, linkedIsolatedStore } from './eslint-node-flags.mts';
 import {
   clean,
   combineStructureResults,
@@ -248,22 +244,40 @@ function stagedScopes(cwd: string, electron: boolean): StagedScope[] {
   return configScopes.length ? configScopes : scanRootScopes('grammar');
 }
 
+// A linked isolated store cannot take --preserve-symlinks, so the plugin roots elsewhere: walls go
+// off (they ignore projectRoot), folder rules still judge this worktree via an absolute projectRoot.
+const ISOLATED_ARGS = [
+  '--rule',
+  '{"project-structure/independent-modules":"off"}',
+  '--report-unused-disable-directives-severity',
+  'off',
+];
+const WALLS_NOT_RUN = couldNotRun(
+  'import walls (independent-modules) did not run on a linked isolated install (pnpm, bun --linker isolated); folder rules judge this worktree only where eslint.config.mjs pins an absolute projectRoot',
+);
+
 // The electron preset leg: the consumer's locally pinned eslint + its own eslint.config.mjs.
 function runPresetLint(cwd: string, targets: string[]): StructureGateResult {
   const eslintBin = join(cwd, 'node_modules', 'eslint', 'bin', 'eslint.js');
   if (!existsSync(eslintBin)) {
     return couldNotRun('electron structure lint needs the locally pinned eslint binary');
   }
-  if (linkedIsolatedStore(cwd)) return couldNotRun(LINKED_ISOLATED_STORE);
+  const isolated = linkedIsolatedStore(cwd) ? [WALLS_NOT_RUN] : [];
   // An empty root is clean, not ESLint's exit-2 "no files matching".
-  const args = [...eslintNodeFlags(cwd), eslintBin, '--no-error-on-unmatched-pattern', '--'];
+  const args = [...eslintNodeFlags(cwd), eslintBin, '--no-error-on-unmatched-pattern'];
+  if (isolated.length) args.push(...ISOLATED_ARGS);
   try {
-    execFileSync(process.execPath, [...args, ...targets], { cwd, stdio: 'inherit' });
-    return clean();
+    execFileSync(process.execPath, [...args, '--', ...targets], { cwd, stdio: 'inherit' });
+    return combineStructureResults([clean(), ...isolated]);
   } catch (e: unknown) {
     // ESLint exits 1 for lint errors only; a crash, a broken config or a failed spawn did not lint.
     const status = e instanceof Error && 'status' in e ? e.status : undefined;
-    if (status === 1) return violations(0, 'guard-structure: local eslint failed');
+    if (status === 1) {
+      return combineStructureResults([
+        violations(0, 'guard-structure: local eslint failed'),
+        ...isolated,
+      ]);
+    }
     return couldNotRun(`local eslint exited abnormally (status ${String(status ?? 'unknown')})`);
   }
 }

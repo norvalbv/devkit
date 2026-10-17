@@ -40,6 +40,8 @@ const BLOCKED = [
   'src/renderer/lib/junk-drawer/probe.ts',
   'src/renderer/utils/frozen-add.ts',
   'src/main/lib/flat-file.ts',
+  'src/shared/Bad_Name.ts',
+  'src/preload/nested/probe.ts',
   'socket-server/src/lib/flat-file.ts',
   'vercel-serverless/lib/flat-file.ts',
 ];
@@ -47,6 +49,8 @@ const BLOCKED = [
 const ALLOWED = [
   'src/renderer/lib/tasks/registered.ts',
   'src/main/lib/queue/index.ts',
+  'src/shared/types.ts',
+  'src/preload/api.ts',
   'socket-server/src/lib/flows/registered.ts',
   'socket-server/src/api/routes/health.ts',
   'vercel-serverless/api/cron/sweep.ts',
@@ -79,11 +83,11 @@ function writeFixture(root: string) {
   for (const probe of PROBES) write(root, probe);
 }
 
-function collectStructureErrors(root: string) {
+function collectStructureErrors(root: string, nodeFlags = ['--preserve-symlinks']) {
   const result = spawnSync(
     process.execPath,
     [
-      '--preserve-symlinks',
+      ...nodeFlags,
       join(root, 'node_modules', 'eslint', 'bin', 'eslint.js'),
       '--format',
       'json',
@@ -123,11 +127,13 @@ function collectStructureErrors(root: string) {
 describe('shipped Electron placement walls', () => {
   let root = '';
   let errors: Map<string, number>;
+  let unflagged: Map<string, number>;
 
   beforeAll(() => {
     root = realpathSync(mkdtempSync(join(tmpdir(), 'electron-folder-structure-')));
     writeFixture(root);
     errors = collectStructureErrors(root);
+    unflagged = collectStructureErrors(root, []);
   }, 120_000);
 
   afterAll(() => {
@@ -140,5 +146,10 @@ describe('shipped Electron placement walls', () => {
 
   it.each(ALLOWED)('allows %s', (probe) => {
     expect(errors.get(probe)).toBe(0);
+  });
+
+  // An isolated store cannot take the flag; the template's absolute projectRoot must root every tree.
+  it('roots every tree at the config without --preserve-symlinks', () => {
+    expect(unflagged).toEqual(errors);
   });
 });
