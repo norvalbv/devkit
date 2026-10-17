@@ -107,6 +107,15 @@ describe('runRelatedTests', () => {
     });
   });
 
+  it('blocks an interrupted run even when vitest exits 0', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exec = fakeExec(0, true);
+    expect(await runRelatedTests('/repo', { staged: ['cli/a.mts'], exec })).toEqual({
+      code: 1,
+      interrupted: true,
+    });
+  });
+
   it('selects from the index, never from unstaged edits', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const repo = editedRepo();

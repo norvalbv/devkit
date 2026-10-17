@@ -112,7 +112,9 @@ export async function runRelatedTests(root: string, opts: RunOpts = {}): Promise
   console.log(`related-tests: ${paths.length} staged path(s)`);
   const vitest = join(root, 'node_modules', '.bin', 'vitest');
   const args = ['related', '--run', '--reporter=dot', ...new Set([...paths, REACH_TEST])];
-  return (opts.exec ?? runGrouped)(vitest, args, root);
+  const run = await (opts.exec ?? runGrouped)(vitest, args, root);
+  // A signalled gate blocks, even when vitest still exits 0 after the forwarded signal.
+  return run.interrupted && run.code === 0 ? { ...run, code: 1 } : run;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
