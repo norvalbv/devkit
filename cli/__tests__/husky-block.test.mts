@@ -135,9 +135,9 @@ describe('buildGuardBlock', () => {
     expect(buildGuardBlock(ALL, 'packages/api')).not.toContain('# devkit:biome-format');
   });
 
-  it('formats .mts/.cts sources, which the pre-sc-2524 extension filter silently skipped', () => {
+  it('formats .mts/.cts/.cjs sources, which earlier extension filters silently skipped', () => {
     const block = buildGuardBlock({ biome: true, guards: [] });
-    expect(block).toContain("grep -E '\\.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$'");
+    expect(block).toContain("grep -E '\\.(tsx?|jsx?|mts|cts|mjs|cjs|css|jsonc?)$'");
   });
 
   it('emits ONE deterministic command for any selected deterministic guard through the mode policy', () => {
