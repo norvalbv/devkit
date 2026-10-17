@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -22,6 +30,10 @@ function declare(patterns: string[], ...dirs: string[]): void {
 }
 
 const sibling = (name: string) => path.join(root, name);
+
+/** Git-exclude guard.config.json in the main checkout, as an overlay install does. */
+const exclude = () =>
+  appendFileSync(path.join(main, '.git', 'info', 'exclude'), '\n/guard.config.json\n');
 
 // The main checkout's directory name carries a space, as the reported checkout's did.
 beforeEach(() => {
@@ -124,5 +136,63 @@ describe('resolveReferenceCheckouts', () => {
   it('throws on an unreadable config rather than reporting nothing declared', () => {
     writeFileSync(path.join(main, 'guard.config.json'), '{"research": ');
     expect(() => resolveReferenceCheckouts(main)).toThrow();
+  });
+});
+
+describe('resolveReferenceCheckouts in a linked worktree without its git-ignored config', () => {
+  it("reads the main worktree's config and resolves from its directory", () => {
+    exclude();
+    declare(['../sib-a'], main);
+    expect(resolveReferenceCheckouts(linked)).toEqual({
+      declared: ['../sib-a'],
+      resolved: [sibling('sib-a')],
+    });
+  });
+
+  it('never borrows a config git does not ignore, as a branch that deleted a tracked one', () => {
+    declare(['../sib-a'], main);
+    expect(resolveReferenceCheckouts(linked)).toEqual({ declared: [], resolved: [] });
+  });
+
+  it("throws on the main worktree's unreadable config", () => {
+    exclude();
+    writeFileSync(path.join(main, 'guard.config.json'), '{"research": ');
+    expect(() => resolveReferenceCheckouts(linked)).toThrow();
+  });
+
+  it("reads the worktree's own config when it has one, never merging main's", () => {
+    exclude();
+    declare(['../sib-b'], main);
+    declare(['../sib-a'], linked);
+    expect(resolveReferenceCheckouts(linked).resolved).toEqual([sibling('sib-a')]);
+  });
+
+  it("reads a monorepo package's config from the same package of the main worktree", () => {
+    appendFileSync(path.join(main, '.git', 'info', 'exclude'), '\npkg/guard.config.json\n');
+    mkdirSync(path.join(main, 'pkg', 'vendor'), { recursive: true });
+    mkdirSync(path.join(linked, 'pkg'));
+    declare(['vendor'], path.join(main, 'pkg'));
+    declare(['../sib-a'], main);
+    expect(resolveReferenceCheckouts(path.join(linked, 'pkg')).resolved).toEqual([
+      path.join(main, 'pkg', 'vendor'),
+    ]);
+  });
+
+  it('never reads a config outside the repository when the main worktree is bare', () => {
+    const bare = path.join(root, 'bare.git');
+    const fromBare = path.join(root, 'deep', 'wt');
+    mkdirSync(path.dirname(fromBare));
+    git(root, 'clone', '-q', '--bare', main, bare);
+    git(bare, 'worktree', 'add', '-q', fromBare);
+    appendFileSync(path.join(bare, 'info', 'exclude'), '\n/guard.config.json\n');
+    declare(['sib-a'], root, bare);
+    expect(resolveReferenceCheckouts(fromBare)).toEqual({ declared: [], resolved: [] });
+  });
+
+  it('treats a dangling config link as absent', () => {
+    exclude();
+    declare(['../sib-a'], main);
+    symlinkSync(path.join(root, 'gone.json'), path.join(linked, 'guard.config.json'));
+    expect(resolveReferenceCheckouts(linked).resolved).toEqual([sibling('sib-a')]);
   });
 });

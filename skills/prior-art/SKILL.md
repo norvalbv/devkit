@@ -60,7 +60,9 @@ The agent answers all seven, every time (status ANSWERED / NO_EVIDENCE / NOT_APP
 
 1. **local** — reference checkouts declared in `guard.config.json` →
    `research.referenceCheckouts` (globs relative to the config's directory), plus the repo's own
-   decision log and utilities. In a linked worktree, a pattern that matches nothing is retried once
+   decision log and utilities. A linked worktree with no `guard.config.json`, where git ignores
+   that path, reads the main worktree's copy in the same directory and resolves from there. When the
+   worktree has its own config, a pattern that matches nothing is retried once
    against the same directory inside the main worktree — the first `worktree` entry of
    `git worktree list --porcelain`, skipped when that entry is `bare` — because sibling clones sit
    beside the main checkout, not beside a worktree. Each non-blank string pattern counts once
