@@ -180,12 +180,12 @@ export async function runCascade(
       },
       spawn.denied,
     );
-    if (!retryableReason(res)) reportDeniedCalls(sel.reviewer, res.status, spawn.denied);
     const disposition = applyOverrideValve(sel, res, cwd, {
       readState: () => readChecklistState(cwd, sel.reviewer),
       stagedDiff: () => gitCached(cwd, [], sel.files),
     });
     const finalState = readChecklistState(cwd, sel.reviewer) ?? captureState;
+    if (!retryableReason(res)) reportDeniedCalls(sel.reviewer, res, spawn.denied, finalState);
     attachItems(res, finalState, disposition, { full: opts.fullItems });
     // Read before the finally deletes the artifact — the flag lives nowhere else (sc-2317).
     const degraded = retrievalDegradation(sel.reviewer.name, finalState, res.status);
