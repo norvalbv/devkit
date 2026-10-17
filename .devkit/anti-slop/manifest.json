@@ -20,10 +20,11 @@
     "anti-slop/no-widen-then-assert",
     "anti-slop/require-safety-comment-for-type-assertion",
     "anti-slop/no-unsafe-external-record-access",
-    "anti-slop/no-unsafe-external-record-enumeration"
+    "anti-slop/no-unsafe-external-record-enumeration",
+    "anti-slop/no-elapsed-time-assertions"
   ],
-  "pluginDigest": "3c49f57cf2331f4e195a23919381e9d4fef8d7c6557b998e9ac17deaffb0cebd",
-  "configDigest": "50ad2d1deb51ce96445be08275533d8e502efe9dc9788b2148709cc06a1525da",
+  "pluginDigest": "17dd314091c7a8014c32b3b34e5ab0d2853650498753816481e8bd94ca61dd2a",
+  "configDigest": "09e5458d89969252a2c0e5d44e327aa9215043176d2db857ca47fbab1d1fac0c",
   "probeDigest": "bf2c2181804ac4004aed98aa41133e080068be9b2e9bf9d47a459ce75c6cdb87",
   "probeConfigDigest": "b9bfbd93519b843df6bd175b91f5742bb67be649cac5c82492621e5a7bbd7604"
 }

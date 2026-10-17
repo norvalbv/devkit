@@ -1,8 +1,8 @@
 # Anti-slop capability
 
 Devkit vendors the complete 15-rule [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop)
-production ruleset at commit **446268e5d15baa968eaec669ff65358d36ae6259** and composes two
-Devkit-owned external-record rules. All 17 rules default to error. The ruleset is an opt-in
+production ruleset at commit **446268e5d15baa968eaec669ff65358d36ae6259** and composes three
+Devkit-owned rules: two external-record rules and one elapsed-time test rule. All 18 rules default to error. The ruleset is an opt-in
 capability on top of Devkit's
 exact Oxlint 1.78.0 and @oxlint/plugins 1.78.0 pins:
 
@@ -235,8 +235,14 @@ Devkit additionally registers `anti-slop/no-unsafe-external-record-access` and
 `anti-slop/no-unsafe-external-record-enumeration`; their scope, options, and accepted proof forms are
 documented in the [external-record extension guide](anti-slop-external-records.md).
 
+`anti-slop/no-elapsed-time-assertions` rejects an ordering matcher (`toBeLessThan`, `toBeGreaterThan`
+and their `OrEqual` forms, through `.not` and `expect.soft`) whose subject is elapsed wall-clock time:
+a `Date.now()` or `performance.now()` delta, or a stable `const` holding one. It never reads the bound,
+so it cannot push a deadline tighter. Equality matchers, product-reported durations and `let` bindings
+are out of scope; the testing skill's "Deadlines are hang detectors" section covers the shapes it cannot see.
+
 The packed E2E fixture asserts that all 15 upstream diagnostics load from the emitted package and
-that both Devkit extensions fire by default through the packed plugin API. It also proves that off, warn,
+that both external-record extensions fire by default through the packed plugin API. It also proves that off, warn,
 error, and scoped overrides work, that create to new violation to fix to prune preserves the
 shrink-only contract, both partial-staging directions, baseline-growth rejection, same-commit
 baseline persistence for Git renames, and a post-merge check against the packed consumer binary.
@@ -244,10 +250,10 @@ baseline persistence for Git renames, and a post-merge check against the packed 
 ## Intentional differences and limits
 
 - The 15 upstream rule/helper implementations are unchanged from the pinned source. Devkit owns the
-  plugin composition seam, the two external-record extensions, delivery, namespacing/config
+  plugin composition seam, the three Devkit-owned rules, delivery, namespacing/config
   ownership, and the baseline wrapper.
 - Oxc's JS-plugin API is alpha. The exact Oxlint/plugin API pair and packed fixture are the
-  compatibility boundary: it covers all 15 upstream rules and both Devkit extensions. Updating
+  compatibility boundary: it covers all 15 upstream rules and both external-record extensions. Updating
   either pin requires refreshing that evidence.
 - Like upstream, these are syntax/scope rules, not TypeScript type-aware rules. They do not replace
   TypeScript check with no emit.
