@@ -1,5 +1,5 @@
-/** fallow's CRAP input (FALLOW_COVERAGE): a private copy of coverage-final.json, hits clamped and
- * keys moved onto this checkout. The artifact itself is never rewritten; the coverage gate binds it. */
+/** fallow's CRAP input (FALLOW_COVERAGE): a private copy of coverage-final.json, hits clamped, keys
+ * moved onto this checkout. The artifact itself is never rewritten; the coverage gate binds it. */
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -15,8 +15,8 @@ const hitSchema = z.int().transform((hits) => Math.max(0, hits));
 const hitsSchema = z.record(z.string(), hitSchema).optional();
 
 /**
- * One istanbul file entry. `path` is rekeyed onto this checkout and the s/f/b hit counts are clamped; every
- * other field (statementMap, fnMap, branchMap, …) passes through untouched.
+ * One istanbul file entry. `path` is rekeyed onto this checkout and the s/f/b hit counts are
+ * clamped; every other field (statementMap, fnMap, branchMap, …) passes through untouched.
  */
 const coverageEntrySchema = z.looseObject({
   path: z.string().optional(),
