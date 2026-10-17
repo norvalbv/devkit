@@ -655,6 +655,12 @@ describe('ratchet baseline paths', () => {
     expect(() => migrateRatchetBaselines(root)).toThrow(
       'Git could not stage ratchet baseline eslint/baselines/size.json',
     );
+    // The file comes back, so the next upgrade retries the drop instead of stranding the index entry.
+    expect(existsSync(join(root, 'eslint/baselines/size.json'))).toBe(true);
+    rmSync(join(root, '.git/index.lock'));
+    expect(migrateRatchetBaselines(root)).toEqual([
+      { from: 'eslint/baselines/size.json', kind: 'dropped-empty', to: SIZE_BASELINE },
+    ]);
   });
 
   it('drops a zero-disable legacy size baseline beside real canonical debt without a conflict', () => {

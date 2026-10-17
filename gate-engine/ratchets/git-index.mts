@@ -115,12 +115,11 @@ export function assertBaselineTrackable(root: string, rel: string): void {
  */
 export function stageBaselineMigration(root: string, from: string, to: string): void {
   if (!isGitWorktree(root)) return;
-  const legacyWasTracked = indexTracksBaseline(root, from);
   stagePathStrict(root, to);
   if (!indexTracksBaseline(root, to)) {
     throw new Error(`Git did not stage migrated ratchet baseline ${to}.`);
   }
-  if (legacyWasTracked) stageBaselineRemoval(root, from);
+  stageBaselineRemoval(root, from);
 }
 
 /** Strictly stage the deletion of a tracked legacy baseline; an untracked one needs nothing. */

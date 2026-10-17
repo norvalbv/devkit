@@ -311,8 +311,7 @@ export function migrateRatchetBaselines(
       continue;
     }
     if (action.kind === 'dropped-empty') {
-      rmSync(join(root, action.from), { force: true });
-      stageBaselineRemoval(root, action.from);
+      dropEmptyBaseline(root, action.from);
       continue;
     }
     const legacy = join(root, action.from);
@@ -374,6 +373,19 @@ export function migrateRatchetBaselines(
     stageBaselineMigration(root, action.from, action.to);
   }
   return actions;
+}
+
+// Restore the bytes when staging throws, so the next upgrade still sees the file and retries the drop.
+function dropEmptyBaseline(root: string, from: string): void {
+  const file = join(root, from);
+  const bytes = readExisting(file);
+  rmSync(file, { force: true });
+  try {
+    stageBaselineRemoval(root, from);
+  } catch (error) {
+    if (bytes) writeFileSync(file, bytes);
+    throw error;
+  }
 }
 
 /** Migrate and print the lifecycle action in the init/upgrade progress stream. */
