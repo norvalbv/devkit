@@ -159,13 +159,6 @@ export function parseClaudeArgv(args: string[]): ClaudeArgvParts {
   return { model, prompt, systemPrompt, readOnly, allowedTools };
 }
 
-/**
- * Translate a claude judge argv into the equivalent `codex exec` argv. Hermetic on purpose:
- * `--ignore-user-config` (auth still works, but the owner's MCP servers / notify hooks / desktop
- * integrations must not load into a judge), `--ignore-rules` (nor user execpolicy), `--ephemeral`
- * (the codex twin of `--no-session-persistence`), `--skip-git-repo-check` (bench scratch dirs are
- * not always repos). Evidence still arrives on stdin — codex appends it as a `<stdin>` block.
- */
 /** The workspace confinement for this judge, or null when it runs read-only or unconfined. */
 const confinedWorkspace = (parts: ClaudeArgvParts, workspace?: CodexWorkspace) =>
   parts.readOnly ? null : (workspace ?? null);
@@ -178,6 +171,13 @@ function repoRootNotice(repoRoot: string): string {
   return `The repository under review is ${repoRoot}. Run every command from there (cd into it first); paths in this task are relative to it. Its working tree is read-only to you except .claude/. ${NO_TEST_RUNS}\n\n`;
 }
 
+/**
+ * Translate a claude judge argv into the equivalent `codex exec` argv. Hermetic on purpose:
+ * `--ignore-user-config` (auth still works, but the owner's MCP servers / notify hooks / desktop
+ * integrations must not load into a judge), `--ignore-rules` (nor user execpolicy), `--ephemeral`
+ * (the codex twin of `--no-session-persistence`), `--skip-git-repo-check` (bench scratch dirs are
+ * not always repos). Evidence still arrives on stdin — codex appends it as a `<stdin>` block.
+ */
 export function codexExecArgs(
   parts: ClaudeArgvParts,
   mcpArgv: string[] = [],
