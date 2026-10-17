@@ -321,8 +321,9 @@ describe('buildSelfHostHook', () => {
     expect(readFileSync(join(root, 'cli', 'partial.mts'), 'utf8')).toBe(
       'const partial={working:true}\n',
     );
+    // The partially staged file gets its STAGED copy formatted in the index; its working copy stays.
     expect(execFileSync('git', ['show', ':cli/partial.mts'], { cwd: root, encoding: 'utf8' })).toBe(
-      'const partial={staged:true}\n',
+      'const partial = { staged: true };\n',
     );
 
     for (const rel of [
@@ -374,6 +375,30 @@ describe('buildSelfHostHook', () => {
     expect(r.stderr).toContain('blocking: devkit formats its own staged set hard');
     if (cmd) expect(r.stderr).toContain(`Ship's exact staging, no judges:\n     ${cmd}\n`);
     else expect(r.stderr).not.toContain("Ship's exact staging");
+  });
+
+  it('blocks when Oxfmt fails on the staged copy of a partially staged file', () => {
+    const root = mkdtempSync(join(tmpdir(), 'self-host-oxfmt-partial-'));
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    mkdirSync(join(root, 'cli'), { recursive: true });
+    mkdirSync(join(root, 'node_modules', '.bin'), { recursive: true });
+    const oxfmt = join(root, 'node_modules', '.bin', 'oxfmt');
+    writeFileSync(oxfmt, '#!/bin/sh\nexit 7\n');
+    chmodSync(oxfmt, 0o755);
+    writeFileSync(join(root, 'cli', 'partial.mts'), 'const value={staged:1}\n');
+    execFileSync('git', ['add', 'cli/partial.mts'], { cwd: root });
+    writeFileSync(join(root, 'cli', 'partial.mts'), 'const value={working:1}\n');
+    const fragment = buildSelfHostHook(HOOK_SEL, '', ROOT).match(
+      /# devkit:biome-format[\s\S]*?# \/devkit:biome-format/,
+    )?.[0];
+    const r = spawnSync('sh', ['-c', fragment ?? 'exit 1'], { cwd: root, encoding: 'utf8' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      'Oxfmt failed over the staged copies listed above (exit 7) — blocking',
+    );
+    expect(execFileSync('git', ['show', ':cli/partial.mts'], { cwd: root, encoding: 'utf8' })).toBe(
+      'const value={staged:1}\n',
+    );
   });
 
   it('backs the lint extra with the native Oxlint policy only', () => {

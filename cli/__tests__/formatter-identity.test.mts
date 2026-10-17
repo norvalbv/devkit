@@ -45,8 +45,9 @@ describe('rendered from CONSUMER_FORMATTER', () => {
         echo "🎨 No biome config here (biome.json / biome.jsonc) — staged files left as authored."
         return 0
     fi
-    FMT_TOOL=biome; FMT_BIN="$__dk_package_bin_dir/biome"
-    __dk_fmt_run() { xargs -0 "$__dk_package_bin_dir/biome" format --write; }`);
+    FMT_TOOL=biome; FMT_BIN="$__dk_package_bin_dir/biome"; FMT_FIX_ARGS='format --write'
+    __dk_fmt_run() { xargs -0 "$__dk_package_bin_dir/biome" format --write; }
+    __dk_fmt_stdin() { "$__dk_package_bin_dir/biome" format --stdin-file-path="$1"; }`);
     expect(buildFullHook({ ...defaultSelection(), biome: true })).toContain(FORMAT_TOOL_SETUP);
   });
 
