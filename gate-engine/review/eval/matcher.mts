@@ -40,7 +40,7 @@ import {
   voteSlot,
 } from '../../judge/matcher-core.mts';
 import { execJudgeAsync } from '../../judge/run-judge.mts';
-import { FINDING_LINE_RE, ISSUES_LINE_RE } from '../contracts/response.mts';
+import { FINDING_LINE_RE, ISSUES_LINE_RE, VERDICT_DRESSING } from '../contracts/response.mts';
 
 export type { MatcherOptions, SlotOutcome };
 export { kappa, MATCH_TIMEOUT_MS, mapPool, parseSlotReply, voteSlot };
@@ -77,7 +77,7 @@ export interface DecoySlot {
 
 // ─── Deterministic transcript parsing ─────────────────────────────────────────────
 
-const VERDICT_LINE_RE = /^[\s>*#-]*\**VERDICT\**\s*:/i;
+const VERDICT_LINE_RE = new RegExp(String.raw`^${VERDICT_DRESSING}\**VERDICT\**\s*:`, 'iu');
 const MAX_CONTEXT_LINES = 5; // the brief allows 2–5 context lines per finding
 
 export interface ParsedTranscript {
