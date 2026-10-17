@@ -65,15 +65,20 @@ function write(root: string, relativePath: string, content = 'export {};\n') {
   writeFileSync(path, content);
 }
 
-function writeFixture(root: string) {
-  symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(root, 'node_modules'), 'dir');
-  write(root, 'package.json', '{"type":"module"}\n');
-  write(root, 'guard.config.json', GUARD_CONFIG);
+// Everything ESLint needs to load the template from `dir`.
+function writeConfig(dir: string) {
+  symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(dir, 'node_modules'), 'dir');
+  write(dir, 'package.json', '{"type":"module"}\n');
+  write(dir, 'guard.config.json', GUARD_CONFIG);
   copyFileSync(
     join(DEVKIT_ROOT, 'templates/electron/eslint.config.mjs'),
-    join(root, 'eslint.config.mjs'),
+    join(dir, 'eslint.config.mjs'),
   );
-  write(root, 'eslint/domains.mjs', DOMAINS);
+  write(dir, 'eslint/domains.mjs', DOMAINS);
+}
+
+function writeFixture(root: string) {
+  writeConfig(root);
   write(root, 'src/main/index.ts'); // src/main declares enforceExistence: 'index.ts'
   for (const probe of PROBES) write(root, probe);
 }
@@ -123,20 +128,14 @@ function collectStructureErrors(root: string, invocation: Invocation) {
 type Invocation = {
   name: string;
   nodeFlags: string[];
+  fixturePrefix?: string;
   spawn: (root: string) => { cwd: string; args: string[] };
 };
 
 // A config holding only the template, so its directory is unrelated to the tree under lint.
 function writeDetachedConfig() {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'electron-folder-structure-config-')));
-  copyFileSync(
-    join(DEVKIT_ROOT, 'templates/electron/eslint.config.mjs'),
-    join(dir, 'eslint.config.mjs'),
-  );
-  symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(dir, 'node_modules'), 'dir');
-  write(dir, 'guard.config.json', GUARD_CONFIG);
-  write(dir, 'eslint/domains.mjs', DOMAINS);
-  write(dir, 'package.json', '{"type":"module"}\n');
+  writeConfig(dir);
   return dir;
 }
 
@@ -159,6 +158,8 @@ const INVOCATIONS: Invocation[] = [
   {
     name: 'from an ancestor of the package (an editor opened at a monorepo root)',
     nodeFlags: [],
+    // A package dir named '..x' must still read as INSIDE cwd, not as a path climbing out of it.
+    fixturePrefix: '..electron-folder-structure-',
     spawn: (root) => ({ cwd: dirname(root), args: [] }),
   },
   {
@@ -177,7 +178,8 @@ describe.each(INVOCATIONS)('shipped Electron placement walls, eslint run $name',
   let errors: Map<string, number>;
 
   beforeAll(() => {
-    root = realpathSync(mkdtempSync(join(tmpdir(), 'electron-folder-structure-')));
+    const prefix = invocation.fixturePrefix ?? 'electron-folder-structure-';
+    root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
     writeFixture(root);
     errors = collectStructureErrors(root, invocation);
   }, 120_000);
