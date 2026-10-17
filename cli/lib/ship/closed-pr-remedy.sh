@@ -5,14 +5,27 @@
 # PR identity TSV. No baseRefOid: GitHub freezes it at the last head push, so two reads of an
 # unchanged PR could differ against a moving base.
 pr_identity() {
-  local supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mts"
-  [ -f "$supervisor" ] || supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
-  node "$supervisor" 60 -- gh pr view "$BR" --repo "$REPO" \
+  gh_bounded pr view "$BR" --repo "$REPO" \
     --json number,state,headRefName,headRefOid,headRepository,baseRefName,url \
     --jq '[.number,.state,.headRefName,.headRefOid,(.headRepository.nameWithOwner // ""),.baseRefName,.url] | @tsv' 2>/dev/null
 }
 
-# Sets PR_SEEN_NUM, PR_SEEN_STATE, PR_SEEN_BASE and PR_SEEN_URL; returns 1 when gh cannot answer.
+gh_bounded() {
+  local supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mts"
+  [ -f "$supervisor" ] || supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
+  node "$supervisor" 60 -- gh "$@"
+}
+
+# Succeeds only when gh answers that origin/$BR heads no same-repo PR. `gh pr view` exits 1 both for
+# "no PR" and for an API failure; `gh pr list` exits 0 with an empty list only for the former.
+pr_absent() {
+  local n
+  n=$(gh_bounded pr list --repo "$REPO" --head "$BR" --state all --limit 100 \
+    --json isCrossRepository --jq 'map(select(.isCrossRepository | not)) | length' 2>/dev/null) && [ "$n" = 0 ]
+}
+
+# Sets PR_SEEN_NUM, PR_SEEN_STATE, PR_SEEN_BASE and PR_SEEN_URL; returns 1 when gh names no PR,
+# whether none exists or gh failed.
 read_pr_state() {
   local fields
   fields=$(pr_identity) || fields=
