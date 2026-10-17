@@ -4,10 +4,8 @@
 // itself, and its socket-server/vercel branches — gated by guard.config.json `backends` — had no
 // coverage at all (the import-wall fixture switches both off).
 //
-// The fixture owns its own node_modules symlink so the plugin, which derives its project root from
-// its OWN resolved module path, roots HERE rather than in the devkit checkout that holds the real
-// dependencies. That is why eslint is spawned through `--preserve-symlinks`, the same way
-// gate-engine/structure/run.mts spawns it.
+// The fixture links node_modules and eslint runs WITHOUT --preserve-symlinks, so the plugin roots
+// in the devkit checkout: the template itself must re-root folder-structure at the fixture.
 import {
   copyFileSync,
   mkdirSync,
@@ -56,6 +54,11 @@ const ALLOWED = [
 
 const PROBES = [...BLOCKED, ...ALLOWED];
 
+const GUARD_CONFIG = JSON.stringify({
+  scanRoots: ['src'],
+  backends: { socketServer: true, vercel: true },
+});
+
 function write(root: string, relativePath: string, content = 'export {};\n') {
   const path = join(root, relativePath);
   mkdirSync(dirname(path), { recursive: true });
@@ -65,11 +68,7 @@ function write(root: string, relativePath: string, content = 'export {};\n') {
 function writeFixture(root: string) {
   symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(root, 'node_modules'), 'dir');
   write(root, 'package.json', '{"type":"module"}\n');
-  write(
-    root,
-    'guard.config.json',
-    JSON.stringify({ scanRoots: ['src'], backends: { socketServer: true, vercel: true } }),
-  );
+  write(root, 'guard.config.json', GUARD_CONFIG);
   copyFileSync(
     join(DEVKIT_ROOT, 'templates/electron/eslint.config.mjs'),
     join(root, 'eslint.config.mjs'),
@@ -79,17 +78,19 @@ function writeFixture(root: string) {
   for (const probe of PROBES) write(root, probe);
 }
 
-function collectStructureErrors(root: string) {
+function collectStructureErrors(root: string, invocation: Invocation) {
+  const { cwd, args } = invocation.spawn(root);
   const result = spawnSync(
     process.execPath,
     [
-      '--preserve-symlinks',
+      ...invocation.nodeFlags,
       join(root, 'node_modules', 'eslint', 'bin', 'eslint.js'),
+      ...args,
       '--format',
       'json',
-      ...PROBES,
+      ...PROBES.map((probe) => join(root, probe)),
     ],
-    { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
+    { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
   );
   // 0 (clean) and 1 (lint errors) are the only statuses that mean eslint ran to completion; a
   // config fault exits 2 with the diagnosis on stderr, and a signal kill can flush partial JSON.
@@ -112,26 +113,79 @@ function collectStructureErrors(root: string) {
   if ([...errors.values()].every((count) => count === 0)) {
     throw new Error(
       `${RULE} reported nothing on ANY probe, so the placement walls never ran. The structure ` +
-        'plugin resolved a project root outside this fixture — typically a symlinked node_modules ' +
-        'realpath-escaping to the owning checkout. Spawn eslint the way ' +
-        'gate-engine/structure/run.mts does (--preserve-symlinks, bin resolved from the fixture).',
+        "plugin roots at the directory above its own node_modules: check each rule's projectRoot " +
+        'in templates/electron/eslint.config.mjs.',
     );
   }
   return errors;
 }
 
-describe('shipped Electron placement walls', () => {
+type Invocation = {
+  name: string;
+  nodeFlags: string[];
+  spawn: (root: string) => { cwd: string; args: string[] };
+};
+
+// A config holding only the template, so its directory is unrelated to the tree under lint.
+function writeDetachedConfig() {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'electron-folder-structure-config-')));
+  copyFileSync(
+    join(DEVKIT_ROOT, 'templates/electron/eslint.config.mjs'),
+    join(dir, 'eslint.config.mjs'),
+  );
+  symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(dir, 'node_modules'), 'dir');
+  write(dir, 'guard.config.json', GUARD_CONFIG);
+  write(dir, 'eslint/domains.mjs', DOMAINS);
+  write(dir, 'package.json', '{"type":"module"}\n');
+  return dir;
+}
+
+const detachedConfigs: string[] = [];
+
+// Each row is a distinct way ESLint meets the template; every row must judge the fixture itself.
+const INVOCATIONS: Invocation[] = [
+  { name: 'from the package root', nodeFlags: [], spawn: (root) => ({ cwd: root, args: [] }) },
+  {
+    // The fixture's own linked node_modules becomes the plugin root, so the offset is '.'.
+    name: 'under --preserve-symlinks',
+    nodeFlags: ['--preserve-symlinks'],
+    spawn: (root) => ({ cwd: root, args: [] }),
+  },
+  {
+    name: 'from a subdirectory of the package',
+    nodeFlags: [],
+    spawn: (root) => ({ cwd: join(root, 'src'), args: [] }),
+  },
+  {
+    name: 'from an ancestor of the package (an editor opened at a monorepo root)',
+    nodeFlags: [],
+    spawn: (root) => ({ cwd: dirname(root), args: [] }),
+  },
+  {
+    name: "with a config from an unrelated checkout (review's merge-base run)",
+    nodeFlags: [],
+    spawn: (root) => {
+      const dir = writeDetachedConfig();
+      detachedConfigs.push(dir);
+      return { cwd: root, args: ['--config', join(dir, 'eslint.config.mjs')] };
+    },
+  },
+];
+
+describe.each(INVOCATIONS)('shipped Electron placement walls, eslint run $name', (invocation) => {
   let root = '';
   let errors: Map<string, number>;
 
   beforeAll(() => {
     root = realpathSync(mkdtempSync(join(tmpdir(), 'electron-folder-structure-')));
     writeFixture(root);
-    errors = collectStructureErrors(root);
+    errors = collectStructureErrors(root, invocation);
   }, 120_000);
 
   afterAll(() => {
-    if (root) rmSync(root, { recursive: true, force: true });
+    for (const dir of [root, ...detachedConfigs.splice(0)]) {
+      if (dir) rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it.each(BLOCKED)('blocks %s', (probe) => {
