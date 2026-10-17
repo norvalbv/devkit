@@ -538,7 +538,7 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
   });
 
   const LIKELY_CAUSE =
-    'no checklist item failed: if the reason cites no file:line defect, the refused calls are the likely cause';
+    'no failed checklist item was recorded: if the reason cites no file:line defect, the refused calls are the likely cause';
   // A correctness judge answering FAIL; `failed` items land in its (un-lensed) artifact.
   const correctnessFail = (repo: string, denied: string[] | null, failed: number) =>
     mkExec(async ({ label, onPermissionDenials }) => {
@@ -872,15 +872,15 @@ describe('reportDeniedCalls', () => {
     const correctness = REVIEWERS.find((r) => r.name === 'correctness-reviewer');
     if (!correctness) throw new Error('correctness-reviewer is not registered');
     const lensJudge = { ...correctness, lens: ['state-transitions'] };
-    reportDeniedCalls(lensJudge, { status: 'pass' }, ['a']);
-    reportDeniedCalls(lensJudge, { status: 'inconclusive' }, null);
+    reportDeniedCalls(lensJudge, { status: 'pass' }, ['a'], null);
+    reportDeniedCalls(lensJudge, { status: 'inconclusive' }, null, null);
     expect(err).not.toHaveBeenCalled();
     const failed = { items: [{ name: 'state-transitions', status: 'fail' }] };
     reportDeniedCalls(lensJudge, { status: 'fail' }, ['a', 'b', 'c', 'd', 'e'], failed);
     expect(err).toHaveBeenCalledWith(
       "⚠️  guard-review: correctness-reviewer [state-transitions] — 5 tool call(s) were denied by the judge's tool allowlist: a | b | c (+2 more)",
     );
-    reportDeniedCalls(lensJudge, { status: 'error' }, ['a', 'b', 'c']);
+    reportDeniedCalls(lensJudge, { status: 'error' }, ['a', 'b', 'c'], null);
     expect(err).toHaveBeenLastCalledWith(expect.stringMatching(/: a \| b \| c$/));
   });
 
