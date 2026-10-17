@@ -25,8 +25,13 @@ export const DEFAULT_UI_PATHS = [
   'less',
 ].map((ext) => `**/*.${ext}`);
 
-/** Test, story and fixture files carry UI extensions but change nothing a user sees. */
+/** Tests, stories, fixtures and agent-tool or devkit dirs can carry UI extensions; none is a screen. */
 const NON_UI_PATHS = [
+  '**/.claude/**',
+  '**/.cursor/**',
+  '**/.codex/**',
+  '**/.agents/**',
+  '**/.devkit/**',
   '**/*.test.*',
   '**/*.spec.*',
   '**/*.stories.*',
