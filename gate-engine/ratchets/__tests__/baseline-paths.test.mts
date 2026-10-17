@@ -641,6 +641,22 @@ describe('ratchet baseline paths', () => {
     expect(migrateRatchetBaselines(root)).toEqual([]);
   });
 
+  // Best-effort staging would leave the index tracking a file the drop already deleted, silently.
+  it('fails loudly when the dropped baseline deletion cannot be staged', () => {
+    const root = makeRoot();
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 't@t.t'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: root });
+    write(root, 'eslint/baselines/size.json', '{"fileDisables":0,"fnDisables":0}\n');
+    execFileSync('git', ['add', 'eslint/baselines/size.json'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'legacy baseline'], { cwd: root });
+    writeFileSync(join(root, '.git/index.lock'), '');
+
+    expect(() => migrateRatchetBaselines(root)).toThrow(
+      'Git could not stage ratchet baseline eslint/baselines/size.json',
+    );
+  });
+
   it('drops a zero-disable legacy size baseline beside real canonical debt without a conflict', () => {
     const root = makeRoot();
     const canonical = '{"files":{"src/a.ts":{"file":1,"fn":0}}}\n';

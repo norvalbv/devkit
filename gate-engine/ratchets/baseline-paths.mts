@@ -16,6 +16,7 @@ import {
   assertBaselineTrackable,
   indexTracksBaseline,
   stageBaselineMigration,
+  stageBaselineRemoval,
   stageBaseline,
 } from './git-index.mts';
 
@@ -311,7 +312,7 @@ export function migrateRatchetBaselines(
     }
     if (action.kind === 'dropped-empty') {
       rmSync(join(root, action.from), { force: true });
-      stageBaseline(root, action.from);
+      stageBaselineRemoval(root, action.from);
       continue;
     }
     const legacy = join(root, action.from);
