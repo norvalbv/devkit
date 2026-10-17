@@ -388,7 +388,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
       if (typeof rc === 'string') {
         const next = rc.startsWith('killed:')
           ? 'Re-run it.'
-          : `${gate.argv[0]} did not start: check it is installed and on PATH.`;
+          : `${gate.argv[0]} did not start: check that it exists, is executable and is on PATH.`;
         fail(gate, `(${rc})`, false, [
           `${rc}: the gate never reached a verdict, so this is not a code finding. ${next}`,
         ]);

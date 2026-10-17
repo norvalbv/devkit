@@ -220,11 +220,22 @@ describe('runDeterministic — a gate that never reached an exit code', () => {
     expect(rc).toBe(1);
     expect(out).toContain('deterministic gates failed: nobin(spawn-failed:ENOENT)');
     expect(out).not.toContain('killed:');
-    expect(out).toContain(
-      'devkit-no-such-binary-xyz did not start: check it is installed and on PATH.',
-    );
+    expect(out).toContain('devkit-no-such-binary-xyz did not start: check that it exists');
     expect(out).not.toContain('Re-run it');
     expect(results).toEqual([{ gate: 'nobin', status: 'could_not_run' }]);
+  });
+
+  it('a gate binary without the execute bit names permission in its remedy, not only PATH', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'guard-det-noexec-'));
+    dirs.push(dir);
+    writeFileSync(join(dir, 'lint.sh'), '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+    const { rc, out, results } = run([], {
+      extra: [{ label: 'noexec', cmd: join(dir, 'lint.sh') }],
+    });
+    expect(rc).toBe(1);
+    expect(out).toContain('deterministic gates failed: noexec(spawn-failed:EACCES)');
+    expect(out).toContain('is executable');
+    expect(results).toEqual([{ gate: 'noexec', status: 'could_not_run' }]);
   });
 
   it('an ordinary exit 1 is unchanged: a bare label and a fail verdict', () => {
