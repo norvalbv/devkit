@@ -9,32 +9,21 @@
  * every path that cannot establish a fact returns a NAMED unknown instead of a plausible default.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { join, relative, resolve, sep } from 'node:path';
-import { writeFileAtomic } from '../atomic-write.mts';
 import { detectGitRoot } from '../detect-git-root.mts';
-import {
-  GhUnavailable,
-  type RunRef,
-  type UnknownReason,
-  downloadSummary,
-  isUsableRun,
-  parseSummary,
-  assertProvenance,
-} from './gh.mts';
+import { GhUnavailable, type RunRef, type UnknownReason, isUsableRun, runById } from './gh.mts';
 import { BranchWalk } from './history.mts';
-import { escapesRoot } from './produce.mts';
 import type { TestReportSummary } from './produce.mts';
+import { DEFAULT_ARTIFACT, DEFAULT_WORKFLOW, loadSummary, workflowSelector } from './source.mts';
 import {
   type FailingTests,
+  type FileStatus,
   type TestAnswer,
   failingTestsOf,
+  normaliseFilePath,
+  statusOf,
   testVerdict,
 } from './test-verdict.mts';
 
-export const CACHE_DIR = '.devkit/baseline-status';
-export const DEFAULT_WORKFLOW = 'gate.yml';
-export const DEFAULT_ARTIFACT = 'test-report-summary';
 /** How many first-parent commits the walk-back looks up, one gh call each. */
 export const DEFAULT_MAX_RUNS = 10;
 /**
@@ -42,9 +31,6 @@ export const DEFAULT_MAX_RUNS = 10;
  * into the branch's whole history of gh calls. It lives here so every caller of queryBaseline has it.
  */
 export const MAX_RUNS_CEILING = 50;
-
-/** What is known about ONE file at the baseline commit. */
-export type FileStatus = 'passed' | 'failed' | 'skipped' | 'excluded' | 'absent' | 'unknown';
 
 export interface BaselineAnswer {
   /** The run as a whole — lint, typecheck, ratchets and tests. */
@@ -64,6 +50,10 @@ export interface BaselineAnswer {
   commitsWithoutRun: string[];
   /** Runs skipped before a usable one was found, each with the conclusion that disqualified it. */
   skippedRuns: { runId: number; sha: string; conclusion: string; why: string }[];
+  /** The event that triggered the answering run (push, pull_request, …). */
+  event?: string;
+  /** The commit the run tested, when it is not `sha`: a pull_request run tests a merge commit. */
+  testedSha?: string;
   reason?: UnknownReason;
   detail?: string;
   /** What to change so the next query can answer — set only where the fix is on the consumer side. */
@@ -77,7 +67,12 @@ export interface FileAnswer extends FailingTests {
   reason?: string;
   lastPassed: { sha: string; runId: number; attempt: number } | null;
   /** Why lastPassed is null — 'no-artifact-history' is the honest day-one answer, not "never passed". */
-  lastPassedReason: 'found' | 'not-in-scanned-window' | 'no-artifact-history' | 'lookup-failed';
+  lastPassedReason:
+    | 'found'
+    | 'not-in-scanned-window'
+    | 'no-artifact-history'
+    | 'lookup-failed'
+    | 'single-run';
   searchedRuns: number;
   runsWithoutArtifact: number;
   /** Set only for `--test`: that one test's verdict in the same run. */
@@ -98,119 +93,6 @@ export function resolveRef(cwd: string, override?: string): string {
     // no origin/HEAD ref (a fresh clone that never ran `git remote set-head`) — fall through
   }
   return 'main';
-}
-
-/** Put a `--file` into the form the summary is keyed by: CWD-resolved, git-root-relative, POSIX. */
-export function normaliseFilePath(cwd: string, path: string): string {
-  const { gitRoot } = detectGitRoot(cwd);
-  // Same POSIX convention as the artifact's keys — a host separator here would miss every one.
-  const rel = relative(gitRoot, resolve(cwd, path)).split(sep).join('/');
-  return escapesRoot(rel) ? path : rel;
-}
-
-/**
- * Did `path` exist at `sha`? null when the answer cannot be established.
- *
- * The commit is probed first: an unfetched commit would otherwise report every path as absent.
- */
-export function fileExistsAt(cwd: string, sha: string, path: string): boolean | null {
-  const has = (arg: string): boolean => {
-    try {
-      execFileSync('git', ['cat-file', '-e', arg], { cwd, stdio: 'ignore' });
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  if (!has(`${sha}^{commit}`)) return null;
-  return has(`${sha}:${path}`);
-}
-
-/** Cache entry name: the artifact is part of the key, so a reconfigured artifact never reads another's. */
-export function cacheName(runId: number, attempt: number, artifact: string): string {
-  return `${runId}-${attempt}-${encodeURIComponent(artifact)}.json`;
-}
-
-/**
- * The summary for one run, from cache or from GitHub. Keyed on runId + ATTEMPT, never sha: a re-run
- * keeps the sha, so a sha key would serve the pre-re-run answer after main was made green.
- */
-export function loadSummary({
-  cwd,
-  run,
-  artifact,
-}: {
-  cwd: string;
-  run: Pick<RunRef, 'databaseId' | 'attempt'>;
-  artifact: string;
-}): TestReportSummary {
-  const cacheFile = join(cwd, CACHE_DIR, cacheName(run.databaseId, run.attempt, artifact));
-  if (existsSync(cacheFile)) {
-    try {
-      // Re-validated, not trusted: `{}` parses, so JSON.parse alone would admit it.
-      const label = `cached run ${run.databaseId}`;
-      const cached = parseSummary(readFileSync(cacheFile, 'utf8'), label);
-      // The FILENAME is not provenance: a correctly named entry can describe another run.
-      assertProvenance(cached, { runId: run.databaseId, attempt: run.attempt }, label);
-      return cached;
-    } catch {
-      // unreadable or non-conforming — fall through and refetch
-    }
-  }
-  const summary = downloadSummary({
-    cwd,
-    runId: run.databaseId,
-    attempt: run.attempt,
-    artifact,
-  });
-  try {
-    mkdirSync(join(cwd, CACHE_DIR), { recursive: true });
-    writeFileAtomic(cacheFile, `${JSON.stringify(summary, null, 2)}\n`);
-  } catch {
-    // an unwritable cache costs a refetch, nothing more
-  }
-  return summary;
-}
-
-/** One file's verdict at the baseline commit, and why — a named contract, not an inline shape. */
-interface FileVerdict {
-  status: FileStatus;
-  reason?: string;
-}
-
-/** Resolve one file against a summary, splitting the three very different kinds of "did not run". */
-function statusOf({
-  cwd,
-  summary,
-  run,
-  path,
-}: {
-  cwd: string;
-  summary: TestReportSummary;
-  run: RunRef;
-  path: string;
-}): FileVerdict {
-  // hasOwn, not truthiness: `files.toString` is a FUNCTION on any JSON-parsed object, so a query
-  // for a file named `toString` was answered with an inherited member instead of a real outcome.
-  if (Object.hasOwn(summary.files, path)) return { status: summary.files[path] };
-
-  // Not collected by the runner. WHY matters: an agent reads an undifferentiated "did not run" as
-  // reassurance, and a path typo would land in exactly that bucket.
-  const exists = fileExistsAt(cwd, run.headSha, path);
-  if (exists === null) {
-    return {
-      status: 'unknown',
-      reason: `commit ${run.headSha.slice(0, 8)} is not in this checkout — run \`git fetch\` and retry`,
-    };
-  }
-  if (!exists) {
-    return { status: 'absent', reason: `no such path at ${run.headSha.slice(0, 8)}` };
-  }
-  return {
-    status: 'excluded',
-    reason:
-      "existed at that commit but the test runner did not collect it (check the suite's include globs)",
-  };
 }
 
 /**
@@ -289,14 +171,6 @@ function unknownAnswer(ref: string, reason: UnknownReason, detail: string): Base
     reason,
     detail,
   };
-}
-
-/**
- * The workflow as gh's `--workflow` expects it: GitHub reads workflows only from the top of
- * `.github/workflows/`, so a path is a filename in disguise — and gh 404s on the path form.
- */
-export function workflowSelector(workflow: string): string {
-  return workflow.trim().split(/[\\/]/).pop() ?? '';
 }
 
 /** How to make the producer side exist; shared by every reason that means "CI emits nothing here". */
@@ -385,37 +259,12 @@ export function queryBaseline({
       continue;
     }
 
-    const answer: BaselineAnswer = {
-      runStatus: run.conclusion === 'success' ? 'green' : 'red',
-      testsStatus: summary.testsPassed ? 'green' : 'red',
-      ref: branch,
-      runId: run.databaseId,
-      attempt: run.attempt,
-      sha: run.headSha,
-      failingFiles: Object.entries(summary.files)
-        .filter(([, outcome]) => outcome === 'failed')
-        .map(([path]) => path)
-        .sort(),
-      ...walkFields(walk),
-      commitsBehindHead: behind,
-      skippedRuns,
-    };
-    if (file) {
-      // Normalised ONCE so the lookup, the git probe and the walk-back cannot disagree on the key.
-      const path = normaliseFilePath(cwd, file);
-      // git resolves `<sha>:<path>` from the REPO ROOT, so the existence probe must run there too.
-      const { gitRoot } = detectGitRoot(cwd);
-      const verdict = statusOf({ cwd: gitRoot, summary, run, path });
-      answer.file = {
-        path,
-        ...verdict,
-        ...failingTestsOf(summary, path),
-        ...findLastPassed({ cwd, walk, artifact, path }),
-      };
-      if (test) answer.file.test = testVerdict(summary, verdict.status, path, test);
-      answer.commitsWithoutRun = [...walk.commitsWithoutRun]; // the walk-back may have gone further
-    }
-    return answer;
+    const branchWalk = walk;
+    const answer = answerFromRun({ cwd, run, summary, ref: branch, file, test }, (path) =>
+      findLastPassed({ cwd, walk: branchWalk, artifact, path }),
+    );
+    // The walk-back may have gone further than the answering run.
+    return { ...answer, ...walkFields(walk), commitsBehindHead: behind, skippedRuns };
   }
 
   const looked = walk?.commitsLooked ?? 0;
@@ -452,6 +301,133 @@ export function queryBaseline({
     answer.remedy = `Walk further back with --max-runs <n> (up to ${MAX_RUNS_CEILING}). ${answer.remedy}`;
   }
   return answer;
+}
+
+/** Where `--file` history comes from: the walk-back, or nothing for a single named run. */
+type LastPassedFor = (
+  path: string,
+) => Pick<FileAnswer, 'lastPassed' | 'lastPassedReason' | 'searchedRuns' | 'runsWithoutArtifact'>;
+
+/** One run's answer from its summary; walk provenance is left empty for the caller to fill. */
+function answerFromRun(
+  {
+    cwd,
+    run,
+    summary,
+    ref,
+    file,
+    test,
+  }: {
+    cwd: string;
+    run: RunRef;
+    summary: TestReportSummary;
+    ref: string;
+    file?: string;
+    test?: string;
+  },
+  lastPassedFor: LastPassedFor,
+): BaselineAnswer {
+  const tested = summary.sha && summary.sha !== run.headSha ? summary.sha : undefined;
+  const answer: BaselineAnswer = {
+    runStatus: run.conclusion === 'success' ? 'green' : 'red',
+    testsStatus: summary.testsPassed ? 'green' : 'red',
+    ref,
+    runId: run.databaseId,
+    attempt: run.attempt,
+    sha: run.headSha,
+    event: run.event,
+    ...(tested && { testedSha: tested }),
+    failingFiles: Object.entries(summary.files)
+      .filter(([, outcome]) => outcome === 'failed')
+      .map(([path]) => path)
+      .sort(),
+    head: null,
+    commitsBehindHead: null,
+    commitsWithoutRun: [],
+    skippedRuns: [],
+  };
+  if (!file) return answer;
+  // Normalised ONCE so the lookup, the git probe and the walk-back cannot disagree on the key.
+  const path = normaliseFilePath(cwd, file);
+  // git resolves `<sha>:<path>` from the REPO ROOT, so the existence probe must run there too.
+  const { gitRoot } = detectGitRoot(cwd);
+  const verdict = statusOf({ cwd: gitRoot, summary, sha: tested ?? run.headSha, path });
+  answer.file = { path, ...verdict, ...failingTestsOf(summary, path), ...lastPassedFor(path) };
+  if (test) answer.file.test = testVerdict(summary, verdict.status, path, test);
+  return answer;
+}
+
+/** `--run`: one named run of any event or branch, answered from its own artifact alone. */
+export function queryRun({
+  cwd = process.cwd(),
+  runId,
+  file,
+  test,
+  workflow = DEFAULT_WORKFLOW,
+  artifact = DEFAULT_ARTIFACT,
+}: {
+  cwd?: string;
+  runId: number;
+  file?: string;
+  test?: string;
+  workflow?: string;
+  artifact?: string;
+}): BaselineAnswer {
+  let run: ReturnType<typeof runById>;
+  try {
+    run = runById(cwd, runId);
+  } catch (e) {
+    if (!(e instanceof GhUnavailable)) throw e;
+    return { ...unknownAnswer('', e.reason, e.message), runId };
+  }
+  const named = (reason: UnknownReason, detail: string): BaselineAnswer => ({
+    ...unknownAnswer(run.headBranch, reason, detail),
+    runId,
+    attempt: run.attempt,
+    sha: run.headSha,
+    event: run.event,
+  });
+  if (!isUsableRun(run)) {
+    const state = run.conclusion || run.status || 'unreported';
+    return named(
+      'no-usable-run',
+      `run ${runId} (attempt ${run.attempt}) is ${state}, so it carries no test report`,
+    );
+  }
+  let summary: TestReportSummary;
+  try {
+    summary = loadSummary({ cwd, run, artifact });
+  } catch (e) {
+    const reason = e instanceof GhUnavailable ? e.reason : 'artifact-unreadable';
+    const why = e instanceof Error ? e.message : String(e);
+    return runArtifactUnknown(named(reason, why), run, {
+      workflow: workflowSelector(workflow),
+      artifact,
+    });
+  }
+  return answerFromRun({ cwd, run, summary, ref: run.headBranch, file, test }, () => ({
+    lastPassed: null,
+    lastPassedReason: 'single-run',
+    searchedRuns: 0,
+    runsWithoutArtifact: 0,
+  }));
+}
+
+/** Name why a named run has no usable summary; CI-rewire advice only for the configured workflow. */
+function runArtifactUnknown(
+  unknown: BaselineAnswer,
+  run: ReturnType<typeof runById>,
+  { workflow, artifact }: { workflow: string; artifact: string },
+): BaselineAnswer {
+  const runWorkflow = workflowSelector(run.path);
+  if (unknown.reason === 'no-artifact' && runWorkflow === workflow) {
+    unknown.remedy = producerRemedy(workflow, artifact, run.headBranch);
+  } else if (unknown.reason === 'no-artifact') {
+    unknown.detail = `${unknown.detail}; run of ${runWorkflow} from ${run.createdAt}: expired, never uploaded, or not produced by this workflow`;
+  } else if (unknown.reason === 'schema-mismatch' && run.attempt > 1) {
+    unknown.detail = `${unknown.detail}; gh serves the first attempt's artifact of a re-run (cli/cli#12437)`;
+  }
+  return unknown;
 }
 
 /** The walk's provenance fields; empty until the remote head has been resolved. */

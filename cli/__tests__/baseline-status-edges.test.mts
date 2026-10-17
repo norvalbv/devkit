@@ -25,13 +25,8 @@ import {
   seedBranch,
   summaryFor,
 } from './_baseline-fixture.mts';
-import {
-  DEFAULT_ARTIFACT,
-  MAX_RUNS_CEILING,
-  cacheName,
-  queryBaseline,
-  resolveRef,
-} from '../lib/baseline-status/query.mts';
+import { MAX_RUNS_CEILING, queryBaseline, resolveRef } from '../lib/baseline-status/query.mts';
+import { DEFAULT_ARTIFACT, cacheName } from '../lib/baseline-status/source.mts';
 
 const FIXTURES = join(import.meta.dirname, 'fixtures');
 
