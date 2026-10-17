@@ -28,6 +28,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
+import { parseJsonObject } from '../../../../gate-engine/config-json.mts';
 import { isCodexModel } from '../../../../gate-engine/judge/codex/result.mts';
 import {
   CLAUDE_FAMILY_SET,
@@ -299,16 +300,16 @@ export function bindClaudeFamily(cwd: string): boolean {
   const tmp = `${lock}.${token.replace(':', '-')}.staged`;
   try {
     const snapshot = readFileSync(path, 'utf8');
-    let raw: RawGuardFile | null;
+    let raw: RawGuardFile;
     try {
-      // SAFETY: the parsed shape is range-checked below — a null document, missing review
-      // object, or claimed family/provenance key aborts the bind without writing.
-      raw = JSON.parse(snapshot) as RawGuardFile | null;
+      // A non-object or duplicate-key document throws; a missing review object or a claimed
+      // family/provenance key aborts the bind below, so neither path writes.
+      raw = parseJsonObject<RawGuardFile>(snapshot, 'guard.config.json');
     } catch {
       return false;
     }
-    const review = raw?.review;
-    if (!raw || !review || !familyKeysAbsent(review)) return false;
+    const review = raw.review;
+    if (!review || !familyKeysAbsent(review)) return false;
     const next = {
       ...raw,
       review: { [FAMILY_PROVENANCE_KEY]: FAMILY_PROVENANCE_TEXT, ...CLAUDE_FAMILY_SET, ...review },
