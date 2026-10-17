@@ -230,9 +230,9 @@ export const DEFAULTS = Object.freeze({
   noLlm: false,
 });
 
-/** A millisecond duration, or undefined for anything that is not a usable positive number. */
+/** Whole ms, rounded up (Node rejects a fractional child_process timeout); else undefined. */
 function positiveMs(v: unknown): number | undefined {
-  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.ceil(v) : undefined;
 }
 
 export function envVar(name: string): string | undefined {
