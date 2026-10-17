@@ -276,7 +276,9 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('Retry after fixing');
     expect(result.stderr).toContain('✗ review:correctness — BLOCKED this run');
-    expect(result.stderr).toContain('⚠ completeness — finding recorded, did NOT block');
+    expect(result.stderr).toContain(
+      '⚠ completeness — finding recorded, did NOT block this run only because review:correctness stopped it first',
+    );
     // The whole point: a reader who sees only the tail still sees it.
     expect(result.stderr.indexOf('Gate findings this run')).toBeGreaterThan(
       result.stderr.indexOf('Retry after fixing'),
