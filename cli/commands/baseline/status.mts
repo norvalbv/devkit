@@ -7,18 +7,33 @@ import {
   queryBaseline,
   workflowSelector,
 } from '../../lib/baseline-status/query.mts';
+import {
+  type Attribution,
+  type AttributionToken,
+  attributeFailures,
+  capped,
+  unknownAttribution,
+} from '../../lib/baseline-status/attribution.mts';
 import { type BaselineSource, configuredSource } from '../../lib/baseline-status/source.mts';
 import type { TestStatus } from '../../lib/baseline-status/test-verdict.mts';
+import {
+  type CheckRow,
+  type TerminalOutcome,
+  ghChecksPoller,
+  summarise,
+} from '../../lib/ship/wait-ci/wait.mts';
 
 export const meta = {
   name: 'baseline-status',
   agentFacing: true,
-  summary: 'Report which test files are failing on the default branch (and whether yours is).',
+  summary:
+    "Report which test files are failing on the default branch (and whether yours is), or which of a PR's failures its base already had.",
   help: `devkit baseline-status — decompose a red default branch into per-file facts.
 
 Usage:
   devkit baseline-status [--file <path> [--test <name>]] [--json] [--ref <branch>]
                          [--max-runs <n>] [--workflow <file>]
+  devkit baseline-status --pr <n> [--json]
 
   --file <path>      answer for one test file, plus the last run in which it passed
   --test <name>      with --file: answer for one test, named as the console prints it
@@ -27,6 +42,7 @@ Usage:
   --ref <branch>     branch to read (default: the remote's HEAD, else main)
   --max-runs <n>     how many commits to walk back (default: ${DEFAULT_MAX_RUNS})
   --workflow <file>  the CI workflow to read (default: guard.config.json, else ${DEFAULT_WORKFLOW})
+  --pr <n>           which of PR <n>'s failing checks its base already had (see below)
 
 Reads the per-file summary artifact that \`devkit test-report-run\` uploads from a CI workflow.
 Configure both in guard.config.json — { "baselineStatus": { "workflow": "<file>", "artifact":
@@ -64,6 +80,12 @@ is never a pass.
 \`--file\` history begins at the first run carrying the artifact; before that it reports
 lastPassedReason "no-artifact-history" rather than implying the file never passed, and a gh
 failure partway back reports "lookup-failed".
+
+\`--pr <n>\` reads the PR's checks once, without waiting, and prints the line \`ship --wait-ci\`
+appends to a failed verdict: \`attribution=<inherited-only|new|unknown> inherited=<n> new=<m> …\`.
+Only inherited-only says none of the red is the PR's. No check registered yet, or any still pending,
+is \`attribution=unknown reason=<no-checks|checks-pending>\`; nothing failing is \`attribution=none\`.
+Exit 2 when gh could not list the PR's checks.
 Set DEVKIT_BASELINE_DEBUG=1 to surface gh's stderr.`,
 };
 
@@ -157,8 +179,8 @@ function render(answer: BaselineAnswer): void {
 }
 
 /** Every option this command accepts, and which of them consume the argument after them. */
-const KNOWN_FLAGS = new Set(['--file', '--test', '--json', '--ref', '--max-runs', '--workflow']);
-const VALUED_FLAGS = new Set(['--file', '--test', '--ref', '--max-runs', '--workflow']);
+const VALUED_FLAGS = new Set(['--file', '--test', '--ref', '--max-runs', '--workflow', '--pr']);
+const KNOWN_FLAGS = new Set([...VALUED_FLAGS, '--json']);
 
 /** Flag > guard.config.json > default. A corrupt config is a usage error, not a stack trace. */
 function source(args: string[], cwd: string): BaselineSource {
@@ -196,10 +218,76 @@ function assertOnlyKnownArgs(args: string[]): void {
   }
 }
 
+/** What `baseline-status --pr` reports: the PR's checks as read once, then the attribution. */
+interface PrAttribution extends Omit<Attribution, 'token'> {
+  pr: string;
+  token: AttributionToken | 'none';
+  /** Set once every check has finished; a pending set has no outcome yet. */
+  ci?: TerminalOutcome;
+  failing?: string[];
+  pending?: string[];
+  cancelled?: string[];
+  /** gh's own words when it could not list the checks. */
+  detail?: string;
+}
+
+const names = (rows: CheckRow[]) => rows.map((row) => row.name);
+
+/** An empty or unfinished check set is unknown, never none: one read cannot wait out either. */
+function checksAnswer(cwd: string, pr: string, rows: CheckRow[]): PrAttribution {
+  const s = summarise(rows);
+  const seen = {
+    pr,
+    failing: names(s.failures),
+    pending: names(s.pending),
+    cancelled: names(s.cancelled),
+  };
+  if (rows.length === 0) return { ...seen, ...unknownAttribution('no-checks') };
+  if (!s.terminal) {
+    const pending = unknownAttribution('checks-pending');
+    return { ...seen, ...pending, line: `${pending.line} pending=${capped(seen.pending)}` };
+  }
+  if (s.failures.length === 0) {
+    const cancelled = seen.cancelled.length > 0 ? ` cancelled=${capped(seen.cancelled)}` : '';
+    const line = `attribution=none ci=${s.outcome}${cancelled}`;
+    return { ...seen, ci: s.outcome, token: 'none', inherited: 0, fresh: 0, line };
+  }
+  const found = attributeFailures({ cwd, pr, failures: s.failures });
+  return {
+    ...seen,
+    ci: s.outcome,
+    ...found,
+    line: `failing=${capped(seen.failing)} ${found.line}`,
+  };
+}
+
+/** `--pr`: one read of the PR's checks. Every other option asks about the default branch. */
+function prStatus(args: string[], cwd: string, pr: string): number {
+  if (!/^[1-9]\d*$/.test(pr)) throw new UsageError(`--pr needs a PR number (got "${pr}")`);
+  const other = args.find((arg) => VALUED_FLAGS.has(arg) && arg !== '--pr');
+  if (other) throw new UsageError(`--pr cannot be combined with ${other}`);
+  source(args, cwd); // a corrupt guard.config.json is exit 1 before any gh call, not a stack trace
+  const read = ghChecksPoller({ pr, cwd })();
+  const answer: PrAttribution =
+    read.kind === 'rows'
+      ? checksAnswer(cwd, pr, read.rows)
+      : { pr, ...unknownAttribution(read.reason), detail: read.message };
+  if (args.includes('--json')) console.log(JSON.stringify(answer, null, 2));
+  else renderPr(answer);
+  return read.kind === 'rows' ? 0 : 2; // 2: gh could not list the checks, so nothing was read
+}
+
+function renderPr(answer: PrAttribution): void {
+  console.log(`pr=${answer.pr} ${answer.line}`);
+  if (answer.detail) console.log(`   ${answer.detail}`);
+}
+
 export default function baselineStatus(args: string[], cwd: string) {
   let answer: BaselineAnswer;
   try {
     assertOnlyKnownArgs(args);
+    const pr = flag(args, '--pr');
+    if (pr !== undefined) return prStatus(args, cwd, pr);
     const file = flag(args, '--file');
     const test = flag(args, '--test');
     if (test && !file) throw new UsageError('--test needs --file <path> (the file the test is in)');

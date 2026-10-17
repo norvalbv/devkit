@@ -1,9 +1,18 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RUN_LIST_BY_COMMIT } from '../../__tests__/_baseline-fixture.mts';
+import baselineStatus from '../../commands/baseline/status.mts';
 import type { CheckRow } from '../ship/wait-ci/wait.mts';
 import {
   attributeFailures,
@@ -117,9 +126,10 @@ describe('compareSummaries and capped', () => {
   });
 });
 
-/** A gh stub answering the five calls attribution makes, from files under $DEVKIT_TEST_FIXTURE. */
+/** A gh stub answering the calls attribution makes, from files under $DEVKIT_TEST_FIXTURE. */
 const GH_STUB = `#!/bin/sh
 F="$DEVKIT_TEST_FIXTURE"
+echo "$1 $2" >> "$F/calls.log"
 if [ "$1" = "api" ]; then
   case "$2" in
     */actions/runs/*) cat "$F/run-\${2##*/}.tsv" 2>/dev/null && exit 0; echo "HTTP 404" >&2; exit 1 ;;
@@ -127,7 +137,12 @@ if [ "$1" = "api" ]; then
   esac
 fi
 if [ "$1" = "pr" ] && [ "$2" = "view" ]; then echo main; exit 0; fi
-if [ "$1" = "pr" ] && [ "$2" = "checks" ]; then cat "$F/checks.json"; exit 1; fi
+if [ "$1" = "pr" ] && [ "$2" = "checks" ]; then
+  if [ -f "$F/checks.json" ]; then cat "$F/checks.json"
+  elif [ -f "$F/checks.err" ]; then cat "$F/checks.err" >&2
+  else echo "no checks reported on the 'feature' branch" >&2; fi
+  exit 1
+fi
 if [ "$1" = "run" ] && [ "$2" = "view" ]; then cat "$F/view-$3.json"; exit 0; fi
 if [ "$1" = "run" ] && [ "$2" = "list" ]; then
   ${RUN_LIST_BY_COMMIT}
@@ -182,17 +197,19 @@ describe('attributeFailures against a stubbed gh', () => {
         },
       ]),
     );
-  const attribute = (failures = [PR_CHECK]) => {
+  const withStub = <T,>(fn: () => T): T => {
     const env = { ...process.env };
     process.env.PATH = `${join(cwd, 'bin')}:${process.env.PATH}`;
     process.env.DEVKIT_TEST_FIXTURE = fixture;
     try {
-      return attributeFailures({ cwd, pr: '7', failures });
+      return fn();
     } finally {
       process.env.PATH = env.PATH;
       process.env.DEVKIT_TEST_FIXTURE = env.DEVKIT_TEST_FIXTURE;
     }
   };
+  const attribute = (failures = [PR_CHECK]) =>
+    withStub(() => attributeFailures({ cwd, pr: '7', failures }));
 
   beforeEach(() => {
     cwd = mkdtempSync(join(tmpdir(), 'attr-'));
@@ -219,6 +236,12 @@ describe('attributeFailures against a stubbed gh', () => {
       inherited: 1,
       fresh: 1,
       line: 'attribution=new inherited=1 new=1 new-failing=b.test.mts new-steps=none base-run=100 base-ci=red',
+      newFailing: ['b.test.mts'],
+      newSteps: [],
+      unsure: [],
+      unattributed: [],
+      baseRun: 100,
+      baseCi: 'red',
     });
   });
 
@@ -267,9 +290,12 @@ describe('attributeFailures against a stubbed gh', () => {
     expect(attribute().line).toBe('attribution=unknown reason=base-pending');
     baseRun();
     rmSync(join(fixture, 'summary-100.json'));
-    expect(attribute().line).toBe(
-      'attribution=unknown reason=no-artifact base-run=100 base-ci=red',
-    );
+    expect(attribute()).toMatchObject({
+      line: 'attribution=unknown reason=no-artifact base-run=100 base-ci=red',
+      reason: 'no-artifact',
+      baseRun: 100,
+      baseCi: 'red',
+    });
     put('run-200.tsv', '.github/workflows/other.yml\t1\n');
     expect(attribute().line).toBe('attribution=unknown reason=no-workflow-run');
   });
@@ -299,5 +325,99 @@ describe('attributeFailures against a stubbed gh', () => {
     );
     expect(out).toContain('ship: ci-outcome=failed pr=7 failing=gate:');
     expect(out).toContain('attribution=unknown reason=attribution-error');
+  });
+
+  describe('baseline-status --pr', () => {
+    const status = (...args: string[]) => {
+      const out: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...a) => void out.push(a.join(' ')));
+      vi.spyOn(console, 'error').mockImplementation((...a) => void out.push(a.join(' ')));
+      try {
+        return { code: withStub(() => baselineStatus(args, cwd)), out: out.join('\n') };
+      } finally {
+        vi.restoreAllMocks();
+      }
+    };
+    const checks = (...rows: CheckRow[]) => put('checks.json', JSON.stringify(rows));
+    const row = (bucket: CheckRow['bucket'], name: string): CheckRow => ({
+      ...check(name, ''),
+      bucket,
+    });
+    const calls = () => readFileSync(join(fixture, 'calls.log'), 'utf8').trim().split('\n');
+
+    it("prints the ship verdict's attribution fields, and their uncapped values as JSON", () => {
+      checks(PR_CHECK);
+      expect(status('--pr', '7')).toEqual({
+        code: 0,
+        out: `pr=7 failing=gate ${attribute().line}`,
+      });
+      const { code, out } = status('--pr', '7', '--json');
+      expect(code).toBe(0);
+      expect(JSON.parse(out)).toMatchObject({
+        pr: '7',
+        token: 'new',
+        ci: 'failed',
+        failing: ['gate'],
+        newFailing: ['b.test.mts'],
+        baseRun: 100,
+        baseCi: 'red',
+      });
+    });
+
+    it('reads once and names a pending check instead of attributing over it', () => {
+      checks(PR_CHECK, row('pending', 'CodeRabbit'));
+      // Exit 0: a pending set is an answer, not a query that could not run.
+      expect(status('--pr', '7')).toEqual({
+        code: 0,
+        out: 'pr=7 attribution=unknown reason=checks-pending pending=CodeRabbit',
+      });
+      expect(calls()).toEqual(['pr checks']);
+    });
+
+    it('exits 0 when the checks were read but a later base lookup failed in gh', () => {
+      // gh-failed means "could not run" for the branch query; here the checks read already ran.
+      checks(PR_CHECK);
+      rmSync(join(fixture, 'run-200.tsv'));
+      expect(status('--pr', '7')).toEqual({
+        code: 0,
+        out: 'pr=7 failing=gate attribution=unknown reason=gh-failed',
+      });
+    });
+
+    it('calls an empty check set unknown, and only a settled set with no failure none', () => {
+      expect(status('--pr', '7')).toEqual({
+        code: 0,
+        out: 'pr=7 attribution=unknown reason=no-checks',
+      });
+      checks(row('pass', 'gate'), row('cancel', 'lint'));
+      expect(status('--pr', '7').out).toBe('pr=7 attribution=none ci=cancelled cancelled=lint');
+      checks(row('pass', 'gate'), row('skipping', 'docs'));
+      expect(status('--pr', '7').out).toBe('pr=7 attribution=none ci=passed');
+    });
+
+    it('exits 2 with the reason when gh cannot list the checks', () => {
+      put('checks.err', 'GraphQL: Could not resolve to a PullRequest with the number of 7.\n');
+      const { code, out } = status('--pr', '7');
+      expect(code).toBe(2);
+      expect(out).toMatch(/^pr=7 attribution=unknown reason=pr-not-found\n {3}GraphQL: Could not/);
+    });
+
+    it('refuses a bad number, a branch-query option or a corrupt config before calling gh', () => {
+      expect(status('--pr', 'abc')).toEqual({
+        code: 1,
+        out: '🚫 --pr needs a PR number (got "abc").',
+      });
+      expect(status('--pr', '7', '--file', 'a.test.mts')).toEqual({
+        code: 1,
+        out: '🚫 --pr cannot be combined with --file.',
+      });
+      writeFileSync(join(cwd, 'guard.config.json'), '{ not json');
+      execFileSync('git', ['init', '-q'], { cwd });
+      checks(PR_CHECK);
+      const corrupt = status('--pr', '7');
+      expect(corrupt.code).toBe(1);
+      expect(corrupt.out).toContain('guard.config.json');
+      expect(existsSync(join(fixture, 'calls.log'))).toBe(false);
+    });
   });
 });
