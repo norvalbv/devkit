@@ -199,9 +199,12 @@ const RECOVERY_SETTLE_MARGIN_MS = 15_000;
  * recovering the evidence behind 0d759d4). Do not reconcile one literal to the other.
  */
 function recoveryBudgetMs(gateStartMs: number): number {
+  // Floored: it becomes a judge's child_process timeout, which Node rejects unless whole.
   const deadline = Number(process.env.DEVKIT_GATE_DEADLINE_MS);
-  if (Number.isFinite(deadline) && deadline > 0) return deadline - Date.now();
-  return Number(process.env.SHIP_COMMIT_TIMEOUT ?? 3600) * 1000 - (Date.now() - gateStartMs);
+  if (Number.isFinite(deadline) && deadline > 0) return Math.floor(deadline - Date.now());
+  return Math.floor(
+    Number(process.env.SHIP_COMMIT_TIMEOUT ?? 3600) * 1000 - (Date.now() - gateStartMs),
+  );
 }
 
 /** One parked first-wave outcome awaiting its post-wave attempt. */
