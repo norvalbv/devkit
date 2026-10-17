@@ -18,6 +18,8 @@ import {
   DECISION_EDIT_HOOK,
   DECISION_SCOPE_BRIEF_HOOK,
   hookScriptsFor,
+  PLACEMENT_BRIEF_HOOK,
+  selectedHookAssets,
 } from '../lib/install/hook-registration-ledger/selection.mts';
 import { readConfig, tmpRepos } from './_helpers.mts';
 
@@ -30,6 +32,7 @@ const SCRIPT_OWNING_COMPONENTS = [
   'priorArtGate',
   'baseDrift',
   'antiSlop',
+  'placement',
 ] as const;
 
 /** A selection with exactly ONE component on — notably agentHooks OFF for every other component. */
@@ -41,6 +44,7 @@ const only = (component: string) => ({
   priorArtGate: component === 'priorArtGate',
   baseDrift: component === 'baseDrift',
   antiSlop: component === 'antiSlop',
+  placement: component === 'placement',
 });
 
 /** The hook-dir script a registration command invokes, or null for an engine-bin command. */
@@ -69,6 +73,7 @@ describe('hook registrations resolve to installable scripts', () => {
       baseDrift: true,
       antiSlop: true,
       comments: true,
+      placement: true,
     });
     const dangling = Object.values(HOOK_REGISTRATIONS)
       .flat()
@@ -92,6 +97,23 @@ describe('hook registrations resolve to installable scripts', () => {
     // reconciliation would install a hook no registration ever invokes.
     for (const hook of owned)
       expect(hookScriptsFor({ ...base, agentHooks: true, decisions: false })).not.toContain(hook);
+  });
+
+  it('selects the placement brief with either folder gate, and never through agentHooks alone', () => {
+    const owns = (selection: Parameters<typeof selectedHookAssets>[0]) => {
+      const assets = selectedHookAssets(selection);
+      return (
+        assets.components.includes('placement') && assets.scripts.includes(PLACEMENT_BRIEF_HOOK)
+      );
+    };
+    expect(owns({ guards: ['fanout'] })).toBe(true);
+    expect(owns({ guards: [], structure: true })).toBe(true);
+    expect(owns({ guards: ['size'], structure: false })).toBe(false);
+    expect(owns({ guards: [], agentHooks: true })).toBe(false);
+    // Without husky neither folder gate runs at commit, and init records guards without fanout.
+    expect(owns({ husky: false, guards: ['fanout'] })).toBe(false);
+    expect(owns({ husky: false, guards: [], structure: true })).toBe(false);
+    expect(selectedHookAssets({ agentHooks: true }).scripts).not.toContain(PLACEMENT_BRIEF_HOOK);
   });
 });
 
@@ -155,6 +177,39 @@ describe('a default init leaves no dangling hook registration', () => {
       readFileSync(join(root, '.devkit/agent-hooks-manifest.json'), 'utf8'),
     );
     expect(Object.keys(manifest.files)).toContain('decision-scope-brief.mjs');
+  });
+
+  it('installs the placement brief by default and keeps it through a full sync-hooks', () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--stack', 'generic', '--yes').status).toBe(0);
+    const installed = () => existsSync(join(root, '.claude/hooks', PLACEMENT_BRIEF_HOOK));
+    expect(installed()).toBe(true);
+    expect(referencedScripts(root, 'claude')).toContain(PLACEMENT_BRIEF_HOOK);
+
+    expect(devkit(root, 'sync-hooks').status).toBe(0);
+    expect(installed()).toBe(true);
+  });
+
+  // init installs from its selection but records guards filtered by husky; sync-hooks reads the record.
+  it('installs no placement brief without husky, so a later sync-hooks has nothing to prune', () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--stack', 'generic', '--yes', '--no-husky').status).toBe(0);
+    const installed = () => existsSync(join(root, '.claude/hooks', PLACEMENT_BRIEF_HOOK));
+    expect(installed()).toBe(false);
+    expect(referencedScripts(root, 'claude')).not.toContain(PLACEMENT_BRIEF_HOOK);
+    expect(devkit(root, 'sync-hooks').status).toBe(0);
+    expect(installed()).toBe(false);
+  });
+
+  // Placement keys off a guard list rather than its own flag; dropping both gates must prune it.
+  it('removes the placement brief once neither folder gate is selected', () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--stack', 'generic', '--yes').status).toBe(0);
+    expect(
+      devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'decisions').status,
+    ).toBe(0);
+    expect(existsSync(join(root, '.claude/hooks', PLACEMENT_BRIEF_HOOK))).toBe(false);
+    expect(referencedScripts(root, 'claude')).not.toContain(PLACEMENT_BRIEF_HOOK);
   });
 
   it('sync-hooks --only fails closed instead of syncing the whole selection', () => {
