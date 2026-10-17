@@ -49,7 +49,7 @@ export function configExtraGates(cwd: string): ExtraGate[] {
 }
 
 // gate_result rows strip this prefix, so `guard-lint` and `lint` are recorded under one name.
-const GUARD_PREFIX_RE = /^guard-/;
+export const GUARD_PREFIX_RE = /^guard-/;
 
 /**
  * The hook's `--extra` gates, then the config's. A name both record under runs neither: it blocks as

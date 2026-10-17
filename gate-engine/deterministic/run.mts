@@ -61,6 +61,7 @@ import {
 import {
   bypassedSuffixes,
   extraGatesFor,
+  GUARD_PREFIX_RE,
   reportCachedBypasses,
   type ExtraGate,
   structureBypassed,
@@ -74,9 +75,6 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // module so the same literals resolve in both — string-literal paths are NOT rewritten by tsc emit.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 
-// Telemetry: strip the `guard-` bin prefix to get the bare gate name (module-level per biome's
-// useTopLevelRegex). Outcome suffixes are recorded apart from the label, never parsed back off it.
-const GUARD_PREFIX_RE = /^guard-/;
 // The suffix a STRICT run appends to a gate that opted out. Distinct from `(unexpected:2)`, which
 // stays reserved for a gate whose exit 2 was never an opt-out (an `--extra` command's fatal config
 // error): both are could-not-run for telemetry, but only this one is an opt-out we chose to reject.
