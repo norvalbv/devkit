@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   type ConventionFinding,
+  conventionWaiverLens,
   parseConventionFindingCandidates,
 } from '../evidence/conventions.mts';
 import {
@@ -57,6 +58,10 @@ const grounded = (raw: string, src: GroundingSource): ConventionFinding[] =>
   groundConventionFindings(parseConventionFindingCandidates(raw), src);
 
 const DISABLE = '/* eslint-disable max-lines */';
+
+const KEBAB_MD = '# Naming\n\nAll new files under app/ must use kebab-case filenames.\n';
+const wholeFile = (offending: string) =>
+  `VIOLATION: All new files under app/ must use kebab-case filenames. — CLAUDE.md:3\nOFFENDING: ${offending}\nVERDICT: FAIL — cited`;
 
 describe('groundConventionFindings — story sc-3580', () => {
   // The same 520-line file at HEAD and staged, with one line changed deep inside it.
@@ -617,5 +622,103 @@ describe('stagedGroundingSource — real git index', () => {
     writeFileSync(join(dir, 'src', 'a.ts'), 'mutated\n');
     git('add .');
     expect(src.readStaged('src/a.ts')).toBe(first);
+  });
+
+  it('grounds a whole-file citation of an added file, never of a renamed one', () => {
+    const { dir, git } = repo();
+    writeFileSync(join(dir, 'CLAUDE.md'), KEBAB_MD);
+    mkdirSync(join(dir, 'app'));
+    writeFileSync(join(dir, 'app', 'old-name.tsx'), 'export const a = 1;\n');
+    git('add .');
+    git('commit -qm base');
+    git('mv app/old-name.tsx app/OldName.tsx');
+    writeFileSync(join(dir, 'app', 'UserBadge.tsx'), 'export const b = 2;\n');
+    git('add .');
+    const src = stagedGroundingSource(dir, ['app/OldName.tsx', 'app/UserBadge.tsx']);
+    expect(grounded(wholeFile('UserBadge.tsx — app/UserBadge.tsx'), src)).toHaveLength(1);
+    expect(grounded(wholeFile('OldName.tsx — app/OldName.tsx'), src)).toEqual([]);
+  });
+});
+
+describe('groundConventionFindings — whole-file citations name a file this change adds', () => {
+  const path = 'app/components/UserBadge.tsx';
+  const content = 'export function UserBadge() {\n  return null;\n}\n';
+  const kebab = (files: { head: string | null; staged?: string | null }, reviewed = [path]) => ({
+    reviewedFiles: reviewed,
+    readStaged: (file: string) =>
+      file === path
+        ? files.staged === undefined
+          ? content
+          : files.staged
+        : file === 'CLAUDE.md'
+          ? KEBAB_MD
+          : null,
+    readHead: (file: string) => (file === path ? files.head : null),
+    readDiff: () => '',
+  });
+  const added = kebab({ head: null });
+
+  it.each(['UserBadge.tsx', '`UserBadge.tsx`', path])(
+    'grounds %s cited with no line on an added file',
+    (quote) => {
+      expect(grounded(wholeFile(`${quote} — ${path}`), added)).toEqual([
+        expect.objectContaining({ offendingPath: path, offendingLine: null }),
+      ]);
+    },
+  );
+
+  it('never grounds it on a file that grew, was renamed, or has no readable staged blob', () => {
+    const grew = kebab({ head: 'export const a = 1;\n' });
+    const renamed = kebab({ head: content });
+    const unreadable = kebab({ head: null, staged: null });
+    for (const src of [grew, renamed, unreadable])
+      expect(grounded(wholeFile(`UserBadge.tsx — ${path}`), src)).toEqual([]);
+  });
+
+  it('drops a quote that is not the file name, or a file outside the reviewed set', () => {
+    expect(grounded(wholeFile(`PascalCase filename — ${path}`), added)).toEqual([]);
+    expect(grounded(wholeFile(`UserBadge.tsx — ${path}`), kebab({ head: null }, []))).toEqual([]);
+  });
+
+  it('drops it when the rule half does not ground', () => {
+    const raw = `VIOLATION: Never hand-edit a record. — AGENTS.md:3\nOFFENDING: UserBadge.tsx — ${path}\nVERDICT: FAIL — x`;
+    expect(grounded(raw, added)).toEqual([]);
+  });
+
+  it('never falls back to a whole-file reading when a line citation misses', () => {
+    expect(grounded(wholeFile(`UserBadge.tsx — ${path}:1`), added)).toEqual([]);
+  });
+
+  it('ends the citation at its bare path, so a prose line after it never joins the path', () => {
+    const raw = wholeFile(`UserBadge.tsx — ${path}`).replace(
+      '\nVERDICT',
+      '\nThe file name is PascalCase.\nVERDICT',
+    );
+    expect(grounded(raw, added)).toHaveLength(1);
+  });
+
+  it('keeps the next pair when its VIOLATION wraps onto a second line', () => {
+    const raw = [
+      'VIOLATION: All new files under app/ must use kebab-case filenames. — CLAUDE.md:3',
+      `OFFENDING: UserBadge.tsx — ${path}`,
+      'VIOLATION: All new files under app/ must use',
+      'kebab-case filenames. — CLAUDE.md:3',
+      `OFFENDING: export function UserBadge() { — ${path}:1`,
+      'VERDICT: FAIL — two',
+    ].join('\n');
+    expect(parseConventionFindingCandidates(raw).map((f) => f.offendingLine)).toEqual([null, 1]);
+  });
+
+  it('still reads a wrapped quote whose first line ends like a bare path to its real line', () => {
+    const raw = `${RULE}\nOFFENDING: const n = a - b.length\n  + c; — src/flows.ts:4\nVERDICT: FAIL — x`;
+    expect(parseConventionFindingCandidates(raw)).toEqual([
+      expect.objectContaining({ offendingPath: 'src/flows.ts', offendingLine: 4 }),
+    ]);
+  });
+
+  it('shares the waiver lens of a line citation of the same file and rule', () => {
+    const [lineless] = grounded(wholeFile(`UserBadge.tsx — ${path}`), added);
+    const [lined] = grounded(wholeFile(`export function UserBadge() { — ${path}:1`), added);
+    expect(conventionWaiverLens(lineless)).toBe(conventionWaiverLens(lined));
   });
 });
