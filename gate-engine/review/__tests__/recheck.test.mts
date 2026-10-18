@@ -274,7 +274,7 @@ describe('runReviewGate({ only }) — the recheck lane', () => {
     expect(evs).toContainEqual(
       expect.objectContaining({
         type: 'advisory_result',
-        gate: `review:${label}`,
+        gate: `review:${CORRECTNESS}`, // the digest's reviewer key, not the lens label
         detail: expect.stringContaining('the retry swallows the parse error'),
       }),
     );

@@ -195,7 +195,7 @@ describe('a lens-split reviewer', () => {
     expect(printed().filter((l) => l.includes('advisory (non-blocking)'))).toEqual([
       'guard-review: commit-guard [g] — advisory (non-blocking): `src/a.ts:1` — mobile passes the display status, unlike desktop',
     ]);
-    expect(advisoryRows().map((r) => r.gate)).toEqual(['review:commit-guard [g]']);
+    expect(advisoryRows().map((r) => r.gate)).toEqual(['review:commit-guard']); // reviewer key
   });
 
   it("gives each chunk part of a lens its own transcript, never the last chunk's", () => {

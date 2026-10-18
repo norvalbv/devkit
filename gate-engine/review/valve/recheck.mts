@@ -113,6 +113,6 @@ export function reportLensPartAdvisories(splitParts: Map<string, LensPart[]>): v
       `review-${label}`,
       composeTranscript(p.task.diffText, p.res.transcript),
     );
-    reportAdvisories(label, parseAdvisories(p.res.transcript), ref);
+    reportAdvisories(p.task.sel.reviewer.name, parseAdvisories(p.res.transcript), ref, label);
   }
 }
