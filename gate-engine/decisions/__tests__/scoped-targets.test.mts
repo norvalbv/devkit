@@ -90,6 +90,44 @@ describe('scopedTargets — semantic supplement (sc-1442)', () => {
     ]);
   });
 
+  it('an excluded slug leaves both channels and costs no semantic slot', async () => {
+    const root = repoWithDecisions([
+      ['foo', 'src/foo/**', 'F'],
+      ['bar', 'src/bar/**', 'B'],
+      ['baz', 'src/baz/**', 'Z'],
+      ['qux', 'src/qux/**', 'Q'],
+    ]);
+    const rows = ['foo', 'bar', 'baz', 'qux'].map((slug) => ({ slug }));
+    // SAFETY: scopedTargets reads only `slug` from a ranked row.
+    vi.mocked(rankAxes).mockImplementation(async (_q, k) => ({ rows: rows.slice(0, k) }) as never);
+    const blocks = await scopedTargets(['src/foo/a.ts'], 'q', 2, root, ['foo', 'bar']);
+    expect(vi.mocked(rankAxes).mock.calls[0]?.[1]).toBe(4);
+    expect(blocks.map((b) => [b.slug, b.via])).toEqual([
+      ['baz', 'semantic'],
+      ['qux', 'semantic'],
+    ]);
+  });
+
+  it('an excluded slug that does not rank still leaves at most k semantic hits', async () => {
+    const root = repoWithDecisions([
+      ['foo', 'src/foo/**', 'F'],
+      ['bar', 'src/bar/**', 'B'],
+      ['baz', 'src/baz/**', 'Z'],
+    ]);
+    const rows = ['foo', 'bar', 'baz'].map((slug) => ({ slug }));
+    // SAFETY: scopedTargets reads only `slug` from a ranked row.
+    vi.mocked(rankAxes).mockImplementation(async (_q, k) => ({ rows: rows.slice(0, k) }) as never);
+    const blocks = await scopedTargets([], 'q', 2, root, ['unranked']);
+    expect(blocks.map((b) => b.slug)).toEqual(['foo', 'bar']);
+  });
+
+  it('asks the ranker for exactly k when nothing is excluded', async () => {
+    const root = repoWithDecisions([['foo', 'src/foo/**', 'F']]);
+    vi.mocked(rankAxes).mockResolvedValue({ source: 'empty', rows: [] });
+    await scopedTargets([], 'q', 6, root);
+    expect(vi.mocked(rankAxes).mock.calls[0]?.[1]).toBe(6);
+  });
+
   it('a semantic-tier throw NEVER discards the scope matches (salt-safety, sc-1442)', async () => {
     // A caller derives its cache salt from the scope-match subset; if a query-only error collapsed
     // the whole result, supplying a commit message could move the salt — the exact violation of

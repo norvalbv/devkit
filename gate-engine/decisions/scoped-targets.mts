@@ -49,17 +49,21 @@ function rulingFor(
  * @param files changed files (scope-match key)
  * @param query free-text (plan terms) for the semantic supplement; '' skips it
  * @param k semantic top-k
+ * @param exclude slugs dropped from both channels before the semantic top-k is taken
  */
 export async function scopedTargets(
   files: string[],
   query: string,
   k = 6,
   cwd = process.cwd(),
+  exclude: readonly string[] = [],
 ): Promise<GoverningTarget[]> {
   const decisionsDir = resolveFromCwd(resolveGuardConfig(cwd), 'decisionsDir');
   if (decisionsDir == null) return []; // fail-open: nothing resolvable → nothing governs
   const scoped = files.length
-    ? loadScopedTargets(decisionsDir).filter((t) => matchScope(files, t.scopeGlobs))
+    ? loadScopedTargets(decisionsDir).filter(
+        (t) => matchScope(files, t.scopeGlobs) && !exclude.includes(t.slug),
+      )
     : [];
   const scopedSlugs = new Set(scoped.map((t) => t.slug));
   const blocks: GoverningTarget[] = scoped.map((t) => ({
@@ -74,8 +78,8 @@ export async function scopedTargets(
     // cache salt from the scope-match subset would see the salt move because a QUERY was supplied —
     // exactly what ship-gates-converge-not-restart forbids for the commit message.
     try {
-      const { rows } = await rankAxes(query, k, cwd);
-      for (const r of rows) {
+      const { rows } = await rankAxes(query, k + exclude.length, cwd);
+      for (const r of rows.filter((row) => !exclude.includes(row.slug)).slice(0, k)) {
         if (scopedSlugs.has(r.slug)) continue;
         const rf = rulingFor(r.slug, decisionsDir);
         if (rf) blocks.push({ slug: r.slug, ruling: rf.ruling, scope: rf.scope, via: 'semantic' });
