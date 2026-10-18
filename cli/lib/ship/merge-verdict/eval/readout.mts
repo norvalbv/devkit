@@ -135,7 +135,7 @@ function reverts(pull: VerdictPull, later: MergedPull, repo: string): boolean {
   return (
     later.title === `Revert "${pull.title}"` ||
     [...later.body.matchAll(REVERTS_LINE)].some(
-      ([, named, n]) => named === repo && Number(n) === pull.number,
+      ([, named, n]) => named.toLowerCase() === repo.toLowerCase() && Number(n) === pull.number,
     ) ||
     (pull.mergeOid !== null && later.body.includes(`This reverts commit ${pull.mergeOid}`))
   );

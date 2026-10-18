@@ -195,6 +195,11 @@ describe('scorePulls', () => {
     expect(score([pull()], [later({ files: [], ...overrides })]).rows[0].reverted).toBe(true);
   });
 
+  it('matches the revert line whatever case the repo is typed in', () => {
+    const undo = later({ title: 'chore: undo', body: 'Reverts Owner/Repo#10', files: [] });
+    expect(score([pull()], [undo]).rows[0].reverted).toBe(true);
+  });
+
   it('takes no revert of a longer PR number for this one', () => {
     const other = later({ title: 'chore: undo', body: `Reverts ${REPO}#101`, files: [] });
     expect(score([pull()], [other]).rows[0].reverted).toBe(false);
@@ -238,7 +243,13 @@ describe('parseSearchPage', () => {
     mergedAt: '2026-10-12T00:00:00Z',
     mergeCommit: { oid: B },
     files: { nodes: [{ path: 'x.mts' }] },
-    userContentEdits: { totalCount: 2, nodes: [{ diff: 'newest' }, { diff: 'oldest' }] },
+    userContentEdits: {
+      totalCount: 2,
+      nodes: [
+        { diff: 'newest', deletedAt: null },
+        { diff: 'oldest', deletedAt: null },
+      ],
+    },
   };
   const page = (nodes: unknown[], hasNextPage = true, issueCount = 336) =>
     JSON.stringify({
@@ -267,6 +278,24 @@ describe('parseSearchPage', () => {
 
   it("refuses a search past GitHub's 1000-result cap instead of scoring a silent subset", () => {
     expect(() => parseSearchPage(page([node], true, 1001))).toThrow('1001 PRs match');
+  });
+
+  it('refuses a PR with a deleted body revision instead of scoring a later one', () => {
+    const edits = [
+      { diff: 'newest', deletedAt: null },
+      { diff: null, deletedAt: '2026-10-13T00:00:00Z' },
+    ];
+    const deleted = { ...node, userContentEdits: { totalCount: 2, nodes: edits } };
+    expect(() => parseSearchPage(page([deleted]))).toThrow('#7 has a deleted body revision');
+  });
+
+  it('skips an edit that emptied the body, as on PR #998', () => {
+    const edits = [
+      { diff: 'newest', deletedAt: null },
+      { diff: null, deletedAt: null },
+    ];
+    const emptied = { ...node, userContentEdits: { totalCount: 2, nodes: edits } };
+    expect(parseSearchPage(page([emptied])).pulls[0].bodies).toEqual(['newest', 'current']);
   });
 
   it('refuses a malformed pull request node instead of dropping it', () => {

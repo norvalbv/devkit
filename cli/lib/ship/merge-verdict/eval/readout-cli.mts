@@ -29,7 +29,7 @@ const SEARCH = `query($q: String!, $after: String) {
     nodes { ... on PullRequest {
       number state title body headRefName headRefOid mergedAt mergeCommit { oid }
       files(first: 100) { nodes { path } }
-      userContentEdits(first: ${MAX_EDITS}) { totalCount nodes { diff } }
+      userContentEdits(first: ${MAX_EDITS}) { totalCount nodes { diff deletedAt } }
     } }
   }
 }`;
@@ -46,7 +46,7 @@ const pullNode = z.object({
   files: z.object({ nodes: z.array(z.object({ path: z.string() })) }).nullable(),
   userContentEdits: z.object({
     totalCount: z.number(),
-    nodes: z.array(z.object({ diff: z.string().nullable() })),
+    nodes: z.array(z.object({ diff: z.string().nullable(), deletedAt: z.string().nullable() })),
   }),
 });
 const pageSchema = z.object({
@@ -82,6 +82,12 @@ export function parseSearchPage(json: string): SearchPage {
         `#${pull.number} has more than ${MAX_EDITS} body edits; its first verdict is unreadable`,
       );
     }
+    // An edit that emptied the body has a null diff too, but no deletedAt, and carries no verdict.
+    if (pull.userContentEdits.nodes.some((edit) => edit.deletedAt !== null)) {
+      throw new Error(
+        `#${pull.number} has a deleted body revision; its first verdict is unreadable`,
+      );
+    }
     const edits = pull.userContentEdits.nodes.flatMap((edit) => edit.diff ?? []).reverse();
     return [
       {
@@ -111,17 +117,18 @@ const gh = (args: string[]): string =>
 
 function verdictPulls(repo: string): VerdictPull[] {
   const query = `repo:${repo} is:pr in:body "${VERDICT_SLOT.slice(5, -4)}"`;
-  const pulls: VerdictPull[] = [];
+  // Cursor paging over a live index can return one PR on two pages.
+  const pulls = new Map<number, VerdictPull>();
   let after: string | null = null;
   do {
     const cursor: string[] = after ? ['-f', `after=${after}`] : [];
     const page = parseSearchPage(
       gh(['api', 'graphql', '-f', `query=${SEARCH}`, '-f', `q=${query}`, ...cursor]),
     );
-    pulls.push(...page.pulls);
+    for (const pull of page.pulls) pulls.set(pull.number, pull);
     after = page.next;
   } while (after);
-  return pulls;
+  return [...pulls.values()];
 }
 
 const mergedSchema = z.array(
