@@ -119,6 +119,24 @@ describe('waiveCommand — round-trips through a real shell into the waive parse
   });
 });
 
+// zsh's EQUALS option, on by default, expands a bare leading `=word` to that command's path.
+describe('shellWord — a leading `=` survives a default zsh', () => {
+  const LEADING_EQUALS = ['=foo.ts', '==x', '='];
+
+  it('quotes a word that starts with `=` and leaves a later `=` bare', () => {
+    for (const word of LEADING_EQUALS) expect(shellWord(word)).toBe(`'${word}'`);
+    for (const word of ['a=b.ts', 'foo=']) expect(shellWord(word)).toBe(word);
+  });
+
+  it.skipIf(!hasShell('zsh')).each(LEADING_EQUALS)('zsh -f: %s', (word) => {
+    const script = `printf '%s\\0' ${shellWord(word)}`;
+    const out = spawnSync('zsh', ['-f', '-c', script], { encoding: 'utf8' });
+    expect(out.stderr).toBe('');
+    expect(out.status).toBe(0);
+    expect(out.stdout).toBe(`${word}\0`);
+  });
+});
+
 describe('waiveCommand — a lens that cannot round-trip prints no command', () => {
   it.each(UNSAFE_LENSES)('%j', (lens) => {
     expect(waiveCommand({ reviewer: REVIEWER, lens, fp: FP, base: BASE })).toBeNull();

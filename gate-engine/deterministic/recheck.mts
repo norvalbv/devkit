@@ -6,8 +6,8 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 
 // Shell-safe argv token: bare when it holds only characters no shell treats specially, else POSIX
-// single-quoted. A repo path with a space is ordinary here (devkit self-hosts at one).
-const SAFE_SHELL_ARG_RE = /^[\w@%+=:,./-]+$/;
+// single-quoted, as is a leading `=` (zsh expands it). A repo path with a space is ordinary here.
+const SAFE_SHELL_ARG_RE = /^(?!=)[\w@%+=:,./-]+$/;
 function shellArg(token: string, forceQuote = false): string {
   const bare = SAFE_SHELL_ARG_RE.test(token) && !forceQuote;
   return bare ? token : `'${token.replaceAll("'", "'\\''")}'`;
