@@ -1461,6 +1461,7 @@ else
     export DEVKIT_RUN_MODE=ship    # never inherit a caller's review allowlist into a real ship
     unset DEVKIT_SHIP_DRY_GATES DEVKIT_SHIP_DRY_REVIEWERS
   fi
+  ship_decision_smell_advisory "$WT" "$ROOT" || true   # read-only; the assertion below proves it
 # Preflight: nothing since staging is allowed to have touched the index. Cheap, and it fails BEFORE
 # the operator pays for a multi-minute gate chain.
   ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { ship_run_keep "staged set changed before the commit"; exit 1; }

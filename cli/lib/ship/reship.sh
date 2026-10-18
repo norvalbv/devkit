@@ -995,6 +995,7 @@ if [ "$REWRITE" -eq 1 ]; then export DEVKIT_SHIP_PR_BASE_SHA="$BASE"; else unset
 export DEVKIT_SHIP_SOURCE_HEAD="$CALLER_HEAD"   # pinned above, before staging (sc-2480)
 export DEVKIT_SHIP_MODE=reship   # tags the ship_attempt telemetry (retry onto an existing branch)
 export DEVKIT_RUN_MODE=ship      # never inherit a caller's review allowlist into a real ship
+ship_decision_smell_advisory "$WT" "$ROOT" || true   # read-only; the assertion below proves it
 # Preflight before the multi-minute chain, then prove the commit still holds the briefed work before
 # anything leaves the machine. Same invariants as new-ship (assert-staged-set.sh).
 ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { ship_run_keep "staged set changed before the commit"; exit 1; }
