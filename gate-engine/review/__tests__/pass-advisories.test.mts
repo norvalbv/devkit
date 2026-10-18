@@ -13,6 +13,7 @@ import { settleReviewOutcome, type SettleCtx } from '../recovery/settle.mts';
 import { REVIEWERS } from '../reviewers.mts';
 import type { ReviewOutcome } from '../runtime.mts';
 import { ReviewGateTiming } from '../telemetry/timing.mts';
+import { reportLensPartAdvisories } from '../valve/recheck.mts';
 
 const REVIEWER = 'commit-guard';
 const DIFF = 'diff --git a/src/a.ts b/src/a.ts\n+++ b/src/a.ts\n+let shared = 0;\n';
@@ -183,5 +184,34 @@ describe('a lens-split reviewer', () => {
     emitMergedLensResults(new Map([[REVIEWER, parts]]), 'sonnet');
     expect(advisoryRows()).toHaveLength(1);
     expect(advisoryRows()[0].detail).toContain('c.ts:3 — third');
+  });
+
+  it('on a lens recheck, reports each live PASS part under its part label', () => {
+    const task = { ...plan(cwd).tasks[0], splitOf: REVIEWER, group: 'g' };
+    const part = (transcript?: string): LensPart =>
+      // SAFETY: the report reads only res/secs/task, which this literal supplies.
+      ({ res: { ...outcome('pass', ''), transcript }, secs: 1, task }) as LensPart;
+    reportLensPartAdvisories(new Map([[REVIEWER, [part(ADVISED), part()]]])); // part() = cached
+    expect(printed().filter((l) => l.includes('advisory (non-blocking)'))).toEqual([
+      'guard-review: commit-guard [g] — advisory (non-blocking): `src/a.ts:1` — mobile passes the display status, unlike desktop',
+    ]);
+    expect(advisoryRows().map((r) => r.gate)).toEqual(['review:commit-guard [g]']);
+  });
+
+  it("gives each chunk part of a lens its own transcript, never the last chunk's", () => {
+    const task = { ...plan(cwd).tasks[0], splitOf: REVIEWER, group: 'g' };
+    const chunk = (index: number): LensPart =>
+      // SAFETY: the report reads only res/task (task.chunk.index for the label), supplied here.
+      ({
+        res: outcome('pass', `ADVISORY: c${index}.ts:1 — chunk ${index}\nVERDICT: PASS`),
+        secs: 1,
+        task: { ...task, chunk: { index } },
+      }) as LensPart;
+    reportLensPartAdvisories(new Map([[REVIEWER, [chunk(0), chunk(1)]]]));
+    const refs = printed()
+      .filter((l) => l.includes('full reasoning'))
+      .map((l) => l.split('guard-review transcript ')[1]);
+    expect(refs).toHaveLength(2);
+    expect(new Set(refs).size).toBe(2);
   });
 });

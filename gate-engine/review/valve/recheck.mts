@@ -1,8 +1,11 @@
 /** `guard-review lens <reviewer>[:<lens>]`: re-judge one reviewer or correctness lens group through
  * the gate's own path, so a PASS lands on the part key a full gate reads — never a reviewer-level one. */
 
-import type { LensPart, ReviewTask } from '../lens/split.mts';
+import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mts';
+import { type LensPart, type ReviewTask, taskLabel } from '../lens/split.mts';
 import { isShipLane } from '../cascade/consumer-assets.mts';
+import { parseAdvisories } from '../contracts/response.mts';
+import { reportAdvisories } from '../evidence/base-context.mts';
 import { emitReviewSkipped } from '../evidence/scope.mts';
 import { lensGroupId, resolveLensGroups } from '../lens/groups.mts';
 import { REVIEWERS, type ReviewerSelection } from '../reviewers.mts';
@@ -98,4 +101,18 @@ export function printRemedy(
 ): void {
   if (f.escalated) console.error(`   Remedy: ${reviewerSkipRemedy(f.name)}`);
   if (!only) console.error(recheckHint(f.name, splitParts.get(f.name), isShipLane()));
+}
+
+/** A lens recheck emits no merged row, so each live PASS part reports its own advisories. A cached
+ * part carries no transcript: its advisories already replayed with its cache line. */
+export function reportLensPartAdvisories(splitParts: Map<string, LensPart[]>): void {
+  for (const p of [...splitParts.values()].flat()) {
+    if (p.res.status !== 'pass' || !p.res.transcript) continue;
+    const label = taskLabel(p.task);
+    const ref = saveTranscript(
+      `review-${label}`,
+      composeTranscript(p.task.diffText, p.res.transcript),
+    );
+    reportAdvisories(label, parseAdvisories(p.res.transcript), ref);
+  }
 }

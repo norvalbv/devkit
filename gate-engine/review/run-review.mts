@@ -57,7 +57,13 @@ import { gitCached, headHash, stagedFiles, stagedTreeHash } from './evidence/sta
 import { reviewerTargetSalts } from './evidence/targets-block.mts';
 import { emitMergedLensResults } from './lens/merge-results.mts';
 import { reportInconclusive } from './valve/inconclusive.mts';
-import { narrowSelection, narrowTasks, printRemedy, type RecheckTarget } from './valve/recheck.mts';
+import {
+  narrowSelection,
+  narrowTasks,
+  printRemedy,
+  type RecheckTarget,
+  reportLensPartAdvisories,
+} from './valve/recheck.mts';
 import {
   mapLimit,
   planReviewWork,
@@ -450,7 +456,9 @@ export async function runReviewGate(
   );
   if (progressFile) clearProgress(progressFile); // ran to completion → nothing unfinished to report
 
-  if (!only?.lens) emitMergedLensResults(splitParts, firstModel); // never a recheck's partial vector
+  // Never a recheck's partial vector: its live parts report their own advisories instead.
+  if (only?.lens) reportLensPartAdvisories(splitParts);
+  else emitMergedLensResults(splitParts, firstModel);
   const fails = results.filter((r) => r.status === 'fail');
   const findingsPrinted = new Set<string>();
   let hinted = false;
