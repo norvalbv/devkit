@@ -8,6 +8,8 @@ const CODE_FENCE_RE = /^\s*```/;
 const CITATION_SEPARATOR_RE = /(?:^|\s)[—–-]\s/g;
 const TERMINAL_LINE_RE = /:(\d+)(?:[-–]\d+)?\s*$/;
 const LINELESS_RULE_LOCATION_RE = /(?:^|\/)CLAUDE\.md(?:\s+\([^)]*\))?$/i;
+// A whole-file OFFENDING ends at a bare path: one token, no `:line`, so a prose line never joins it.
+const BARE_PATH_LOCATION_RE = /^`?[^\s`]*[./][^\s`]*`?$/;
 
 export function splitConventionCitation(block: string): { quote: string; location: string } | null {
   const separator = [...block.matchAll(CITATION_SEPARATOR_RE)].at(-1);
@@ -45,7 +47,11 @@ export function parseConventionEvidencePairs(raw: string): ConventionEvidencePai
   let mode: 'idle' | 'violation' | 'offending' = 'idle';
   let buffer: string[] = [];
   let pendingViolation: string | null = null;
-  const blockHasTrailer = () => hasConventionCitationTrailer(buffer.join(' '));
+  const blockHasTrailer = () => {
+    const block = buffer.join(' ');
+    if (hasConventionCitationTrailer(block)) return true;
+    return mode === 'offending' && BARE_PATH_LOCATION_RE.test(citationLocation(block) ?? '');
+  };
 
   const finalize = () => {
     if (mode === 'violation' && buffer.length) pendingViolation = buffer.join(' ');
@@ -138,7 +144,8 @@ export interface ConventionFinding {
   rulePath: string;
   ruleLine: number | null;
   offendingPath: string;
-  offendingLine: number;
+  /** Null for a whole-file citation (a rule about the file itself, e.g. its name). */
+  offendingLine: number | null;
   /** The quoted offending text, verbatim; grounding (conventions-grounding.mts) checks it exists. */
   offendingQuote: string;
   /** The quoted rule text, verbatim; the only identity a lineless rule citation carries. */
@@ -158,13 +165,13 @@ export function parseConventionLocation(location: string): ConventionCitation | 
   return path ? { path, line: Number(line[1]) } : null;
 }
 
-/** Parse the last spaced dash trailer; only OFFENDING citations require a numeric line. */
-function parseConventionCitation(block: string, requireLine: boolean): ConventionCitation | null {
+/** Parse the last spaced dash trailer; a lineless OFFENDING is a whole-file citation. */
+function parseConventionCitation(block: string, offending: boolean): ConventionCitation | null {
   const location = citationLocation(block);
   if (!location) return null;
   const normalized = parseConventionLocation(location);
   if (normalized) return normalized;
-  return !requireLine && LINELESS_RULE_LOCATION_RE.test(location)
+  return offending || LINELESS_RULE_LOCATION_RE.test(location)
     ? { path: location, line: null }
     : null;
 }
@@ -183,7 +190,7 @@ export function parseConventionFindingCandidates(raw: string): ConventionFinding
   for (const pair of parseConventionEvidencePairs(evidence)) {
     const violation = parseConventionCitation(pair.violation, false);
     const offending = parseConventionCitation(pair.offending, true);
-    if (!violation || !offending || offending.line === null) continue;
+    if (!violation || !offending) continue;
     findings.push({
       rulePath: violation.path,
       ruleLine: violation.line,

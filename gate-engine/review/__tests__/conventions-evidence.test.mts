@@ -476,3 +476,56 @@ describe('conventions rule grounding — a CLI-appended decision note', () => {
     expect(exec.mock.calls[1][0].args[1]).toContain('governing CLAUDE.md files');
   });
 });
+
+describe('conventions whole-file citations — a filename rule', () => {
+  const RULE = 'All new files under src/components/ must use kebab-case filenames.';
+  const BADGE = 'src/components/UserBadge.json';
+  const fail =
+    `VIOLATION: ${RULE} — CLAUDE.md:3\n` +
+    `OFFENDING: UserBadge.json — ${BADGE}\n` +
+    'VERDICT: FAIL — UserBadge.json is not kebab-case';
+
+  // A data file, so no code reviewer reads the stubbed FAIL. `committed` puts it at HEAD first,
+  // so the change only edits it in place.
+  const badgeRepo = (committed: boolean) => {
+    const repo = consumerRepo();
+    mkdirSync(join(repo, 'src', 'components'), { recursive: true });
+    writeFileSync(join(repo, 'CLAUDE.md'), `# Naming\n\n${RULE}\n`);
+    if (committed) writeFileSync(join(repo, BADGE), '{}\n');
+    execSync('git add .', { cwd: repo });
+    execSync(
+      'git -c user.email=devkit@example.test -c user.name="Devkit Test" -c commit.gpgsign=false commit -qm base',
+      { cwd: repo },
+    );
+    writeFileSync(join(repo, BADGE), '{\n  "a": 1\n}\n');
+    execSync('git add .', { cwd: repo });
+    return repo;
+  };
+
+  it('blocks when the judge names a file this change adds', async () => {
+    const exec = vi.fn(async () => fail);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(badgeRepo(false), { exec })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain('conventions-reviewer FAILED');
+  });
+
+  it('strict mode names the whole-file form in its retry and blocks on a lineless retry', async () => {
+    process.env.GUARD_AI_STRICT = '1';
+    const fabricated = fail.replace(`UserBadge.json — ${BADGE}`, `UserBadgeJson — ${BADGE}:1`);
+    const exec = vi.fn().mockResolvedValueOnce(fabricated).mockResolvedValueOnce(fail);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(badgeRepo(false), { exec })).toBe(1);
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(exec.mock.calls[1][0].args[1]).toContain('`OFFENDING: <file basename> — <file path>`');
+  });
+
+  it('stays inconclusive for the same citation of a file modified in place', async () => {
+    const exec = vi.fn(async () => fail);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(badgeRepo(true), { exec })).toBe(2);
+    expect(err.mock.calls.flat().join('\n')).toContain('or the name of a file it adds');
+  });
+});
