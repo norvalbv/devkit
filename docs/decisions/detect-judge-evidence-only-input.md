@@ -19,3 +19,4 @@ created: 2026-07-01
 **Revisit-when:** the bench shows evidence-only input missing decisions (DECISION recall drop on grown corpora), or commit-path latency budgets relax enough that an agentic detect pass (alignment's shape) becomes affordable per smelled commit
 **Scope:** gate-engine/decisions/detect.mjs
 **Source:** collab
+- 2026-10-18 — **Scope:** gate-engine/decisions/detect.mts — detect.mjs became detect.mts in the TypeScript migration, so the recorded glob matched nothing and this ruling never loaded.
