@@ -114,6 +114,13 @@ describe('readout-cli', () => {
     expect(calls).toContainEqual(expect.stringContaining('--search merged:>=2026-10-12'));
   });
 
+  it('scores a PR once when two search pages both return it', () => {
+    const twice = JSON.stringify(page([node(1, 'MERGED', A), node(2, 'OPEN', B)], false));
+    const result = fakeGh({ ...ANSWERS, page2: twice }).run();
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('first printed verdict: 2 PRs;');
+  });
+
   it('ends non-zero naming the failure when a gh call fails', () => {
     const { [`checks-${A}`]: _missing, ...rest } = ANSWERS;
     const result = fakeGh(rest).run('--repo', 'owner/repo');
