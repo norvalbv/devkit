@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { blockingFindings } from '../../../cli/lib/ship/digest/blocking.mts';
 import { blockingNote, fingerprint, loadOverrides, reconcile } from '../overrides.mts';
 import {
+  shellQuote,
   shellWord,
   UNSAFE_TEXT_RE,
   WAIVE_RATIONALE_PLACEHOLDER,
@@ -78,6 +79,15 @@ describe('waiveCommand — round-trips through a real shell into the waive parse
 
   it('quotes every word holding `#`, which extendedglob zsh would glob', () => {
     expect(shellWord('a:src/a.ts@CLAUDE.md#1a2b3c4d')).toBe("'a:src/a.ts@CLAUDE.md#1a2b3c4d'");
+  });
+
+  it('shellQuote quotes even a plain word, and shellWord leaves it bare', () => {
+    expect(shellQuote('a.ts')).toBe("'a.ts'");
+    expect(shellWord('a.ts')).toBe('a.ts');
+  });
+
+  it('an empty word prints as an empty quoted word, so a pasted argv keeps its slot', () => {
+    expect(shellWord('')).toBe("''");
   });
 
   it('omits a base the waive CLI would refuse, so the printed command still parses', () => {

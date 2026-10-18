@@ -16,6 +16,7 @@ import { treeBlobsAtRef } from '../../../gate-engine/ratchets/tree-blobs.mts';
 import { assignedNames, ownDirVars, scanShellScript } from '../doctor/hook-gate-scan.mts';
 import { commitIndexEnv } from '../../../gate-engine/ratchets/commit-index.mts';
 import { failLine } from '../../../gate-engine/deterministic/reason.mts';
+import { shellQuote } from '../../../gate-engine/review/valve/shell-word.mts';
 import { inspectReleaseOnlyDist, printReleaseOnlyDist } from './preflight/release-only-dist.mts';
 import { staleNewDist } from './preflight/stale-new-dist.mts';
 import {
@@ -364,10 +365,6 @@ export async function inspectDistIntegrity(
     missing,
     stale: staleNewDist(root, [...briefed].filter(shipping), atBase, distArtifact),
   };
-}
-
-export function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 export function printDistIntegrityFailure(report: DistIntegrityReport): number {

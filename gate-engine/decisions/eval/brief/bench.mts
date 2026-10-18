@@ -24,6 +24,7 @@ import { parseArgs } from 'node:util';
 import { packageDir } from '../../../../cli/lib/fs-helpers.mts';
 import { HOOK_REGISTRATIONS } from '../../../../cli/lib/install/hook-registration-ledger/registrations.mts';
 import { hookScriptsFor } from '../../../../cli/lib/install/hook-registration-ledger/selection.mts';
+import { shellQuote } from '../../../review/valve/shell-word.mts';
 import { cleanBenchEnv } from '../bench-env.mts';
 import { openCheckpoint, progressFile, readProgress } from '../checkpoint.mts';
 import {
@@ -74,7 +75,6 @@ type AgentOut = { code: number | null; json: any; timedOut: boolean; stderr?: st
 type Options = { [flag: string]: string | boolean | undefined };
 
 const readJson = (file: string) => JSON.parse(readFileSync(file, 'utf8'));
-const shq = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`;
 const option = (values: Options, key: string) => {
   const value = values[key];
   return value === undefined || value === true || value === false ? undefined : value;
@@ -114,7 +114,7 @@ export function tappedHooks(registrations = HOOK_REGISTRATIONS.decisions) {
   const byEvent: Record<string, { matcher: string; hooks: { type: string; command: string }[] }[]> =
     {};
   for (const { event, matcher, registrationId, command } of registrations) {
-    const tapped = `node ${shq(TAP)} ${shq(registrationId)} ${shq(command)}`;
+    const tapped = `node ${shellQuote(TAP)} ${shellQuote(registrationId)} ${shellQuote(command)}`;
     (byEvent[event] ??= []).push({ matcher, hooks: [{ type: 'command', command: tapped }] });
   }
   return byEvent;
@@ -132,9 +132,13 @@ export function setupScratch(taskDir: string, hooks: boolean, overlay?: string):
   appendFileSync(path.join(dir, '.git', 'info', 'exclude'), 'node_modules/\n.claude/\n');
   const bin = path.join(dir, 'node_modules', '.bin');
   mkdirSync(bin, { recursive: true });
-  writeFileSync(path.join(bin, 'guard-decisions'), `#!/bin/sh\nexec node ${shq(STUB)} "$@"\n`, {
-    mode: 0o755,
-  });
+  writeFileSync(
+    path.join(bin, 'guard-decisions'),
+    `#!/bin/sh\nexec node ${shellQuote(STUB)} "$@"\n`,
+    {
+      mode: 0o755,
+    },
+  );
   if (hooks) {
     const hookDir = path.join(dir, '.claude', 'hooks');
     mkdirSync(hookDir, { recursive: true });
