@@ -24,7 +24,8 @@ function configuredOverlay(root: string): boolean | undefined {
     return overlayConfigured(root);
   } catch (error) {
     // SAFETY: Node filesystem failures carry ErrnoException.code; a parse error carries none.
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    const { code } = error as NodeJS.ErrnoException;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return undefined; // ENOTDIR: `.devkit` is a file
     throw new Error(
       `${join(root, '.devkit/config.json')} could not be read (${String(error)}): devkit cannot tell whether this is an overlay install, so no baseline was changed. Repair or restore the file by hand.`,
       { cause: error },
