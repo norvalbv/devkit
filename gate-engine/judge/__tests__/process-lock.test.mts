@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -132,6 +140,17 @@ describe('process lock', () => {
     expect(existsSync(lock)).toBe(false);
     const started = Date.now();
     expect(withProcessLock(lock, () => 'again', { ...LABEL, waitMs: 0 })).toBe('again');
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it('surfaces a parent path that cannot exist at once, rather than as a held lock', () => {
+    // A dangling `.devkit` symlink fails every mkdir with ENOENT; waiting reports a phantom holder.
+    const root = join(tempLock(), '..');
+    symlinkSync(join(root, 'missing'), join(root, 'dangling'));
+    const started = Date.now();
+    expect(() => withProcessLock(join(root, 'dangling', 'l.lock'), () => 1, LABEL)).toThrow(
+      expect.objectContaining({ code: 'ENOENT' }),
+    );
     expect(Date.now() - started).toBeLessThan(1_000);
   });
 

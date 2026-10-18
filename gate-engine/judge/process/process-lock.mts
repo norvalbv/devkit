@@ -93,15 +93,15 @@ function removeIfEmpty(dir: string): void {
 function tryTake(dir: string, nonce: string): boolean {
   // Sibling names end in `.lock` so a consumer's `.devkit/*.lock` ignore also hides crash litter.
   const staged = `${dir}.new-${nonce}.lock`;
+  mkdirSync(staged, { recursive: true }); // a parent that can never exist throws here, at once
   try {
-    mkdirSync(staged, { recursive: true });
     writeFileSync(join(staged, nonce), `${process.pid}\n${ownIdentity()}`);
     renameSync(staged, dir);
     return true;
   } catch (cause) {
     rmSync(staged, { recursive: true, force: true });
     const code = errnoCode(cause);
-    if (code === 'ENOENT') return false; // the parent was removed mid-take: retry recreates it
+    if (code === 'ENOENT') return false; // the parent was removed mid-take: the next mkdir recreates it
     if (!['ENOTEMPTY', 'EEXIST', 'EPERM'].includes(code ?? '')) throw cause;
     removeIfEmpty(dir); // a leftover empty directory (a crash mid-release) must not block forever
     return false;
