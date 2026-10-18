@@ -170,6 +170,8 @@ case "$tool" in
   guard-comments) exit \${COMMENTS_RC:-0};;
   guard-decisions) exit \${DEC_RC:-0};;
   guard-review)
+    echo "\${DEVKIT_REMEDY_DIR:-none}" >> "$HOME/remedy-dirs.log"
+    [ -z "\${DEVKIT_REMEDY_DIR:-}" ] || [ -d "$DEVKIT_REMEDY_DIR" ] || echo missing >> "$HOME/remedy-dirs.log"
     case "$1" in
       completeness)
         # COMP_SLOW_TERM: a judge that does not die the instant it is signalled. It releases the
