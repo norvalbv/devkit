@@ -1,8 +1,9 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { findDrift, findPartialDrift, repoFiles, runDrift } from '../drift.mts';
+import { matchesRepoGlob } from '../../../skills/_devkit/review-roots.mjs';
+import { findDrift, findPartialDrift, literalPrefix, repoFiles, runDrift } from '../drift.mts';
 import { resolveSupersession } from '../recall/supersession.mts';
 
 /** A Target block with a Scope — the only shape drift cares about. */
@@ -170,12 +171,84 @@ describe('decision drift (scope no longer resolves)', () => {
     expect(findPartialDrift(root, decisions)).toEqual([]);
   });
 
+  // src/** absorbs the dot-dir root, so only the walk of src can reach .storybook.
+  it('enters a named dot-directory under a broader Scope root, and one after a wildcard', () => {
+    mkdirSync(join(root, 'src', '.storybook'), { recursive: true });
+    writeFileSync(join(root, 'src', '.storybook', 'main.ts'), '\n');
+    mkdirSync(join(root, 'pkgs', 'ui', '.config'), { recursive: true });
+    writeFileSync(join(root, 'pkgs', 'ui', '.config', 'x.json'), '\n');
+    const scope = 'src/**,src/.storybook/**,pkgs/*/.config/**';
+    writeFileSync(join(decisions, 'absorbed.md'), target('absorbed', scope));
+    expect(findPartialDrift(root, decisions)).toEqual([]);
+  });
+
   // A walk cut short at the file cap never saw the rest of the tree, so it cannot call a glob dead.
   it('concludes no partial drift when the walk hit its file cap', () => {
     // Whichever top-level dir the walk reads first, the other glob was simply never reached.
     writeFileSync(join(decisions, 'capped.md'), target('capped', 'docs/**,src/**'));
     expect(findPartialDrift(root, decisions, 1)).toEqual([]);
     expect(findPartialDrift(root, decisions)).toEqual([]);
+  });
+
+  // A whole-repo walk spent its cap on an unscoped sibling and called the scoped tree dead.
+  it('walks only Scope roots, so an oversized unscoped sibling cannot starve a live glob', () => {
+    mkdirSync(join(root, 'aaa'));
+    for (let i = 0; i < 5; i++) writeFileSync(join(root, 'aaa', `f${i}.mts`), '\n');
+    mkdirSync(join(root, 'zzz'));
+    writeFileSync(join(root, 'zzz', 'x.mts'), '\n');
+    writeFileSync(join(decisions, 'far.md'), target('far', 'zzz/**'));
+    expect(findDrift(root, decisions, 3)).toEqual([]);
+  });
+
+  it('concludes nothing and exits 2 when the Scope roots reach the file budget', () => {
+    writeFileSync(join(root, 'src', 'live', 'more.mts'), '\n');
+    writeFileSync(join(decisions, 'wide.md'), target('wide', 'src/**'));
+    writeFileSync(join(decisions, 'rotted.md'), target('rotted', 'src/gone/**'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const code = runDrift(root, decisions, 1);
+    const printed = error.mock.calls.flat().join('\n');
+    error.mockRestore();
+    expect(code).toBe(2);
+    expect(printed).toContain('reach at least 1 files');
+    expect(printed).not.toContain('NO LONGER LOADED');
+    expect(findDrift(root, decisions, 1)).toEqual([]);
+  });
+
+  it('still exits 1 on a dangling Supersedes when the walk could not conclude', () => {
+    writeFileSync(join(decisions, 'wide.md'), target('wide', 'src/**'));
+    const dangling = supersedingTarget('bad', '2026-06-14', 'r', 'nope#target:2026-06-13');
+    writeFileSync(join(decisions, 'bad.md'), dangling);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(runDrift(root, decisions, 1)).toBe(1);
+    vi.restoreAllMocks();
+  });
+
+  it('a literal file glob and a glob opening with a wildcard both resolve', () => {
+    writeFileSync(join(decisions, 'file.md'), target('file', 'src/live/kept.mts'));
+    writeFileSync(join(decisions, 'anywhere.md'), target('anywhere', '**/kept.mts'));
+    expect(findDrift(root, decisions)).toEqual([]);
+  });
+
+  // The gate matches git paths case-sensitively, and never sees a path outside the repository.
+  it('reports a case-only match, a parent-directory escape and a path through a file as drifted', () => {
+    const sibling = mkdtempSync(join(tmpdir(), 'dk-drift-sibling-'));
+    writeFileSync(join(sibling, 'x.mts'), '\n');
+    writeFileSync(join(decisions, 'cased.md'), target('cased', 'Src/live/**'));
+    writeFileSync(join(decisions, 'escape.md'), target('escape', `../${basename(sibling)}/**`));
+    writeFileSync(join(decisions, 'under-file.md'), target('under-file', 'src/live/kept.mts/x'));
+    const slugs = findDrift(root, decisions).map((d) => d.slug);
+    expect(slugs).toEqual(['cased', 'escape', 'under-file']);
+    rmSync(sibling, { recursive: true, force: true });
+  });
+
+  it('dedupes Scope roots by whole segment, so src/main does not swallow src/mainline', () => {
+    mkdirSync(join(root, 'src', 'main'));
+    writeFileSync(join(root, 'src', 'main', 'a.mts'), '\n');
+    mkdirSync(join(root, 'src', 'mainline'));
+    writeFileSync(join(root, 'src', 'mainline', 'x.mts'), '\n');
+    writeFileSync(join(decisions, 'main.md'), target('main', 'src/main/**'));
+    writeFileSync(join(decisions, 'line.md'), target('line', 'src/mainline/x.mts'));
+    expect(findDrift(root, decisions)).toEqual([]);
   });
 
   it('concludes no partial drift on an empty tree', () => {
@@ -376,5 +449,21 @@ describe('same-day Target blocks get distinct ids', () => {
       supersedingTarget('b', '2026-08-01', 'newer', 'a#target:2026-07-25~2'),
     );
     expect(resolveSupersession(decisions).unresolved).toEqual([]);
+  });
+});
+
+// drift walks only literalPrefix(g); a path the gate's glob accepts outside it would read as dead.
+describe('literalPrefix bounds every path the gate glob accepts', () => {
+  it.each([
+    ['a/**', 'a/b/c.ts', 'a'],
+    ['a/*.ts', 'a/x.ts', 'a'],
+    ['a/b?c/d', 'a/bxc/d', 'a'],
+    ['**/x', 'p/q/x', ''],
+    ['a/**/b', 'a/z/b', 'a'],
+    ['a/b.ts', 'a/b.ts', 'a/b.ts'],
+  ])('%s', (glob, sample, prefix) => {
+    expect(matchesRepoGlob(sample, glob)).toBe(true);
+    expect(literalPrefix(glob)).toBe(prefix);
+    expect(prefix === '' || sample === prefix || sample.startsWith(`${prefix}/`)).toBe(true);
   });
 });
