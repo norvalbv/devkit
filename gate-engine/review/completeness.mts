@@ -342,9 +342,8 @@ export async function runCompleteness(
       return finish(0, 'full', stickyDuration);
     }
     const changed = stagedTargetChanges(files, cwd);
-    const targets = (
-      await scopedTargets(files, message.split('\n')[0] ?? '', 6, cwd).catch(() => [])
-    ).filter((t) => !changed.includes(t.slug));
+    const subject = message.split('\n')[0] ?? '';
+    const targets = await scopedTargets(files, subject, 6, cwd, changed).catch(() => []);
     // The FULL --stat rides uncapped ahead of the evidence: on a branch-sized commit the caps
     // drop whole files, but the judge must at least SEE the complete file/churn map of what it
     // is being asked to gap-check. Diff prefixes are forced ON-config so a consumer's
