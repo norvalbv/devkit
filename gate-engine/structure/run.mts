@@ -26,6 +26,7 @@ import { ESLint, type Linter } from 'eslint'; // devkit's OWN eslint (now a depe
 import { z } from 'zod';
 import { resolveGuardConfig } from '../config.mts';
 import { gitPrefix, splitNul } from '../ratchets/git-index.mts';
+import { deletionProbes, runDeletionProbes } from './deletion-probe.mts';
 import { buildStructureConfigs } from './eslint-config.mts';
 import {
   eslintNodeFlags,
@@ -64,6 +65,7 @@ interface StagedPlan {
   targets: string[];
   probeScopes: StagedScope[];
   deferred: string[];
+  stagedPolicy: boolean;
 }
 
 // ESLint throws "No files matching the pattern" for an absent tree and "…are ignored" when every file
@@ -139,6 +141,7 @@ export function planStagedStructureLint(
     targets: unique(targets),
     probeScopes: [...probeScopes.values()],
     deferred: unique(deferred),
+    stagedPolicy,
   };
 }
 
@@ -152,7 +155,8 @@ function untrackedPaths(cwd: string): string[] {
   return gitPaths(cwd, ['ls-files', '--full-name', '--others', '--exclude-standard', '-z']);
 }
 
-function destructivePaths(cwd: string): string[] {
+// `paths` holds both sides of a rename; `removed` only what the commit takes away.
+function destructivePaths(cwd: string) {
   const fields = splitNul(
     execFileSync('git', ['diff', '--cached', '--name-status', '-z', '--diff-filter=DR'], {
       cwd,
@@ -161,15 +165,15 @@ function destructivePaths(cwd: string): string[] {
     }).toString(),
   );
   const paths: string[] = [];
+  const removed: string[] = [];
   for (let index = 0; index < fields.length;) {
     const status = fields[index++] ?? '';
-    if (status.startsWith('R')) {
-      paths.push(fields[index++] ?? '', fields[index++] ?? '');
-    } else if (status.startsWith('D')) {
-      paths.push(fields[index++] ?? '');
-    }
+    const from = fields[index++] ?? '';
+    removed.push(from);
+    paths.push(from);
+    if (status.startsWith('R')) paths.push(fields[index++] ?? '');
   }
-  return paths.filter(Boolean);
+  return { paths: paths.filter(Boolean), removed: removed.filter(Boolean) };
 }
 
 function toCwdPaths(paths: string[], prefix: string): string[] {
@@ -305,7 +309,9 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
     );
     // Name-status preserves both sides of a rename, unlike name-only. Either side can remove a
     // required sibling, so either must probe its containing structure root.
-    const destructive = toCwdPaths(destructivePaths(cwd), prefix);
+    const staged = destructivePaths(cwd);
+    const destructive = toCwdPaths(staged.paths, prefix);
+    const removed = toCwdPaths(staged.removed, prefix);
     // Untracked sources also change the tree observed by a topology parser, so they carry the
     // same deferral rule as tracked working-tree edits.
     const unstaged = unique(
@@ -322,14 +328,24 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
     // A probe also reads worktree bytes. Do not select a dirty source as the representative file
     // for a deletion/rename check; its result would not describe the staged tree either.
     const unstableSources = new Set(unstaged);
-    const probes = plan.probeScopes.map((scope) => ({
-      scope,
-      target: firstProbeFile(cwd, scope, unstableSources),
-    }));
+    // A grammar deletion probes a synthetic path in each removed folder (deletion-probe.mts); a real
+    // file still probes the preset leg and a staged policy edit.
+    const probes = plan.probeScopes
+      .filter((scope) => scope.leg === 'preset' || plan.stagedPolicy)
+      .map((scope) => ({ scope, target: firstProbeFile(cwd, scope, unstableSources) }));
+    const deletions = plan.probeScopes.flatMap((scope) => {
+      const inScope = removed.filter((file) => pathInScope(file, scope));
+      if (scope.leg !== 'grammar' || !inScope.length) return [];
+      return [{ scope, synthetic: deletionProbes(cwd, scope.root, inScope) }];
+    });
     const probeTargets = probes
       .map((probe) => probe.target)
       .filter((target): target is string => target !== null);
-    const unprobedRoots = probes.filter((probe) => probe.target === null).map((p) => p.scope.root);
+    const unprobedRoots = unique([
+      ...probes.filter((probe) => probe.target === null).map((p) => p.scope.root),
+      ...deletions.filter((probe) => probe.synthetic === null).map((p) => p.scope.root),
+    ]);
+    const syntheticProbes = deletions.flatMap((probe) => probe.synthetic ?? []);
     // Deferred input was inspected by nothing, so it is could-not-run — never folded into a clean 0.
     const results: StructureGateResult[] = [];
     if (plan.deferred.length) {
@@ -355,6 +371,8 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
     const grammarFiles = legFiles('grammar');
     if (presetFiles.length) results.push(runPresetLint(cwd, presetFiles));
     if (grammarFiles.length) results.push(await runGrammarLint(cwd, grammarFiles));
+    if (syntheticProbes.length)
+      results.push(await runDeletionProbes(cwd, syntheticProbes, removed));
     return withUncompiledWalls(cwd, combineStructureResults(results));
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
