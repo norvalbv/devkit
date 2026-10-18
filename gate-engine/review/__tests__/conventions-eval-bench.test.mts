@@ -773,18 +773,22 @@ describe('appendLedger', () => {
 });
 
 describe('blockingAuthorityByGoldSlot — whole-file citations', () => {
-  it('credits a gold slot matched to a lineless OFFENDING the parser keeps', () => {
-    const raw =
-      'VIOLATION: All new files must use kebab-case filenames. — CLAUDE.md:5\n' +
-      'OFFENDING: UserBadge.tsx — app/components/UserBadge.tsx\n' +
-      'VERDICT: FAIL — not kebab-case';
-    const validated = parseConventionFindings(raw);
-    expect(validated).toEqual([expect.objectContaining({ offendingLine: null })]);
-    const outcomes = [
-      { slotId: 'g1', kind: 'gold' as const, match: 1, stable: true, outage: false },
-    ];
-    expect(blockingAuthorityByGoldSlot(outcomes, parseFindings(raw), validated)).toEqual({
-      g1: true,
-    });
-  });
+  // Both sides key the raw location, so a decorated path still meets its own validated key.
+  it.each(['app/components/UserBadge.tsx', '`./app/components/UserBadge.tsx`'])(
+    'credits a gold slot matched to a lineless OFFENDING the parser keeps (%s)',
+    (loc) => {
+      const raw =
+        'VIOLATION: All new files must use kebab-case filenames. — CLAUDE.md:5\n' +
+        `OFFENDING: UserBadge.tsx — ${loc}\n` +
+        'VERDICT: FAIL — not kebab-case';
+      const validated = parseConventionFindings(raw);
+      expect(validated).toEqual([expect.objectContaining({ offendingLine: null })]);
+      const outcomes = [
+        { slotId: 'g1', kind: 'gold' as const, match: 1, stable: true, outage: false },
+      ];
+      expect(blockingAuthorityByGoldSlot(outcomes, parseFindings(raw), validated)).toEqual({
+        g1: true,
+      });
+    },
+  );
 });
