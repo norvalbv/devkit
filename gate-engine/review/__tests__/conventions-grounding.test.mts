@@ -716,6 +716,14 @@ describe('groundConventionFindings — whole-file citations name a file this cha
     ]);
   });
 
+  it('scans a judge line of one huge dotted token in linear time', () => {
+    const huge = 'a.'.repeat(80_000);
+    const raw = `${RULE}\nOFFENDING: q — ${huge} x\nmore\nVERDICT: FAIL — x`;
+    const started = performance.now();
+    expect(parseConventionFindingCandidates(raw)).toHaveLength(1);
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+
   it('shares the waiver lens of a line citation of the same file and rule', () => {
     const [lineless] = grounded(wholeFile(`UserBadge.tsx — ${path}`), added);
     const [lined] = grounded(wholeFile(`export function UserBadge() { — ${path}:1`), added);

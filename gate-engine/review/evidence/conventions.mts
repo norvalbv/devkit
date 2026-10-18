@@ -8,8 +8,6 @@ const CODE_FENCE_RE = /^\s*```/;
 const CITATION_SEPARATOR_RE = /(?:^|\s)[—–-]\s/g;
 const TERMINAL_LINE_RE = /:(\d+)(?:[-–]\d+)?\s*$/;
 const LINELESS_RULE_LOCATION_RE = /(?:^|\/)CLAUDE\.md(?:\s+\([^)]*\))?$/i;
-// A whole-file OFFENDING ends at a bare path: one token, no `:line`, so a prose line never joins it.
-const BARE_PATH_LOCATION_RE = /^`?[^\s`]*[./][^\s`]*`?$/;
 
 export function splitConventionCitation(block: string): { quote: string; location: string } | null {
   const separator = [...block.matchAll(CITATION_SEPARATOR_RE)].at(-1);
@@ -21,6 +19,12 @@ export function splitConventionCitation(block: string): { quote: string; locatio
 
 function citationLocation(block: string): string | null {
   return splitConventionCitation(block)?.location ?? null;
+}
+
+// A whole-file OFFENDING ends at a bare path: one token, no `:line`, so a prose line never joins it.
+// Two linear tests, not one regex: nested unbounded classes backtrack quadratically on a long token.
+function isBarePath(location: string): boolean {
+  return !/\s/.test(location) && /[./]/.test(location);
 }
 
 function hasConventionCitationTrailer(block: string): boolean {
@@ -50,7 +54,7 @@ export function parseConventionEvidencePairs(raw: string): ConventionEvidencePai
   const blockHasTrailer = () => {
     const block = buffer.join(' ');
     if (hasConventionCitationTrailer(block)) return true;
-    return mode === 'offending' && BARE_PATH_LOCATION_RE.test(citationLocation(block) ?? '');
+    return mode === 'offending' && isBarePath(citationLocation(block) ?? '');
   };
 
   const finalize = () => {
