@@ -75,7 +75,7 @@ export interface FallowCopy {
 }
 
 /** The map fallow should read for `<top>`'s artifact, or `<cwd>`'s when the root has none. Null when
- * fallow reads it unaided or there is none; throws on a map that does not parse. */
+ * fallow reads it unaided or there is none; throws on an unscoped map that does not parse. */
 export function writeFallowCopy(top: string, cwd: string): FallowCopy | null {
   const atTop = join(top, COVERAGE_FILE);
   const report = existsSync(atTop) ? atTop : join(cwd, COVERAGE_FILE);
