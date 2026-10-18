@@ -6,7 +6,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { inspectDistIntegrity, shellSourceEdges } from '../lib/ship/dist-integrity.mts';
+import { inspectDistIntegrity } from '../lib/ship/dist-integrity.mts';
+import { shellSourceEdges } from '../lib/ship/preflight/shell-source-edges.mts';
 import { rootRegistry } from './_helpers.mts';
 
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
