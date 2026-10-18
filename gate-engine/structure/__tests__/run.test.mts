@@ -234,6 +234,7 @@ describe('guard-structure staged plan', () => {
       targets: ['src/main.ts', unusual, 'vercel-serverless/handler.ts'],
       probeScopes: [],
       deferred: [],
+      stagedPolicy: false,
     });
   });
 
@@ -249,6 +250,7 @@ describe('guard-structure staged plan', () => {
       targets: ['src/Feature/Renamed.ts'],
       probeScopes: [{ root: 'src', extensions: ['ts', 'tsx', 'css'] }],
       deferred: [],
+      stagedPolicy: false,
     });
   });
 
@@ -265,6 +267,7 @@ describe('guard-structure staged plan', () => {
       targets: ['src/Added.ts', 'src/Renamed.ts'],
       probeScopes: rootScope,
       deferred: [],
+      stagedPolicy: false,
     });
   });
 
@@ -280,6 +283,7 @@ describe('guard-structure staged plan', () => {
       targets: ['src/Feature/index.ts'],
       probeScopes: [],
       deferred: [],
+      stagedPolicy: false,
     });
   });
 
@@ -293,13 +297,23 @@ describe('guard-structure staged plan', () => {
   it('defers a partially staged source file instead of reading its worktree bytes as index bytes', () => {
     expect(
       planStagedStructureLint(scopes, ['src/Feature/index.ts'], [], ['src/Feature/index.ts']),
-    ).toEqual({ targets: [], probeScopes: [], deferred: ['src/Feature/index.ts'] });
+    ).toEqual({
+      targets: [],
+      probeScopes: [],
+      deferred: ['src/Feature/index.ts'],
+      stagedPolicy: false,
+    });
   });
 
   it('defers every staged file in a topology root with an unrelated working-tree source', () => {
     expect(
       planStagedStructureLint(scopes, ['src/Feature/index.ts'], [], ['src/Feature/Uncommitted.ts']),
-    ).toEqual({ targets: [], probeScopes: [], deferred: ['src/Feature/index.ts'] });
+    ).toEqual({
+      targets: [],
+      probeScopes: [],
+      deferred: ['src/Feature/index.ts'],
+      stagedPolicy: false,
+    });
   });
 
   it.each([
@@ -313,6 +327,7 @@ describe('guard-structure staged plan', () => {
       targets: [],
       probeScopes: [],
       deferred: ['structure policy', 'src/Feature/index.ts'],
+      stagedPolicy: false,
     });
   });
 });
@@ -574,7 +589,7 @@ if (names.some((f) => String(f).includes('Bad'))) { console.log('PRESET-VIOLATIO
     expect(presetCalls(root)).toEqual([['src/Keep.ts']]);
   });
 
-  it('hands a grammar-scope deletion probe to the preset too when the preset owns the probe file', async () => {
+  it('a grammar-scope deletion outside the preset extensions probes the grammar leg only', async () => {
     const root = electronRepo({
       config: {
         scanRoots: ['src'],
@@ -586,8 +601,9 @@ if (names.some((f) => String(f).includes('Bad'))) { console.log('PRESET-VIOLATIO
     stage(root, 'src/cli/keep-me.ts', 'src/cli/gone.mts');
     execFileSync('git', ['commit', '-qm', 'seed'], { cwd: root });
     execFileSync('git', ['rm', '-q', '--', 'src/cli/gone.mts'], { cwd: root });
-    await runStagedStructureGate(root);
-    expect(presetCalls(root)).toEqual([['src/cli/keep-me.ts']]);
+    // The grammar leg probes a synthetic path, so no real file is handed to the preset leg.
+    await expect(runStagedStructureGate(root)).resolves.toMatchObject({ code: 0 });
+    expect(presetCalls(root)).toEqual([]);
   });
 
   it.each([
@@ -827,5 +843,189 @@ describe('planStagedStructureLint — overlapping scopes', () => {
     expect(
       planStagedStructureLint([preset, grammar], ['src/cli/tool.ts'], [], ['src/cli/other.mts']),
     ).toMatchObject({ targets: [], deferred: ['src/cli/tool.ts'] });
+  });
+});
+
+describe('guard-structure staged deletion probe', () => {
+  const feature = {
+    files: ['{pascal}', 'index.ts'],
+    enforceExistence: ['index.ts', 'Sub'],
+    folders: { Sub: { files: ['{pascal}'] } },
+  };
+  const config = {
+    scanRoots: ['src'],
+    sourceExtensions: ['ts'],
+    structure: {
+      trees: [
+        {
+          name: 'lib',
+          root: 'src',
+          sourceExtensions: ['ts'],
+          grammar: { files: ['{pascal}'], folders: { Feature: feature } },
+        },
+      ],
+    },
+  };
+  const git = (root: string, ...args: string[]) => execFileSync('git', args, { cwd: root });
+
+  // Committed debt: `Bad_name.ts` breaks `{pascal}`. Everything else conforms.
+  function debtRepo(files = ['src/Bad_name.ts']) {
+    const root = repo(config);
+    for (const file of [
+      ...files,
+      'src/Other.ts',
+      'src/Feature/index.ts',
+      'src/Feature/Thing.ts',
+      'src/Feature/Sub/Leaf.ts',
+      'src/Feature/__tests__/a.test.ts',
+    ]) {
+      write(root, file);
+    }
+    initializeGit(root);
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'debt');
+    return root;
+  }
+
+  it.each([
+    ['a valid rename', (root: string) => git(root, 'mv', 'src/Other.ts', 'src/Renamed.ts')],
+    ['an unrelated deletion', (root: string) => git(root, 'rm', '-q', '--', 'src/Other.ts')],
+  ])('%s passes beside committed debt it did not touch', async (_label, change) => {
+    const root = debtRepo();
+    change(root);
+    await expect(runStagedStructureGate(root)).resolves.toMatchObject({ code: 0 });
+  });
+
+  it.each([
+    ['deleting', (root: string) => git(root, 'rm', '-q', '--', 'src/Feature/index.ts')],
+    [
+      'renaming away',
+      (root: string) => git(root, 'mv', 'src/Feature/index.ts', 'src/Feature/Main.ts'),
+    ],
+  ])('%s a required file in a subfolder blocks, naming it', async (_label, change) => {
+    const root = debtRepo();
+    change(root);
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(1);
+    expect(result.text).toContain('Enforce existence = ./src/Feature/index.ts');
+  });
+
+  it('deleting a whole required folder probes its parent and blocks', async () => {
+    const root = debtRepo();
+    git(root, 'rm', '-q', '-r', '--', 'src/Feature/Sub');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(1);
+    expect(result.text).toContain('Enforce existence = ./src/Feature/Sub');
+  });
+
+  it('a rename into an invalid name still blocks', async () => {
+    const root = debtRepo();
+    git(root, 'mv', 'src/Other.ts', 'src/moved_bad.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(1);
+    expect(result.text).toContain('moved_bad.ts');
+  });
+
+  it('deleting a file the structure ignores (__tests__) passes', async () => {
+    const root = debtRepo();
+    git(root, 'rm', '-q', '--', 'src/Feature/__tests__/a.test.ts');
+    await expect(runStagedStructureGate(root)).resolves.toMatchObject({ code: 0 });
+  });
+
+  it('a deletion under a folder that is already invalid is could-not-run in every probed folder', async () => {
+    const root = debtRepo([
+      'src/junk/Inner/A.ts',
+      'src/junk/Inner/B.ts',
+      'src/junk/C.ts',
+      'src/junk/D.ts',
+    ]);
+    git(root, 'rm', '-q', '--', 'src/junk/Inner/A.ts', 'src/junk/C.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(2);
+    expect(result.text).toContain('deletion probe in src/junk was masked');
+    expect(result.text).toContain('deletion probe in src/junk/Inner was masked');
+  });
+
+  it('a deletion with no grammar declared is could-not-run, never a claimed clean', async () => {
+    const root = repo({ scanRoots: ['src'], sourceExtensions: ['ts'] });
+    write(root, 'src/Gone.ts');
+    write(root, 'src/Kept.ts');
+    initializeGit(root);
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'seed');
+    git(root, 'rm', '-q', '--', 'src/Gone.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(2);
+    expect(result.text).toContain('no structure.trees[].grammar declared');
+  });
+
+  it('a staged policy edit with a deletion still blocks on the debt it re-judges', async () => {
+    const root = debtRepo([]);
+    write(root, 'src/Aaa_bad.ts');
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'debt first in the walk');
+    writeFileSync(join(root, 'guard.config.json'), `${JSON.stringify(config, null, 2)}\n`);
+    git(root, 'add', '--', 'guard.config.json');
+    git(root, 'rm', '-q', '--', 'src/Other.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(1);
+    expect(result.text).toContain('Aaa_bad.ts');
+  });
+
+  it('a staged policy edit still runs the deletion probe for a removed required file', async () => {
+    const root = debtRepo([]);
+    writeFileSync(join(root, 'guard.config.json'), `${JSON.stringify(config, null, 2)}\n`);
+    git(root, 'add', '--', 'guard.config.json');
+    git(root, 'rm', '-q', '--', 'src/Feature/index.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(1); // the policy probe (src/Other.ts) is clean; only the deletion probe sees it
+    expect(result.text).toContain('Enforce existence = ./src/Feature/index.ts');
+  });
+
+  it('an index-only deletion (rm --cached) defers instead of probing a file still on disk', async () => {
+    const root = debtRepo();
+    git(root, 'rm', '-q', '--cached', '--', 'src/Feature/index.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(2);
+    expect(result.text).toContain('deferred mixed staged/unstaged input');
+  });
+
+  it('an existence rule already broken at HEAD is could-not-run, never a block on an unrelated deletion', async () => {
+    const root = debtRepo([]);
+    git(root, 'rm', '-q', '--', 'src/Feature/index.ts');
+    git(root, 'commit', '-qm', 'existence debt');
+    git(root, 'rm', '-q', '--', 'src/Feature/Thing.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(2);
+    expect(result.text).toContain('deletion probe in src/Feature was masked');
+  });
+
+  it.each([
+    ['a package subdirectory', 'packages/lib', 'src'],
+    ['a repository-root tree', '.', '.'],
+  ])('%s probes the removed folder by its cwd-relative path', async (_label, pkg, treeRoot) => {
+    const root = repo();
+    const cwd = join(root, pkg);
+    const tree = { ...config.structure.trees[0], root: treeRoot };
+    write(
+      cwd,
+      'guard.config.json',
+      JSON.stringify({ ...config, scanRoots: [treeRoot], structure: { trees: [tree] } }),
+    );
+    for (const file of [
+      'Other.ts',
+      'Feature/index.ts',
+      'Feature/Thing.ts',
+      'Feature/Sub/Leaf.ts',
+    ]) {
+      write(cwd, join(treeRoot, file));
+    }
+    initializeGit(root);
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'seed');
+    git(cwd, 'rm', '-q', '--', join(treeRoot, 'Feature/index.ts'));
+    const result = await runStagedStructureGate(cwd);
+    expect(result.code).toBe(1);
+    expect(result.text).toContain(`Enforce existence = ./${join(treeRoot, 'Feature/index.ts')}`);
   });
 });
