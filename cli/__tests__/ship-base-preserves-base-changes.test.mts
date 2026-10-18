@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { LINES_BASELINE } from '../../gate-engine/ratchets/baseline-paths.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 import {
   dirs,
@@ -941,5 +942,82 @@ describe('ship --base: the hunk-level verdict is taken before any branch exists 
     expect(r.stderr).not.toContain(PREFLIGHT_BLOCK);
     expect(r.stderr).toContain('branch already exists: feat/again');
     expect(remoteBranchExists(bare, 'feat/again')).toBe(false);
+  });
+});
+
+const SIZE_GATE = join(scriptPath, '../../../../gate-engine/ratchets/size-disable.mts');
+const TOOK = `ship: took origin/base's ${LINES_BASELINE}`;
+const lines = (n: number) =>
+  Array.from({ length: n }, (_, i) => `const x${i + 1} = 1;`).join('\n') + '\n';
+const runGate = (cwd: string, mode: string) =>
+  spawnSync(process.execPath, [SIZE_GATE, mode], {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, ...GIT_ENV },
+  });
+
+/** f1.ts and f2.ts grandfathered at 120 lines on ADJACENT baseline lines; the real line ratchet
+ *  is the pre-commit hook, so the ship worktree's commit re-lowers what it ships. */
+function seedBaseline() {
+  const fx = seedForked(
+    (d) => {
+      mkdirSync(join(d, 'src'));
+      writeFileSync(
+        join(d, 'guard.config.json'),
+        JSON.stringify({ scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 }),
+      );
+      for (const f of ['f1', 'f2']) writeFileSync(join(d, `src/${f}.ts`), lines(120));
+      writeFileSync(join(d, 'notes.txt'), 'shared\n');
+      expect(runGate(d, 'freeze').status).toBe(0);
+    },
+    { hookBody: `"${process.execPath}" "${SIZE_GATE}" gate` },
+  );
+  // A sibling's gated shrink of f1.ts lands on base first.
+  advanceBase(fx.bare, (c) => {
+    writeFileSync(join(c, 'src/f1.ts'), lines(80));
+    execFileSync('git', ['add', '-A'], { cwd: c, env: { ...process.env, ...GIT_ENV } });
+    expect(runGate(c, 'gate').status).toBe(0);
+  });
+  // The caller, still at the fork point, shrinks f2.ts through the same gate.
+  writeFileSync(join(fx.dir, 'src/f2.ts'), lines(90));
+  fx.git(['add', '-A'], { stdio: 'ignore' });
+  expect(runGate(fx.dir, 'gate').status).toBe(0);
+  return fx;
+}
+
+describe('ship --base: a conflicting gate-owned size-lines.json (sc-5147)', () => {
+  it('takes the base copy, and the gated commit re-lowers the shipped file', () => {
+    const { dir, env, git } = seedBaseline();
+
+    const r = ship(dir, env, 'feat/shrink', ['src/f2.ts', LINES_BASELINE]);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr.split(TOOK).length - 1, r.stderr).toBe(1); // staging only; the trial is silent
+    expect(r.stderr).not.toContain('changed the same region of');
+    const committed = JSON.parse(git(['show', `feat/shrink:${LINES_BASELINE}`])).files;
+    expect(committed).toEqual({ 'src/f1.ts': 80, 'src/f2.ts': 90 });
+    expect(git(['show', 'feat/shrink:src/f2.ts'])).toBe(lines(90));
+  });
+
+  it('still aborts on a mixed conflict, naming only the hand-mergeable path', () => {
+    const { dir, env, git, bare } = seedBaseline();
+    advanceBase(bare, (c) => writeFileSync(join(c, 'notes.txt'), 'base edit\n'));
+    writeFileSync(join(dir, 'notes.txt'), 'caller edit\n');
+
+    const r = ship(dir, env, 'feat/mixed', ['src/f2.ts', 'notes.txt', LINES_BASELINE]);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).not.toContain(TOOK);
+    expect(conflictListing(r.stderr)).toContain('notes.txt');
+    expect(conflictListing(r.stderr)).not.toContain('size-lines.json');
+    expect(commitListing(r.stderr)).not.toContain('size-lines.json');
+    expect(localBranchExists(git, 'feat/mixed')).toBe(false);
+  });
+
+  it('names the same path as the line ratchet', () => {
+    const helper = readFileSync(join(scriptPath, '..', 'gate-owned-baseline.sh'), 'utf8');
+    expect(/^SHIP_GATE_OWNED_BASELINE=(.+)$/m.exec(helper)?.[1]).toBe(LINES_BASELINE);
   });
 });
