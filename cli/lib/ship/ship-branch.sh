@@ -674,6 +674,7 @@ fi
 # ship_patch_base echoes BASE unchanged unless the base genuinely moved under this checkout, which
 # keeps the default arm and every in-sync ship byte-identical to before.
 . "$SCRIPT_DIR/patch-anchor.sh"
+. "$SCRIPT_DIR/gate-owned-baseline.sh"
 WHOLE_POSITIVES=()
 WHOLE_SELECTORS=()
 WHOLE_EXCLUDES=()
