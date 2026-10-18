@@ -24,7 +24,8 @@ function citationLocation(block: string): string | null {
 // A whole-file OFFENDING ends at a bare path: one token, no `:line`, so a prose line never joins it.
 // Two linear tests, not one regex: nested unbounded classes backtrack quadratically on a long token.
 function isBarePath(location: string): boolean {
-  return !/\s/.test(location) && /[./]/.test(location);
+  const core = location.replace(/^`|`$/g, '');
+  return !/[\s`]/.test(core) && /[./]/.test(core);
 }
 
 function hasConventionCitationTrailer(block: string): boolean {
