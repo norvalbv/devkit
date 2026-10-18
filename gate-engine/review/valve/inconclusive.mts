@@ -1,6 +1,7 @@
 /** Reports the reviewers that stayed inconclusive. Under strict ship each row fails closed, and
  * rows needing the same Remedy share ONE copy, so an outage cannot bury the log in repeats. */
 
+import { printRemedyOnce } from '../../judge/outage/remedy-once.mts';
 import { strictRemedy } from '../../judge/run-judge.mts';
 import { ENGINE_ERROR_REMEDY, RESPONSE_CONTRACT_REMEDY } from '../contracts/response.mts';
 import type { ReviewOutcome } from '../runtime.mts';
@@ -12,10 +13,10 @@ function remedyText(r: ReviewOutcome, resetsAt?: number): string {
   return strictRemedy(cause, r.outageBin, resetsAt);
 }
 
-/** One group's remedy. An outage group names its latest reset: the conservative wait. */
-function remedyFor(group: ReviewOutcome[]): string {
+/** An outage group names its latest reset: the conservative wait. */
+function latestReset(group: ReviewOutcome[]): number | undefined {
   const resets = group.flatMap((r) => r.outageResetsAt ?? []);
-  return remedyText(group[0], resets.length ? Math.max(...resets) : undefined);
+  return resets.length ? Math.max(...resets) : undefined;
 }
 
 export function reportInconclusive(rows: ReviewOutcome[], strict: boolean): void {
@@ -34,8 +35,9 @@ export function reportInconclusive(rows: ReviewOutcome[], strict: boolean): void
     groups.set(key, [...(groups.get(key) ?? []), r]);
   }
   if (!strict) return;
-  for (const group of groups.values()) {
-    console.error(`   Remedy: ${remedyFor(group)} (completed verdicts are cached).`);
+  for (const [key, group] of groups) {
+    const resetsAt = latestReset(group);
+    printRemedyOnce(key, remedyText(group[0], resetsAt), 'completed verdicts are cached', resetsAt);
   }
 }
 

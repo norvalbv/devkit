@@ -34,8 +34,13 @@ echo "🔍 Reviewer gate (headless domain judges)..."
 # subshell, which would make $! a wrapper whose death leaves the judge orphaned and running. See
 # review-fragments.mts.
 comp_pid=""
+dk_remedy_dir=""
+unset DEVKIT_REMEDY_DIR
 if [ "\${DEVKIT_RUN_MODE:-}" != "review" ] && [ "\${DEVKIT_RUN_MODE:-}" != "dry-gates" ] && [ -n "\${DEVKIT_COMMIT_MSG_FILE:-}" ] && [ -f "\${DEVKIT_COMMIT_MSG_FILE:-}" ]; then
     echo "🧩 Completeness judge started in parallel (ship message known)..."
+    # One dir both judges share, so the second to print a judge-outage Remedy points up instead.
+    dk_remedy_dir=$(mktemp -d 2>/dev/null) || dk_remedy_dir=""
+    [ -z "$dk_remedy_dir" ] || export DEVKIT_REMEDY_DIR="$dk_remedy_dir"
     ${DK_NO_GIT_ENV_INLINE} "$__dk_package_bin_dir/guard-review" completeness --gate "$DEVKIT_COMMIT_MSG_FILE" & comp_pid=$!
 fi
 rrc=0
@@ -82,6 +87,8 @@ if [ -n "$comp_pid" ]; then
         wait "$comp_pid" 2>/dev/null || comp_observed_rc=$?
     fi
 fi
+[ -z "$dk_remedy_dir" ] || rm -rf -- "$dk_remedy_dir" 2>/dev/null || true
+unset DEVKIT_REMEDY_DIR
 if [ "$rrc" -eq 1 ]; then
     echo "   A reviewer FAILED (escalation-confirmed). Fix the findings above, then re-run."
     __dk_comp_observed
