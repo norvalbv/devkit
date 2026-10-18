@@ -12,6 +12,9 @@
  *
  * The family unit is the complete SET including correctnessChunkLoc: a trio-only bind would chunk a
  * claude correctness reviewer at the package default 400, a shape no large-diff bench has measured.
+ *
+ * A bind also records the values it wrote, so a later devkit whose set moved can tell its own stale
+ * write (raw == recorded != current) from an operator's edit, and refresh only the former.
  */
 
 import {
@@ -28,6 +31,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
+import { z } from 'zod';
 import { isCodexModel } from '../../../../gate-engine/judge/codex/result.mts';
 import {
   CLAUDE_FAMILY_SET,
@@ -48,6 +52,7 @@ export const FAMILY_STALE_CHECK = 'judge family pin';
 export const FAMILY_PROVENANCE_KEY = '//judgeFamily';
 export const FAMILY_PROVENANCE_TEXT =
   'claude family bound by devkit doctor --fix (codex binary was unresolvable). Explicit edits and GUARD_* envs win; delete these four keys to return to package defaults.';
+export const FAMILY_RECORD_KEY = '//judgeFamilyBound';
 
 /** Re-exported, never re-declared: the remedy wording renders the same set, and gate-engine cannot
  *  import cli, so the definition lives there and the binder reads it from one place. */
@@ -87,6 +92,7 @@ export function binResolvable(name: 'codex' | 'claude', cwd: string): boolean {
  * keys survive at runtime through the spreads even though the type does not name them. */
 interface RawReview {
   [FAMILY_PROVENANCE_KEY]?: string;
+  [FAMILY_RECORD_KEY]?: unknown;
   model?: string;
   escalationModel?: string;
   correctnessModel?: string;
@@ -228,30 +234,52 @@ const familyKeysAbsent = (review: RawReview): boolean => {
   }
 };
 
+/** The machine-side bind preconditions: codex dark, claude present, no env that outranks the write. */
+// The selection is read HERE, not passed in: a concurrent init could change it after a caller's
+// snapshot, and an unreadable record refuses as though every judge were installed.
+function bindPreconditions(cwd: string): boolean {
+  const guards = recordedJudgeGuards(cwd) ?? ALL_JUDGES;
+  return (
+    !binResolvable('codex', cwd) && binResolvable('claude', cwd) && !modelEnvOverridesActive(guards)
+  );
+}
+
+/** The values a bind records writing. A record of any other shape decodes to nothing. */
+const FamilyRecord = z.object({
+  model: z.string().optional(),
+  escalationModel: z.string().optional(),
+  correctnessModel: z.string().optional(),
+  correctnessChunkLoc: z.number().optional(),
+});
+type FamilyRecord = z.infer<typeof FamilyRecord>;
+
+/** What the bind recorded writing — only under the EXACT marker. */
+function recordOf(review: RawReview): FamilyRecord | null {
+  if (review[FAMILY_PROVENANCE_KEY] !== FAMILY_PROVENANCE_TEXT) return null;
+  const rec = FamilyRecord.safeParse(review[FAMILY_RECORD_KEY]);
+  return rec.success ? rec.data : null;
+}
+
+/** Keys still holding devkit's recorded write after the set moved on. Any other value is the operator's. */
+function staleFamilyKeys(review: RawReview): (typeof FAMILY_KEYS)[number][] {
+  const rec = recordOf(review);
+  if (!rec) return [];
+  return FAMILY_KEYS.filter(
+    (k) => rec[k] !== undefined && review[k] === rec[k] && rec[k] !== CLAUDE_FAMILY_SET[k],
+  );
+}
+
 /** Can `doctor --fix` bind the claude family here? Owns EVERY precondition, codex included —
  * callers hold no facts the writer trusts. */
 export function claudeBindable(cwd: string): boolean {
-  // The selection is read HERE, not passed in: a concurrent init could change it after a caller's
-  // snapshot, and an unreadable record refuses as though every judge were installed.
-  const guards = recordedJudgeGuards(cwd) ?? ALL_JUDGES;
-  if (
-    binResolvable('codex', cwd) ||
-    !binResolvable('claude', cwd) ||
-    modelEnvOverridesActive(guards)
-  )
-    return false;
+  if (!bindPreconditions(cwd)) return false;
   const review = rawReview(cwd);
   return review !== null && familyKeysAbsent(review);
 }
 
+/** Binds the family into a config with no family keys, or refreshes the stale keys of a devkit bind. */
 export function bindClaudeFamily(cwd: string): boolean {
-  const guards = recordedJudgeGuards(cwd) ?? ALL_JUDGES;
-  if (
-    binResolvable('codex', cwd) ||
-    !binResolvable('claude', cwd) ||
-    modelEnvOverridesActive(guards)
-  )
-    return false;
+  if (!bindPreconditions(cwd)) return false;
   const path = join(cwd, 'guard.config.json');
   // Writer exclusion: an atomically-created lockfile (`wx`) carrying this binder's OWNERSHIP TOKEN.
   // A held lock aborts, never waits. A lock older than STALE_LOCK_MS is broken (one crash cannot
@@ -302,17 +330,25 @@ export function bindClaudeFamily(cwd: string): boolean {
     let raw: RawGuardFile | null;
     try {
       // SAFETY: the parsed shape is range-checked below — a null document, missing review
-      // object, or claimed family/provenance key aborts the bind without writing.
+      // object, or claimed keys that are not a stale devkit write abort the bind without writing.
       raw = JSON.parse(snapshot) as RawGuardFile | null;
     } catch {
       return false;
     }
     const review = raw?.review;
-    if (!raw || !review || !familyKeysAbsent(review)) return false;
-    const next = {
-      ...raw,
-      review: { [FAMILY_PROVENANCE_KEY]: FAMILY_PROVENANCE_TEXT, ...CLAUDE_FAMILY_SET, ...review },
-    };
+    if (!raw || !review) return false;
+    const fresh = familyKeysAbsent(review);
+    const stale = staleFamilyKeys(review);
+    if (!fresh && stale.length === 0) return false;
+    const update = fresh
+      ? CLAUDE_FAMILY_SET
+      : Object.fromEntries(stale.map((k) => [k, CLAUDE_FAMILY_SET[k]]));
+    // A refresh already carries the exact marker; leaving it in place keeps the diff to the values.
+    // Spreads, not Object.assign: an own "__proto__" key from JSON.parse must survive the merge.
+    const head: RawReview = {};
+    if (fresh) head[FAMILY_PROVENANCE_KEY] = FAMILY_PROVENANCE_TEXT;
+    const record = fresh ? { ...CLAUDE_FAMILY_SET } : { ...recordOf(review), ...update };
+    const next = { ...raw, review: { ...head, ...review, ...update, [FAMILY_RECORD_KEY]: record } };
     writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`);
     // Last-instant guards before the atomic swap: the lock must still carry OUR token (a stale
     // takeover means we lost), and the file must be byte-identical to the parsed snapshot (a
@@ -360,18 +396,32 @@ export function claudeRuntimeResult(
   );
 }
 
-/** A devkit-written claude pin whose reason has expired: codex resolves again, but the
- * both-binaries-present rule keeps the written set forever. Advisory — clearing it is a choice. */
+/** During the outage a bind serves: the devkit-written values the current set has moved past. */
+function familyDriftResult(cwd: string, review: RawReview): CheckResult | null {
+  const stale = staleFamilyKeys(review);
+  if (stale.length === 0) return null;
+  return check(
+    FAMILY_STALE_CHECK,
+    'DRIFT',
+    `the devkit-bound claude family predates this devkit's set: ${stale.map((k) => `review.${k} ${String(review[k])} → ${CLAUDE_FAMILY_SET[k]}`).join(', ')}`,
+    '`devkit doctor --fix` rewrites only those keys (no codex binary, claude present, no GUARD_* model env), or edit them by hand — a hand-edited key is yours and doctor stops tracking it; commit guard.config.json so a ship reads it. To keep every value, delete //judgeFamily',
+    bindPreconditions(cwd),
+    true,
+  );
+}
+
+/** A devkit-written claude pin that is out of date. Once codex resolves again its reason has
+ * expired; before that, a set that moved since the bind leaves stale values in force. Advisory. */
 export function familyStaleResult(cwd: string): CheckResult | null {
   const review = rawReview(cwd);
   // The EXACT marker devkit writes — a user-authored note under the same key is not a devkit pin.
-  if (review?.[FAMILY_PROVENANCE_KEY] !== FAMILY_PROVENANCE_TEXT || !binResolvable('codex', cwd))
-    return null;
+  if (review?.[FAMILY_PROVENANCE_KEY] !== FAMILY_PROVENANCE_TEXT) return null;
+  if (!binResolvable('codex', cwd)) return familyDriftResult(cwd, review);
   return check(
     FAMILY_STALE_CHECK,
     'DRIFT',
     'guard.config.json carries a devkit-written claude family pin, but codex now resolves — the pin has outlived the outage that justified it',
-    'delete the four review model keys (and //judgeFamily) to return to package defaults, or keep them as a deliberate choice and delete only //judgeFamily',
+    'delete the four review model keys (and //judgeFamily, //judgeFamilyBound) to return to package defaults, or keep them as a deliberate choice and delete only //judgeFamily',
     false,
     true,
   );
