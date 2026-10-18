@@ -133,17 +133,36 @@ export const TEST_ONLY_ADDITIONS = [
   'CODEX_THREAD_ID',
 ];
 
-// One-run gate bypasses, in both spellings envFlag reads: everything `devkit ship --help` documents,
-// plus the unadvertised decision-checks one. Inherited, they would flip gate tests. Parity-tested.
+// One-run gate bypasses (BYPASS_FLAGS in cli/lib/ship/merge-verdict/bypasses.mts), in both
+// spellings envFlag reads. Inherited, they would flip gate tests. Parity-tested.
 export const BYPASS_ENV = [
+  'NO_LOG',
+  'DECISION_NO_LLM',
+  'NO_REVIEW',
+  'NO_COMPLETENESS',
+  'NO_SENTRY_JUDGE',
+  'SENTRY_NO_LLM',
   'COVERAGE_OK',
   'NO_COVERAGE',
   'STRUCTURE_OK',
   'NO_STRUCTURE',
+  'MASS_DELETION_OK',
+  'SHIP_BASE_OK',
+  'SHIP_REPLACE_OK',
   'HOOK_PARITY_OK',
   'DECISIONS_INTEGRITY_OK',
   'DECISION_CHECKS_OK',
 ].flatMap((suffix) => [`GUARD_${suffix}`, `FRINK_${suffix}`]);
+
+// The same file's re-aim and soften controls are inherited authority too. GUARD_DECISIONS_DIR is
+// already in INHERITED_RUN_ENV. Parity-tested.
+export const RUN_CONTROL_ENV = [
+  ...['REVIEW_SKIP', 'ALLOWLIST_PATH', 'COMPLETENESS_HARD', 'SENTRY_HARD'].flatMap((suffix) => [
+    `GUARD_${suffix}`,
+    `FRINK_${suffix}`,
+  ]),
+  'FRINK_DECISIONS_DIR',
+];
 
 // The judge-family move an outage remedy exports for a ship (family-override.mts). Inherited through
 // the related-tests gate, it re-routes the judges a test stubs. Parity-tested.
@@ -170,6 +189,7 @@ export const SCRUBBED_ENV = [
   ...SHIP_EXPORTED_ENV,
   ...TEST_ONLY_ADDITIONS,
   ...BYPASS_ENV,
+  ...RUN_CONTROL_ENV,
   ...JUDGE_ROUTING_ENV,
   ...SHIP_QUEUE_ENV,
 ];
