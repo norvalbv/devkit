@@ -20,7 +20,17 @@
 import { claimed, commitClaim, emit, fetchReport, projectRoot, readInput } from './base-drift-lib.mjs';
 
 const MUTATING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
+// Claude and Cursor send `file_path`; the wider set costs nothing and covers a provider that does not.
 const PATH_KEYS = ['file_path', 'path', 'target_file', 'target_path'];
+
+/** The tool input as an object: Cursor documents some tools' `tool_input` as a JSON params string. */
+function toolInputOf(input) {
+  try {
+    return JSON.parse(input?.tool_input);
+  } catch {
+    return input?.tool_input;
+  }
+}
 
 /**
  * The first path-like field carrying real content, decoded from the harness payload.
@@ -45,7 +55,7 @@ function filePathsOf(input) {
     }
     for (const nested of Object.values(value)) walk(nested);
   };
-  walk(input?.tool_input);
+  walk(toolInputOf(input));
   return [...found];
 }
 

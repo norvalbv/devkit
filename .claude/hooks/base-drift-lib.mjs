@@ -108,13 +108,12 @@ export function commitClaim(namespace, sessionId, token) {
 }
 
 /**
- * The advisory envelope each surface actually reads. Cursor ignores Claude's `hookSpecificOutput`
- * wrapper, so sending it there delivers nothing — the same vendor split decision-edit-guard.mjs
- * handles in renderOutput, minus its `permission` key: this must never deny an edit, and must never
- * answer `allow`, which would strip the user's own permission prompts.
+ * The advisory envelope each surface actually reads. Cursor reads only `additional_context` on an
+ * allowed call (`agent_message` reaches the agent only on a deny), and never a `permission` key:
+ * this must never deny an edit, and must never answer `allow`, which strips the user's prompts.
  */
 export function renderAdvisory(input, hookEventName, additionalContext) {
-  if (input?.cursor_version) return { agent_message: additionalContext };
+  if (input?.cursor_version) return { additional_context: additionalContext };
   return { hookSpecificOutput: { hookEventName, additionalContext } };
 }
 

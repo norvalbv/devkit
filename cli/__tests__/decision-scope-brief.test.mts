@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { cursorPayload } from './_cursor-payloads.mts';
 import { mainWithWorktree } from './_worktree-fixture.mts';
 
 const HOOK = fileURLToPath(new URL('../../agents-hooks/decision-scope-brief.mjs', import.meta.url));
@@ -60,6 +61,16 @@ function run(
   }).stdout.trim();
 }
 
+/** Pipe a whole harness payload, for shapes `run` cannot build. */
+function runRaw(input: Record<string, unknown>) {
+  return spawnSync('node', [HOOK], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...process.env, CLAUDE_PROJECT_DIR: root },
+    input: JSON.stringify(input),
+  }).stdout.trim();
+}
+
 const GOVERNED = JSON.stringify([
   {
     slug: 'retrieval-candidate-set',
@@ -85,6 +96,22 @@ describe('decision-scope-brief', () => {
     const out = JSON.parse(run({ file_path: 'src/a.ts' }));
     expect(out.hookSpecificOutput).not.toHaveProperty('permissionDecision');
     expect(out).not.toHaveProperty('permissionDecisionReason');
+  });
+
+  it('briefs a Cursor IDE Write in the nested envelope Cursor maps onto additional_context', () => {
+    stubBin(GOVERNED);
+    const out = JSON.parse(runRaw(cursorPayload('write-create', root, 'src/a.ts')));
+    expect(out.hookSpecificOutput.additionalContext).toContain('retrieval-candidate-set');
+    expect(out).not.toHaveProperty('permission');
+    expect(out.hookSpecificOutput).not.toHaveProperty('permissionDecision');
+  });
+
+  it('briefs a Cursor Write whose tool_input arrives as a JSON params string', () => {
+    stubBin(GOVERNED);
+    const input = cursorPayload('write-edit', root, 'src/a.ts');
+    const out = runRaw({ ...input, tool_input: JSON.stringify(input.tool_input) });
+    expect(JSON.parse(out).hookSpecificOutput.additionalContext).toContain('src/a.ts');
+    expect(runRaw({ ...input, session_id: 'null-input', tool_input: 'null' })).toBe('');
   });
 
   it('stays silent when no ruling governs the file', () => {

@@ -32,6 +32,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const MUTATING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
+// Claude and Cursor send `file_path`; the wider set costs nothing and covers a provider that does not.
 const PATH_KEYS = ['file_path', 'path', 'target_file', 'target_path'];
 /** Keep a brief short enough to be read: the ruling is the payload, the rest is a pointer. */
 const RULING_CHARS = 320;
@@ -45,8 +46,17 @@ function readInput() {
   }
 }
 
+/** The tool input as an object: Cursor documents some tools' `tool_input` as a JSON params string. */
+function toolInputOf(input) {
+  try {
+    return JSON.parse(input?.tool_input);
+  } catch {
+    return input?.tool_input;
+  }
+}
+
 function filePathOf(input) {
-  const ti = input?.tool_input ?? {};
+  const ti = toolInputOf(input) ?? {};
   for (const k of PATH_KEYS) if (typeof ti[k] === 'string' && ti[k].trim()) return ti[k];
   return null;
 }
