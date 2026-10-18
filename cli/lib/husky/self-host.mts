@@ -43,7 +43,7 @@ import {
 
 // Structure-lint and the hard Biome lint/assist gate fold into the deterministic orchestrator via
 // `--extra`. Self-host-only for formatting: its SCOPE (proven allowlist) and hard FAILURE POLICY.
-export const SELF_HOST_STRUCTURE_CMD = 'bun run lint:structure';
+export const SELF_HOST_STRUCTURE_CMD = 'guard-structure staged';
 // Extras follow guard.config.example.json's //extraGates contract. A node extra reads the index
 // via commitIndexEnv(root), salts env inputs in prefixCacheScope; a GUARD_*_OK needs GATE_BYPASSES.
 export const SELF_HOST_EXTRAS: Array<{ label: string; cmd: string }> = [

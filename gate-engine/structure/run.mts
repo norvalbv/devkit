@@ -26,12 +26,9 @@ import { ESLint, type Linter } from 'eslint'; // devkit's OWN eslint (now a depe
 import { z } from 'zod';
 import { resolveGuardConfig } from '../config.mts';
 import { gitPrefix, splitNul } from '../ratchets/git-index.mts';
+import { lintAttributed } from './attribution.mts';
 import { buildStructureConfigs } from './eslint-config.mts';
-import {
-  eslintNodeFlags,
-  LINKED_ISOLATED_STORE,
-  linkedIsolatedStore,
-} from './eslint-node-flags.mts';
+import { runPresetAttributed, runPresetLint } from './preset-lint.mts';
 import {
   clean,
   combineStructureResults,
@@ -70,6 +67,7 @@ interface StagedPlan {
 // in a present tree is ignored — both mean "nothing to lint" (clean), not a failure. Hoisted (perf).
 const NOTHING_TO_LINT_RE = /No files matching|are ignored/i;
 const ELECTRON_SOURCE_EXTENSIONS = ['ts', 'tsx', 'css'];
+const STAGED_NAMES = ['diff', '--cached', '--name-only', '-z'];
 const POLICY_PATH_RE =
   /^(?:(?:eslint\.config\.mjs|guard\.config\.json|eslint\/domains\.mjs|\.devkit\/(?:config\.json|structure\/exempt\.mjs|baselines\/imports\.mjs))$|eslint\/baselines\/|\.devkit\/baselines\/structure\/)/;
 
@@ -248,26 +246,6 @@ function stagedScopes(cwd: string, electron: boolean): StagedScope[] {
   return configScopes.length ? configScopes : scanRootScopes('grammar');
 }
 
-// The electron preset leg: the consumer's locally pinned eslint + its own eslint.config.mjs.
-function runPresetLint(cwd: string, targets: string[]): StructureGateResult {
-  const eslintBin = join(cwd, 'node_modules', 'eslint', 'bin', 'eslint.js');
-  if (!existsSync(eslintBin)) {
-    return couldNotRun('electron structure lint needs the locally pinned eslint binary');
-  }
-  if (linkedIsolatedStore(cwd)) return couldNotRun(LINKED_ISOLATED_STORE);
-  // An empty root is clean, not ESLint's exit-2 "no files matching".
-  const args = [...eslintNodeFlags(cwd), eslintBin, '--no-error-on-unmatched-pattern', '--'];
-  try {
-    execFileSync(process.execPath, [...args, ...targets], { cwd, stdio: 'inherit' });
-    return clean();
-  } catch (e: unknown) {
-    // ESLint exits 1 for lint errors only; a crash, a broken config or a failed spawn did not lint.
-    const status = e instanceof Error && 'status' in e ? e.status : undefined;
-    if (status === 1) return violations(0, 'guard-structure: local eslint failed');
-    return couldNotRun(`local eslint exited abnormally (status ${String(status ?? 'unknown')})`);
-  }
-}
-
 function firstProbeFile(
   cwd: string,
   scope: StagedScope,
@@ -299,10 +277,7 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
     // `unstaged` below and defers as policy, instead of silently routing on bytes nobody staged.
     const stack = electronPreset(cwd);
     const prefix = gitPrefix(cwd);
-    const changed = toCwdPaths(
-      gitPaths(cwd, ['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR']),
-      prefix,
-    );
+    const changed = toCwdPaths(gitPaths(cwd, [...STAGED_NAMES, '--diff-filter=ACMR']), prefix);
     // Name-status preserves both sides of a rename, unlike name-only. Either side can remove a
     // required sibling, so either must probe its containing structure root.
     const destructive = toCwdPaths(destructivePaths(cwd), prefix);
@@ -353,8 +328,12 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
       );
     const presetFiles = legFiles('preset');
     const grammarFiles = legFiles('grammar');
-    if (presetFiles.length) results.push(runPresetLint(cwd, presetFiles));
-    if (grammarFiles.length) results.push(await runGrammarLint(cwd, grammarFiles));
+    const added = new Set(toCwdPaths(gitPaths(cwd, [...STAGED_NAMES, '--diff-filter=AC']), prefix));
+    // A staged policy edit, deletion or rename can change an edited file's verdict too.
+    const stable =
+      !destructive.length && !changed.some((f) => isPolicyPath(f) || routingInputs.includes(f));
+    results.push(...(await runPresetAttributed(cwd, presetFiles, added, stable)));
+    results.push(...(await lintAttributed(cwd, grammarFiles, added, stable, runGrammarLint)));
     return withUncompiledWalls(cwd, combineStructureResults(results));
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -382,7 +361,7 @@ async function structureLegs(cwd: string, targets?: string[]): Promise<Structure
   const trees: StructureTree[] = cfg.structure?.trees ?? [];
   const presetRoots = cfg.scanRoots.filter((root) => existsSync(join(cwd, root)));
   const results: StructureGateResult[] = [];
-  if (presetRoots.length) results.push(runPresetLint(cwd, presetRoots));
+  if (presetRoots.length) results.push(await runPresetLint(cwd, presetRoots));
   if (trees.some((tree) => tree.grammar)) results.push(await runGrammarLint(cwd));
   if (!results.length) return couldNotRun('no electron scanRoot or grammar root is present');
   return combineStructureResults(results);
@@ -465,8 +444,8 @@ export async function runCli(cmd = 'gate') {
     console.error(
       '🚫 Structure violations (folder-structure). Rename/relocate the file(s) to match the declared grammar, or (if intentional) re-grandfather via `devkit init`.',
     );
-  } else if (code === 2 && text) {
-    console.error(text); // fail-open notice on stderr; still exits 2 (pass)
+  } else if (text) {
+    console.error(text); // fail-open notice or pre-existing advisory; both pass
   }
   process.exit(code);
 }

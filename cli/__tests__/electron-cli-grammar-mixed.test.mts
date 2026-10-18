@@ -205,3 +205,81 @@ describe.each(['staged', 'gate'] as const)('electron preset + CLI grammar tree (
     SLOW,
   );
 });
+
+// A commit that only edits a file must not be blamed for import-wall debt already at HEAD, and must
+// still be blocked for a crossing it adds or swaps in, under the real template's messages.
+describe('electron preset debt at HEAD (staged)', () => {
+  const importOf = (target: string) => `import '../../../main/${target}';\n`;
+  // Formatters wrap long named imports; the wall then reports a span over several lines.
+  const namedImportOf = (target: string) =>
+    `import {\n  a,\n  b,\n} from '../../../main/${target}';\n`;
+  function debtRepo(crossing = importOf('index')) {
+    const root = mixedRepo();
+    stage(root, {
+      [ELECTRON_WALL_PROBE]: `${crossing}export {};\n`,
+      'src/main/other.ts': 'export {};\n',
+    });
+    git(root, 'commit', '-qm', 'debt');
+    return root;
+  }
+
+  it(
+    'an edit that leaves the crossing alone passes with an advisory naming HEAD',
+    () => {
+      const root = debtRepo();
+      stage(root, { [ELECTRON_WALL_PROBE]: `${importOf('index')}export const edited = 1;\n` });
+      const result = gate(root, 'staged');
+      expect(result.status, result.output).toBe(0);
+      expect(result.output).toContain('pre-existing structure violation(s) at');
+      expect(result.output).toContain('project-structure/independent-modules');
+    },
+    SLOW,
+  );
+
+  it.each([
+    [
+      'adds a second crossing',
+      importOf('index'),
+      `${importOf('index')}${importOf('other')}export {};\n`,
+    ],
+    ['swaps the crossing for another', importOf('index'), `${importOf('other')}export {};\n`],
+    [
+      'swaps a multi-line crossing for another',
+      namedImportOf('index'),
+      `${namedImportOf('other')}export {};\n`,
+    ],
+  ])(
+    'an edit that %s blocks',
+    (_label, crossing, body) => {
+      const root = debtRepo(crossing);
+      stage(root, { [ELECTRON_WALL_PROBE]: body });
+      const result = gate(root, 'staged');
+      expect(result.status, result.output).toBe(1);
+      expect(result.output).toContain('project-structure/independent-modules');
+    },
+    SLOW,
+  );
+});
+
+// frink's one observed max-lines debt: the report spans the file's tail, so neither growth nor an
+// edit there may make HEAD's over-cap file read as a new violation.
+describe('electron preset size debt at HEAD (staged)', () => {
+  const BIG = 'src/renderer/lib/utils/big.ts';
+  const body = (lines: number) =>
+    Array.from({ length: lines }, (_, i) => `export const v${i} = ${i};`).join('\n') + '\n';
+
+  it(
+    'an over-cap file that grows and changes its tail stays advisory',
+    () => {
+      const root = mixedRepo();
+      stage(root, { [BIG]: body(505) });
+      git(root, 'commit', '-qm', 'debt');
+      stage(root, { [BIG]: `${body(510)}export const tail = 1;\n` });
+      const result = gate(root, 'staged');
+      expect(result.status, result.output).toBe(0);
+      expect(result.output).toContain('pre-existing structure violation(s) at');
+      expect(result.output).toContain('max-lines');
+    },
+    SLOW,
+  );
+});
