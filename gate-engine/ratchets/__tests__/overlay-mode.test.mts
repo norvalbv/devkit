@@ -42,6 +42,13 @@ describe('overlayInstall', () => {
     );
   });
 
+  it('treats a regular file named .devkit as no config rather than an unreadable one', () => {
+    vi.stubEnv('DEVKIT_OVERLAY', '');
+    const root = repo();
+    writeFileSync(join(root, '.devkit'), 'not a directory\n');
+    expect(overlayInstall(root)).toBe(false);
+  });
+
   it('DEVKIT_OVERLAY=1 answers overlay without reading the config', () => {
     vi.stubEnv('DEVKIT_OVERLAY', '1');
     expect(overlayInstall(repo('{"overlay":tru'))).toBe(true);
