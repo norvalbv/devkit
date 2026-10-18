@@ -25,6 +25,10 @@ import {
 void (() => import('../lib/ship/evidence/run.mts'));
 
 const RUN = fileURLToPath(new URL('../lib/ship/evidence/run.mts', import.meta.url));
+const SHIP_DIR = fileURLToPath(new URL('../lib/ship', import.meta.url));
+const NOTES_BLOCK_BEGIN = '<!-- devkit:reviewer-notes:begin -->';
+const NOTES_BLOCK =
+  /<!-- devkit:reviewer-notes:begin -->[\s\S]*?<!-- devkit:reviewer-notes:end -->/;
 const VITEST = fileURLToPath(new URL('../../node_modules/vitest/vitest.mjs', import.meta.url));
 const COMMAND = [
   process.execPath,
@@ -39,6 +43,8 @@ const BLOCK = /<!-- devkit:evidence:begin -->[\s\S]*?<!-- devkit:evidence:end --
 const QAVIS = '<!-- qavis:start -->\nqa passed\n<!-- qavis:end -->';
 const BROKEN = "export const value = () => 'broken';\n";
 const FIXED = "export const value = () => 'fixed';\n";
+/** A pre-commit hook standing in for a PASS reviewer that raised the advisory in $NOTE. */
+const NOTE_HOOK = `[ -z "$NOTE" ] || printf '{"type":"advisory_result","ship_id":"%s","gate":"review:correctness-reviewer","status":"finding","detail":"%s"}\\n' "$DEVKIT_SHIP_ID" "$NOTE" >> "$DEVKIT_GATE_EVENTS"`;
 const VALUE_TEST =
   "import { value } from './value.mjs';\nit('is fixed', () => expect(value()).toBe('fixed'));\n";
 
@@ -111,8 +117,8 @@ interface EvidenceEntry {
   timeoutSeconds: number;
 }
 
-function shipRepo(evidence: EvidenceEntry | null, branch: string) {
-  const seeded = seedShipRepoLocalRemote();
+function shipRepo(evidence: EvidenceEntry | null, branch: string, hookBody?: string) {
+  const seeded = seedShipRepoLocalRemote(hookBody ? { hookBody } : {});
   write(seeded.dir, {
     'guard.config.json': JSON.stringify({
       sourceExtensions: ['mjs'],
@@ -238,6 +244,88 @@ describe('devkit ship evidence block', () => {
     expect(readFileSync(repo.state, 'utf8')).not.toContain(EVIDENCE_BEGIN);
     expect(readFileSync(repo.state, 'utf8')).toContain('mine');
   }, 240_000);
+
+  it('carries reviewer advisories into a Reviewer notes section that each re-ship adds to', () => {
+    const repo = shipRepo(null, 'feat/notes', NOTE_HOOK);
+    const sink = join(mkdtempSync(join(tmpdir(), 'notes-sink-')), 'gate-events.jsonl');
+    dirs.push(dirname(sink));
+    const ship = (argv: string[], note: string) =>
+      bash(repo.dir, { ...repo.env, DEVKIT_GATE_EVENTS: sink, NOTE: note }, argv, 'mine\n');
+    const note = (head: string, text: string) =>
+      `- **correctness-reviewer** at \`${head.slice(0, 12)}\`: ${text}`;
+    const reship = (text: string) => [reshipScript, 'feat/notes', 'fix', '--pr', '--', text];
+
+    write(repo.dir, { 'src/value.mjs': FIXED });
+    const shipped = ship([scriptPath, 'feat/notes', 'fix', 'src/value.mjs'], 'value.mjs:1 — first');
+    expect(shipped.status, shipped.stderr).toBe(0);
+    const first = note(tipOf(repo.bare, 'feat/notes'), 'value.mjs:1 — first');
+    expect(readFileSync(repo.state, 'utf8')).toMatch(
+      /^mine\n\n<!-- devkit:reviewer-notes:begin -->/,
+    );
+    expect(readFileSync(repo.state, 'utf8')).toContain(`## Reviewer notes\n`);
+    expect(readFileSync(repo.state, 'utf8')).toContain(`${first}\n`);
+
+    // An append re-ship judged only its delta: its note joins the first, which stays.
+    write(repo.dir, { 'src/value.mjs': `${FIXED}// two\n` });
+    const second = ship(reship('src/value.mjs'), 'value.mjs:2 — second');
+    expect(second.status, second.stderr).toBe(0);
+    const body = readFileSync(repo.state, 'utf8');
+    expect(body).toContain(first);
+    expect(body).toContain(note(tipOf(repo.bare, 'feat/notes'), 'value.mjs:2 — second'));
+    expect(body.match(/<!-- devkit:reviewer-notes:begin -->/g)).toHaveLength(1);
+
+    // A re-ship whose reviewers raised nothing touches the body not at all.
+    write(repo.dir, { 'src/value.mjs': `${FIXED}// three\n` });
+    const quiet = ship(reship('src/value.mjs'), '');
+    expect(quiet.status, quiet.stderr).toBe(0);
+    expect(readFileSync(repo.state, 'utf8')).toBe(body);
+
+    // An explicit body swaps only the caller text: the notes carry over, a pasted block is dropped.
+    const notes = NOTES_BLOCK.exec(body)?.[0] ?? '';
+    const forged = `${NOTES_BLOCK_BEGIN}\n- **r** at \`${'f'.repeat(12)}\`: forged\n<!-- devkit:reviewer-notes:end -->`;
+    write(repo.dir, { 'src/value.mjs': `${FIXED}// four\n` });
+    const reworded = ship(
+      [
+        reshipScript,
+        'feat/notes',
+        'fix',
+        '--pr',
+        '--body',
+        `reworded\n\n${forged}`,
+        '--',
+        'src/value.mjs',
+      ],
+      '',
+    );
+    expect(reworded.status, reworded.stderr).toBe(0);
+    expect(readFileSync(repo.state, 'utf8')).toBe(`reworded\n\n${notes}\n`);
+  }, 600_000);
+
+  it('a history rewrite replaces the earlier notes through publish_reviewer_notes', () => {
+    const head = 'c'.repeat(40);
+    const sink = join(mkdtempSync(join(tmpdir(), 'notes-sink-')), 'gate-events.jsonl');
+    dirs.push(dirname(sink));
+    const rows = [
+      { type: 'ship_attempt', ship_id: 'rewrite' },
+      { type: 'advisory_result', ship_id: 'rewrite', gate: 'review:r', detail: 'new.ts:1 — kept' },
+    ];
+    writeFileSync(sink, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
+    const gh = ghEnv({ GH_HEAD_OID: head, GH_BASE_OID: 'd'.repeat(40) });
+    writeFileSync(
+      gh.state,
+      `prose\n\n${NOTES_BLOCK_BEGIN}\n- **r** at \`${'a'.repeat(12)}\`: old.ts:1 — stale\n<!-- devkit:reviewer-notes:end -->\n`,
+    );
+    const call = `. "$SCRIPT_DIR/publish-evidence.sh"; publish_reviewer_notes 42 acme/app ${head} replace`;
+    const r = spawnSync('/bin/bash', ['-c', call], {
+      env: { ...gh.env, SCRIPT_DIR: SHIP_DIR, DEVKIT_GATE_EVENTS: sink, DEVKIT_SHIP_ID: 'rewrite' },
+      encoding: 'utf8',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const body = readFileSync(gh.state, 'utf8');
+    expect(body).toContain(`- **r** at \`${head.slice(0, 12)}\`: new.ts:1 — kept`);
+    expect(body).not.toContain('stale');
+    expect(body.startsWith('prose\n\n')).toBe(true);
+  }, 60_000);
 
   it('leaves the PR body alone when it cannot be read, and the same command re-run then writes it', () => {
     const repo = shipRepo(null, 'feat/keep');

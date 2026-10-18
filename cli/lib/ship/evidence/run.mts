@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-// Ship's evidence step, run by publish-evidence.sh after the PR exists. `budget` sizes the bound,
-// `publish` captures red/green and writes the block, `body` cleans a caller body before gh sees it.
+// Ship's PR-body steps, run by publish-evidence.sh. `budget` sizes the bound, `publish` writes the
+// red/green block, `notes` the reviewer advisories, `body` cleans a caller body before gh sees it.
 import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -11,19 +11,24 @@ import {
   type PreparedRegressionRepository,
   prepareRegressionRepository,
 } from '../../baseline-status/regression-repository.mts';
+import { telemetrySink } from '../../../../gate-engine/judge/run-context.mts';
+import { readShipEvents } from '../digest/gate-digest.mts';
 import { errorMessage } from '../review/shared/common.mts';
 import type { VerdictInput } from '../merge-verdict/ship-change.mts';
 import {
   carryEvidenceBlock,
+  carryOwned,
   type PrintedVerdict,
   readEvidenceBlock,
   renderEvidenceBlock,
+  upsertEvidenceBlock,
   verdictUnavailable,
 } from './block.mts';
 import { type EvidenceConfig, expandCommand, readEvidenceConfig } from './config.mts';
 import { type EvidenceOutcome, inconclusive, notRun, outcomeFromRegression } from './outcome.mts';
-import { publishEvidenceBlock, readPull } from './pr-body.mts';
+import { publishBody, readPull } from './pr-body.mts';
 import { buildRedCommit, classifyChange, prBase, treeOf } from './red-ref.mts';
+import { NOTES, noteLines, upsertNotes } from './reviewer-notes.mts';
 
 const REPORT = '.devkit-evidence-report.json';
 
@@ -156,11 +161,20 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<vo
     env,
   });
   const block = renderEvidenceBlock(produced.outcome, produced.evidence, verdict);
-  const result = publishEvidenceBlock(repo, pr, head, block);
+  const result = publishBody(repo, pr, head, (body) => upsertEvidenceBlock(body, block));
   const { status, reason, detail } = produced.outcome;
   console.error(
     `evidence: ${status}${reason ? ` (${reason})` : ''}: ${detail} [PR body ${result}]`,
   );
+}
+
+/** This ship's reviewer advisories into the PR body; a ship whose reviewers raised none makes no gh call. */
+function publishNotes(repo: string, pr: string, head: string, replace: boolean): void {
+  const events = readShipEvents(telemetrySink() ?? '', process.env.DEVKIT_SHIP_ID ?? '');
+  const lines = noteLines(events, head);
+  if (!lines.length) return;
+  const result = publishBody(repo, pr, head, (body) => upsertNotes(body, lines, replace));
+  console.error(`reviewer notes: ${lines.length} advisory row(s) [PR body ${result}]`);
 }
 
 function required(values: Record<string, string | undefined>, name: string): string {
@@ -181,15 +195,22 @@ async function main(argv: string[]): Promise<void> {
     pr: { type: 'string' },
     head: { type: 'string' },
     failed: { type: 'string' },
+    mode: { type: 'string' },
   } as const;
   const { values } = parseArgs({ args: rest, options, strict: true });
   if (command === 'body') {
     const caller = readFileSync(0, 'utf8');
     const current = values.pr ? readPull(required(values, 'repo'), values.pr).body : '';
-    process.stdout.write(carryEvidenceBlock(caller, current));
+    process.stdout.write(carryOwned(NOTES, carryEvidenceBlock(caller, current), current));
     return;
   }
-  if (command !== 'publish') throw new Error('usage: run.mts budget <dir> | publish … | body …');
+  if (command === 'notes') {
+    const [repo, pr, head] = ['repo', 'pr', 'head'].map((name) => required(values, name));
+    publishNotes(repo, pr, head, values.mode === 'replace');
+    return;
+  }
+  if (command !== 'publish')
+    throw new Error('usage: run.mts budget <dir> | publish … | notes … | body …');
   await publish({
     cwd: required(values, 'cwd'),
     repo: required(values, 'repo'),

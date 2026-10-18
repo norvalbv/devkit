@@ -1716,6 +1716,7 @@ git update-ref -d "$RECOVERY_RECEIPT_REF" "${RECOVERY_COMMIT:-${SHIP_COMMIT:-}}"
 # on every ship to this branch, and worthless once the commit it describes is published.
 git update-ref -d "$RECOVERY_GATE_ADDS_REF" 2>/dev/null || true
 # After every ref is settled, so a ship killed during the bounded test runs loses no recovery state.
+[ -z "$PR_NUM" ] || publish_reviewer_notes "$PR_NUM" "$REPO" "${RECOVERY_COMMIT:-$SHIP_COMMIT}"
 [ -z "$PR_NUM" ] || publish_evidence_block "$WT" "$PR_NUM" "$REPO" "${RECOVERY_COMMIT:-$SHIP_COMMIT}"
 git worktree remove --force "$WT" 2>/dev/null || true
 

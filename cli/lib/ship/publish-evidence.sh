@@ -15,6 +15,12 @@ evidence_caller_body() {
   node "$(evidence_run_script)" body --repo "$1" ${2:+--pr "$2"}
 }
 
+# This ship's reviewer advisories into the PR body; `replace` only for a history rewrite. Fail-open.
+# usage: publish_reviewer_notes <pr-number> <repo> <head-sha> [replace]
+publish_reviewer_notes() {
+  node "$(evidence_run_script)" notes --repo "$2" --pr "$1" --head "$3" ${4:+--mode "$4"} </dev/null || true
+}
+
 # usage: publish_evidence_block <worktree> <pr-number> <repo> <head-sha>
 publish_evidence_block() {
   local wt=$1 pr=$2 repo=$3 head=$4 run supervisor budget tmp status=0
