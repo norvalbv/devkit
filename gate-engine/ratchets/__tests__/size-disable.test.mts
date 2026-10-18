@@ -1619,6 +1619,28 @@ describe('overlay install: a commit-time gate leaves the shared baseline alone',
     expect(r.stdout).not.toContain('guard-size freeze');
   });
 
+  it.each([
+    ['a line ceiling shrinks', LINE_CFG, LINES, big(80), big(60)],
+    ['the last line ceiling heals', LINE_CFG, LINES, big(80), big(40)],
+    ['the last disable heals', { scanRoots: ['src'] }, SIZE, dis(2), dis(0)],
+  ])(
+    'blocks and keeps the baseline when %s under an unparseable config.json',
+    (_l, cfg, rel, before, after) => {
+      const root = overlayRoot(cfg);
+      write(root, 'src/legacy.ts', before);
+      run(root, 'freeze');
+      const frozen = bytes(root, rel);
+      write(root, '.devkit/config.json', '{"overlay":tru');
+      write(root, 'src/legacy.ts', after);
+      gitAdd(root, 'src/legacy.ts');
+      const r = run(root, 'gate');
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('.devkit/config.json could not be read');
+      expect(r.stderr).not.toContain('ignored by Git');
+      expect(bytes(root, rel)).toBe(frozen);
+    },
+  );
+
   it('still blocks a staged file that adds a disable', () => {
     const root = overlayRoot({ scanRoots: ['src'] });
     write(root, 'src/a.ts', dis(1));
