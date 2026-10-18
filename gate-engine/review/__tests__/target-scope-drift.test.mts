@@ -117,6 +117,65 @@ describe('scopeDriftHint', () => {
   });
 });
 
+describe('scopeDriftHint on an issue citing several Targets', () => {
+  const RESHIP = 'cli/lib/ship/reship.sh';
+  const OTHER = 'ship-machine-wide-queue';
+  const twoTargets = () =>
+    deps({
+      loadTargets: () => [
+        { slug: SLUG, scopeGlobs: [PRE_PUSH] },
+        { slug: OTHER, scopeGlobs: [RESHIP] },
+      ],
+    });
+
+  it('stays silent with the cite before each location', () => {
+    const { d, emit } = twoTargets();
+    const issue = `TARGET: ${SLUG} — "…" at ${CAPTURE}:1; TARGET: ${OTHER} — "…" at ${RESHIP}:2`;
+    expect(scopeDriftHint('r', [item([issue])], d)).toBe('');
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  // The order most reviewers write: the location leads, the cite follows.
+  it('stays silent with each location before its cite', () => {
+    const { d, emit } = twoTargets();
+    const issue = `${CAPTURE}:1 — TARGET: ${SLUG} — "…"; ${RESHIP}:2 — TARGET: ${OTHER} — "…"`;
+    expect(scopeDriftHint('r', [item([issue])], d)).toBe('');
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  // The second path may belong to an unscoped Target, so it is no evidence against the scoped one.
+  it('stays silent when the second cited slug has no Scope', () => {
+    const { d, emit } = deps();
+    const issue = `${CAPTURE}:1 — TARGET: ${SLUG} — "…"; ${RESHIP}:2 — TARGET: unscoped-axis — "…"`;
+    expect(scopeDriftHint('r', [item([issue])], d)).toBe('');
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('judges each issue string alone: single-Target issues of one item still hint', () => {
+    const { d } = twoTargets();
+    const out = scopeDriftHint(
+      'r',
+      [item([cite(`${CAPTURE}:1`), `TARGET: ${OTHER} at ${PRE_PUSH}:2`])],
+      d,
+    );
+    expect(out).toContain(
+      `Target ${SLUG} was enforced outside its Scope (${PRE_PUSH}) on ${CAPTURE}.`,
+    );
+    expect(out).toContain(
+      `Target ${OTHER} was enforced outside its Scope (${RESHIP}) on ${PRE_PUSH}.`,
+    );
+  });
+
+  it('still hints every out-of-Scope path when one Target is cited twice', () => {
+    const { d, emit } = deps();
+    const out = scopeDriftHint('r', [item([`${cite(`${CAPTURE}:1`)}; ${cite(`${RESHIP}:2`)}`])], d);
+    expect(out.split('\n')).toHaveLength(2);
+    expect(out).toContain(` on ${CAPTURE}.`);
+    expect(out).toContain(` on ${RESHIP}.`);
+    expect(emit).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('renderFindingsBlockForParts with scope drift', () => {
   it('appends the hint after the findings lines', () => {
     const { d } = deps();

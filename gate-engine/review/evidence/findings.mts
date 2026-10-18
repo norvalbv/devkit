@@ -163,7 +163,8 @@ export function normalizeCitedPath(
   return exists(path.join(cwd, posix)) ? posix : null;
 }
 
-/** Every (slug, path) pair where a blocking issue cites a known Target on an out-of-Scope path. */
+/** Every (slug, path) pair where a blocking issue cites a known Target on an out-of-Scope path.
+ *  An issue citing several Targets is skipped: its paths cannot be bound to their own Target. */
 export function scopeDriftFindings(
   items: ReviewItem[],
   targets: ScopeGlobs[],
@@ -175,6 +176,7 @@ export function scopeDriftFindings(
   const drifts: ScopeDrift[] = [];
   for (const issue of items.filter(isBlockingItem).flatMap((i) => i.issues ?? [])) {
     const slugs = [...issue.matchAll(TARGET_CITE_RE)].map((m) => m[1]);
+    if (new Set(slugs).size > 1) continue;
     for (const slug of slugs) {
       const globs = bySlug.get(slug);
       if (!globs) continue;
