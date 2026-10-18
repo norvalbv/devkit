@@ -1,7 +1,7 @@
 # Anti-slop capability
 
 Devkit vendors the complete 15-rule [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop)
-production ruleset at commit **446268e5d15baa968eaec669ff65358d36ae6259** and composes two
+production ruleset at commit **e8c4880471b23ab7f216fba7b27d173a6ef07d4c** and composes two
 Devkit-owned external-record rules. All 17 rules default to error. The ruleset is an opt-in
 capability on top of Devkit's
 exact Oxlint 1.78.0 and @oxlint/plugins 1.78.0 pins:

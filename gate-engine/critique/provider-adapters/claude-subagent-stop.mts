@@ -45,8 +45,11 @@ function ownDataValue(record: Record<string, unknown>, key: string): unknown {
 }
 
 function opaqueIdentifier(value: unknown): value is string {
+  return typeof value === 'string' && opaqueIdentifierText(value);
+}
+
+function opaqueIdentifierText(value: string): boolean {
   if (
-    typeof value !== 'string' ||
     value.length === 0 ||
     value.length > CLAUDE_PLAN_CRITIQUE_IDENTITY_MAX_BYTES ||
     Buffer.byteLength(value, 'utf8') > CLAUDE_PLAN_CRITIQUE_IDENTITY_MAX_BYTES ||
@@ -66,7 +69,7 @@ function tupleHash(domain: string, values: readonly string[]): string {
 
 /** Stable turn identity shared by Claude SubagentStop capture and future Stop observation. */
 export function deriveClaudePlanCritiqueWorkId(sessionId: string, promptId: string): string {
-  if (!opaqueIdentifier(sessionId) || !opaqueIdentifier(promptId))
+  if (!opaqueIdentifierText(sessionId) || !opaqueIdentifierText(promptId))
     throw new Error('invalid Claude plan critique work identity');
   return `pcw1_${tupleHash('claude_plan_critique_work', [sessionId, promptId])}`;
 }
