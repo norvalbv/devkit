@@ -1,26 +1,15 @@
 /**
  * install-fallow tests. The single spawn seam (spawnSync) is mocked so NO test ever shells
  * out to bun/npm/cargo/fallow — each case scripts the per-command exit status it wants.
- * File IO (gitignore) runs against a real tmp repo, mirroring detect-stack.test.mjs.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock the spawn seam before importing the module under test.
 const spawnSync = vi.fn();
 vi.mock('node:child_process', () => ({ spawnSync: (...a) => spawnSync(...a) }));
 
-const { FALLOW_PINNED_VERSION, detectFallow, installFallow, ensureFallowGitignore } =
-  await import('./install-fallow.mts');
+const { FALLOW_PINNED_VERSION, detectFallow, installFallow } = await import('./install-fallow.mts');
 
-let roots = [];
-function tmpRepo() {
-  const root = mkdtempSync(join(tmpdir(), 'fallow-'));
-  roots.push(root);
-  return root;
-}
 // Helper: a spawnSync result object. status null mimics a missing binary (spawn error).
 function result(status, stdout = '') {
   return status === null
@@ -34,8 +23,6 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  for (const r of roots) rmSync(r, { recursive: true, force: true });
-  roots = [];
 });
 
 describe('FALLOW_PINNED_VERSION', () => {
@@ -100,37 +87,5 @@ describe('installFallow', () => {
   it('never shells out and writes nothing under dryRun', () => {
     installFallow({ cwd: '/x', dryRun: true });
     expect(spawnSync).not.toHaveBeenCalled();
-  });
-});
-
-describe('ensureFallowGitignore', () => {
-  it('creates .gitignore with the .fallow/ line when absent', () => {
-    const root = tmpRepo();
-    ensureFallowGitignore({ cwd: root });
-    expect(readFileSync(join(root, '.gitignore'), 'utf8')).toContain('.fallow/');
-  });
-
-  it('is idempotent — a second call adds nothing', () => {
-    const root = tmpRepo();
-    ensureFallowGitignore({ cwd: root });
-    const after = readFileSync(join(root, '.gitignore'), 'utf8');
-    ensureFallowGitignore({ cwd: root });
-    expect(readFileSync(join(root, '.gitignore'), 'utf8')).toBe(after);
-    expect(after.match(/\.fallow\//g)).toHaveLength(1);
-  });
-
-  it('appends to an existing .gitignore without clobbering it', () => {
-    const root = tmpRepo();
-    writeFileSync(join(root, '.gitignore'), 'node_modules\n');
-    ensureFallowGitignore({ cwd: root });
-    const out = readFileSync(join(root, '.gitignore'), 'utf8');
-    expect(out).toContain('node_modules');
-    expect(out).toContain('.fallow/');
-  });
-
-  it('dryRun writes nothing', () => {
-    const root = tmpRepo();
-    ensureFallowGitignore({ cwd: root, dryRun: true });
-    expect(existsSync(join(root, '.gitignore'))).toBe(false);
   });
 });

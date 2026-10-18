@@ -11,10 +11,9 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { writeIfAbsent } from '../fs-helpers.mts';
 
 /**
  * Pinned fallow version. NEVER @latest — a floating tag makes the gate non-deterministic
@@ -161,29 +160,6 @@ export function installFallow({ cwd, dryRun }: FallowCommandOptions = {}): {
   }
   printManualSteps();
   return { ok: false, method: null, message: 'no package manager could install fallow' };
-}
-
-/**
- * Idempotently ensure `.fallow/` is gitignored (fallow's local cache dir). Appends the
- * line only when absent; creates .gitignore if the repo has none.
- *
- */
-export function ensureFallowGitignore({ cwd, dryRun }: FallowCommandOptions = {}): void {
-  const path = join(cwd ?? process.cwd(), '.gitignore');
-  const line = '.fallow/';
-  const existing = existsSync(path) ? readFileSync(path, 'utf8') : '';
-  if (existing.split('\n').includes(line)) return;
-  if (dryRun) {
-    console.log(`[dry-run] append "${line}" to ${path}`);
-    return;
-  }
-  if (!existing) {
-    writeIfAbsent(path, `${line}\n`);
-    return;
-  }
-  writeIfAbsent(path, `${existing}${existing.endsWith('\n') ? '' : '\n'}${line}\n`, {
-    force: true,
-  });
 }
 
 /**

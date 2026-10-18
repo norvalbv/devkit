@@ -1,10 +1,69 @@
-import { existsSync, readFileSync } from 'node:fs';
+import fs, { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { installSearchCode } from '../lib/install/install-search-code.mts';
 import { tmpRepos } from './_helpers.mts';
 
 const { tmpRepo, devkit, cleanup } = tmpRepos('sc-');
 afterEach(cleanup);
+
+describe('installSearchCode .gitignore line', () => {
+  it('keeps an edit another writer makes between its read and its write', () => {
+    const root = tmpRepo();
+    const gitignore = join(root, '.gitignore');
+    writeFileSync(gitignore, 'node_modules\n');
+    const realReadFileSync = fs.readFileSync;
+    let interleaved = false;
+    // SAFETY: the wrapper forwards every argument to the real readFileSync and returns its value.
+    fs.readFileSync = ((...args: Parameters<typeof fs.readFileSync>) => {
+      const stale = realReadFileSync(...args);
+      if (!interleaved && String(args[0]) === gitignore) {
+        interleaved = true; // an editor saves its own line just after devkit's read
+        writeFileSync(gitignore, 'node_modules\nuser-line\n');
+      }
+      return stale;
+    }) as typeof fs.readFileSync;
+    syncBuiltinESMExports(); // install-search-code.mts binds readFileSync by name
+    try {
+      installSearchCode(root, false);
+    } finally {
+      fs.readFileSync = realReadFileSync;
+      syncBuiltinESMExports();
+    }
+    expect(interleaved).toBe(true);
+    expect(readFileSync(gitignore, 'utf8')).toBe('node_modules\nuser-line\n.search-code/\n');
+  });
+
+  it('puts the line on its own line when the file lacks a trailing newline, once', () => {
+    const root = tmpRepo();
+    writeFileSync(join(root, '.gitignore'), 'node_modules');
+    installSearchCode(root, false);
+    installSearchCode(root, false);
+    expect(readFileSync(join(root, '.gitignore'), 'utf8')).toBe('node_modules\n.search-code/\n');
+  });
+
+  it('appends under the shared .gitignore lock, and a re-run converges once it is free', () => {
+    const root = tmpRepo();
+    const lock = join(root, '.devkit', 'gitignore.lock');
+    writeFileSync(join(root, '.gitignore'), 'node_modules\n');
+    mkdirSync(join(root, '.devkit'));
+    writeFileSync(lock, String(process.pid)); // a live devkit writer mid-rewrite
+    expect(() => installSearchCode(root, false)).toThrow(/held by another devkit process/);
+    expect(readFileSync(join(root, '.gitignore'), 'utf8')).toBe('node_modules\n');
+    rmSync(lock);
+    installSearchCode(root, false);
+    expect(readFileSync(join(root, '.gitignore'), 'utf8')).toBe('node_modules\n.search-code/\n');
+    expect(existsSync(lock)).toBe(false); // released
+  });
+
+  it('dry-run writes neither .gitignore nor .devkit/', () => {
+    const root = tmpRepo();
+    installSearchCode(root, true);
+    expect(existsSync(join(root, '.gitignore'))).toBe(false);
+    expect(existsSync(join(root, '.devkit'))).toBe(false);
+  });
+});
 
 describe('search-code opt-in component', () => {
   it('--search-code writes the opt-in config + gitignores the index + wires indexPath', () => {
