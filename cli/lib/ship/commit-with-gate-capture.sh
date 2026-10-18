@@ -73,7 +73,7 @@ ship_decision_smell_advisory() {
   grep -qs 'guard-decisions' "$(gate_worktree_pre_commit "$1" "$2")" "$1/.husky/pre-commit" || return 0
   local mod out
   mod="$(dirname "${BASH_SOURCE[0]}")/preflight/decision-smells.mts"
-  [ -f "$mod" ] || mod="${mod%.mts}.mjs"
+  [ -f "$mod" ] || mod="$(dirname "${BASH_SOURCE[0]}")/preflight/decision-smells.mjs"
   out=$(cd "$1" && node "$mod" "$2" 2>/dev/null) || out=""
   SHIP_DECISION_ADVISORY=$out
   [ -z "$out" ] || printf '%s\n' "$out" >&2

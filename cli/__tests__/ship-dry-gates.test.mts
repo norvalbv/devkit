@@ -220,7 +220,9 @@ describe('ship — decision-smell advisory before the gate chain', () => {
       writeFileSync(join(dir, '.git/info/exclude'), 'guard.config.json\n.devkit/decisions/\n');
     });
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).toContain('If it blocks: .devkit/decisions is git-ignored here');
+    expect(r.stderr).toContain(
+      'If it blocks: git cannot confirm .devkit/decisions is stageable here',
+    );
     expect(r.stderr).not.toContain("pass the record's path");
   });
 

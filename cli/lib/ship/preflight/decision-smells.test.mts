@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { adviseStaged, renderAdvisory } from './decision-smells.mts';
 
 const CLI = fileURLToPath(new URL('./decision-smells.mts', import.meta.url));
@@ -11,12 +11,13 @@ const BIG = `${Array.from({ length: 150 }, (_, i) => `line ${i}`).join('\n')}\n`
 const ENV_KEYS = ['GUARD_NO_LOG', 'GUARD_DECISION_NO_LLM'] as const;
 
 let dir: string;
-let extra: string | undefined;
+const made: string[] = [];
 const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
 
 /** A repo whose staged set deletes a 150-line tracked file — the legacy-deletion smell. */
 function seedDeletion(ignore = '') {
   dir = mkdtempSync(join(tmpdir(), 'dec-advise-'));
+  made.push(dir);
   git('init', '-q', '-b', 'main');
   git('config', 'user.email', 'a@b.c');
   git('config', 'user.name', 'a');
@@ -30,23 +31,18 @@ function seedDeletion(ignore = '') {
 
 /** Makes the decisions dir a symlink to a directory outside the repo, as an overlay worktree links it. */
 function symlinkDecisionsDir() {
-  extra = mkdtempSync(join(tmpdir(), 'dec-advise-target-'));
+  const target = mkdtempSync(join(tmpdir(), 'dec-advise-target-'));
+  made.push(target);
   mkdirSync(join(dir, 'docs'));
-  symlinkSync(extra, join(dir, 'docs/decisions'));
+  symlinkSync(target, join(dir, 'docs/decisions'));
 }
 
-const saved = ENV_KEYS.map((k) => [k, process.env[k]] as const);
 beforeEach(() => {
-  for (const k of ENV_KEYS) delete process.env[k];
+  for (const k of ENV_KEYS) vi.stubEnv(k, undefined);
 });
 afterEach(() => {
-  for (const [k, v] of saved) {
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
-  }
-  if (dir) rmSync(dir, { recursive: true, force: true });
-  if (extra) rmSync(extra, { recursive: true, force: true });
-  extra = undefined;
+  vi.unstubAllEnvs();
+  for (const d of made.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
 describe('decision advisory', () => {
@@ -64,7 +60,9 @@ describe('decision advisory', () => {
     seedDeletion('docs/decisions/\n');
     const lines = adviseStaged(dir, dir);
     expect(lines[0]).toMatch(/legacy-deletion — old\.ts/);
-    expect(lines[2]).toMatch(/docs\/decisions is git-ignored here, so do not pass a record/);
+    expect(lines[2]).toMatch(
+      /git cannot confirm docs\/decisions is stageable here .*so do not pass a record/,
+    );
     expect(lines[2]).toMatch(/GUARD_NO_LOG=1 only with the user's OK/);
   });
 
@@ -73,7 +71,7 @@ describe('decision advisory', () => {
     writeFileSync(join(dir, 'guard.config.json'), '{"decisionsDir": ".devkit/decisions"}\n');
     writeFileSync(join(dir, '.git/info/exclude'), '.devkit\n');
     expect(adviseStaged(dir, dir)[2]).toMatch(
-      /^ {3}If it blocks: \.devkit\/decisions is git-ignored/,
+      /^ {3}If it blocks: git cannot confirm \.devkit\/decisions is stageable/,
     );
   });
 
@@ -81,14 +79,16 @@ describe('decision advisory', () => {
     seedDeletion();
     symlinkDecisionsDir();
     const lines = adviseStaged(dir, dir);
-    expect(lines[2]).toMatch(/docs\/decisions is git-ignored here, so do not pass a record/);
+    expect(lines[2]).toMatch(
+      /git cannot confirm docs\/decisions is stageable here .*so do not pass a record/,
+    );
     expect(lines.join('\n')).not.toMatch(/pass the record's path/);
   });
 
   it('says a ship will likely block when the judge is disabled, without a conflicting remedy', () => {
     seedDeletion();
     symlinkDecisionsDir();
-    process.env.GUARD_DECISION_NO_LLM = '1';
+    vi.stubEnv('GUARD_DECISION_NO_LLM', '1');
     const lines = adviseStaged(dir, dir);
     expect(lines[1]).toMatch(/judge is disabled here \(noLlm\), so a ship will likely block/);
     expect(lines.join('\n')).not.toMatch(/record is staged|pass the record's path|ROUTINE/);
@@ -104,12 +104,12 @@ describe('decision advisory', () => {
 
   it('is silent under GUARD_NO_LOG and when nothing smells', () => {
     seedDeletion();
-    process.env.GUARD_NO_LOG = '1';
+    vi.stubEnv('GUARD_NO_LOG', '1');
     expect(adviseStaged(dir, dir)).toEqual([]);
-    delete process.env.GUARD_NO_LOG;
+    vi.stubEnv('GUARD_NO_LOG', undefined);
     git('reset', '-q');
     expect(adviseStaged(dir, dir)).toEqual([]);
-    expect(renderAdvisory([], { ignored: false, noLlm: false, decisionsDir: 'd' })).toEqual([]);
+    expect(renderAdvisory([], { stageable: true, noLlm: false, decisionsDir: 'd' })).toEqual([]);
   });
 
   it('caps a mass deletion at five named files, so the tail repeat cannot bury the verdict', () => {
@@ -117,15 +117,15 @@ describe('decision advisory', () => {
       label: 'legacy-deletion',
       path: `v/${i}.ts`,
     }));
-    const lines = renderAdvisory(sources, { ignored: false, noLlm: false, decisionsDir: 'd' });
+    const lines = renderAdvisory(sources, { stageable: true, noLlm: false, decisionsDir: 'd' });
     expect(lines.filter((l) => l.includes('decision smell (regex only'))).toHaveLength(5);
     expect(lines[5]).toBe('   … and 295 more smelly file(s); the decisions gate judges every one.');
     expect(lines).toHaveLength(8);
   });
 
   it("never prints the gate's own block key, which ship uses to attribute a block", () => {
-    const opts = [true, false].flatMap((ignored) =>
-      [true, false].map((noLlm) => ({ ignored, noLlm, decisionsDir: 'docs/decisions' })),
+    const opts = [true, false].flatMap((stageable) =>
+      [true, false].map((noLlm) => ({ stageable, noLlm, decisionsDir: 'docs/decisions' })),
     );
     for (const o of opts) {
       const text = renderAdvisory([{ label: 'legacy-deletion', path: 'a.ts' }], o).join('\n');
