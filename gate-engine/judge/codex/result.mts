@@ -158,13 +158,8 @@ export function parseClaudeArgv(args: string[]): ClaudeArgvParts {
   return { model, prompt, systemPrompt, readOnly, allowedTools };
 }
 
-/**
- * Translate a claude judge argv into the equivalent `codex exec` argv. Hermetic on purpose:
- * `--ignore-user-config` (auth still works, but the owner's MCP servers / notify hooks / desktop
- * integrations must not load into a judge), `--ignore-rules` (nor user execpolicy), `--ephemeral`
- * (the codex twin of `--no-session-persistence`), `--skip-git-repo-check` (bench scratch dirs are
- * not always repos). Evidence still arrives on stdin — codex appends it as a `<stdin>` block.
- */
+/** `codex exec` argv for a claude judge argv, hermetic: no owner config.toml, execpolicy rules,
+ * skills catalog or global AGENTS.md (home.mts). Bench scratch dirs need --skip-git-repo-check. */
 /** Reasoning efforts codex accepts for `model_reasoning_effort` (codex-rs config). */
 const REASONING_EFFORTS: ReadonlySet<string> = new Set(['low', 'medium', 'high', 'xhigh']);
 
@@ -238,6 +233,8 @@ export function codexExecArgs(
     ...(confined ? ['-C', confined.scratch, '--add-dir', join(confined.repoRoot, '.claude')] : []),
     '-c',
     'web_search="disabled"',
+    '-c',
+    'skills.include_instructions=false',
     ...mcpArgv,
     '--ignore-user-config',
     '--ignore-rules',

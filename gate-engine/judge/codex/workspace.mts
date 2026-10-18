@@ -3,7 +3,8 @@
 import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { needsCodexWorkspace } from './result.mts';
+import { ensureCodexJudgeHome } from './home.mts';
+import { isCodexModel, needsCodexWorkspace, parseClaudeArgv } from './result.mts';
 
 /** A workspace-write judge's scratch cwd, plus the repo whose `.claude/` alone it may write. */
 export interface CodexWorkspace {
@@ -14,6 +15,8 @@ export interface CodexWorkspace {
 export interface CodexSandbox {
   codexReadOnly: boolean;
   workspace?: CodexWorkspace;
+  /** Spawn env for every codex judge: its own CODEX_HOME, so the owner's AGENTS.md never loads. */
+  env?: { CODEX_HOME: string };
   /** Never throws: a judge's verdict must not turn into an outage over a leftover temp dir. */
   cleanup: () => void;
 }
@@ -22,13 +25,17 @@ export interface CodexSandbox {
 // root's; copying them keeps the confined judge's instructions identical.
 const PROJECT_DOCS = ['AGENTS.md', 'AGENTS.override.md'];
 
-/** Create the workspace when this argv routes to a workspace-write codex judge; a no-op otherwise. */
+/** Any codex judge gets its own home; a workspace-write one also a scratch cwd. Claude: a no-op. */
 export function prepareCodexSandbox(
   args: string[],
   codexReadOnly: boolean,
   cwd: string,
+  ownerEnv: NodeJS.ProcessEnv = process.env,
 ): CodexSandbox {
-  if (!needsCodexWorkspace(args, codexReadOnly)) return { codexReadOnly, cleanup: () => {} };
+  if (!isCodexModel(parseClaudeArgv(args).model)) return { codexReadOnly, cleanup: () => {} };
+  // Before mkdtemp: a home that cannot be made must not leak a scratch dir.
+  const env = { CODEX_HOME: ensureCodexJudgeHome(ownerEnv) };
+  if (!needsCodexWorkspace(args, codexReadOnly)) return { codexReadOnly, env, cleanup: () => {} };
   const repoRoot = resolve(cwd);
   assertClaudeDirConfined(repoRoot);
   const scratch = mkdtempSync(join(tmpdir(), 'devkit-judge-'));
@@ -39,7 +46,7 @@ export function prepareCodexSandbox(
     cleanup();
     throw error;
   }
-  return { codexReadOnly, workspace: { scratch, repoRoot }, cleanup };
+  return { codexReadOnly, env, workspace: { scratch, repoRoot }, cleanup };
 }
 
 function removeScratch(scratch: string): void {
