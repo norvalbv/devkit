@@ -4,20 +4,13 @@
  */
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
-
-// Shell-safe argv token: bare when it holds only characters no shell treats specially, else POSIX
-// single-quoted. A repo path with a space is ordinary here (devkit self-hosts at one).
-const SAFE_SHELL_ARG_RE = /^[\w@%+=:,./-]+$/;
-function shellArg(token: string, forceQuote = false): string {
-  const bare = SAFE_SHELL_ARG_RE.test(token) && !forceQuote;
-  return bare ? token : `'${token.replaceAll("'", "'\\''")}'`;
-}
+import { shellQuote, shellWord } from '../review/valve/shell-word.mts';
 
 // argv[0] as the gate's execvp saw it. A PATH name goes through `env --` so no builtin, function or
 // keyword intercepts it; `NAME=value` is quoted instead (env would read it as an assignment).
 function commandWord(word: string): string {
-  if (word.includes('/')) return shellArg(word);
-  return word.includes('=') ? shellArg(word, true) : `env -- ${shellArg(word)}`;
+  if (word.includes('/')) return shellWord(word);
+  return word.includes('=') ? shellQuote(word) : `env -- ${shellWord(word)}`;
 }
 
 function realOrSelf(p: string): string {
@@ -46,7 +39,7 @@ export function recheckCommand(argv: string[], moduleCwd?: string): string {
   // Only argv[1] — the gate module devkit resolved itself — is relativised; repo-written args are exact.
   const bases = moduleCwd ? [...new Set([moduleCwd, realOrSelf(moduleCwd)])] : [];
   const words = argv.map((a, i) => (i === 1 && path.isAbsolute(a) ? displayPath(a, bases) : a));
-  return [commandWord(words[0]), ...words.slice(1).map((w) => shellArg(w))].join(' ');
+  return [commandWord(words[0]), ...words.slice(1).map(shellWord)].join(' ');
 }
 
 /** A registry gate's re-check line, plus anti-slop's documented short form. */
