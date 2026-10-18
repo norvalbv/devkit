@@ -642,3 +642,44 @@ describe('_ship_sh_word — quoting round-trips any argument', () => {
     expect(r.stdout).toBe(input);
   });
 });
+
+// The pre-chain decision-smell advisory must also be the last thing a tailing reader sees.
+describe('commit_with_gate_capture — repeats the decision-smell advisory at the tail', () => {
+  const ADVISORY = '⚠️  decision smell (regex only, not a verdict): legacy-deletion — old.ts';
+
+  it('ends with the advisory when the decisions gate never ran, pass or block', () => {
+    for (const [body, ok] of [
+      ["echo 'GATE_RAN' >&2\n", true],
+      ["echo 'GATE_RAN' >&2\nexit 1\n", false],
+    ] as const) {
+      const { root, wt, base } = fixture(true, body);
+      const result = runCommit(root, wt, base, false, false, '', {
+        SHIP_DECISION_ADVISORY: ADVISORY,
+      });
+      expect(result.status === 0, result.stderr).toBe(ok);
+      expect(result.stderr.trimEnd().endsWith(ADVISORY), result.stderr).toBe(true);
+    }
+  });
+
+  it('stays quiet once the decisions gate printed its own verdict', () => {
+    const { root, wt, base } = fixture(
+      true,
+      "echo 'decision-gate: judge cleared as ROUTINE' >&2\n",
+    );
+    const result = runCommit(root, wt, base, false, false, '', {
+      SHIP_DECISION_ADVISORY: ADVISORY,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).not.toContain(ADVISORY);
+  });
+
+  it('leaves a timed-out chain its own guidance last', () => {
+    const { root, wt, base } = fixture(true, 'sleep 20\n');
+    const result = runCommit(root, wt, base, false, false, '', {
+      SHIP_DECISION_ADVISORY: ADVISORY,
+      DK_TEST_CALLER_VARS: 'SHIP_COMMIT_TIMEOUT=2',
+    });
+    expect(result.status, result.stderr).toBe(124);
+    expect(result.stderr).not.toContain(ADVISORY);
+  });
+});
