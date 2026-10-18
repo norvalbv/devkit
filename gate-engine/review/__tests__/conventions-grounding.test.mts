@@ -716,6 +716,16 @@ describe('groundConventionFindings — whole-file citations name a file this cha
     ]);
   });
 
+  it('lets a backtick only wrap the bare path, so an inner one keeps the block open', () => {
+    const wrapped = wholeFile(`UserBadge.tsx — \`${path}\``).replace(
+      '\nVERDICT',
+      '\nprose\nVERDICT',
+    );
+    expect(grounded(wrapped, added)).toHaveLength(1);
+    const inner = wholeFile('q — `a`/`b.ts`').replace('\nVERDICT', '\nprose\nVERDICT');
+    expect(parseConventionFindingCandidates(inner)[0].offendingPath).toBe('`a`/`b.ts` prose');
+  });
+
   it('scans a judge line of one huge dotted token in linear time', () => {
     const huge = 'a.'.repeat(80_000);
     const raw = `${RULE}\nOFFENDING: q — ${huge} x\nmore\nVERDICT: FAIL — x`;
