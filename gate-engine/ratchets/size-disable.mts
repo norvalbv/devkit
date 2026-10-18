@@ -16,6 +16,7 @@ import { exitGate } from '../deterministic/reason.mts';
 import { overlayInstall } from '../overlay-mode.mts';
 import {
   readRatchetBaseline,
+  refuseFreezeThroughLink,
   removeRatchetBaseline,
   SIZE_BASELINE,
   writeRatchetBaseline,
@@ -144,11 +145,8 @@ export function countOversized(
   return over.sort((a, b) => a.file.localeCompare(b.file));
 }
 
-// Grandfather the current over-cap source files into the raw-line baseline (size-lines.json).
-// Automatic onboarding stays shrink-only; the explicit CLI refresh may raise a ceiling, but names
-// every increase so legitimate main-branch drift can be reconciled without a silent laundering path.
-// Writes ONLY the line baseline and never touches the disable-count baseline (size.json). Returns
-// the number of files over the cap; deletes a stale baseline when none remain.
+// Grandfather over-cap files into size-lines.json only; onboarding is shrink-only, the CLI refresh
+// names every raise. Returns the over-cap count and deletes a stale baseline when none remain.
 export function freezeLines(root = process.cwd(), mode: LinesFreezeMode = 'shrink-only'): number {
   const cfg = resolveGuardConfig(root);
   if (!cfg.maxLines && !cfg.maxTestLines) return 0;
@@ -436,6 +434,7 @@ function runCli(cmd: string): void {
   const baseline = readRatchetBaseline(root, BASELINE);
 
   if (cmd === 'freeze') {
+    refuseFreezeThroughLink(root, 'guard-size', [SIZE_BASELINE, LINES_BASELINE]);
     // Per-file map. Shrink-only: min against the prior per-file count so a --no-verify growth can't be
     // laundered back in. A pre-per-file (or missing) baseline has no per-file prior → this first freeze
     // re-grandfathers current counts (the migration point).
