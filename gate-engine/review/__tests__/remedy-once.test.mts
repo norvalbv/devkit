@@ -134,6 +134,17 @@ describe('one strict-ship Remedy across completeness and the reviewer fleet', ()
     expect(remedies[1]).toContain('for another 5h 3m');
   });
 
+  it('a Remedy still queued on a POSIX pipe leaves no marker, so the fleet keeps its full copy', async () => {
+    // process.exit drops a pipe write libuv has not flushed; a marker would then point at nothing.
+    const queued = vi.spyOn(process.stderr, 'writableLength', 'get').mockReturnValue(1);
+    const lines = captureStderr();
+    const resetsAt = Date.now() + 5 * HOUR;
+    await completenessHits({ kind: 'rate-limited', permanent: true, resetsAt });
+    queued.mockReturnValue(0);
+    reportInconclusive([fleetRow('a', 'rate-limited', 'claude', resetsAt)], true);
+    expect(fullRemedies(lines())).toHaveLength(2);
+  });
+
   it('without a shared dir every printer keeps its full Remedy', async () => {
     delete process.env.DEVKIT_REMEDY_DIR;
     const lines = captureStderr();

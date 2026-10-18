@@ -15,19 +15,22 @@ function printedReset(marker: string): number {
   }
 }
 
+/** This hook run's marker for one wording, or '' when no hook shared a dir. */
+function markerPath(key: string): string {
+  const dir = process.env.DEVKIT_REMEDY_DIR;
+  return dir ? path.join(dir, createHash('sha256').update(key).digest('hex').slice(0, 16)) : '';
+}
+
 /** `key` is the wording minus its reset; a later reset than the one printed earns a full copy. */
 export function printRemedyOnce(key: string, text: string, suffix: string, resetsAt = 0): void {
-  const dir = process.env.DEVKIT_REMEDY_DIR;
-  const marker = dir
-    ? path.join(dir, createHash('sha256').update(key).digest('hex').slice(0, 16))
-    : '';
+  const marker = markerPath(key);
   if (marker && printedReset(marker) >= resetsAt) {
     console.error(`   Remedy: the same Remedy as printed above (${suffix}).`);
     return;
   }
   console.error(`   Remedy: ${text} (${suffix}).`);
-  // Marked only AFTER printing: a sibling racing this line prints a duplicate, never nothing.
-  if (!marker) return;
+  // Marked only once the text is out: POSIX pipe writes are async and process.exit drops a queued one.
+  if (!marker || process.stderr.writableLength > 0) return;
   try {
     writeFileSync(marker, String(resetsAt));
   } catch {
