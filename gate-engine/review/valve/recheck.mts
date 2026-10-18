@@ -4,8 +4,9 @@
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mts';
 import { type LensPart, type ReviewTask, taskLabel } from '../lens/split.mts';
 import { isShipLane } from '../cascade/consumer-assets.mts';
-import { parseAdvisories } from '../contracts/response.mts';
-import { reportAdvisories } from '../evidence/base-context.mts';
+import { emitAdvisoryResult } from '../../judge/advisory/emit.mts';
+import { ADVISORY_CAP, parseAdvisories } from '../contracts/response.mts';
+import { printAdvisories } from '../evidence/base-context.mts';
 import { emitReviewSkipped } from '../evidence/scope.mts';
 import { lensGroupId, resolveLensGroups } from '../lens/groups.mts';
 import { REVIEWERS, type ReviewerSelection } from '../reviewers.mts';
@@ -103,16 +104,21 @@ export function printRemedy(
   if (!only) console.error(recheckHint(f.name, splitParts.get(f.name), isShipLane()));
 }
 
-/** A lens recheck emits no merged row, so each live PASS part reports its own advisories. A cached
- * part carries no transcript: its advisories already replayed with its cache line. */
+/** A lens recheck emits no merged row, so each live PASS part prints its own advisories, and each
+ * reviewer still gets ONE advisory_result. A cached part carries no transcript: it already replayed. */
 export function reportLensPartAdvisories(splitParts: Map<string, LensPart[]>): void {
-  for (const p of [...splitParts.values()].flat()) {
-    if (p.res.status !== 'pass' || !p.res.transcript) continue;
-    const label = taskLabel(p.task);
-    const ref = saveTranscript(
-      `review-${label}`,
-      composeTranscript(p.task.diffText, p.res.transcript),
-    );
-    reportAdvisories(p.task.sel.reviewer.name, parseAdvisories(p.res.transcript), ref, label);
+  for (const [name, parts] of splitParts) {
+    const all: string[] = [];
+    for (const p of parts) {
+      if (p.res.status !== 'pass' || !p.res.transcript) continue;
+      const advisories = parseAdvisories(p.res.transcript);
+      if (!advisories.length) continue;
+      const label = taskLabel(p.task);
+      const text = composeTranscript(p.task.diffText, p.res.transcript);
+      printAdvisories(label, advisories, saveTranscript(`review-${label}`, text));
+      all.push(...advisories);
+    }
+    const unique = [...new Set(all)].slice(0, ADVISORY_CAP);
+    if (unique.length) emitAdvisoryResult(`review:${name}`, 'finding', unique.join(' | '));
   }
 }

@@ -291,19 +291,22 @@ export function cachedAdvisories(...metas: VerdictMeta[]): string[] | undefined 
 }
 
 /** A PASS's `ADVISORY:` findings: self-labelled lines (a split merge prints no verdict line to sit
- * under), where the full reasoning lives, and ONE advisory_result — the digest keeps one per gate.
- * `label` names a lens part on screen; the row stays keyed `review:<name>`, as every path keys it. */
+ * under), where the full reasoning lives, and ONE advisory_result — the digest keeps one per gate. */
 export function reportAdvisories(
   name: string,
   advisories: string[] | undefined,
   ref?: string | null,
-  label = name,
 ): void {
   if (!advisories?.length) return;
+  printAdvisories(name, advisories, ref);
+  emitAdvisoryResult(`review:${name}`, 'finding', advisories.join(' | '));
+}
+
+/** The screen half of reportAdvisories, for a caller that emits one row across several labels. */
+export function printAdvisories(label: string, advisories: string[], ref?: string | null): void {
   for (const a of advisories)
     console.error(`guard-review: ${label} — advisory (non-blocking): ${a}`);
   if (ref) console.error(`guard-review: ${label} — full reasoning: guard-review transcript ${ref}`);
-  emitAdvisoryResult(`review:${name}`, 'finding', advisories.join(' | '));
 }
 
 /** A cached PASS line (`tail` = its provenance), marked and reported when it replays MCP-degraded. */

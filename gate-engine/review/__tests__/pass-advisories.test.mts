@@ -198,7 +198,7 @@ describe('a lens-split reviewer', () => {
     expect(advisoryRows().map((r) => r.gate)).toEqual(['review:commit-guard']); // reviewer key
   });
 
-  it("gives each chunk part of a lens its own transcript, never the last chunk's", () => {
+  it("gives each chunk part its own transcript, and the reviewer ONE row holding every chunk's advisory", () => {
     const task = { ...plan(cwd).tasks[0], splitOf: REVIEWER, group: 'g' };
     const chunk = (index: number): LensPart =>
       // SAFETY: the report reads only res/task (task.chunk.index for the label), supplied here.
@@ -213,5 +213,10 @@ describe('a lens-split reviewer', () => {
       .map((l) => l.split('guard-review transcript ')[1]);
     expect(refs).toHaveLength(2);
     expect(new Set(refs).size).toBe(2);
+    // The digest keeps the first row per gate, so a row per chunk would hide chunk 1's advisory.
+    expect(advisoryRows()).toHaveLength(1);
+    expect(advisoryRows()[0]).toMatchObject({ gate: 'review:commit-guard' });
+    expect(advisoryRows()[0].detail).toContain('chunk 0');
+    expect(advisoryRows()[0].detail).toContain('chunk 1');
   });
 });
