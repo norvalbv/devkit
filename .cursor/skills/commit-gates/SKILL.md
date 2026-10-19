@@ -98,11 +98,12 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   sandbox` applies the same host sandbox as the judge's `codex exec` (Seatbelt on macOS, Landlock on
   Linux), with no model call, and runs the command in your login shell as the judge does. From the
   repo root, a workspace-write (investigating) judge's view is:
-  `r=$PWD s=$(mktemp -d); cp AGENTS.md "$s"; (cd "$s" && CODEX_HOME=$(mktemp -d) codex sandbox -c 'sandbox_mode="workspace-write"' -c "sandbox_workspace_write.writable_roots=[\"$r/.claude\"]" -- "$SHELL" -lc '<cmd>'); echo "exit $?"`.
+  `r=$(pwd -P) s=$(cd "$(mktemp -d)" && pwd -P); cp AGENTS.md "$s"; (cd "$s" && CODEX_HOME=$(mktemp -d) codex sandbox -c 'default_permissions="devkit_judge"' -c "permissions.devkit_judge.filesystem={\":root\"=\"read\",\":tmpdir\"=\"write\",\":slash_tmp\"=\"write\",\"$s\"=\"write\",\"$r/.claude/.correctness-review.json\"=\"write\"}" -- "$SHELL" -lc '<cmd>'); echo "exit $?"`.
   On macOS, add `--log-denials` after `sandbox` to name each denied operation; Linux has no such
-  flag. A read-only judge runs in the repo root itself: drop the `cd` and the `writable_roots`, and
-  set `sandbox_mode="read-only"`. Both modes read the whole disk and have no network.
-  Workspace-write can write only the scratch cwd, `<repo>/.claude`, `/tmp` and `$TMPDIR`. Run the
+  flag. A read-only judge runs in the repo root itself: drop the `cd` and both `-c` overrides, and
+  pass `-c 'sandbox_mode="read-only"'`. Both modes read the whole disk and have no network.
+  Workspace-write can write only the scratch cwd, `/tmp`, `$TMPDIR` and one checklist state file
+  (above, correctness's; another reviewer's is its own `.claude/.<name>-review.json`). Run the
   bare command, not a pipeline, since a pipe's exit status hides the denial. Cite the output in a
   waive rationale.
 - **A finding stands for a class.** A finding against a matcher, parser, predicate or validator

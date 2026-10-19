@@ -36,7 +36,8 @@ import {
 } from './codex/result.mts';
 import { emitGateEvent, type TelemetryStatus } from './gate-events.mts';
 import { trackJudge } from './process/heartbeat.mts';
-import { type CodexSandbox, prepareCodexSandbox } from './codex/workspace.mts';
+import type { CodexSandbox, CodexSandboxOpts } from './codex/workspace.mts';
+import { prepareCodexSandbox } from './codex/workspace.mts';
 import { withoutGitEnv } from './judge-isolation.mts';
 import {
   type JudgeMcpProfile,
@@ -119,7 +120,7 @@ export const DEEP_JUDGE_TIMEOUT_MS = 1800000;
 // stored twice. `timeout` is REQUIRED (sc-1317): Node's `execFile`/`execFileSync` treat an
 // omitted/0 timeout as "no cap at all", which would silently defeat the SIGKILL guarantee below —
 // every real caller already supplies one, so this is a type-level guard, not a behavior change.
-interface ExecJudgeOpts {
+interface ExecJudgeOpts extends CodexSandboxOpts {
   label: string;
   args: string[];
   input?: string;
@@ -136,8 +137,6 @@ interface ExecJudgeOpts {
   onMcpPrepared?: (capabilityFingerprint: string, degradedCause?: string) => void;
   /** Trusted-registry project roots; isolated fixtures supply the consumer root they represent. */
   mcpProjectRoots?: readonly string[];
-  /** Tool-equipped, write-free Codex judge; required without staged-tree tamper detection. */
-  codexReadOnly?: boolean;
   /** Split-reviewer lens group for judge_exec spend attribution; all parts share one judge label. */
   lens?: string;
   /** Fires once per measured claude spawn with the tool calls its permission gate refused. */
@@ -343,7 +342,7 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
   try {
     // Inside the try on purpose: an argv a codex model cannot express (no prompt) surfaces as ONE
     // outage warning carrying the translation error, keeping this function's never-throws contract.
-    ws = prepareCodexSandbox(args, opts.codexReadOnly === true, cwd ?? process.cwd());
+    ws = prepareCodexSandbox(args, opts, cwd ?? process.cwd());
     const cli = spawnFor(args, mcp, ws);
     opts.onMcpPrepared?.(mcp.capabilityFingerprint, spawnDegradedCause(mcp, cli.mcpInjected));
     const out = execFileSync(cli.bin, cli.argv, {
@@ -441,7 +440,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
     try {
       // See the sync twin: routing inside the try keeps the never-rejects contract when argv
       // translation itself throws.
-      ws = prepareCodexSandbox(args, opts.codexReadOnly === true, cwd ?? process.cwd());
+      ws = prepareCodexSandbox(args, opts, cwd ?? process.cwd());
       const cli = spawnFor(args, mcp, ws);
       opts.onMcpPrepared?.(mcp.capabilityFingerprint, spawnDegradedCause(mcp, cli.mcpInjected));
       const child = execFile(

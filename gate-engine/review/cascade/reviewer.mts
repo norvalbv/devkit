@@ -270,17 +270,22 @@ async function cascadeVerdict(
   // Per-lens spend attribution: every split part deliberately shares one judge LABEL (the reviewer
   // identity the caches and warehouse key on), so the lens rides the judge_exec event as its own field.
   const lens = reviewer.lens?.length ? lensGroupId(reviewer.lens) : undefined;
-  let firstOutage: JudgeOutage | undefined;
-  const firstOpts = {
-    label: `review:${reviewer.name}`,
-    args: args(prompt, passModel),
+  // First pass, retries and escalation write one checklist state file, so all carry its grant.
+  const shared = {
     input,
-    timeout: budgetLeft(),
     cwd,
     transcript: false,
     mcpProfile,
     env,
     lens,
+    codexWritableFile: reviewer.stateFile,
+  };
+  let firstOutage: JudgeOutage | undefined;
+  const firstOpts = {
+    ...shared,
+    label: `review:${reviewer.name}`,
+    args: args(prompt, passModel),
+    timeout: budgetLeft(),
     onOutage: (outage: JudgeOutage) => {
       firstOutage = outage;
     },
@@ -431,15 +436,10 @@ async function cascadeVerdict(
     };
   let secondOutage: JudgeOutage | undefined;
   const second = await exec({
+    ...shared,
     label: `review:${reviewer.name}:escalate`,
     args: args(escalatePrompt(prompt, first), escalationModel),
-    input,
     timeout: escalationBudget,
-    cwd,
-    transcript: false,
-    mcpProfile,
-    env,
-    lens,
     onOutage: (outage: JudgeOutage) => {
       secondOutage = outage;
     },

@@ -13,8 +13,8 @@
  * second judge pipeline.
  */
 
-import { join } from 'node:path';
 import { type JudgeUsage, withResultArgs } from '../claude-result.mts';
+import { codexPermissionArgs } from './permissions.mts';
 import type { CodexWorkspace } from './workspace.mts';
 
 // ── the `codex exec --json` event contract ──────────────────────────────────────────────────────
@@ -104,7 +104,7 @@ export interface ClaudeArgvParts {
    * the closest analog is prepending the brief to the prompt — see codexExecArgs. */
   systemPrompt: string | null;
   /** `--disallowedTools *` (JUDGE_READ_ONLY) maps to codex's read-only sandbox; an investigating
-   * judge runs workspace-write, confined to a scratch cwd plus `<repo>/.claude` (CodexWorkspace). */
+   * judge runs workspace-write, confined to a scratch cwd plus its one state file (CodexWorkspace). */
   readOnly: boolean;
   /** The claude `--allowedTools` grants, comma-split — the codex path maps `mcp__<server>__…`
    * entries onto per-server `enabled_tools` allowlists (sc-2054). */
@@ -201,8 +201,8 @@ const confinedWorkspace = (parts: ClaudeArgvParts, workspace?: CodexWorkspace) =
 export const NO_TEST_RUNS =
   'Do not run tests, test runners or package-manager scripts (bun run, npm run); review by reading. Test execution belongs to the pre-push suite.';
 
-function repoRootNotice(repoRoot: string): string {
-  return `The repository under review is ${repoRoot}. Run every command from there (cd into it first); paths in this task are relative to it. Its working tree is read-only to you except .claude/. ${NO_TEST_RUNS}\n\n`;
+function repoRootNotice({ repoRoot, stateFile }: CodexWorkspace): string {
+  return `The repository under review is ${repoRoot}. Run every command from there (cd into it first); paths in this task are relative to it. Its working tree is read-only to you${stateFile ? ` except ${stateFile}` : ''}. ${NO_TEST_RUNS}\n\n`;
 }
 
 export function codexExecArgs(
@@ -218,7 +218,7 @@ export function codexExecArgs(
   // to the prompt instead. A labeled block, so the model sees the brief/task boundary the two
   // claude message slots used to provide.
   const prompt =
-    (confined ? repoRootNotice(confined.repoRoot) : '') +
+    (confined ? repoRootNotice(confined) : '') +
     (parts.systemPrompt
       ? `<agent-brief>\n${parts.systemPrompt}\n</agent-brief>\n\n${parts.prompt}`
       : parts.prompt);
@@ -233,9 +233,9 @@ export function codexExecArgs(
     argv.push('-c', `model_reasoning_effort=${JSON.stringify(spec.effort)}`);
   // skills/commit-gates/SKILL.md replays this sandbox via `codex sandbox`; keep it in step.
   argv.push(
-    '--sandbox',
-    parts.readOnly ? 'read-only' : 'workspace-write',
-    ...(confined ? ['-C', confined.scratch, '--add-dir', join(confined.repoRoot, '.claude')] : []),
+    ...(confined
+      ? ['-C', confined.scratch, ...codexPermissionArgs(confined)]
+      : ['--sandbox', parts.readOnly ? 'read-only' : 'workspace-write']),
     '-c',
     'web_search="disabled"',
     ...mcpArgv,
