@@ -56,7 +56,7 @@ import {
   trackMcpSpawns,
   withNamedAgentMcpTools,
 } from '../judge/mcp/profile.mts';
-import { printCachedPass, reportMcpDegraded } from './evidence/base-context.mts';
+import { STICKY_RULING, printCachedPass, reportMcpDegraded } from './evidence/base-context.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import type { JudgeOutage } from '../judge/outage/classify.mts';
 import {
@@ -328,7 +328,7 @@ export async function runCompleteness(
         sticky,
         diffMatches
           ? `(same branch + message + staged diff) — message ${messageId}`
-          : `(same branch + message; judged on an earlier diff, which is not re-judged) — message ${messageId}`,
+          : `(same branch + message; judged on an earlier diff, which is not re-judged) — message ${messageId}; ${STICKY_RULING}`,
       );
       const stickyDuration =
         typeof sticky.duration_ms === 'number' ? sticky.duration_ms : undefined;
