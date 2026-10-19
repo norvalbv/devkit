@@ -14,12 +14,12 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { cmpSemver } from '../../commands/update.mts';
 import { writeIfAbsent } from '../fs-helpers.mts';
 
 /**
- * Pinned fallow version. NEVER @latest — a floating tag makes the gate non-deterministic
- * and can drift below FALLOW_GATE_MIN_VERSION. 3.10.0 sits well above the default floor
- * (2.46.0), so a pinned install always satisfies the gate's version check.
+ * Pinned fallow version, NEVER @latest (a floating tag makes the gate non-deterministic). It is
+ * also the minimum: `ensureFallow` keeps a fallow at or above it and never downgrades one.
  *
  * The floor here is >=3.4.2, not just "newer is nicer". Through 2.x, `fallow audit`
  * materialised its comparison base as a REGISTERED git worktree and its cleanup was not
@@ -63,6 +63,12 @@ interface RunResult {
   stdout: string;
 }
 
+// ensureFallow's outcome: whether a usable fallow is on PATH now, plus the progress line to print.
+interface FallowEnsureResult {
+  ok: boolean;
+  message: string;
+}
+
 /**
  * Single spawn seam. Every external command in this module funnels through here so dryRun
  * print-and-skip and the test mock have ONE place to intercept. Inherits stdio by default
@@ -86,8 +92,9 @@ function run(
   return { status: r.error ? null : r.status, stdout: r.stdout ?? '' };
 }
 
-// Match a "fallow X.Y.Z" probe line, capturing the bare version.
-const VERSION_RE = /fallow\s+(\d+\.\d+\.\d+\S*)/;
+// Match a "fallow X.Y.Z" probe line, capturing only the numeric core: a prerelease suffix
+// would make cmpSemver NaN and read a newer fallow as older.
+const VERSION_RE = /fallow\s+(\d+\.\d+\.\d+)/;
 
 // Parse a version probe into the bare version, or null if it didn't match.
 function parseVersion(stdout: string): string | null {
@@ -96,24 +103,18 @@ function parseVersion(stdout: string): string | null {
 }
 
 /**
- * Is fallow reachable? Try the binary on PATH first, then `npx --no-install` (uses an
- * already-installed local copy without a network fetch). Never throws.
- *
+ * Is fallow on PATH? PATH only: the hook's `command -v fallow`, `fallow init` and the
+ * baseline saves all resolve PATH, so an npx-only copy would leave the gate skipping.
  */
 export function detectFallow({ cwd }: { cwd?: string } = {}): {
   available: boolean;
   version: string | null;
 } {
-  const probes: [string, string[]][] = [
-    ['fallow', ['--version']],
-    ['npx', ['--no-install', 'fallow', '--version']],
-  ];
-  for (const [cmd, args] of probes) {
-    const { status, stdout } = run(cmd, args, { cwd, capture: true });
-    const version = parseVersion(stdout);
-    if (status === 0 && version) return { available: true, version };
-  }
-  return { available: false, version: null };
+  const { status, stdout } = run('fallow', ['--version'], { cwd, capture: true });
+  const version = parseVersion(stdout);
+  return status === 0 && version
+    ? { available: true, version }
+    : { available: false, version: null };
 }
 
 // The package-manager attempts, in priority order. cargo's crate is `fallow-cli` but the
@@ -161,6 +162,29 @@ export function installFallow({ cwd, dryRun }: FallowCommandOptions = {}): {
   }
   printManualSteps();
   return { ok: false, method: null, message: 'no package manager could install fallow' };
+}
+
+/**
+ * The one detect-then-install path for every install mode: keep a PATH fallow at or above the
+ * pin, else install the pin.
+ */
+export function ensureFallow({ cwd, dryRun }: FallowCommandOptions = {}): FallowEnsureResult {
+  const pin = FALLOW_PINNED_VERSION;
+  if (dryRun) {
+    return {
+      ok: true,
+      message: `[dry-run] fallow: keep an installed fallow >= ${pin}, else install fallow@${pin}`,
+    };
+  }
+  const { version } = detectFallow({ cwd });
+  if (version && cmpSemver(version, pin) >= 0) {
+    return { ok: true, message: `using installed fallow ${version} (>= ${pin})` };
+  }
+  const r = installFallow({ cwd });
+  return {
+    ok: r.ok,
+    message: `${version ? `fallow ${version} is below ${pin}` : 'fallow not found'}: ${r.message}`,
+  };
 }
 
 /**
@@ -214,22 +238,16 @@ export function saveFallowBaselines({ cwd, dryRun }: FallowCommandOptions = {}):
  */
 export function resolveOverlayFallow(cwd: string, dryRun: boolean): boolean {
   if (dryRun) {
-    console.log('  [dry-run] fallow: detect → install-if-missing → save baselines → gate in hook');
+    console.log(
+      '  [dry-run] fallow: keep an installed fallow >= pin, else install it → save baselines → gate in hook',
+    );
     return true;
   }
-  const det = detectFallow({ cwd });
-  if (det.available) {
-    console.log(`  ✓ fallow present (${det.version})`);
-  } else {
-    console.log('  ! fallow not found — attempting a global install (bun → npm → cargo)...');
-    const r = installFallow({ cwd });
-    if (!r.ok) {
-      console.log(
-        '  ! fallow not installed — skipping the fallow gate (install it above, re-run).',
-      );
-      return false;
-    }
-    console.log(`  ✓ ${r.message}`);
+  const r = ensureFallow({ cwd });
+  console.log(`  ${r.ok ? '✓' : '!'} ${r.message}`);
+  if (!r.ok) {
+    console.log('  ! fallow not installed — skipping the fallow gate (install it above, re-run).');
+    return false;
   }
   const saved = saveFallowBaselines({ cwd });
   console.log(
