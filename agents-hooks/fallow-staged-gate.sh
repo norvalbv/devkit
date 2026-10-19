@@ -125,7 +125,7 @@ if [ -n "$FLOOR" ] && [ -n "$VERSION" ]; then
   fi
 fi
 
-# The staged set of ROOT's index: this hook runs before the agent's `git commit`, outside git's env.
+# ROOT's staged set, read with this process's env: a PreToolUse hook runs before `git commit`.
 # Flags mirror gate-engine/review/baseline-gate.mts, so binaries, renames and subdirs resolve alike.
 DIFF_FILE="$(mktemp)"
 FALLOW_OUT="$(mktemp)"
