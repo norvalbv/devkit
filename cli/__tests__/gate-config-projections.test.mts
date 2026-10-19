@@ -1,6 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   appendFileSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
@@ -140,6 +141,7 @@ describe('gate config projections', () => {
     expect(configuredPaths(foreign, '--usable-chunks')).toBe('\n');
     expect(configuredPaths(join(root, 'junk.db'), '--usable-chunks')).toBe('\n');
     expect(configuredPaths(join(root, 'missing.db'), '--usable-chunks')).toBe('\n');
+    expect(existsSync(join(root, 'missing.db'))).toBe(false); // probing never creates an index
     expect(lstatSync(join(root, 'junk.db')).size).toBe(10); // probing never rewrites the file
   });
 
