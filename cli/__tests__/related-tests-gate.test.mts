@@ -79,6 +79,13 @@ describe('forcedTests', () => {
     expect(forcedTests(['vitest.setup.mjs'])).toEqual([SCRUB]);
   });
 
+  // The scrub test also reads both configs to pin that they share the setup file.
+  it('forces the env-scrub test for either vitest config it reads', () => {
+    expect(forcedTests(['vitest.config.mjs'])).toEqual([SCRUB]);
+    expect(forcedTests(['vitest.e2e.config.mjs'])).toEqual([SCRUB]);
+    expect(forcedTests(['templates/app/vitest.config.mjs'])).toEqual([]);
+  });
+
   // The scrub test scans cli/lib/ship at the top level only, so a deeper script is not its input.
   it('forces nothing for a nested or mirrored script, or a module', () => {
     expect(
@@ -301,5 +308,19 @@ describe('related-tests entrypoint', () => {
     expect(r.stdout).not.toContain('check.sh');
     // `[1]` is literal in a name, never a glob class matching x1.sh.
     expect(r.stdout).not.toContain('x[1].sh');
+  });
+
+  // relatedPaths drops vitest.setup.mjs, so the note must read the raw staged set to see it.
+  it('does not list a test the staged setup file forced as not run', () => {
+    const repo = editedRepo();
+    mkdirSync(join(repo, 'cli', '__tests__'), { recursive: true });
+    mkdirSync(join(repo, 'cli', 'lib', 'ship', 'review'), { recursive: true });
+    writeFileSync(join(repo, SCRUB), "read('cli/lib/ship/review/x.sh');\n");
+    writeFileSync(join(repo, 'cli', 'lib', 'ship', 'review', 'x.sh'), 'echo hi\n');
+    writeFileSync(join(repo, 'vitest.setup.mjs'), 'export {};\n');
+    git(repo, 'add', '.');
+    const r = spawnSync(process.execPath, [GATE], { cwd: repo, encoding: 'utf8' });
+    expect(r.stdout).toContain(', 1 forced');
+    expect(r.stdout).not.toContain('not run here');
   });
 });

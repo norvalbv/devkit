@@ -16,7 +16,8 @@ const REACH_TEST = 'cli/__tests__/test-graph-reach.test.mts';
 // The env-scrub test reads these from disk, so no import edge selects it. The ship-script pattern
 // mirrors that test's own top-level scan of cli/lib/ship.
 const SCRUB_TEST = 'cli/__tests__/vitest-setup-env-scrub.test.mts';
-const SCRUB_INPUT_RE = /^cli\/lib\/ship\/[^/]+\.sh$|^vitest\.setup\.mjs$/;
+const SCRUB_INPUT_RE =
+  /^cli\/lib\/ship\/[^/]+\.sh$|^vitest\.setup\.mjs$|^vitest(\.e2e)?\.config\.mjs$/;
 
 /** The disk-reading tests a staged path selects, which `vitest related` would never run. */
 export function forcedTests(staged: Iterable<string>): string[] {
@@ -141,6 +142,7 @@ export function runRelatedTests(root: string, opts: RunOpts = {}): number {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const code = runRelatedTests(process.cwd());
-  noteUnmapped(process.cwd(), relatedPaths(stagedSet(process.cwd()) ?? []));
+  // The raw set, not relatedPaths: a staged vitest.setup.mjs must still mark its forced test as run.
+  noteUnmapped(process.cwd(), [...(stagedSet(process.cwd()) ?? [])]);
   process.exitCode = code;
 }
