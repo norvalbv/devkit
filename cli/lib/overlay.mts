@@ -135,6 +135,8 @@ function repoHooks(gitRoot: string, origHooksPath: string) {
   const scriptDir = overlayHookScriptDir(origHooksPath);
   const native = /^(?:\.\/)?\.git\/hooks\/*$/.test(scriptDir);
   const scriptsAbs = native ? nativeHooksDir(gitRoot) : hooksDir(gitRoot, scriptDir);
+  if (!scriptsAbs && !existsSync(join(gitRoot, '.git')))
+    throw new Error(`${gitRoot} is not a git repository`);
   // Never "no hooks" on an unanswerable git: that would silently drop the repo's own hooks.
   if (!scriptsAbs) throw new Error(`could not resolve the git common dir of ${gitRoot}; retry`);
   const names = existsSync(scriptsAbs) ? readdirSync(scriptsAbs) : [];
