@@ -9915,14 +9915,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "cli/lib/install/install-fallow.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `wireFallowGate` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "return { ok: status === 0 };",
-      "fingerprint": "cf7a6907e55ac3fe9a6ba6bea6e9b3cdb3b6f1dd26ff849b74a7eb4cce299186",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/config.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -11251,14 +11243,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "cli/lib/install/install-fallow.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `saveFallowBaselines` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "return { ok };",
-      "fingerprint": "ed5f5aa081cbf0bf020efe07ad5fdde860fbafde1acd8863f91b2da184c2ea69",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/critique/eval/run-critic.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -11952,14 +11936,6 @@
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
       "context": "function finite(value: unknown): value is number {",
       "fingerprint": "f93850ed8f7fbbe1f9770e2d433e6bbc6355101896b4b3f70ea8dac73298df44",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "cli/lib/install/install-fallow.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `wireFallowHooks` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "return { ok: git.ok, log };",
-      "fingerprint": "f953db6ecf8179c9420418e6840daebdbb79c12a401a5740f8248d7927fff19a",
       "count": 1
     },
     {

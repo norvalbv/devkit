@@ -641,16 +641,12 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     await initOverlay(root);
     mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
     writeFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), '{"a.ts":400}\n');
-    mkdirSync(join(root, 'fallow-baselines'));
-    writeFileSync(join(root, 'fallow-baselines', 'health.json'), '{}\n');
-    writeFileSync(join(root, '.git', 'info', 'exclude'), '\nfallow-baselines\n', { flag: 'a' });
     const wt = addWorktree(root);
 
     commit(wt, 'link it');
     writeFileSync(join(wt, '.devkit', 'baselines', 'size-lines.json'), '{"a.ts":300}\n');
 
     expect(lstatSync(join(wt, '.devkit', 'baselines')).isSymbolicLink()).toBe(false);
-    expect(lstatSync(join(wt, 'fallow-baselines')).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), 'utf8')).toBe(
       '{"a.ts":400}\n',
     );
@@ -749,26 +745,6 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(existsSync(join(wt, 'eslint.config.devkit.mjs'))).toBe(false);
   });
 
-  it('clean removes a copied directory that only a `dir/` line ignores', async () => {
-    const root = workRepo();
-    await initOverlay(root);
-    mkdirSync(join(root, 'fallow-baselines'));
-    writeFileSync(join(root, 'fallow-baselines', 'health.json'), '{}\n');
-    const exclude = join(root, '.git', 'info', 'exclude');
-    const lines = readFileSync(exclude, 'utf8').split('\n');
-    writeFileSync(
-      exclude,
-      `${lines.filter((line) => line !== 'fallow-baselines').join('\n')}\nfallow-baselines/\n`,
-    );
-    const wt = addWorktree(root);
-    await doctorRun(['--fix'], root);
-    expect(lstatSync(join(wt, 'fallow-baselines')).isDirectory()).toBe(true);
-
-    await cleanRun(['--yes'], root);
-
-    expect(existsSync(join(wt, 'fallow-baselines'))).toBe(false);
-  });
-
   it('doctor --fix restores a copy a worktree lost', async () => {
     const root = workRepo();
     await initOverlay(root);
@@ -798,23 +774,22 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
   it('a projection that fails blocks the commit with its remedy, and the next commit retries', async () => {
     const root = workRepo();
     await initOverlay(root);
-    mkdirSync(join(root, 'fallow-baselines'));
-    const unreadable = join(root, 'fallow-baselines', 'health.json');
+    mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
+    const unreadable = join(root, '.devkit', 'baselines', 'size-lines.json');
     writeFileSync(unreadable, '{}\n');
     chmodSync(unreadable, 0o000);
-    writeFileSync(join(root, '.git', 'info', 'exclude'), '\nfallow-baselines\n', { flag: 'a' });
     const wt = addWorktree(root);
 
     try {
       expect(blockedCommit(wt)).toContain('could not repair the projection');
-      expect(existsSync(join(wt, 'fallow-baselines'))).toBe(false);
+      expect(existsSync(join(wt, '.devkit', 'baselines', 'size-lines.json'))).toBe(false);
       expect(markerLines()).toEqual([]);
     } finally {
       chmodSync(unreadable, 0o644);
     }
     commit(wt, 'copy succeeds');
 
-    expect(readFileSync(join(wt, 'fallow-baselines', 'health.json'), 'utf8')).toBe('{}\n');
+    expect(readFileSync(join(wt, '.devkit', 'baselines', 'size-lines.json'), 'utf8')).toBe('{}\n');
     expect(lstatSync(join(wt, '.devkit', 'config.json')).isSymbolicLink()).toBe(true);
     expect(markerLines()).toEqual([realpathSync(wt)]);
   });
@@ -822,11 +797,10 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
   it('under the global husky shim a failed projection blocks without running the repo hook', async () => {
     const root = workRepo();
     await initOverlay(root);
-    mkdirSync(join(root, 'fallow-baselines'));
-    const unreadable = join(root, 'fallow-baselines', 'health.json');
+    mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
+    const unreadable = join(root, '.devkit', 'baselines', 'size-lines.json');
     writeFileSync(unreadable, '{}\n');
     chmodSync(unreadable, 0o000);
-    writeFileSync(join(root, '.git', 'info', 'exclude'), '\nfallow-baselines\n', { flag: 'a' });
     const wt = addWorktree(root);
 
     try {
@@ -1003,23 +977,21 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(git(wt, 'status', '--porcelain')).toBe('');
   });
 
-  it('a directory ignored only by a `dir/` line is copied when branch-local and reported when linked', async () => {
+  it('a linked directory ignored only by a `dir/` line is reported, not linked', async () => {
     const root = workRepo();
     await initOverlay(root);
     writeFileSync(join(root, 'guard.config.json'), '{}\n');
-    for (const dir of ['docs/decisions', '.fallow', 'fallow-baselines']) {
+    for (const dir of ['docs/decisions', '.fallow']) {
       mkdirSync(join(root, dir), { recursive: true });
       writeFileSync(join(root, dir, 'a'), 'a\n');
     }
     const excludeFile = join(root, '.git', 'info', 'exclude');
-    const lines = readFileSync(excludeFile, 'utf8').replace(/^fallow-baselines$/m, '');
-    writeFileSync(excludeFile, `${lines}\ndocs/decisions/\n.fallow/\n`);
+    writeFileSync(excludeFile, '\ndocs/decisions/\n.fallow/\n', { flag: 'a' });
     const wt = addWorktree(root);
 
     expect(await doctorRun([], root)).toBe(1);
     expect(await doctorRun(['--fix'], root)).toBe(1);
 
-    expect(lstatSync(join(wt, 'fallow-baselines')).isDirectory()).toBe(true);
     for (const rel of ['docs/decisions', '.fallow']) expect(existsSync(join(wt, rel))).toBe(false);
     expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain(
       '.fallow, docs/decisions cannot be linked from the overlay',

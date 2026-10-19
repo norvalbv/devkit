@@ -38,14 +38,6 @@ import { writeIfAbsent } from '../fs-helpers.mts';
  */
 export const FALLOW_PINNED_VERSION = '3.10.0';
 
-// The three per-analysis baselines `fallow audit` consumes (--dead-code-baseline etc.).
-// Each maps a sub-analysis save command to its file under fallow-baselines/.
-const BASELINES = [
-  { cmd: 'dead-code', file: 'dead-code.json' },
-  { cmd: 'health', file: 'health.json' },
-  { cmd: 'dupes', file: 'dupes.json' },
-];
-
 // Shared shape for every command helper's options object (the destructured `opts` arg).
 interface FallowCommandOptions {
   cwd?: string;
@@ -187,34 +179,12 @@ export function ensureFallowGitignore({ cwd, dryRun }: FallowCommandOptions = {}
 }
 
 /**
- * Save the three per-analysis baselines into fallow-baselines/ so `fallow audit` only
- * fails on genuinely NEW issues (pre-existing debt is grandfathered). Fail-open per save.
- * Only the overlay install calls this.
- */
-export function saveFallowBaselines({ cwd, dryRun }: FallowCommandOptions = {}): { ok: boolean } {
-  let ok = true;
-  for (const { cmd, file } of BASELINES) {
-    const target = join('fallow-baselines', file);
-    // capture (not inherit): the baseline file is written regardless, and we DON'T want fallow's
-    // full health/dupes/dead-code report flooding the install terminal — the caller prints a
-    // one-line "saved baselines" summary instead.
-    const { status } = run('fallow', [cmd, '--save-baseline', target], {
-      cwd,
-      dryRun,
-      capture: true,
-    });
-    if (status !== 0) ok = false;
-  }
-  return { ok };
-}
-
-/**
- * Resolve fallow for an OVERLAY install: detect → install-if-missing → save baselines so a legacy
- * repo's debt is grandfathered. Returns whether to wire the gate; fail-open — abort, never block.
+ * Resolve fallow for an OVERLAY install: detect → install-if-missing. Returns whether to wire the
+ * gate; fail-open — abort, never block.
  */
 export function resolveOverlayFallow(cwd: string, dryRun: boolean): boolean {
   if (dryRun) {
-    console.log('  [dry-run] fallow: detect → install-if-missing → save baselines → gate in hook');
+    console.log('  [dry-run] fallow: detect → install-if-missing → gate in hook');
     return true;
   }
   const det = detectFallow({ cwd });
@@ -231,20 +201,15 @@ export function resolveOverlayFallow(cwd: string, dryRun: boolean): boolean {
     }
     console.log(`  ✓ ${r.message}`);
   }
-  const saved = saveFallowBaselines({ cwd });
-  console.log(
-    `  ${saved.ok ? '✓ saved' : '! some'} fallow baselines → fallow-baselines/ (grandfather debt)`,
-  );
   return true;
 }
 
-// CLI smoke entry: `node install-fallow.mjs [detect|install|baselines]`. Helps verify
+// CLI smoke entry: `node install-fallow.mjs [detect|install]`. Helps verify
 // the helper by hand without the wizard.
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const sub = process.argv[2] ?? 'detect';
   const cwd = process.cwd();
   if (sub === 'detect') console.log(JSON.stringify(detectFallow({ cwd })));
   else if (sub === 'install') console.log(JSON.stringify(installFallow({ cwd })));
-  else if (sub === 'baselines') console.log(JSON.stringify(saveFallowBaselines({ cwd })));
   else console.error(`unknown subcommand: ${sub}`);
 }
