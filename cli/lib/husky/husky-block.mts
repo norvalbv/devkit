@@ -309,8 +309,8 @@ export function chainExec(target: string, gitRuns = false): string {
     : `[ -f ${w} ] && exec sh ${w} "$@"`;
 }
 
-/** Linked-worktree chain word for the repo's own hook: `.git` is a FILE there, so a `.git/hooks/*`
- * target resolves through the common dir. Anything else stays single-quoted (never executes). */
+/** A `.git/hooks/*` target, hooksPath set or unset, runs from the common dir, though git alone runs
+ * nothing for an explicit one in a linked worktree. Anything else stays single-quoted (inert). */
 export function chainWord(target: string): string {
   const hook = /^(?:\.\/)?\.git\/hooks\/+([^/]+)$/.exec(target)?.[1];
   return hook

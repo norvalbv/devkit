@@ -13,6 +13,7 @@
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   realpathSync,
@@ -332,19 +333,35 @@ describe('review setup capture — native hooks probe', () => {
     );
   });
 
-  it('refuses a trailing-slash hooksPath, which names the same directory', () => {
-    // `core.hooksPath = .git/hooks/` is a hand-writable value that devkit records verbatim. It
-    // produces the IDENTICAL chain path, so deciding the refusal on the raw recorded spelling
-    // rather than the normalized one would let a one-character difference disable the guard.
-    const fx = worktreeFixture('trailing-slash', {
-      nativeHookInSharedDir: true,
-      origHooksPath: '.git/hooks/',
-    });
+  // Every spelling devkit records verbatim must normalize to the same refusal.
+  it.each(['.git/hooks', '.git/hooks/', './.git/hooks'])(
+    'refuses an explicit %s hooksPath, as for unset',
+    (value) => {
+      // git itself resolves an explicit relative hooksPath per worktree, where `.git` is a gitfile,
+      // so a linked-worktree commit runs no hook; with hooksPath unset the common-dir hook runs.
+      const parent = mkTmp('devkit-review-worktree-explicit-');
+      const [mainRoot, wt, marker] = ['main', 'wt', 'ran'].map((p) => join(parent, p));
+      mkdirSync(mainRoot);
+      git(mainRoot, 'init', '-q');
+      git(mainRoot, 'commit', '-q', '--allow-empty', '-m', 'root');
+      writeFileSync(join(mainRoot, '.git/hooks/pre-commit'), `#!/bin/sh\necho x >> '${marker}'\n`, {
+        mode: 0o755,
+      });
+      git(mainRoot, 'worktree', 'add', '-q', '--detach', wt, 'HEAD');
+      git(wt, 'config', 'core.hooksPath', value);
+      git(wt, 'commit', '-q', '--allow-empty', '-m', 'explicit');
+      expect(existsSync(marker)).toBe(false);
+      git(wt, 'config', '--unset', 'core.hooksPath');
+      git(wt, 'commit', '-q', '--allow-empty', '-m', 'unset');
+      expect(existsSync(marker)).toBe(true);
 
-    expect(() => captureReviewSetup(fx.targetRoot, fx.setupManifest)).toThrow(
-      /native pre-commit lives outside it/,
-    );
-  });
+      // devkit's chain deliberately runs the common-dir hook either way, so review must refuse it.
+      const fx = worktreeFixture('explicit', { nativeHookInSharedDir: true, origHooksPath: value });
+      expect(() => captureReviewSetup(fx.targetRoot, fx.setupManifest)).toThrow(
+        /native pre-commit lives outside it/,
+      );
+    },
+  );
 
   it('refuses a submodule whose native pre-commit lives under the superproject', () => {
     // A submodule's `.git` is a gitfile too, and its hooks live in <super>/.git/modules/<name> —
