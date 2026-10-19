@@ -1,0 +1,18 @@
+{
+  "conversation_id": "00000000-0000-4000-8000-000000000001",
+  "generation_id": "00000000-0000-4000-8000-000000000002",
+  "model": "default",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "__WORKSPACE__/notes/a.md",
+    "content": "goodbye\n"
+  },
+  "tool_use_id": "toolu_02",
+  "cwd": "__WORKSPACE__",
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "hook_event_name": "preToolUse",
+  "cursor_version": "3.24.18",
+  "workspace_roots": ["__WORKSPACE__"],
+  "user_email": null,
+  "transcript_path": "__WORKSPACE__/.cursor/transcript.jsonl"
+}

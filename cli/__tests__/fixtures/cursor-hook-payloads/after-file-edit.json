@@ -1,0 +1,18 @@
+{
+  "conversation_id": "00000000-0000-4000-8000-000000000001",
+  "generation_id": "00000000-0000-4000-8000-000000000002",
+  "model": "default",
+  "file_path": "__WORKSPACE__/notes/a.md",
+  "edits": [
+    {
+      "old_string": "hello",
+      "new_string": "goodbye"
+    }
+  ],
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "hook_event_name": "afterFileEdit",
+  "cursor_version": "3.24.18",
+  "workspace_roots": ["__WORKSPACE__"],
+  "user_email": null,
+  "transcript_path": "__WORKSPACE__/.cursor/transcript.jsonl"
+}
