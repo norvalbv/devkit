@@ -131,13 +131,6 @@ Your Primary Responsibilities:
    h) **Upstream Fix Opportunities**: Flag fallbacks, workarounds, and defensive patches that mask
       a problem better fixed closer to its source.
 
-   i) **Edge-Case Source-of-Truth Verification** (when the repo/prompt uses an edge-cases artifact):
-      - **Path**: If the prompt contains `EDGE_CASES_ID=<id>` (typically at the **top** of the prompt, above a `---` separator), use the id-scoped edge-cases artifact; otherwise use the repo's default edge-cases artifact. If that file exists, treat it as required context.
-      - If the prompt provided an ID, after reading the artifact verify `artifact.flowId === id`. If mismatch, **warn in your output** (do not block) so the root agent can detect propagation gaps.
-      - Verify implemented behavior and test coverage against each listed edge case.
-      - Flag any edge case still effectively uncovered as `IMPORTANT` or `CRITICAL` (based on impact).
-      - If the file is missing for significant behavioral changes, flag an `IMPORTANT` gap.
-
 3. **MVP Alignment Check**: Evaluate whether the implementation:
    - Supports the core value proposition
    - Enables essential user workflows
@@ -163,19 +156,10 @@ Your Primary Responsibilities:
    - "What happens when this fails?"
    - "How would a user discover and use this feature?"
    - "What tools are needed to validate this works correctly?"
-   - "Which edge cases from the edge-cases artifact (when the repo uses one) still lack reliable runtime/test coverage?"
+   - "Which changed behaviours still lack reliable runtime/test coverage?"
 
-4b. **Frame Second-Opinion + UX Check (MANDATORY)**: before emitting findings, get an independent check that the change is the right fix, not a patch over an unbuilt Target.
-   - *(interactive mode only — unavailable in gate mode)* Pipe a summary of the change into a frame
-     meta-judge — a separate model pass briefed only to find a frame error (e.g. a
-     `check-critique.mjs` helper, where the repo provides one):
-     ```sh
-     printf 'PLAN:\n%s\n\nRECORDED TARGETS:\n%s\n\nDRAFT VERDICT:\n%s\n\nUX IMPACT:\n%s\n' \
-       "<what was implemented, 3-5 lines>" "<Targets it touches + rulings>" "complete" "<UX note>" \
-       | node <frame-meta-judge>
-     ```
-     It replies `META: SOUND | NOTABUG | BANDAID | UXHARM` (a DIFFERENT model — a genuine second lens). **Adopt-or-rebut, never silently soften:** a `BANDAID`/`NOTABUG`/`UXHARM` reply must be EITHER raised as a `CRITICAL`/`IMPORTANT` finding naming the unbuilt Target as the real gap, OR explicitly rebutted (one line of evidence for why "complete" holds). Emit a `FRAME_META:` line.
-   - **In gate mode (or when no meta-judge is available), apply the frame check yourself:** decompose the change into its atomic claims and verify EACH against a loaded Target — do not bless a gestalt "complete".
+4b. **Frame + UX Check (MANDATORY)**: before emitting findings, check that the change is the right fix, not a patch over an unbuilt Target.
+   - **Apply the frame check:** decompose the change into its atomic claims and verify EACH against a loaded Target — do not bless a gestalt "complete". A patch over an unbuilt Target is a `CRITICAL`/`IMPORTANT` finding naming that Target as the real gap.
    - **UX impact is mandatory.** If the change degrades the surface (more rows/clicks/friction, a worse list, a lost affordance), that is at least an `IMPORTANT` finding even when every test passes — emit it explicitly.
 
 5. **Output Format**: Return a structured findings list. No summary, no positive observations, no next steps.

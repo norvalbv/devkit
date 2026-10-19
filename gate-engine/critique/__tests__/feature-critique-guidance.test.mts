@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -96,6 +97,27 @@ describe('feature-critique guidance', () => {
     expect(agent).toContain('Do not write a separate artifact');
   });
 
+  it('leaves no tracked agent or skill reading the removed edge-cases artifact', () => {
+    const tracked = execFileSync(
+      'git',
+      ['-C', ROOT, 'ls-files', '-z', '--', ':(glob)agents/**/*.md', ':(glob)skills/**/*.md'],
+      {
+        encoding: 'utf8',
+      },
+    )
+      .split('\0')
+      .filter(Boolean);
+    expect(tracked).toContain('agents/feature-completeness-reviewer.md');
+    expect(tracked).toContain('skills/feature-critique/SKILL.md');
+    const hits = tracked.flatMap((file) => {
+      const text = readFileSync(join(ROOT, file), 'utf8');
+      return ['EDGE_CASES_ID', 'flowId', '.cursor/.edge-cases']
+        .filter((marker) => text.includes(marker))
+        .map((marker) => `${file}: ${marker}`);
+    });
+    expect(hits).toEqual([]);
+  });
+
   it('runs once on the final plan, permits one blocker recheck, and stops looping', () => {
     for (const text of [skill, brainstorming]) {
       expect(text).toContain('decision-complete');
@@ -108,9 +130,10 @@ describe('feature-critique guidance', () => {
   });
 
   it('ships the same text to every synced agent surface', () => {
-    for (const surface of ['.claude', '.cursor'])
-      expect(readFileSync(join(ROOT, surface, 'agents', 'feature-critique.md'), 'utf8')).toBe(
-        agent,
-      );
+    for (const name of ['feature-critique.md', 'feature-completeness-reviewer.md']) {
+      const source = readFileSync(join(ROOT, 'agents', name), 'utf8');
+      for (const surface of ['.claude', '.cursor'])
+        expect(readFileSync(join(ROOT, surface, 'agents', name), 'utf8')).toBe(source);
+    }
   });
 });
