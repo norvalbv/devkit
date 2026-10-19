@@ -13,6 +13,16 @@ import { stagedSet } from '../../../../gate-engine/ratchets/git-index.mts';
 // Runs with every selection: it fails when a module is left unreachable to `vitest related` itself.
 const REACH_TEST = 'cli/__tests__/test-graph-reach.test.mts';
 
+// The env-scrub test reads these from disk, so no import edge selects it. The ship-script pattern
+// mirrors that test's own top-level scan of cli/lib/ship.
+const SCRUB_TEST = 'cli/__tests__/vitest-setup-env-scrub.test.mts';
+const SCRUB_INPUT_RE = /^cli\/lib\/ship\/[^/]+\.sh$|^vitest\.setup\.mjs$/;
+
+/** The disk-reading tests a staged path selects, which `vitest related` would never run. */
+export function forcedTests(staged: Iterable<string>): string[] {
+  return [...staged].some((p) => SCRUB_INPUT_RE.test(p)) ? [SCRUB_TEST] : [];
+}
+
 // vitest's forceRerunTriggers (**/package.json, **/{vitest,vite}.config.*, setupFiles) select the
 // whole suite, which CI already runs.
 const RERUN_TRIGGER_RE = /(^|\/)(package\.json|(vitest|vite)\.config\.[^/]*)$|^vitest\.setup\.mjs$/;
@@ -71,9 +81,11 @@ export function noteUnmapped(root: string, paths: string[], grep: Grep = gitGrep
     const unmapped = unmappedPaths(paths);
     if (!unmapped.length) return;
     const hits = grep(root, [...new Set(unmapped.map((p) => basename(p)))]);
+    const forced = new Set(forcedTests(paths));
     const lines = unmapped.flatMap((p) => {
       const stem = basename(p, extname(p));
       const tests = [...(hits.get(basename(p)) ?? [])]
+        .filter((t) => !forced.has(t))
         .map((t) => basename(t))
         .sort((a, b) => nameRank(a, stem) - nameRank(b, stem));
       if (!tests.length) return [];
@@ -103,14 +115,24 @@ interface RunOpts {
 
 /** Exit code of the related-tests run: 0 when nothing is selected, vitest's status otherwise. */
 export function runRelatedTests(root: string, opts: RunOpts = {}): number {
-  const paths = relatedPaths(('staged' in opts ? opts.staged : stagedSet(root)) ?? []);
-  if (!paths.length) {
+  const staged = [...(('staged' in opts ? opts.staged : stagedSet(root)) ?? [])];
+  const paths = relatedPaths(staged);
+  // From the raw set: relatedPaths drops vitest.setup.mjs, which the env-scrub test binds.
+  const forced = forcedTests(staged);
+  if (!paths.length && !forced.length) {
     console.log('related-tests: none selected');
     return 0;
   }
-  console.log(`related-tests: ${paths.length} staged path(s)`);
+  console.log(
+    `related-tests: ${paths.length} staged path(s)${forced.length ? `, ${forced.length} forced` : ''}`,
+  );
   const vitest = join(root, 'node_modules', '.bin', 'vitest');
-  const args = ['related', '--run', '--reporter=dot', ...new Set([...paths, REACH_TEST])];
+  const args = [
+    'related',
+    '--run',
+    '--reporter=dot',
+    ...new Set([...paths, ...forced, REACH_TEST]),
+  ];
   const result = (opts.exec ?? spawnSync)(vitest, args, { cwd: root, stdio: 'inherit' });
   if (result.error) console.error(`✗ related-tests could not run vitest: ${result.error.message}`);
   // A null status is a signal kill or a failed spawn: nothing passed, so block.
