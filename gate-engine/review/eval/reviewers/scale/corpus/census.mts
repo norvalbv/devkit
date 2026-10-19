@@ -11,7 +11,7 @@ import { sha256, canonical } from '../claim-inventory.mts';
 import { manifestHash, parseManifest } from './manifest.mts';
 import { measureSpan } from './visibility.mts';
 import { hashLocalModuleClosure } from '../../../module-closure-hash.mts';
-import { commitIndexTree } from '../../../../../ratchets/commit-index.mts';
+import { COMMIT_INDEX_FILE_VAR, commitIndexTree } from '../../../../../ratchets/commit-index.mts';
 
 const isolatedEnv = (): NodeJS.ProcessEnv => ({
   ...process.env,
@@ -19,6 +19,7 @@ const isolatedEnv = (): NodeJS.ProcessEnv => ({
   GIT_COMMON_DIR: undefined,
   GIT_WORK_TREE: undefined,
   GIT_INDEX_FILE: undefined,
+  [COMMIT_INDEX_FILE_VAR]: undefined,
   GIT_OPTIONAL_LOCKS: '0',
 });
 

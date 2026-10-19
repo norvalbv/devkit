@@ -25,7 +25,7 @@ import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { managedPath } from '../../../../critique/immutable-file.mts';
-import { withIndexCopy } from '../../../../ratchets/commit-index.mts';
+import { COMMIT_INDEX_FILE_VAR, withIndexCopy } from '../../../../ratchets/commit-index.mts';
 import { assertDiffSha256 } from './labels.mts';
 
 /** Private, mode-0700 home for materialized third-party checkouts and their raw patches — see
@@ -241,6 +241,7 @@ function validateCached(o: MaterializeOpts, wt: string, base: string): void {
     GIT_COMMON_DIR: undefined,
     GIT_WORK_TREE: undefined,
     GIT_INDEX_FILE: undefined,
+    [COMMIT_INDEX_FILE_VAR]: undefined,
     GIT_OPTIONAL_LOCKS: '0',
   };
   const inspect = (cwd: string, args: string[], env = isolated, input?: string): string =>

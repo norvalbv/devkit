@@ -185,6 +185,24 @@ describe('private native source census', () => {
       fx.cleanup();
     }
   });
+  it('hashes the same real index its diff reads, even under a commit-index carrier for that repo', () => {
+    const fx = fixture();
+    const gitDir = path.join(fx.repo, '.git');
+    const alternate = path.join(gitDir, 'alt-index');
+    const git = (args: string[], env = process.env) =>
+      execFileSync('git', args, { cwd: fx.repo, encoding: 'utf8', env }).trim();
+    git(['read-tree', 'HEAD'], { ...process.env, GIT_INDEX_FILE: alternate });
+    process.env.DEVKIT_COMMIT_INDEX_FILE = alternate;
+    process.env.DEVKIT_COMMIT_GIT_DIR = gitDir;
+    try {
+      const report = censusSource(JSON.stringify(fx.manifest), 'case-001', fx.repo);
+      expect(report.facts.stagedTreeSha).toBe(git(['write-tree']));
+    } finally {
+      delete process.env.DEVKIT_COMMIT_INDEX_FILE;
+      delete process.env.DEVKIT_COMMIT_GIT_DIR;
+      fx.cleanup();
+    }
+  });
   it('computes the staged tree while another process holds the index lock', () => {
     const fx = fixture();
     try {
