@@ -18,6 +18,7 @@ import {
   BASE_DRIFT_BRIEF_HOOK,
   BASE_DRIFT_LIB,
   BASE_DRIFT_SESSION_HOOK,
+  EDIT_TARGETS_LIB,
   hookScriptsFor,
 } from '../lib/install/hook-registration-ledger/selection.mts';
 import { tmpRepos } from './_helpers.mts';
@@ -47,7 +48,9 @@ describe('hookScriptsFor ownership', () => {
     const bundleOnly = hookScriptsFor({ ...base, agentHooks: true, baseDrift: false });
     for (const name of OWNED) expect(bundleOnly).not.toContain(name);
     // …and selecting the component alone must be sufficient for every one of them.
-    expect(hookScriptsFor({ ...base, baseDrift: true }).sort()).toEqual([...OWNED].sort());
+    expect(hookScriptsFor({ ...base, baseDrift: true }).sort()).toEqual(
+      [...OWNED, EDIT_TARGETS_LIB].sort(),
+    );
   });
 
   it('keeps the shared lib when agent hooks are deselected but base-drift is on', () => {

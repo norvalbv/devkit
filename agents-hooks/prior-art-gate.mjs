@@ -22,6 +22,9 @@
  * of one JSON avoid a read-modify-write race between the PostToolUse writer and this reader.
  * The namespace is private to this script, so its repo key need not match the bash cksum key
  * other session hooks use.
+ *
+ * No Codex equivalent: Codex has no ExitPlanMode, and its collaboration.spawn_agent never reaches an
+ * Agent-matched hook (codex-cli 0.162.1; https://github.com/openai/codex/issues/49736).
  */
 
 import {

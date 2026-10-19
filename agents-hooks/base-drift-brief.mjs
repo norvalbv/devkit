@@ -18,8 +18,9 @@
  * sc-2297's base moved twice, the second move being the one that produced the 88-file divergence.
  */
 import { claimed, commitClaim, emit, fetchReport, projectRoot, readInput } from './base-drift-lib.mjs';
+import { patchTargets } from './edit-targets-lib.mjs';
 
-const MUTATING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
+const MUTATING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'apply_patch']);
 const PATH_KEYS = ['file_path', 'path', 'target_file', 'target_path'];
 
 /**
@@ -55,7 +56,7 @@ export function main() {
     if (!MUTATING_TOOLS.has(input?.tool_name)) return;
     // ALL of them: one MultiEdit can touch several files, and warning about only the first would
     // leave the rest of the same call silently unchecked.
-    const files = filePathsOf(input);
+    const files = [...filePathsOf(input), ...patchTargets(input)];
     if (files.length === 0) return;
     // cachedOk: the pre-edit path takes the shared TTL window, so a burst of edits costs at most one
     // fetch per window per clone rather than one per edit.
