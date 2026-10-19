@@ -9,6 +9,7 @@ import {
   hasAnyCommand,
   testSpawnSync as spawnSync,
 } from './_helpers.mts';
+import { readIntent } from '../lib/ship/ship-intent.mts';
 
 export const scriptPath = fileURLToPath(new URL('../lib/ship/ship-branch.sh', import.meta.url));
 export const reshipScript = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
@@ -117,6 +118,13 @@ export function seedShipRepo({ hookBody = 'exit 0', origin = 'git@github.com:acm
   writeFileSync(join(dir, '.husky/_/pre-commit'), `#!/bin/sh\n${hookBody}\n`);
   chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
   return { dir, env, git };
+}
+
+/** The ship intent recorded for `branch`, with its body decoded; throws when none was recorded. */
+export function recorded(dir: string, branch: string) {
+  const r = readIntent(dir, branch);
+  if (!('intent' in r)) throw new Error(`no intent recorded: ${r.reason}`);
+  return { ...r.intent, body: Buffer.from(r.intent.bodyB64, 'base64').toString() };
 }
 
 export function dropWorktree(git, stderr) {

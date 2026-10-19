@@ -688,20 +688,15 @@ if [ "$FROM_BRANCH" -eq 0 ]; then
   if [ "$PATCH_BASE" != "$BASE" ]; then
     ship_classify_whole_file "$ROOT" "$BASE" "$PATCH_BASE" -- "${GIT_PATHS[@]}"
     echo "ship: origin/$BASE_REF moved to ${BASE:0:7} since this checkout forked at ${PATCH_BASE:0:7} — staging is anchored at the fork point and three-way merged." >&2
-    # A preserved-commit retry only warns, so it still reaches the --resume recovery check.
-    if ! ship_refuse_whole_file_drift "$ROOT" "$BASE" "$PATCH_BASE" "$BASE_REF" ${LOCAL_BRANCH_EXISTS:+--advise}; then
-      echo "ship: preflight — blocked before creating a branch or worktree; nothing was staged or gated." >&2
-      exit 1
-    fi
   fi
 fi
 
 # Take staging's hunk-level verdict BEFORE any branch or worktree exists (sc-3496). The same function
 # staging calls below, pointed at a throwaway index holding BASE instead of the ephemeral worktree,
 # so the two cannot disagree about what conflicts or how it is named. It used to run only after the
-# worktree claim and the size/judge/hook preflights, so a conflict the base-drift advisory had
-# already named cost a branch+worktree created and deleted for nothing. Still hunk-level, never
-# path-level: base-drift-surfaced-at-read-time Rejected(a) is untouched.
+# worktree claim, so a conflict the base-drift advisory had already named cost a branch+worktree
+# created and deleted for nothing; it now runs first among the blocking preflights. Still hunk-level,
+# never path-level: base-drift-surfaced-at-read-time Rejected(a) is untouched.
 #
 # Staging stays AUTHORITATIVE. $ROOT is a shared checkout, so a clean trial does not promise a clean
 # apply later; the rare conflict a concurrent edit would have dissolved is an accepted false block.
@@ -721,9 +716,17 @@ ship_text_arm_trial() {
   echo "ship: preflight — blocked before creating a branch or worktree; nothing was staged or gated." >&2
   return 1
 }
-if [ "$FROM_BRANCH" -eq 0 ] && [ "$PATCH_BASE" != "$BASE" ] && [ -z "$LOCAL_BRANCH_EXISTS" ]; then
-  ship_text_arm_trial || exit 1
-fi
+
+# Both base-conflict refusals as one blocking preflight, a no-op unless the base moved past the fork
+# point. A preserved-commit retry only warns, so it still reaches the --resume recovery check.
+ship_base_conflict_preflight() {
+  [ "$FROM_BRANCH" -eq 0 ] && [ "$PATCH_BASE" != "$BASE" ] || return 0
+  if ! ship_refuse_whole_file_drift "$ROOT" "$BASE" "$PATCH_BASE" "$BASE_REF" ${LOCAL_BRANCH_EXISTS:+--advise}; then
+    echo "ship: preflight — blocked before creating a branch or worktree; nothing was staged or gated." >&2
+    return 1
+  fi
+  [ -n "$LOCAL_BRANCH_EXISTS" ] || ship_text_arm_trial
+}
 
 # Nothing to commit → say so NOW. Staging (below) has exactly three inputs: the tracked diff vs
 # BASE, the untracked files in scope, and the untracked-but-IGNORED files in scope (a briefed path
@@ -973,9 +976,12 @@ gate_signal_handoff_init
 # The blocking preflights. Each is read-only against the caller root and runs before any worktree or
 # branch exists, yet AFTER record_ship_intent is available: a blocked attempt records its invocation
 # and exits, so the printed retry is `devkit ship --resume <branch>` (sc-2389, sc-2535). A new
-# blocking preflight belongs here too — preflight-resume.test.mts fails one placed ahead of the record.
+# blocking preflight belongs here too, named *_preflight and aborting via ship_abort_resumable:
+# preflight-resume.test.mts finds preflights by that name and fails one placed ahead of the record.
 # Identity and collision refusals above stay unrecorded: the record is keyed per branch, and writing
 # one for a branch this attempt may not own could clobber a live ship's resume record.
+
+ship_base_conflict_preflight || ship_abort_resumable 1
 
 # Advisory raw-line preview against BASE: it measures the caller's pre-merge bytes, so it never blocks.
 # The in-worktree guard-size reports an overrun together with the other deterministic gates.
