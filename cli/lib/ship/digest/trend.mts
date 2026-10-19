@@ -61,8 +61,8 @@ export function parseTrendRow(line: string): TrendRow | undefined {
   }
 }
 
-/** Rows a ship writes before its own marker; inside a killed open attempt they would read as foreign. */
-const PRE_MARKER = new Set(['ship_intent', 'judge_preflight']);
+/** Rows a ship writes before its marker or after its result; inside another attempt they read as foreign. */
+const PRE_MARKER = new Set(['ship_intent', 'judge_preflight', 'ship_evidence']);
 
 /** This branch's rows → its attempts in order, or null when two overlap (completion order is then not
  * round order). Markers open attempts: an inherited DEVKIT_SHIP_ID can span several. */
