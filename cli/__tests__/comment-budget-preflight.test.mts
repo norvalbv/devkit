@@ -14,6 +14,8 @@ import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CheckResult } from '../../gate-engine/comment-firewall/check.mts';
+import { testExecFileSync } from './_helpers.mts';
+import { mainWithWorktree } from './_worktree-fixture.mts';
 
 const HOOK = fileURLToPath(
   new URL('../../agents-hooks/comment-budget-preflight.mjs', import.meta.url),
@@ -37,7 +39,13 @@ function stubBin(result: CheckResult, status = 0) {
   writeFileSync(bin, body, { mode: 0o755 });
 }
 
-function run(filePath: string, session: string, toolName = 'Write', projectDir = root) {
+function run(
+  filePath: string,
+  session: string,
+  toolName = 'Write',
+  projectDir = root,
+  cwd?: string,
+) {
   return spawnSync('node', [HOOK], {
     cwd: root,
     encoding: 'utf8',
@@ -45,10 +53,22 @@ function run(filePath: string, session: string, toolName = 'Write', projectDir =
     input: JSON.stringify({
       tool_name: toolName,
       session_id: session,
+      cwd,
       tool_input: { file_path: isAbsolute(filePath) ? filePath : join(root, filePath) },
     }),
   });
 }
+
+/** A stub under `dir`'s node_modules/.bin that logs the directory it ran in to cwd.log. */
+function cwdStub(dir: string, key: string) {
+  const bin = join(dir, 'node_modules', '.bin');
+  mkdirSync(bin, { recursive: true });
+  const result = JSON.stringify({ items: [item(key, 'a.ts:1-3 — // x')], remedy: '' });
+  const body = `#!/bin/sh\npwd -P >> '${join(root, 'cwd.log')}'\necho '${result}'\n`;
+  writeFileSync(join(bin, 'guard-comments'), body, { mode: 0o755 });
+}
+
+const ranIn = () => readFileSync(join(root, 'cwd.log'), 'utf8').trim().split('\n');
 
 function context(stdout: string): string {
   return JSON.parse(stdout).hookSpecificOutput.additionalContext;
@@ -131,5 +151,64 @@ describe('comment-budget-preflight hook', () => {
     } finally {
       rmSync(link, { force: true });
     }
+  });
+});
+
+describe('comment-budget-preflight hook in a linked worktree session', () => {
+  it('checks each file in the checkout that holds it, whatever the payload cwd', () => {
+    const { main, worktree } = mainWithWorktree((prefix) => mkdtempSync(join(root, prefix)));
+    cwdStub(main, `main-${Date.now()}`);
+    cwdStub(worktree, `wt-${Date.now()}`);
+    writeFileSync(join(main, 'a.ts'), '// x\n');
+    writeFileSync(join(worktree, 'a.ts'), '// x\n');
+
+    const inWorktree = run(join(worktree, 'a.ts'), `wt-${Date.now()}`, 'Write', main, worktree);
+    expect(context(inWorktree.stdout)).toContain('a.ts:1-3');
+    // Shell in the worktree, edit in main: the commit gate for that file runs in main.
+    const inMain = run(join(main, 'a.ts'), `main-${Date.now()}`, 'Edit', main, worktree);
+    expect(context(inMain.stdout)).toContain('a.ts:1-3');
+    expect(ranIn()).toEqual([realpathSync(worktree), realpathSync(main)]);
+  });
+
+  it('checks a worktree nested under the project in itself, not from the project config', () => {
+    const { main } = mainWithWorktree((prefix) => mkdtempSync(join(root, prefix)));
+    const nested = join(main, '.claude', 'worktrees', 'x');
+    testExecFileSync('git', ['-C', main, 'worktree', 'add', '-q', '--detach', nested], {
+      stdio: 'ignore',
+    });
+    writeFileSync(join(main, 'guard.config.json'), '{}\n');
+    cwdStub(main, `nested-${Date.now()}`);
+    writeFileSync(join(nested, 'a.ts'), '// x\n');
+    const out = run(join(nested, 'a.ts'), `nested-${Date.now()}`, 'Write', main, nested);
+    expect(context(out.stdout)).toContain('a.ts:1-3');
+    expect(ranIn()).toEqual([realpathSync(nested)]);
+  });
+
+  it('keeps a monorepo-package project scoped to that package in every worktree', () => {
+    const { main, worktree } = mainWithWorktree((prefix) => mkdtempSync(join(root, prefix)));
+    const project = join(main, 'packages', 'api');
+    mkdirSync(join(main, 'other'), { recursive: true });
+    mkdirSync(join(worktree, 'packages', 'api', 'src'), { recursive: true });
+    writeFileSync(join(main, 'guard.config.json'), '{}\n');
+    cwdStub(project, `pkg-${Date.now()}`);
+    writeFileSync(join(main, 'other', 'x.ts'), '// x\n');
+    writeFileSync(join(worktree, 'packages', 'api', 'src', 'a.ts'), '// x\n');
+
+    expect(run(join(main, 'other', 'x.ts'), `pkg-out-${Date.now()}`, 'Write', project).stdout).toBe(
+      '',
+    );
+    const file = join(worktree, 'packages', 'api', 'src', 'a.ts');
+    const out = run(file, `pkg-wt-${Date.now()}`, 'Write', project, worktree);
+    expect(context(out.stdout)).toContain('a.ts:1-3');
+    expect(ranIn()).toEqual([realpathSync(join(worktree, 'packages', 'api'))]);
+  });
+
+  it("falls back to the project's guard-comments when the worktree has no node_modules", () => {
+    const { main, worktree } = mainWithWorktree((prefix) => mkdtempSync(join(root, prefix)));
+    cwdStub(main, `bin-${Date.now()}`);
+    writeFileSync(join(worktree, 'a.ts'), '// x\n');
+    const out = run(join(worktree, 'a.ts'), `bin-${Date.now()}`, 'Write', main, worktree);
+    expect(context(out.stdout)).toContain('a.ts:1-3');
+    expect(ranIn()).toEqual([realpathSync(worktree)]);
   });
 });
