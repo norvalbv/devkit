@@ -783,9 +783,12 @@ describe('ship run record + orphan preflight', () => {
   });
 
   it('reaps the whole gate tree when only the CLI process is signalled (sc-2159)', async () => {
-    // The only test that drives cli/commands/ship.mts rather than the script directly.
+    // The only test that drives cli/commands/ship.mts rather than the script directly. Its entry
+    // queues on a private root, so the test never waits on, or holds, a machine-wide ship slot.
     const { dir, env, git } = seedShipRepoLocalRemote();
     seedScopedFile(dir);
+    const queueRoot = mkdtempSync(join(tmpdir(), 'ship-queue-'));
+    dirs.push(queueRoot);
     const gatePidFile = join(dir, '.gate-pid');
     const ready = join(dir, '.gate-ready');
     const hook = join(dir, '.husky/_/pre-commit');
@@ -794,36 +797,47 @@ describe('ship run record + orphan preflight', () => {
     // so waitForPath cannot observe a half-written file.
     writeFileSync(
       hook,
-      `#!/bin/sh\necho $$ > "${gatePidFile}"\ntouch "${ready}"\nwhile :; do sleep 0.1; done\n`,
+      `#!/bin/sh\necho $$ > "${gatePidFile}"\ntouch "${ready}"\ni=0\nwhile [ $i -lt 1200 ]; do sleep 0.1; i=$((i+1)); done\n`,
     );
     chmodSync(hook, 0o755);
 
     const cli = spawn(
       process.execPath,
       [
-        join(dirname(scriptPath), '../../index.mts'),
-        'ship',
+        join(import.meta.dirname, '_ship-temp-queue-entry.mts'),
+        queueRoot,
         'feat/signalled',
         'ship it',
         'note.txt',
       ],
       {
         cwd: dir,
-        stdio: 'ignore',
+        stdio: ['ignore', 'ignore', 'pipe'],
         env: { ...publishEnvFor(env), SHIP_DRY_RUN: '1' },
       },
     );
-    await waitForPath(ready, 60_000);
-    const gatePid = Number(readFileSync(gatePidFile, 'utf8').trim());
-    expect(gatePid).toBeGreaterThan(0);
-    expect(processAlive(gatePid)).toBe(true);
+    const exited = once(cli, 'exit');
+    try {
+      await waitForPath(ready, 60_000, cli);
+      const gatePid = Number(readFileSync(gatePidFile, 'utf8').trim());
+      expect(gatePid).toBeGreaterThan(0);
+      expect(processAlive(gatePid)).toBe(true);
+      expect(existsSync(join(queueRoot, 'slot', 'holder.json'))).toBe(true);
 
-    cli.kill('SIGTERM');
-    const [code] = await once(cli, 'exit');
+      cli.kill('SIGTERM');
+      const [code] = await exited;
 
-    expect(code).toBe(143);
-    expect(processAlive(gatePid)).toBe(false);
-    expect(git(['worktree', 'list'])).not.toMatch(/devkit-ship-/);
+      expect(code).toBe(143);
+      expect(processAlive(gatePid)).toBe(false);
+      expect(existsSync(join(queueRoot, 'slot'))).toBe(false);
+      expect(git(['worktree', 'list'])).not.toMatch(/devkit-ship-/);
+    } finally {
+      // A failed assertion must not leave the tree cleaning up after afterEach deletes its repo.
+      cli.kill('SIGTERM'); // a no-op once the child has exited
+      const stop = setTimeout(() => cli.kill('SIGKILL'), 20_000);
+      await exited;
+      clearTimeout(stop);
+    }
   }, 120_000);
 
   it('records nothing and reclaims nothing under SHIP_RESOLVE_ONLY', () => {
