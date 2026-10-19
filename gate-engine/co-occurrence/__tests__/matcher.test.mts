@@ -114,7 +114,7 @@ describe('matcher --gate exit-code contract', () => {
 // linked index overwrites the PRIMARY checkout's rows with this checkout's code.
 describe('matcher index refresh', () => {
   // Run the gate with an explicit cwd; report whether the indexer ran (it touches `marker`).
-  function refreshRan(cwd: string, indexDb: string, tag: string): boolean {
+  function refreshRan(cwd: string, indexDb: string, tag: string, extraEnv = {}): boolean {
     const marker = join(tmp, `ran-${tag}.flag`);
     rmSync(marker, { force: true });
     try {
@@ -125,6 +125,7 @@ describe('matcher index refresh', () => {
           SEARCH_CODE_DB: indexDb,
           MATCHER_CHANGED_FILES: '',
           GUARD_INDEX_COMMAND: `touch "${marker}"`,
+          ...extraEnv,
         },
         stdio: 'pipe',
       });
@@ -136,6 +137,11 @@ describe('matcher index refresh', () => {
 
   it('refreshes when the index lives inside this checkout', () => {
     expect(refreshRan(tmp, dbPath, 'inside')).toBe(true);
+  });
+
+  it('still refreshes when the configured timeout is fractional', () => {
+    const env = { GUARD_INDEX_COMMAND_TIMEOUT_MS: '1500.5' };
+    expect(refreshRan(tmp, dbPath, 'fractional', env)).toBe(true);
   });
 
   it('does NOT refresh an index that resolves outside this checkout', () => {
