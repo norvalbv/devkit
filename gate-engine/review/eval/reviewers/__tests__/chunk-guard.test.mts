@@ -119,6 +119,19 @@ describe('native benchmark planning', () => {
     expect(result.execution.tasks.every((t) => t.calls === 1)).toBe(true);
     expect(result.firstVerdict).toBe('FAIL');
   });
+  it('labels a row outage when a later task hits an outage after earlier contract misses', async () => {
+    let calls = 0;
+    const result = await runRow(large, {
+      exec: async (opts) => {
+        calls += 1;
+        if (calls < 10) return 'VERDICT: PASS';
+        opts.onOutage({ kind: 'rate-limited', permanent: true });
+        return null;
+      },
+    });
+    expect(result.finalStatus).toBe('inconclusive');
+    expect(result.subcause).toBe('outage');
+  });
   it('removes an inherited explicit production sink as well as correlation IDs', () => {
     const env = {
       DEVKIT_GATE_EVENTS: '/production',
