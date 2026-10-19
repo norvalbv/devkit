@@ -48,6 +48,8 @@ export interface GitBaselineEnvelope {
   base: AntiSlopBaseline | null;
   /** Git tree used to distinguish inherited findings from candidate growth. */
   baseTree?: string;
+  /** Commit the base tree came from, so a remedy can name it outside a snapshot's temp cwd. */
+  baseOid?: string | null;
   /** Original checkout used when the candidate runs from a materialized staged snapshot. */
   baseCheckoutCwd?: string;
   introducedPaths: Set<string>;
@@ -225,6 +227,7 @@ function envelope(
   return {
     layout: repo,
     baseTree,
+    baseOid: resolveRef(repo.root, baseRef),
     candidateTree,
     changes,
     base: baselineAtTree(repo, baseTree),
@@ -460,6 +463,7 @@ export function withStagedAntiSlopSnapshot<T>(
       skipped,
       base: evidence.base,
       baseTree: evidence.baseTree,
+      baseOid: evidence.baseOid,
       baseCheckoutCwd: cwd,
       introducedPaths: evidence.introducedPaths,
       activatedRuleIds: evidence.activatedRuleIds,
