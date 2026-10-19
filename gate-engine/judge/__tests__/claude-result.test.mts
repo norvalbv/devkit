@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CLAUDE_RESULT_ARGS,
+  claudeModelRefusal,
   parseJudgeUsage,
   parsePermissionDenials,
   unwrapClaudeResult,
@@ -163,5 +164,25 @@ describe('parsePermissionDenials', () => {
     expect(parsePermissionDenials(envelope({ permission_denials: [] }).slice(0, 40))).toBeNull();
     expect(parsePermissionDenials(null)).toBeNull();
     expect(parsePermissionDenials(undefined)).toBeNull();
+  });
+});
+
+describe('claudeModelRefusal', () => {
+  const refusal = { is_error: true, terminal_reason: 'api_error', api_error_status: 404 };
+
+  it('returns the CLI sentence from a 404 api-error envelope', () => {
+    expect(claudeModelRefusal(envelope({ ...refusal, result: 'model refused' }))).toBe(
+      'model refused',
+    );
+  });
+
+  it.each([
+    ['a success envelope', envelope()],
+    ['another api status', envelope({ ...refusal, api_error_status: 500 })],
+    ['a non-api error', envelope({ ...refusal, terminal_reason: 'max_turns' })],
+    ['invalid JSON', 'diff --git a/x b/x'],
+    ['no stdout', undefined],
+  ])('is null for %s', (_name, raw) => {
+    expect(claudeModelRefusal(raw)).toBeNull();
   });
 });
