@@ -8,9 +8,9 @@
  * projected into consumer repos by `devkit sync-skills` — a test file there would ship as dead
  * weight a consumer's own runner might pick up.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createChecklistStore } from '../../../skills/_devkit/checklist-store.mjs';
 
@@ -68,6 +68,17 @@ describe('createChecklistStore — persistence', () => {
     h.store.save({ generated: 'now', files: ['a.ts'], items: items() });
     expect(existsSync(h.path)).toBe(true);
     expect(h.store.load().items).toHaveLength(2);
+  });
+
+  // A confined codex judge's state file exists, empty, before `generate` writes it.
+  it('reads an empty file as no checklist, so a command before generate names the fix', () => {
+    const h = harness();
+    mkdirSync(dirname(h.path), { recursive: true });
+    writeFileSync(h.path, '');
+    expect(h.store.load()).toBeNull();
+    h.store.status();
+    expect(h.out()).toContain('No checklist. Run: generate');
+    expect(h.exits).toEqual([1]);
   });
 
   it('writes pretty-printed JSON (the file is meant to be read by a human and an agent)', () => {
