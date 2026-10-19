@@ -129,6 +129,7 @@ describe('native benchmark planning', () => {
         return null;
       },
     });
+    expect(result.execution.taskCount).toBe(10);
     expect(result.finalStatus).toBe('inconclusive');
     expect(result.subcause).toBe('outage');
   });
