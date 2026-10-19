@@ -39,11 +39,7 @@ function config(overlay: boolean, overrides: Record<string, unknown> = {}) {
     overlay,
     ...(overlay ? { origHooksPath: '.git/hooks' } : {}),
     components: selection,
-    review: {
-      enabled: true,
-      guards: ['decisions'],
-      decisionsDir: 'docs/decisions',
-    },
+    review: { enabled: true, guards: ['decisions'] },
     ...overrides,
   };
 }
@@ -122,7 +118,7 @@ describe('review setup manifest', () => {
       overlay: false,
       hooksPath: '.husky/_',
       chain: null,
-      profile: { enabled: true, guards: ['decisions'], decisionsDir: 'docs/decisions' },
+      profile: { enabled: true, guards: ['decisions'] },
     });
     expect(pathRecord(captured, 'effective-hook')?.relativePath).toBe('.husky/pre-commit');
     expect(pathRecord(captured, 'correctness-overrides')?.fingerprint).not.toBe('absent');
@@ -229,14 +225,14 @@ describe('review setup manifest', () => {
     ]);
   });
 
-  it('canonicalizes harmless decision-directory syntax accepted by existing installs', () => {
-    const { root, manifest } = setup('decision-directory-syntax');
+  it('ignores a leftover review.decisionsDir, since guard.config.json owns the decisions directory', () => {
+    const { root, manifest } = setup('decision-directory-leftover');
     writeFileSync(
       join(root, '.devkit/config.json'),
-      `${JSON.stringify(config(false, { review: { enabled: true, guards: [], decisionsDir: './docs/decisions/' } }), null, 2)}\n`,
+      `${JSON.stringify(config(false, { review: { enabled: true, guards: [], decisionsDir: '../elsewhere' } }), null, 2)}\n`,
     );
 
-    expect(captureReviewSetup(root, manifest).setup.profile.decisionsDir).toBe('docs/decisions');
+    expect(captureReviewSetup(root, manifest).setup.profile).toEqual({ enabled: true, guards: [] });
   });
 
   it('records the exact overlay hook and complete original chain source directory', () => {
@@ -334,16 +330,6 @@ describe('review setup manifest', () => {
       'unknown installed guard',
       { components: { ...selection, guards: ['bogus'] } },
       /components\.guards contains unknown guards: bogus/,
-    ],
-    [
-      'empty decisions directory',
-      { review: { enabled: true, guards: [], decisionsDir: '  ' } },
-      /decisionsDir must not be empty/,
-    ],
-    [
-      'escaping decisions directory',
-      { review: { enabled: true, guards: [], decisionsDir: '../shared-decisions' } },
-      /decisionsDir must be repository-relative/,
     ],
   ])('rejects malformed config: %s', (_name, override, expected) => {
     const { root, manifest } = setup('malformed');

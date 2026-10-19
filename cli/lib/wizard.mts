@@ -14,7 +14,6 @@ import {
   AGENT_TARGETS,
   COMPONENTS,
   CONFIG_DRIVEN_STRUCTURE,
-  DEFAULT_REVIEW_DECISIONS_DIR,
   GUARD_OPTIONS,
   OPTIONAL_COMPONENTS,
   RECOMMENDED_GUARD_IDS,
@@ -176,8 +175,6 @@ interface RunWizardOpts {
   structureAvailable: boolean;
   /** component ids currently wired (so we can offer removal) */
   installed: Set<string>;
-  /** persisted review policy fields that the wizard does not expose */
-  existingReview?: Partial<ReviewProfile>;
 }
 
 // The plan the wizard hands back to init (which normalises `selection` into a full Selection). The
@@ -197,7 +194,6 @@ export async function runWizard({
   detectedMode = 'package',
   structureAvailable,
   installed,
-  existingReview,
 }: RunWizardOpts): Promise<WizardResult | null> {
   intro('◆ devkit setup');
 
@@ -356,7 +352,6 @@ export async function runWizard({
   const review: ReviewProfile = {
     enabled: Boolean(reviewEnabled),
     guards: reviewGuards,
-    decisionsDir: existingReview?.decisionsDir?.trim() || DEFAULT_REVIEW_DECISIONS_DIR,
   };
 
   // 5. Removal: package/standalone only (overlay is local-only — a re-run just overwrites).

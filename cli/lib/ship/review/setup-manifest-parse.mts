@@ -34,7 +34,7 @@ function manifestRelativePath(value: unknown, label: string): string {
 function parseProfile(value: unknown): ReviewProfile {
   const profile = objectValue(value, 'review setup manifest profile must be a JSON object.');
   if (
-    !exactKeys(profile, ['enabled', 'guards', 'decisionsDir']) ||
+    !exactKeys(profile, ['enabled', 'guards']) ||
     typeof profile.enabled !== 'boolean' ||
     !Array.isArray(profile.guards)
   ) {
@@ -47,11 +47,7 @@ function parseProfile(value: unknown): ReviewProfile {
   ) {
     return fail('review setup manifest profile has invalid guards.');
   }
-  return {
-    enabled: profile.enabled,
-    guards: guards as string[],
-    decisionsDir: manifestRelativePath(profile.decisionsDir, 'profile decisionsDir'),
-  };
+  return { enabled: profile.enabled, guards: guards as string[] };
 }
 
 function parseChain(value: unknown): ReviewSetupState['chain'] {
