@@ -5,9 +5,9 @@
  * Two load-bearing properties. It stays OFF unless asked for — it denies harness tool calls, so an
  * unrequested install is a real defect, and `--yes` installs every recommended component, which makes
  * that exactly the case worth pinning. And it never projects to Cursor — the registrations carry no
- * cursorEvent because Cursor has no ExitPlanMode/Task.
+ * cursorEvent because Cursor has no prior-art subagent to satisfy the gate.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { defaultSelection } from '../lib/components.mts';
@@ -24,6 +24,43 @@ const hookPath = (root: string, surface = 'claude') =>
 const readJson = (root: string, rel: string) => JSON.parse(readFileSync(join(root, rel), 'utf8'));
 const claudeHookCommands = (root: string) =>
   JSON.stringify(readJson(root, '.claude/settings.json').hooks ?? {});
+const LEDGER = '.devkit/agent-hook-registrations-manifest.json';
+const HOOK_DOCS = ['.claude/settings.json', '.codex/hooks.json'];
+const PRE_EDIT_COMMAND = `${PRIOR_ART_GATE_HOOK}" edit`;
+
+type HookGroup = { matcher?: string; hooks: { command: string }[] };
+
+/** Rewind an install to the registry before pre-edit existed: its handler and ledger rows go. */
+function stripPreEdit(root: string): void {
+  for (const rel of HOOK_DOCS) {
+    const doc = readJson(root, rel);
+    doc.hooks.PreToolUse = doc.hooks.PreToolUse.map((group: HookGroup) => ({
+      ...group,
+      hooks: group.hooks.filter((hook) => !hook.command.endsWith(PRE_EDIT_COMMAND)),
+    }));
+    writeFileSync(join(root, rel), `${JSON.stringify(doc, null, 2)}\n`);
+  }
+  const ledger = readJson(root, LEDGER);
+  ledger.entries = ledger.entries.filter(
+    (entry: { registrationId: string }) => entry.registrationId !== 'prior-art-gate:pre-edit',
+  );
+  writeFileSync(join(root, LEDGER), `${JSON.stringify(ledger, null, 2)}\n`);
+}
+
+const hasPreEdit = (root: string, rel: string) =>
+  readJson(root, rel).hooks.PreToolUse.some((group: HookGroup) =>
+    group.hooks.some((hook) => hook.command.endsWith(PRE_EDIT_COMMAND)),
+  );
+
+const preEditState = (root: string) => ({
+  docs: HOOK_DOCS.map((rel) => hasPreEdit(root, rel)),
+  ledger: readJson(root, LEDGER)
+    .entries.filter(
+      (e: { registrationId: string }) => e.registrationId === 'prior-art-gate:pre-edit',
+    )
+    .map((e: { provider: string }) => e.provider)
+    .sort(),
+});
 
 afterEach(cleanup);
 
@@ -70,6 +107,12 @@ describe('devkit init --prior-art-gate', () => {
       ),
     ).toBe(true);
     expect(
+      flat('PreToolUse').some(
+        (entry: string) =>
+          entry.startsWith('Edit|Write|MultiEdit::') && entry.endsWith(PRE_EDIT_COMMAND),
+      ),
+    ).toBe(true);
+    expect(
       flat('PostToolUse').some(
         (entry: string) => entry.startsWith('Task|Agent::') && entry.includes(PRIOR_ART_GATE_HOOK),
       ),
@@ -86,7 +129,25 @@ describe('devkit init --prior-art-gate', () => {
       'utf8',
     );
     expect(ledger).toContain('prior-art-gate:pre-plan');
+    expect(ledger).toContain('prior-art-gate:pre-edit');
     expect(ledger).toContain('prior-art-gate:post-task');
+  });
+
+  it('an install from before pre-edit existed gains it on re-run, conflict-free and idempotent', () => {
+    const root = tmpRepo();
+    const init = () => devkit(root, 'init', '--stack', 'generic', '--yes', '--prior-art-gate');
+    expect(init().status).toBe(0);
+    stripPreEdit(root);
+    // Absent everywhere, so the re-run must take the add path rather than adopting a leftover.
+    expect(preEditState(root)).toEqual({ docs: [false, false], ledger: [] });
+
+    expect(init().status).toBe(0);
+    expect(preEditState(root)).toEqual({ docs: [true, true], ledger: ['claude', 'codex'] });
+    const snapshot = () =>
+      [...HOOK_DOCS, LEDGER].map((rel) => readFileSync(join(root, rel), 'utf8'));
+    const before = snapshot();
+    expect(init().status).toBe(0);
+    expect(snapshot()).toEqual(before);
   });
 
   it('--prior-art-gate with --no-claude deselects the gate with a notice (Claude-only hooks)', () => {

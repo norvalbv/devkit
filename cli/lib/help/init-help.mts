@@ -32,9 +32,9 @@ Usage:
                          needs --skills). Turn it off for this session by saying "stop
                          adhd mode", durably with .devkit/adhd-off, or drop it with
                          --no-adhd (which also removes it on a re-run).
-  --prior-art-gate       Install the deny-once step-0 ordering HOOK: the first ExitPlanMode
-                         or feature-critique dispatch in a session with no prior-art run is
-                         denied once with the skip predicate; a call whose plan/prompt carries
+  --prior-art-gate       Install the deny-once step-0 ordering HOOK: the first file edit,
+                         ExitPlanMode or feature-critique dispatch in a session with no
+                         prior-art run is denied once with the skip predicate; a call carrying
                          a \`Prior-art:\` line passes untaxed, and retries pass (off by default).
                          Drop it with --no-prior-art-gate (also removes it on a re-run).
   --base-drift           Install the base-drift ADVISORY hooks: a SessionStart brief and a pre-edit
