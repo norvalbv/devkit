@@ -69,3 +69,4 @@ created: 2026-08-06
 **Scope:** agents-hooks/prior-art-gate.mjs,skills/brainstorming/**
 **Source:** brainstorm
 **Evidence-change:** Plan-mode-only triggers are a structural escape: plan-less sessions never reach the gate (owner-observed; unmeasured, since the record-agent telemetry series is not a dispatch count). Prior-art research added a precedent (GateGuard's first-touch edit gate) and a documented hook field (agent_id) that makes an edit trigger safe for subagents.
+- 2026-10-16 — The first-file-edit trigger also covers Bash: a Bash call whose command writes files, classified by form (devkit-gates-repo-not-harness, 2026-10-16), claims the same once-per-session deny in Claude sessions; read-only Bash never does. A Bash heredoc that writes a plan carrying the Prior-art: line acknowledges the session like a plan-file Write.

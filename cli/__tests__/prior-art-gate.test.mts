@@ -1,14 +1,16 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { delimiter, dirname, join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   decide,
+  loadShellWrites,
   markerPaths,
   recordRun,
   renderOutput,
 } from '../../agents-hooks/prior-art-gate.mjs';
+import { writesToRepo } from '../../gate-engine/prior-art/shell-writes.mts';
 
 let root: string;
 let tmp: string;
@@ -176,7 +178,7 @@ describe('decide (PreToolUse)', () => {
   });
 });
 
-type HookCaller = { agent_id?: string; agent_type?: string; session_id?: string };
+type HookCaller = { agent_id?: string; agent_type?: string; session_id?: string; cwd?: string };
 type ToolInput = {
   file_path?: string;
   old_string?: string;
@@ -184,6 +186,7 @@ type ToolInput = {
   content?: string;
   edits?: { old_string: string; new_string: string }[];
   input?: string;
+  command?: string;
 };
 
 const write = (toolName: string, toolInput: ToolInput, extra: HookCaller = {}) => ({
@@ -262,10 +265,14 @@ const HOOK = join(import.meta.dirname, '../../agents-hooks/prior-art-gate.mjs');
 
 /** Run the real hook script as its own process, the way the harness does; resolves its stdout.
  * TMPDIR keeps its markers in this test's temp dir; `timeout` kills a wedged child. */
-function runHook(projectDir: string, input: ReturnType<typeof write>): Promise<string> {
+function runHook(
+  projectDir: string,
+  input: ReturnType<typeof write>,
+  env: NodeJS.ProcessEnv = {},
+): Promise<string> {
   return new Promise((done) => {
     const child = spawn(process.execPath, [HOOK, 'edit'], {
-      env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir, TMPDIR: tmp },
+      env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir, TMPDIR: tmp, ...env },
       timeout: 10_000,
     });
     let out = '';
@@ -287,6 +294,83 @@ describe('main — a parallel batch of gated calls', () => {
       const outs = await Promise.all(Array.from({ length: 12 }, () => runHook(root, input)));
       expect(outs.filter((out) => out.includes('"deny"'))).toHaveLength(1);
       expect(existsSync(markerPaths(root, input.session_id, tmp).snoozed)).toBe(true);
+    }
+  });
+});
+
+const REPO = join(import.meta.dirname, '../..');
+const classifier = () => writesToRepo;
+const bash = (command: string, extra: HookCaller = {}) =>
+  write('Bash', { command }, { cwd: root, ...extra });
+
+describe('decide — a Bash command that writes files', () => {
+  it('denies the first writing Bash call once, and the spent reminder then covers Edit', () => {
+    expect(decide(bash("sed -i '' s/a/b/ src/a.ts"), root, tmp, classifier)).toContain('prior-art');
+    expect(decide(bash("sed -i '' s/a/b/ src/a.ts"), root, tmp, classifier)).toBeNull();
+    expect(decide(write('Edit', { new_string: 'x' }), root, tmp)).toBeNull();
+  });
+
+  it('lets a read-only Bash call through without spending the reminder', () => {
+    expect(decide(bash('git status'), root, tmp, classifier)).toBeNull();
+    expect(existsSync(markerPaths(root, 'sess-1', tmp).snoozed)).toBe(false);
+    expect(decide(write('Edit', { new_string: 'x' }), root, tmp)).not.toBeNull();
+  });
+
+  it('never loads the classifier once prior-art ran or the reminder is spent', () => {
+    const loader = vi.fn(classifier);
+    recordRun(post('Task', 'prior-art'), root, tmp);
+    expect(decide(bash('echo x > a.ts'), root, tmp, loader)).toBeNull();
+    const spent = { session_id: 'sess-2' };
+    decide(write('Edit', { new_string: 'x' }, spent), root, tmp);
+    expect(decide(bash('echo x > a.ts', spent), root, tmp, loader)).toBeNull();
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  it('allows and claims nothing when no classifier loads or it throws', () => {
+    const throwing = () => () => {
+      throw new Error('classifier failed');
+    };
+    expect(decide(bash('echo x > a.ts'), root, tmp, () => null)).toBeNull();
+    expect(decide(bash('echo x > a.ts'), root, tmp, throwing)).toBeNull();
+    expect(existsSync(markerPaths(root, 'sess-1', tmp).snoozed)).toBe(false);
+    expect(decide(write('Edit', { new_string: 'x' }), root, tmp)).not.toBeNull();
+  });
+
+  it('exempts a subagent write and passes a heredoc carrying the Prior-art: line', () => {
+    expect(decide(bash('echo x > a.ts', { agent_id: 'a1' }), root, tmp, classifier)).toBeNull();
+    expect(existsSync(markerPaths(root, 'sess-1', tmp).snoozed)).toBe(false);
+    const plan = "cat > plan.md <<'EOF'\nPrior-art: skipped — rename\nEOF";
+    expect(decide(bash(plan), root, tmp, classifier)).toBeNull();
+    expect(existsSync(markerPaths(root, 'sess-1', tmp).snoozed)).toBe(true);
+  });
+});
+
+describe('loadShellWrites', () => {
+  it('finds nothing with no build, no devkit package and no devkit on PATH', () => {
+    expect(loadShellWrites(root, { PATH: '' })).toBeNull();
+  });
+
+  it("loads this checkout's own build when the repo is devkit itself", () => {
+    expect(loadShellWrites(REPO, { PATH: '' })).toBeTypeOf('function');
+  });
+});
+
+describe('main — a Bash write in a repo with no node_modules', () => {
+  it('loads the classifier through the devkit on PATH, and a mixed batch still gets one deny', async () => {
+    const bin = mkdtempSync(join(tmpdir(), 'prior-art-gate-bin-'));
+    try {
+      // The packaged layout: the bin is dist/cli/index.mjs beside a dist/package.json.
+      symlinkSync(join(REPO, 'dist', 'cli', 'index.mjs'), join(bin, 'devkit'));
+      const env = { PATH: [bin, dirname(process.execPath)].join(delimiter) };
+      const calls = Array.from({ length: 12 }, (_, i) =>
+        i % 2 ? bash("sed -i '' s/a/b/ src/a.ts") : write('Edit', { new_string: 'x' }),
+      );
+      const outs = await Promise.all(calls.map((input) => runHook(root, input, env)));
+      expect(outs.filter((out) => out.includes('"deny"'))).toHaveLength(1);
+      const alone = bash("sed -i '' s/a/b/ src/a.ts", { session_id: 'sess-alone' });
+      expect(await runHook(root, alone, env)).toContain('"deny"');
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
     }
   });
 });

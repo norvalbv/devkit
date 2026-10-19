@@ -51,8 +51,10 @@ export function nativeProjection(
     command: string;
     cursorEvent?: string;
     cursorMatcher?: string;
+    providers?: readonly AgentProvider[];
   },
 ): HookRegistrationOwnershipV1['native'] | null {
+  if (registration.providers && !registration.providers.includes(provider)) return null;
   const { event, matcher, command } = registration;
   if (provider === 'claude') return { event, matcher, command };
   if (provider === 'codex')

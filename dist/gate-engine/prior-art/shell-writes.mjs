@@ -1,0 +1,265 @@
+/** Whether a Bash command writes files outside temp space, by FORM only (script bodies unread,
+ * expansions count as no write): the prior-art gate needs one hit per session, not proof. */
+import { realpathSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
+import { parse } from 'unbash';
+const WRITE_REDIRECTS = new Set(['>', '>>', '>|', '&>', '&>>']);
+const FD_TARGET = /^(\d+|-)$/;
+const STDIN_SCRIPT_REDIRECTS = new Set(['<<', '<<-', '<<<']);
+const INTERPRETER = /^(python(\d+(\.\d+)?)?|node|bun|ruby|tsx)$/;
+const INLINE_SCRIPT_FLAGS = new Set(['-c', '-e', '--eval', '-']);
+// Only value-less flags may precede `i`, so perl's `-Ilib` or `-Mstrict` never read as in-place.
+const SED_IN_PLACE = /^(-[nErsuz]*i|--in-place)/;
+const PERL_IN_PLACE = /^-[0-9alnpsw]*i/;
+const XARGS_VALUE_FLAGS = new Set(['-I', '-n', '-P', '-L', '-d', '-E', '-s']);
+const XARGS_REPLACE = /^(-I|-i|--replace)/;
+const NO_VALUE_FLAGS = new Set();
+// Flags whose next word is a value, never a file operand (`truncate -s 0 f`, `cp -t dir a b`).
+const TOUCH_VALUE_FLAGS = new Set(['-d', '-t', '-r', '--date', '--reference']);
+const TRUNCATE_VALUE_FLAGS = new Set(['-s', '-r', '--size', '--reference']);
+const COPY_VALUE_FLAGS = new Set([
+    '-S',
+    '-m',
+    '-o',
+    '-g',
+    '--suffix',
+    '--mode',
+    '--owner',
+    '--group',
+]);
+const TARGET_DIR_LONG = '--target-directory';
+// The value-taking short flags of cp/mv/install; getopt gives the rest of a cluster to the first.
+const COPY_SHORT_VALUES = 'Smogt';
+const SHORT_CLUSTER = /^-[^-]/;
+/** A word's value when it is literal; `null` when an expansion or substitution decides it. */
+function literal(word) {
+    return word && !/[$`]/.test(word.text) ? word.value : null;
+}
+function inside(path, dir) {
+    const rel = relative(dir, path);
+    return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+function expandHome(path) {
+    return path === '~' || path.startsWith('~/') ? homedir() + path.slice(1) : path;
+}
+/** Inside the repo always counts (even a repo under tmp); elsewhere only outside temp and /dev. */
+function writtenPlace(target, scope) {
+    if (target === null)
+        return false;
+    const path = resolve(scope.cwd, expandHome(target));
+    if (inside(path, scope.root))
+        return true;
+    return !path.startsWith('/dev/') && !scope.temps.some((dir) => inside(path, dir));
+}
+/** `>&` writes only when its target is a file, not an fd duplication such as `2>&1`. */
+function writeRedirect(r) {
+    return (WRITE_REDIRECTS.has(r.operator) ||
+        (r.operator === '>&' && !FD_TARGET.test(r.target?.value ?? '')));
+}
+function redirectsWrite(redirects, scope) {
+    return redirects.some((r) => writeRedirect(r) && writtenPlace(literal(r.target), scope));
+}
+function operands(args, valueFlags = NO_VALUE_FLAGS) {
+    const found = [];
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i] ?? null;
+        if (!arg?.startsWith('-'))
+            found.push(arg);
+        else if (valueFlags.has(arg))
+            i++;
+    }
+    return found;
+}
+/** Where `patch` writes: `-d DIR`, `-dDIR` or `--directory[=]DIR`, else cwd. */
+function patchDir(args) {
+    for (const [i, a] of args.entries()) {
+        if (a === '-d' || a === '--directory')
+            return args[i + 1] ?? null;
+        if (a?.startsWith('--directory='))
+            return a.slice('--directory='.length);
+        if (a?.startsWith('-d'))
+            return a.slice(2);
+    }
+    return '.';
+}
+/** In-place editors write their last operand; with none (fed by xargs or find) they still write. */
+function inPlaceWrites(args, scope) {
+    const files = operands(args);
+    return files.length === 0 || writtenPlace(files.at(-1) ?? null, scope);
+}
+function hasFlag(args, flag) {
+    return args.some((a) => a !== null && flag.test(a));
+}
+function interpreterWrites(args, { filter, stdinScript }) {
+    if (filter)
+        return false;
+    const inline = args.some((a) => a !== null && INLINE_SCRIPT_FLAGS.has(a));
+    return inline || (stdinScript && operands(args).length === 0);
+}
+/** `xargs [flags] cmd …` and `find … -exec cmd … ;` run `cmd` on paths only known at run time. */
+function wrappedWrites(inner, context, appended) {
+    const nested = { ...context, filter: true, stdinScript: false, wrapped: true, appended };
+    return inner.length > 0 && verbWrites(inner, nested);
+}
+function xargsCall(args) {
+    let i = 0;
+    let appended = true;
+    while (i < args.length && args[i]?.startsWith('-')) {
+        if (XARGS_REPLACE.test(args[i]))
+            appended = false;
+        i += XARGS_VALUE_FLAGS.has(args[i]) ? 2 : 1;
+    }
+    return { inner: args.slice(i), appended };
+}
+function findInner(args) {
+    const at = args.findIndex((a) => a === '-exec' || a === '-execdir');
+    if (at < 0)
+        return [];
+    const end = args.findIndex((a, i) => i > at && (a === ';' || a === '+'));
+    return args.slice(at + 1, end < 0 ? undefined : end);
+}
+/** `git -C a -C b` is cumulative: each `-C` resolves against the one before it. */
+function gitApplyWrites(args, { scope }) {
+    let dir = scope.cwd;
+    let i = 0;
+    for (; args[i] === '-C' || args[i] === '-c'; i += 2) {
+        const next = args[i + 1];
+        if (args[i] === '-C')
+            dir = dir === null || next == null ? null : resolve(dir, expandHome(next));
+    }
+    return args[i] === 'apply' && writtenPlace(dir, scope);
+}
+/** Every operand is written; with none under xargs or find, the run-time operands are. */
+const everyOperand = (valueFlags) => (args, { scope, wrapped }) => {
+    const files = operands(args, valueFlags);
+    return files.length === 0 ? wrapped : files.some((a) => writtenPlace(a, scope));
+};
+/** A `--target-directory` long option, or a GNU-unique prefix of it such as `--target-dir`. */
+function targetLong(name) {
+    return name.length > 2 && TARGET_DIR_LONG.startsWith(name);
+}
+/** The target in a short cluster (`-t DIR`, `-rt DIR`, `-rtDIR`) when `t` is its first value flag. */
+function clusterTarget(cluster, next) {
+    const at = [...cluster.slice(1)].findIndex((c) => COPY_SHORT_VALUES.includes(c)) + 1;
+    if (at < 1 || cluster[at] !== 't')
+        return undefined;
+    const rest = cluster.slice(at + 1);
+    return rest === '' ? next : rest;
+}
+/** cp/mv/install's target directory (`-t DIR`, `-rt DIR`, `-tDIR`, `--target-dir[=]DIR`). */
+function targetDir(args) {
+    for (const [i, a] of args.entries()) {
+        if (a === null)
+            continue;
+        const eq = a.indexOf('=');
+        if (targetLong(eq < 0 ? a : a.slice(0, eq)))
+            return eq < 0 ? (args[i + 1] ?? null) : a.slice(eq + 1);
+        const short = SHORT_CLUSTER.test(a) ? clusterTarget(a, args[i + 1] ?? null) : undefined;
+        if (short !== undefined)
+            return short;
+    }
+    return undefined;
+}
+/** `cp`/`mv`/`install` write into their target directory when given, else their last operand. */
+const copyTarget = (args, { scope, appended }) => {
+    const dir = targetDir(args);
+    if (dir !== undefined)
+        return writtenPlace(dir, scope);
+    // Appending xargs makes its last run-time operand the destination, so it is unknown here.
+    if (appended)
+        return true;
+    return writtenPlace(operands(args, COPY_VALUE_FLAGS).at(-1) ?? null, scope);
+};
+const shellScript = (args, { scope }) => args[0] === '-c' && args[1] != null && scriptWrites(args[1], scope);
+const VERB_RULES = new Map([
+    [
+        'xargs',
+        (args, context) => {
+            const { inner, appended } = xargsCall(args);
+            return wrappedWrites(inner, context, appended);
+        },
+    ],
+    ['find', (args, context) => wrappedWrites(findInner(args), context, false)],
+    ['git', gitApplyWrites],
+    ['patch', (args, { scope }) => writtenPlace(patchDir(args), scope)],
+    ['sed', (args, { scope }) => hasFlag(args, SED_IN_PLACE) && inPlaceWrites(args, scope)],
+    [
+        'perl',
+        (args, context) => hasFlag(args, PERL_IN_PLACE)
+            ? inPlaceWrites(args, context.scope)
+            : interpreterWrites(args, context),
+    ],
+    ['tee', everyOperand(NO_VALUE_FLAGS)],
+    ['touch', everyOperand(TOUCH_VALUE_FLAGS)],
+    ['truncate', everyOperand(TRUNCATE_VALUE_FLAGS)],
+    ['cp', copyTarget],
+    ['mv', copyTarget],
+    ['install', copyTarget],
+    ['bash', shellScript],
+    ['sh', shellScript],
+    ['zsh', shellScript],
+]);
+function verbWrites(command, context) {
+    const name = basename(command[0] ?? '');
+    const rule = VERB_RULES.get(name) ?? (INTERPRETER.test(name) ? interpreterWrites : undefined);
+    return rule?.(command.slice(1), context) ?? false;
+}
+function commandWrites(command, scope, filter) {
+    if (redirectsWrite(command.redirects, scope))
+        return true;
+    const stdinScript = command.redirects.some((r) => STDIN_SCRIPT_REDIRECTS.has(r.operator));
+    const words = [command.name, ...command.suffix].map(literal);
+    return verbWrites(words, { scope, filter, stdinScript, wrapped: false, appended: false });
+}
+function children(node) {
+    switch (node.type) {
+        case 'Statement':
+            return [node.command];
+        case 'AndOr':
+        case 'CompoundList':
+            return node.commands;
+        case 'If':
+            return node.else ? [node.clause, node.then, node.else] : [node.clause, node.then];
+        case 'While':
+            return [node.clause, node.body];
+        case 'Case':
+            return node.items.map((item) => item.body);
+        case 'Subshell':
+        case 'BraceGroup':
+        case 'For':
+        case 'Select':
+        case 'ArithmeticFor':
+        case 'Function':
+        case 'Coproc':
+            return [node.body];
+        default:
+            return [];
+    }
+}
+function nodeWrites(node, scope, filter) {
+    if (node.type === 'Command')
+        return commandWrites(node, scope, filter);
+    if (node.type === 'Pipeline')
+        return node.commands.some((c, i) => nodeWrites(c, scope, filter || i > 0));
+    if ('redirects' in node && redirectsWrite(node.redirects, scope))
+        return true;
+    return children(node).some((child) => nodeWrites(child, scope, filter));
+}
+function scriptWrites(command, scope) {
+    const ast = parse(command);
+    if (ast.errors?.length)
+        return false;
+    return ast.commands.some((statement) => nodeWrites(statement, scope, false));
+}
+/** True when `command`, run from `cwd`, writes a file inside `root` or anywhere outside temp. */
+export function writesToRepo(command, cwd, root) {
+    const temps = ['/tmp', '/private/tmp', tmpdir()];
+    try {
+        temps.push(realpathSync(tmpdir()));
+    }
+    catch {
+        // an unresolvable tmpdir keeps its literal spelling only
+    }
+    return scriptWrites(command, { cwd, root, temps });
+}

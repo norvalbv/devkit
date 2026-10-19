@@ -6,7 +6,8 @@
  * One script, two events. PostToolUse (Task|Agent) records "a prior-art subagent ran this
  * session" as an empty marker file. PreToolUse denies the FIRST gated call in a session with no
  * such run — once — where gated means a file write (Edit|Write|MultiEdit, the plan-file Write
- * included), ExitPlanMode, or a feature-critique dispatch. The reason restates the brainstorming
+ * included, or a Bash command devkit's classifier says writes files), ExitPlanMode, or a
+ * feature-critique dispatch. The reason restates the brainstorming
  * skill's skip predicate; the denial itself writes a snooze marker, so every retry that session
  * passes. A gated call whose input already carries the skill-mandated `Prior-art:` acknowledgment
  * line (verdict or skip note) passes without any deny and marks the session acknowledged — the
@@ -14,8 +15,10 @@
  * teammate (agent_id set) pass untouched: they share the lead's session but cannot dispatch
  * prior-art, so a deny there would spend the lead's one reminder. This orders devkit's OWN shipped
  * workflow stages (the carve-out recorded in docs/decisions/devkit-gates-repo-not-harness.md); it
- * reads tool identity, agent_id, subagent_type, and that one devkit-prescribed token — never
- * foreign argument shapes or content beyond the token match.
+ * reads tool identity, agent_id, subagent_type, that one devkit-prescribed token, and a Bash
+ * call's command, classified by form with devkit's own parser (gate-engine/prior-art/
+ * shell-writes.mts). This synced copy imports nothing but node builtins, so it loads that
+ * classifier from devkit's build or install; when none loads, Bash is simply not gated.
  *
  * Markers live in ${tmpdir()}/devkit-prior-art/, namespaced by repo root + session id: session
  * ids are globally unique but $TMPDIR is machine-global, and two files (.ran/.snoozed) instead
@@ -32,14 +35,16 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const STEP0_SUBAGENT = "prior-art";
 const GATED_SUBAGENT = "feature-critique";
 const SUBAGENT_TOOLS = new Set(["Task", "Agent"]);
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"]);
+const CLASSIFIER = join("gate-engine", "prior-art", "shell-writes.mjs");
 // The one-line disposition the brainstorming skill mandates every plan record
 // (`Prior-art: <verdict> …` or the skip note). Its presence IS the acknowledgment.
 const ACK_TOKEN = "Prior-art:";
@@ -76,6 +81,55 @@ export function recordRun(input, root, tmp = tmpdir()) {
   }
 }
 
+/** The `devkit` executable on PATH, resolved through symlinks; null when there is none. */
+function devkitOnPath(env) {
+  for (const dir of (env.PATH ?? "").split(delimiter)) {
+    try {
+      return realpathSync(join(dir, "devkit"));
+    } catch {
+      // not in this PATH entry
+    }
+  }
+  return null;
+}
+
+/**
+ * devkit's Bash-write classifier, from the first of: this repo's own build (self-host), the
+ * repo's devkit package, or the devkit on PATH (dist/cli/index.mjs → dist/gate-engine/…).
+ */
+export function loadShellWrites(root, env = process.env) {
+  const load = createRequire(import.meta.url);
+  const bin = devkitOnPath(env);
+  const candidates = [
+    join(root, "dist", CLASSIFIER),
+    join(root, "node_modules", "@norvalbv", "devkit", "dist", CLASSIFIER),
+    bin && join(dirname(bin), "..", CLASSIFIER),
+  ];
+  for (const file of candidates.filter(Boolean)) {
+    try {
+      const { writesToRepo } = load(file);
+      if (writesToRepo) return writesToRepo;
+    } catch {
+      // an older devkit without the classifier, or no build here: try the next one
+    }
+  }
+  return null;
+}
+
+/** The calls the gate can deny: file writes, plan exit, a feature-critique dispatch, and Bash. */
+function gatedTool(input) {
+  const tool = input?.tool_name;
+  if (tool === "ExitPlanMode" || tool === "Bash" || EDIT_TOOLS.has(tool)) return true;
+  return SUBAGENT_TOOLS.has(tool) && input?.tool_input?.subagent_type === GATED_SUBAGENT;
+}
+
+/** A Bash call claims the session's deny only when the classifier says its command writes files. */
+function bashWrites(input, root, markers, shellWrites) {
+  if (existsSync(markers.snoozed)) return false;
+  const command = input?.tool_input?.command ?? "";
+  return shellWrites(root)?.(command, input?.cwd || root, root) === true;
+}
+
 /**
  * PreToolUse: the deny reason, or null (allow). The one denial writes the session snooze,
  * so a retry — with prior-art run, or with a stated skip note — always passes.
@@ -84,18 +138,14 @@ export function decide(
   input,
   root = process.env.CLAUDE_PROJECT_DIR || process.cwd(),
   tmp = tmpdir(),
+  shellWrites = loadShellWrites,
 ) {
   try {
     if (input?.agent_id) return null; // subagent / in-process teammate: the lead is gated
-    const tool = input?.tool_name;
-    const gated =
-      tool === "ExitPlanMode" ||
-      EDIT_TOOLS.has(tool) ||
-      (SUBAGENT_TOOLS.has(tool) &&
-        input?.tool_input?.subagent_type === GATED_SUBAGENT);
-    if (!gated) return null; // incl. the Task call that spawns prior-art itself
+    if (!gatedTool(input)) return null; // incl. the Task call that spawns prior-art itself
     const markers = markerPaths(root, input?.session_id, tmp);
     if (existsSync(markers.ran)) return null;
+    if (input.tool_name === "Bash" && !bashWrites(input, root, markers, shellWrites)) return null;
     // The marker means "acknowledged or already-reminded" — sticky either way. Exclusive create
     // (throws EEXIST → the catch allows) so one call of a parallel batch claims the session's deny.
     mkdirSync(markers.dir, { recursive: true });
