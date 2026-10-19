@@ -16,6 +16,7 @@
 import { join } from 'node:path';
 import { type JudgeUsage, withResultArgs } from '../claude-result.mts';
 import type { CodexWorkspace } from './workspace.mts';
+import { toolGateArgs } from './tool-gate.mts';
 
 // ── the `codex exec --json` event contract ──────────────────────────────────────────────────────
 // One ThreadEvent per stdout line (codex-rs/exec/src/exec_events.rs). Only the fields devkit reads
@@ -47,6 +48,7 @@ interface CodexErrorPayload {
 
 interface CodexEvent {
   type?: string;
+  thread_id?: string;
   item?: CodexEventItem;
   usage?: CodexUsagePayload;
   error?: CodexErrorPayload;
@@ -197,7 +199,6 @@ export function parseModelSpec(spec: string): ModelSpec {
 const confinedWorkspace = (parts: ClaudeArgvParts, workspace?: CodexWorkspace) =>
   parts.readOnly ? null : (workspace ?? null);
 
-// Claude judges cannot run tests (JUDGE_READ_TOOLS); codex judges have a shell and are told instead.
 export const NO_TEST_RUNS =
   'Do not run tests, test runners or package-manager scripts (bun run, npm run); review by reading. Test execution belongs to the pre-push suite.';
 
@@ -387,7 +388,7 @@ export function judgeCliFor(
   const confined = confinedWorkspace(parts, workspace);
   return {
     bin: codexBin(),
-    argv: codexExecArgs(parts, mcp.argv, workspace),
+    argv: codexExecArgs(parts, [...mcp.argv, ...toolGateArgs(parts, confined)], workspace),
     codex: true,
     // Checklist scripts chdir here (skills/_devkit/review-roots.mjs): state lands where the gate reads it.
     extraEnv: confined

@@ -51,7 +51,7 @@ import {
   type JudgeOutageKind,
 } from './outage/classify.mts';
 import { unavailableMessage, warnNoOutput } from './outage/wording.mts';
-import { saveCodexCommands } from './codex/commands.mts';
+import { codexGateDenials, saveCodexCommands } from './codex/commands.mts';
 import { composeTranscript, saveTranscriptUnique } from './transcript-store.mts';
 
 // Re-exported so the gates that already import their remedy wording from here keep ONE import path,
@@ -272,7 +272,7 @@ function emitJudgeExec(
   if (outageDetail !== undefined) extra.outage_detail = outageDetail;
   const commandsRef = saveCodexCommands(opts.label, stdout, opts.lens);
   if (commandsRef) extra.commands_ref = commandsRef;
-  Object.assign(extra, recordPermissionDenials(opts, stdout));
+  Object.assign(extra, recordPermissionDenials(opts, stdout, codexGateDenials(opts.label, stdout)));
   recordAgentRun({
     label: opts.label,
     output,

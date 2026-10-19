@@ -147,12 +147,14 @@ export interface DenialFields {
   denials_ref?: string;
 }
 
-/** Hand a spawn's denials to its caller and store their text in a `<label>.denied` sidecar. */
+/** Hand a spawn's denials to its caller and store their text in a `<label>.denied` sidecar.
+ * `fallback` carries denials measured outside the claude envelope (the codex tool gate). */
 export function recordPermissionDenials(
   sink: DenialSink,
   raw: string | null | undefined,
+  fallback?: string[] | null,
 ): DenialFields {
-  const denied = parsePermissionDenials(raw);
+  const denied = parsePermissionDenials(raw) ?? fallback ?? null;
   if (denied === null) return {};
   sink.onPermissionDenials?.(denied);
   const fields: DenialFields = { permission_denials: denied.length };
