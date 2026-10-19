@@ -13,6 +13,7 @@ import { blockingFindings, judgeFinding } from './blocking.mts';
 import { count, oneLine, textOf } from './fields.mts';
 import { scanBackward } from './tail.mts';
 import { readBranchHistory, renderTrend, summariseTrend } from './trend.mts';
+import { waivedRows } from './waived.mts';
 
 /**
  * The fields this digest reads off a gate event, and only those. The sink is an append-only stream
@@ -68,11 +69,13 @@ export interface GateEvent {
   items?: unknown[];
   /** completeness gate_result FAIL only: its CRITICAL and IMPORTANT finding counts. */
   tally?: { critical?: number; important?: number };
+  /** review_result / cache_hit: the waivers a verdict rests on (a cache_hit keeps no rationale). */
+  waivers?: { lens?: string; fingerprint?: string; rationale?: string }[];
 }
 
 /** One gate's contribution to this attempt. `gate` is the event's own label, never parsed prose.
- * `unverified`: a downgraded judge, a PASS judged on an earlier diff, or a PASS over a packet that
- * omitted or truncated files. It never blocks. */
+ * `unverified`: a downgraded judge, a PASS judged on an earlier diff or a partial packet, or a
+ * waived finding. It never blocks. */
 export interface DigestRow {
   gate: string;
   state: 'finding' | 'cached' | 'could-not-run' | 'unverified';
@@ -350,6 +353,7 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
     ...firstPerGate(advisory),
     // Deduped for the same reason: pre-commit and commit-msg can both replay one stale verdict.
     ...firstPerGate(unverified),
+    ...waivedRows(mine),
     ...cached,
   ];
 }
@@ -465,7 +469,7 @@ export function render(rows: DigestRow[], logPath = ''): string {
   if (missingOthers.length > MAX_MISSING) {
     out.push(`   … ${missingOthers.length - MAX_MISSING} more gate(s) that could not run`);
   }
-  // Uncapped: at most one row per judge survives the dedupe, and a cut one would be the silent
+  // Uncapped: one row per judge or waived ID survives the dedupe, and a cut one would be the silent
   // omission this section exists to end. The same `·` a bypass wears, because it carries that weight.
   for (const r of unverified) out.push(`   · ${r.gate} — ${r.detail}`);
   if (cached > 0) {

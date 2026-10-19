@@ -4,8 +4,7 @@ import { waiveCommand } from '../../../../gate-engine/review/valve/shell-word.mt
 import { count, oneLine, textOf } from './fields.mts';
 import type { GateEvent } from './gate-digest.mts';
 import { issuesUnder } from './trend.mts';
-
-const FINGERPRINT = /^[0-9a-f]{12}$/;
+import { FINGERPRINT } from './waived.mts';
 
 /** The detail of each row a review_result FAIL contributes, with the fingerprint it names. */
 export function blockingFindings(

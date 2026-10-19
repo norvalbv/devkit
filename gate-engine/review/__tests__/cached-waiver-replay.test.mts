@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readShipEvents, render, summarise } from '../../../cli/lib/ship/digest/gate-digest.mts';
 import { loadCache } from '../cache.mts';
 import { reportCachedHitNotes } from '../contracts/checklist.mts';
 import { resetReviewBaseContext } from '../evidence/base-context.mts';
@@ -105,6 +106,7 @@ describe('runReviewGate — a waived correctness FAIL on an identical re-run', (
   });
   afterEach(() => {
     cleanupReviewFixtures();
+    delete process.env.DEVKIT_SHIP_ID;
     if (savedSplit === undefined) delete process.env.GUARD_CORRECTNESS_SPLIT;
     else process.env.GUARD_CORRECTNESS_SPLIT = savedSplit;
   });
@@ -131,10 +133,12 @@ describe('runReviewGate — a waived correctness FAIL on an identical re-run', (
         () => 'a',
       ),
     ).toBe(0);
+    process.env.DEVKIT_SHIP_ID = 'ship-fresh';
     expect(await runReviewGate(repo, { exec })).toBe(0);
 
     vi.mocked(console.error).mockClear();
     const before = judged();
+    process.env.DEVKIT_SHIP_ID = 'ship-cached';
     expect(await runReviewGate(repo, { exec })).toBe(0);
     expect(judged()).toBe(before);
     expect(printed()).toContain(`${REVIEWER} — check-fail-1 overridden [${fp}] (cached PASS)`);
@@ -144,6 +148,12 @@ describe('runReviewGate — a waived correctness FAIL on an identical re-run', (
       .map((line) => JSON.parse(line))
       .filter((row) => row.type === 'cache_hit' && row.judge === `review:${REVIEWER}`);
     expect(hits.at(-1)?.waivers).toEqual([{ lens: 'check-fail-1', fingerprint: fp }]);
+    // The ship digest reads what the gate wrote, fresh and replayed, so a renamed field fails here.
+    const digest = (id: string) =>
+      render(summarise(readShipEvents(process.env.DEVKIT_GATE_EVENTS ?? '', id), id));
+    const row = `· review:${REVIEWER} — check-fail-1 waived [${fp}]`;
+    expect(digest('ship-fresh')).toContain(`${row}: a single writer owns the counter, so no race`);
+    expect(digest('ship-cached')).toContain(`${row} (cached PASS)`);
 
     persist(repo, {});
     expect(await runReviewGate(repo, { exec })).toBe(1);
