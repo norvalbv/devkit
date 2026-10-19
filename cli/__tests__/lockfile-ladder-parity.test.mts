@@ -43,13 +43,21 @@ describe('resolve_pm and dependencyInstallRemedy share one lockfile ladder', () 
     },
   );
 
+  it('a directory named like a lockfile counts for neither ladder', () => {
+    const dir = mkdtempSync(join(root, 'repo-'));
+    mkdirSync(join(dir, 'bun.lock'));
+    writeFileSync(join(dir, 'package-lock.json'), '');
+    expect(dependencyInstallRemedy(dir)).toBe('npm ci');
+    expect(bash('. "$1"; resolve_pm', dir)).toBe('npm');
+  });
+
   it('resolve_pm tests exactly the lockfiles the TS ladder lists', () => {
     const words = bash('. "$1"; declare -f resolve_pm', root).split(/\s+/);
     const tested = words.flatMap((word, i) => (words[i - 1] === '-f' ? [word] : []));
     expect(new Set(tested)).toEqual(new Set(LOCKFILES));
   });
 
-  // The no-lockfile row is the generic sentence ship used to print from bash, apostrophe included.
+  // With no lockfile, ship prints a generic sentence; its apostrophe must survive the shell.
   it.each([
     [['yarn.lock'], 'yarn install --immutable'],
     [[], "install dependencies with this repo's package manager"],

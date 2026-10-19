@@ -1,6 +1,6 @@
 /** Whether every declared direct dependency has a package.json under node_modules, and which install
  * fixes it when not. Shared by `devkit ship` and `devkit coverage-run`. */
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, matchesGlob, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -29,6 +29,10 @@ const LOCKFILE_LADDER: [lockfile: string, install: string][] = [
 ];
 
 export const LOCKFILES = LOCKFILE_LADDER.map(([lockfile]) => lockfile);
+
+/** A regular file (or a link to one), as bash `[ -f ]` tests it: a directory never counts. */
+const hasLockfile = (dir: string, lockfile: string): boolean =>
+  statSync(join(dir, lockfile), { throwIfNoEntry: false })?.isFile() === true;
 
 const validPart = (part: string): boolean =>
   part.length > 0 && part !== '.' && part !== '..' && !part.includes('\\');
@@ -66,7 +70,7 @@ export function missingDeclaredDependencies(
 
 /** The frozen-lockfile install command for the checkout at `dir`. */
 export function dependencyInstallRemedy(dir: string): string {
-  const rung = LOCKFILE_LADDER.find(([lockfile]) => existsSync(join(dir, lockfile)));
+  const rung = LOCKFILE_LADDER.find(([lockfile]) => hasLockfile(dir, lockfile));
   return rung?.[1] ?? "install dependencies with this repo's package manager";
 }
 
@@ -173,7 +177,7 @@ export function installDirFor(missing: MissingModule, root: string): string | nu
       const declares = installed || declaresPackage(manifest, name);
       const member = declarer && relative(dir, declarer).replaceAll('\\', '/');
       const provides = declares || (member !== null && listsWorkspace(manifest, member));
-      if (provides && LOCKFILES.some((lock) => existsSync(join(dir, lock)))) return dir;
+      if (provides && LOCKFILES.some((lock) => hasLockfile(dir, lock))) return dir;
       if (declares) declarer ??= dir;
     }
     if (dir === top) return null;
@@ -207,7 +211,7 @@ export function formatMissingRootDependencies(cwd: string): string[] {
   const shown = missing.slice(0, 10).join(', ') + (missing.length > 10 ? ', …' : '');
   return [
     `⚠️  ${missing.length} declared dependenc${missing.length === 1 ? 'y is' : 'ies are'} not installed: ${shown}`,
-    LOCKFILES.some((lock) => existsSync(join(cwd, lock)))
+    LOCKFILES.some((lock) => hasLockfile(cwd, lock))
       ? `   Test files importing them will fail to load. Run \`${dependencyInstallRemedy(cwd)}\` first.`
       : '   Test files importing them will fail to load. Install them first.',
   ];
