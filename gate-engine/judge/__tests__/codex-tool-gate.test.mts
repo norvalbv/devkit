@@ -47,12 +47,12 @@ afterEach(() => {
 
 describe('codexHookTrustHash', () => {
   it('matches the hash codex trusted live and an independent implementation', () => {
-    // codex-cli 0.150.0 / 0.159.3 / 0.162.1 ran this exact hook with no bypass flag (2026-10-19).
+    // A command string codex-cli 0.150.0, 0.159.3 and 0.162.1 trusted live with no bypass flag.
     const live = `'/Users/benji/.nvm/versions/node/v22.20.0/bin/node' '/tmp/sc4645/hook.mjs' eyJsZWRnZXIiOiIvdG1wL3NjNDY0NS9sZWRnZXIuanNvbmwifQ`;
     expect(codexHookTrustHash('pre_tool_use', '*', live)).toBe(
       'sha256:57adac4171bff63cde8a176f1a3833de471047988eaf6810a8161135e2b1aa06',
     );
-    // frink-oss thread-hooks.test.ts golden for a matcherless Stop hook.
+    // A second, independent implementation of codex's hook hash agrees on a matcherless Stop hook.
     expect(codexHookTrustHash('stop', undefined, 'echo stop')).toBe(
       'sha256:236335e9e512004a0f5f42af65a07ea9059bd9a23dbb68286ed57fecf2b69ddf',
     );
