@@ -123,7 +123,7 @@ export const FORMAT_EXTENSION_FILTER = "grep -E '\\.(tsx?|jsx?|mts|cts|mjs|css|j
 // FMT_RC is XARGS's status, not the formatter's (xargs collapses 1-125 into one code of its own),
 // so the report points at the tool's diagnostics rather than claiming the number is its exit code.
 export const FORMAT_FAILURE_REPORT = `        if [ "$FMT_RC" -eq 127 ]; then
-            echo "🎨 $FMT_TOOL is not installed at $FMT_BIN — $FMT_N staged file(s) left UNFORMATTED. Run \\\`devkit doctor --fix\\\`; this commit continues."
+            echo "🎨 $FMT_TOOL is missing or cannot start at $FMT_BIN — $FMT_N staged file(s) left UNFORMATTED. Install this repo's dependencies; this commit continues."
         elif [ "$FMT_RC" -ne 0 ]; then
             echo "🎨 $FMT_TOOL failed over $FMT_N staged file(s) (xargs exit $FMT_RC) — some may be UNFORMATTED; its diagnostics are above. This commit continues."
         fi`;

@@ -166,4 +166,21 @@ describe('overlay format step — real git and the real oxfmt binary', () => {
     expect(existsSync(join(repo, 'node_modules'))).toBe(false);
     expect(git('show', ':a.ts')).toBe(UNFORMATTED);
   });
+
+  // Passes the [ -x ] check, then exec fails on the missing interpreter, so xargs exits 127.
+  it('gives the install remedy, not doctor --fix, when an existing binary cannot start', () => {
+    const { repo, git } = repoWith(
+      { '.oxfmtrc.json': '{}\n', 'a.ts': UNFORMATTED },
+      { oxfmtBin: false },
+    );
+    mkdirSync(join(repo, 'node_modules', '.bin'), { recursive: true });
+    writeFileSync(join(repo, 'node_modules', '.bin', 'oxfmt'), '#!/nonexistent/node\n');
+    chmodSync(join(repo, 'node_modules', '.bin', 'oxfmt'), 0o755);
+    const r = runStep(repo);
+    expect(r.status, r.stdout).toBe(0);
+    expect(r.stdout).toContain('oxfmt is missing or cannot start at node_modules/.bin/oxfmt');
+    expect(r.stdout).toContain("Install this repo's dependencies; this commit continues.");
+    expect(r.stdout).not.toContain('doctor --fix');
+    expect(git('show', ':a.ts')).toBe(UNFORMATTED);
+  });
 });

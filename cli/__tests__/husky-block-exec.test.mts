@@ -569,12 +569,14 @@ describe('format re-stage step (real git)', () => {
       expect(r.stdout).toContain('🎨 biome formatted and re-staged 2 staged file(s).');
     });
 
-    it('reports a missing Oxfmt and lets the commit continue', () => {
+    it('reports a missing biome with the install remedy and lets the commit continue', () => {
       const repo = initRepo();
       stageFile(repo, 'a.mts');
       const r = runInRepo(repo, { biome: null });
       expect(r.status).toBe(0); // best-effort: a formatter outage is never a commit outage
-      expect(r.stdout).toContain('biome is not installed at');
+      expect(r.stdout).toContain('biome is missing or cannot start at');
+      expect(r.stdout).toContain("Install this repo's dependencies");
+      expect(r.stdout).not.toContain('doctor --fix');
       expect(r.stdout).toContain('left UNFORMATTED');
     });
 
