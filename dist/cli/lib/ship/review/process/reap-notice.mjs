@@ -5,6 +5,8 @@ import { processTableOutput } from './process-table.mjs';
 // path: env holds the ownership token and API keys, and MCP server argv holds tokens.
 const MAX_LISTED = 5;
 const FIELD_MAX_CHARS = 64;
+// Each read runs inside the linger timer, before the reap's signals: a hung ps must not hold them.
+const READ_TIMEOUT_MS = 500;
 const PROCESS_COLUMNS = '-o pid= -o ppid= -o pgid= -o etime= -o ucomm='.split(' ');
 const ARGS_COLUMNS = '-o pid= -o args='.split(' ');
 const PROCESS_LINE_PATTERN = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)(?:\s+(.*?))?\s*$/;
@@ -16,7 +18,7 @@ export function survivingPids(table, identities) {
         .map(([pid]) => pid);
 }
 function psLines(pids, columns) {
-    return processTableOutput([...columns, '-p', pids.join(',')]).split('\n');
+    return processTableOutput([...columns, '-p', pids.join(',')], READ_TIMEOUT_MS).split('\n');
 }
 /**
  * Env-free `ps` reads (no e/E flag) of the given pids; a pid gone since the sample is skipped. The
