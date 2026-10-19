@@ -486,20 +486,27 @@ describe('detectChangedComments', () => {
     const DOC = ['// one', '// two', '// three', '// four'];
     const CODE = Array.from({ length: 8 }, (_, index) => `const v${index} = ${index};`);
 
-    /** Moves `<pkg>src/<name>` into `<pkg>src/d/` and fixes its import; `pkg` models a monorepo package. */
-    function moved(edit: (lines: string[]) => string[], name = 'a.ts', pkg = ''): string {
+    /** Moves `<fromPkg>src/<name>` into `<pkg>src/d/` and fixes its import; `pkg` models a monorepo package. */
+    function moved(
+      edit: (lines: string[]) => string[],
+      name = 'a.ts',
+      pkg = '',
+      fromPkg = pkg,
+    ): string {
       const root = fixture();
-      const src = path.join(root, pkg, 'src');
-      mkdirSync(path.join(src, 'd'), { recursive: true });
+      const from = path.join(root, fromPkg, 'src');
+      const to = path.join(root, pkg, 'src', 'd');
+      mkdirSync(from, { recursive: true });
+      mkdirSync(to, { recursive: true });
       if (pkg) writeFileSync(path.join(root, pkg, 'guard.config.json'), '{"scanRoots":["src"]}\n');
       writeFileSync(
-        path.join(src, name),
+        path.join(from, name),
         ['import { x } from "./x";', ...DOC, ...CODE, ''].join('\n'),
       );
       commitAll(root, 'base');
-      git(root, ['mv', path.join(src, name), path.join(src, 'd', name)]);
+      git(root, ['mv', path.join(from, name), path.join(to, name)]);
       const lines = ['import { x } from "../x";', ...DOC, ...CODE, ''];
-      writeFileSync(path.join(src, 'd', name), edit(lines).join('\n'));
+      writeFileSync(path.join(to, name), edit(lines).join('\n'));
       git(root, ['add', '-A']);
       expect(git(root, ['diff', '--cached', '--name-status'])).toMatch(/^R\d+\s/);
       return root;
@@ -534,6 +541,59 @@ describe('detectChangedComments', () => {
     it('reads the old path under the package prefix when the gate runs in a subdirectory', () => {
       const root = moved((lines) => lines, 'a.ts', 'pkg');
       expect(detectChangedComments(path.join(root, 'pkg')).findings).toEqual([]);
+    });
+
+    describe('in from a sibling package, with the gate run in the package', () => {
+      const fromSibling = (edit: (lines: string[]) => string[]) =>
+        moved(edit, 'a.ts', 'pkg', 'other');
+      const inPkg = (root: string) => detectChangedComments(path.join(root, 'pkg'));
+
+      it('leaves the untouched comment paragraphs alone', () => {
+        expect(inPkg(fromSibling((lines) => lines)).findings).toEqual([]);
+      });
+
+      it('still reports a paragraph added during the move', () => {
+        const root = fromSibling((lines) => [
+          ...lines.slice(0, 9),
+          '// new a',
+          '// new b',
+          '// new c',
+          ...lines.slice(9),
+        ]);
+        expect(inPkg(root).findings.map((finding) => finding.path)).toEqual(['src/d/a.ts']);
+      });
+
+      it('pairs the move when git config sets diff.relative', () => {
+        const root = fromSibling((lines) => lines);
+        git(root, ['config', 'diff.relative', 'true']);
+        expect(inPkg(root).findings).toEqual([]);
+      });
+
+      it('passes a pure move', () => {
+        const root = fromSibling((lines) => ['import { x } from "./x";', ...lines.slice(1)]);
+        expect(inPkg(root).findings).toEqual([]);
+      });
+
+      it('excuses a trailing reference kept on a code line edited during the move', () => {
+        const root = fixture();
+        const config = { scanRoots: ['src'], comments: { forbiddenRefs: ['\\bsc-\\d+\\b'] } };
+        mkdirSync(path.join(root, 'pkg/src'), { recursive: true });
+        mkdirSync(path.join(root, 'other/src'), { recursive: true });
+        for (const dir of ['', 'pkg']) {
+          writeFileSync(path.join(root, dir, 'guard.config.json'), JSON.stringify(config));
+        }
+        const file = (ref: string, value = 2) => [...CODE, `const ref = ${value}; // ${ref}`, ''];
+        writeFileSync(path.join(root, 'other/src/a.ts'), file('sc-12', 1).join('\n'));
+        commitAll(root, 'base');
+        git(root, ['mv', 'other/src/a.ts', 'pkg/src/a.ts']);
+        const stage = (ref: string) => {
+          writeFileSync(path.join(root, 'pkg/src/a.ts'), file(ref).join('\n'));
+          git(root, ['add', '-A']);
+          return inPkg(root).refFindings.map((finding) => finding.refs);
+        };
+        expect(stage('sc-12')).toEqual([]);
+        expect(stage('sc-13')).toEqual([['sc-13']]);
+      });
     });
 
     it('treats a bracketed route file name literally, not as a glob over its siblings', () => {

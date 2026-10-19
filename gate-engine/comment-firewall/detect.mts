@@ -85,26 +85,30 @@ function stagedPaths(cwd: string, ref?: string): Set<string> {
 
 type Renames = Map<string, { from: string; pure: boolean }>;
 
-/** Staged renames keyed by new path, so a moved file is diffed against its pre-move blob. */
+/** Staged renames keyed by cwd-relative new path. `--relative` would drop a source outside the cwd
+ * before git pairs it, so pairing runs repo-wide and `from` comes back cwd-relative (maybe `../`). */
 function stagedRenames(cwd: string, ref?: string): Renames {
   const args = [
     'diff',
     '--cached',
     '--name-status',
     '-z',
-    '--relative',
+    '--no-relative',
     '--find-renames',
     '--diff-filter=R',
     '--no-ext-diff',
   ];
   if (ref) args.push(ref);
   const fields = splitNul(git(cwd, args));
+  const prefix = gitPrefix(cwd);
   const renamed: Renames = new Map();
   for (let i = 0; i < fields.length;) {
     const status = fields[i++] ?? '';
     const from = fields[i++];
     const newPath = fields[i++];
-    if (from && newPath) renamed.set(newPath, { from, pure: status === 'R100' });
+    if (!from || !newPath?.startsWith(prefix)) continue;
+    const entry = { from: path.posix.relative(prefix, from), pure: status === 'R100' };
+    renamed.set(newPath.slice(prefix.length), entry);
   }
   return renamed;
 }
@@ -141,7 +145,7 @@ function patch(cwd: string, file: string, ref?: string, from?: string): string {
     '--no-ext-diff',
     '--find-renames',
     '--unified=4',
-    '--relative',
+    '--no-relative',
     '--diff-filter=ACMR',
   ];
   if (ref) args.push(ref);
@@ -229,7 +233,7 @@ function commentFragmentsAt(cwd: string, file: string, ref: string) {
   if (!SUPPORTED_EXTENSIONS.has(extension)) return fragments;
   let source: string;
   try {
-    source = git(cwd, ['show', `${ref}:${gitPrefix(cwd)}${file}`]);
+    source = git(cwd, ['show', `${ref}:./${file}`]);
   } catch {
     return fragments;
   }
