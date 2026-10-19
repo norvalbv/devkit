@@ -226,6 +226,7 @@ ORIGIN_URL=$(git config --get remote.origin.url || git remote get-url origin)
 REPO=$(printf '%s\n' "$ORIGIN_URL" | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git$##')
 
 REWRITE=0
+PR_MERGE_BASE=
 if [ -n "$BASE_FLAG" ]; then
   REWRITE=1
   BASE_REF=${BASE_FLAG#origin/}
@@ -601,10 +602,11 @@ else
   ship_refuse_unmatched_paths "$ROOT" "$BASE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1
   # Before the intent write too: no later push can reach a non-open PR, so nothing is worth resuming.
   [ -n "${SHIP_DRY_RUN:-}" ] || reship_refuse_closed_pr "" "nothing pushed" || exit 1
+  PR_MERGE_BASE=$(pr_merge_base "$BASE")
   # Tracked-dist drift is named against the PR's fork point, where CI judges it, not the PR tip,
   # which already carries the PR's own new artifacts. origin/HEAD covers dry runs and an unfetched base.
-  DRIFT_TARGET=
-  for DRIFT_REF in ${PR_SEEN_BASE:+"origin/$PR_SEEN_BASE"} "$(git symbolic-ref -q --short refs/remotes/origin/HEAD || true)"; do
+  DRIFT_TARGET=$PR_MERGE_BASE
+  [ -n "$DRIFT_TARGET" ] || for DRIFT_REF in ${PR_SEEN_BASE:+"origin/$PR_SEEN_BASE"} "$(git symbolic-ref -q --short refs/remotes/origin/HEAD || true)"; do
     [ -n "$DRIFT_REF" ] && DRIFT_TARGET=$(git merge-base "$BASE" "$DRIFT_REF" 2>/dev/null) && break
   done
 fi
@@ -990,8 +992,8 @@ else
 # The pinned parent the worktree was cut from — the PR tip for an append, or the PR base for a
 # rewrite — lets in-chain gates (fallow) diff against it rather than their own main-autodetect.
 export DEVKIT_SHIP_BASE_SHA="$BASE"
-# CI's PR base is known only for a rewrite; an append's PR tip is not it, so the dist extra skips.
-if [ "$REWRITE" -eq 1 ]; then export DEVKIT_SHIP_PR_BASE_SHA="$BASE"; else unset DEVKIT_SHIP_PR_BASE_SHA; fi
+# CI's PR base: a rewrite's worktree is cut from it; an append's PR tip is not it, so GitHub named it.
+if [ "$REWRITE" -eq 1 ]; then export DEVKIT_SHIP_PR_BASE_SHA="$BASE"; elif [ -n "$PR_MERGE_BASE" ]; then export DEVKIT_SHIP_PR_BASE_SHA="$PR_MERGE_BASE"; else unset DEVKIT_SHIP_PR_BASE_SHA; fi
 export DEVKIT_SHIP_SOURCE_HEAD="$CALLER_HEAD"   # pinned above, before staging (sc-2480)
 export DEVKIT_SHIP_MODE=reship   # tags the ship_attempt telemetry (retry onto an existing branch)
 export DEVKIT_RUN_MODE=ship      # never inherit a caller's review allowlist into a real ship
