@@ -88,14 +88,14 @@ describe('loadReviewerTargetsBlocks — salt stability', () => {
       mkdirSync(dir, { recursive: true });
       const axis = (slug: string, date: string) =>
         `---\nslug: ${slug}\ncreated: ${date}\n---\n\n## Target · ${date} — ${slug}\n\n**Ruling:** ${slug} ruling\n**Scope:** src/**\n`;
-      writeFileSync(join(dir, 'newer.md'), axis('newer', '2026-06-01'));
-      writeFileSync(join(dir, 'older.md'), axis('older', '2026-01-01'));
+      writeFileSync(join(dir, 'z-newer.md'), axis('z-newer', '2026-06-01'));
+      writeFileSync(join(dir, 'a-older.md'), axis('a-older', '2026-01-01'));
       const before = (await loadReviewerTargetsBlocks(root, ['src/a.ts'])).saltBlock;
-      appendFileSync(join(dir, 'older.md'), '- 2026-07-01 — an implementation note\n');
-      utimesSync(join(dir, 'older.md'), new Date(), new Date('2030-01-01'));
+      appendFileSync(join(dir, 'a-older.md'), '- 2026-07-01 — an implementation note\n');
+      utimesSync(join(dir, 'a-older.md'), new Date(), new Date('2030-01-01'));
       const after = (await loadReviewerTargetsBlocks(root, ['src/a.ts'])).saltBlock;
       expect(after).toBe(before);
-      expect(before.indexOf('### newer')).toBeLessThan(before.indexOf('### older'));
+      expect(before.indexOf('### z-newer')).toBeLessThan(before.indexOf('### a-older'));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

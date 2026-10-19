@@ -46,10 +46,14 @@ function rulingFor(
   return { ruling: t.ruling, scope: t.scope ?? null };
 }
 
-// Newest ruling first, so a capped prompt keeps the Target just recorded. Content-keyed (never
-// mtime), so the order and every cache salt built from it survive copies, clones and note appends.
+// Newest ruling first, so a capped prompt keeps the Target just recorded. Content-keyed, and compared
+// by UTF-16 code unit rather than locale, so the order and its cache salts match on every machine.
 function newestFirst(a: { slug: string; date: string }, b: { slug: string; date: string }) {
-  return b.date.localeCompare(a.date) || a.slug.localeCompare(b.slug);
+  return codeUnitOrder(b.date, a.date) || codeUnitOrder(a.slug, b.slug);
+}
+
+function codeUnitOrder(x: string, y: string): number {
+  return Number(x > y) - Number(x < y);
 }
 
 /**
