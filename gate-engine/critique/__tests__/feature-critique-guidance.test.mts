@@ -17,6 +17,15 @@ const ROOT = join(import.meta.dirname, '..', '..', '..');
 const agent = readFileSync(join(ROOT, 'agents', 'feature-critique.md'), 'utf8');
 const skill = readFileSync(join(ROOT, 'skills', 'feature-critique', 'SKILL.md'), 'utf8');
 const brainstorming = readFileSync(join(ROOT, 'skills', 'brainstorming', 'SKILL.md'), 'utf8');
+const EDGE_CASES_ARTIFACT_MARKERS = {
+  EDGE_CASES_ID: /\bEDGE_CASES_ID\b/u,
+  flowId: /\bflowId\b/u,
+  '.cursor/.edge-cases': /\.cursor\/\.edge-cases/u,
+};
+const bannedMarkers = (text: string) =>
+  Object.entries(EDGE_CASES_ARTIFACT_MARKERS)
+    .filter(([, pattern]) => pattern.test(text))
+    .map(([marker]) => marker);
 
 describe('feature-critique guidance', () => {
   it('preserves the substantive critique lenses and evidence rules', () => {
@@ -109,13 +118,15 @@ describe('feature-critique guidance', () => {
       .filter(Boolean);
     expect(tracked).toContain('agents/feature-completeness-reviewer.md');
     expect(tracked).toContain('skills/feature-critique/SKILL.md');
-    const hits = tracked.flatMap((file) => {
-      const text = readFileSync(join(ROOT, file), 'utf8');
-      return ['EDGE_CASES_ID', 'flowId', '.cursor/.edge-cases']
-        .filter((marker) => text.includes(marker))
-        .map((marker) => `${file}: ${marker}`);
-    });
+    const hits = tracked.flatMap((file) =>
+      bannedMarkers(readFileSync(join(ROOT, file), 'utf8')).map((marker) => `${file}: ${marker}`),
+    );
     expect(hits).toEqual([]);
+  });
+
+  it('bans the artifact markers as whole words, not inside unrelated identifiers', () => {
+    expect(bannedMarkers('verify `artifact.flowId === id`')).toEqual(['flowId']);
+    expect(bannedMarkers('a GitHub `workflowId` or `flowIdentity`')).toEqual([]);
   });
 
   it('runs once on the final plan, permits one blocker recheck, and stops looping', () => {
