@@ -1187,16 +1187,15 @@ describe('overlay inherited base allowance', () => {
     return root;
   }
 
-  it('passes a version bump whose whole-repository scan meets debt already at HEAD', () => {
+  it('passes a version bump that edits a file carrying debt already at HEAD', () => {
     const root = staleOverlayClone();
+    writeFileSync(join(root, 'src', 'other.ts'), `${FINDING_SOURCE}export const extra = 1;\n`);
     git(root, ['add', '-A']);
 
-    const status = antiSlop(['check', '--staged'], root);
-
-    expect(out.join('\n')).toContain(
-      'base allowance forgave 1 inherited finding(s) across 1 rule(s): anti-slop/no-object-parameters',
-    );
-    expect(status).toBe(0);
+    expect(antiSlop(['check', '--staged'], root)).toBe(0);
+    const forgave =
+      'base allowance forgave 1 inherited finding(s) across 1 rule(s): anti-slop/no-object-parameters';
+    expect(out.join('\n')).toContain(forgave);
   });
 
   it('still blocks findings the commit introduces, in an edited or a new file', () => {
