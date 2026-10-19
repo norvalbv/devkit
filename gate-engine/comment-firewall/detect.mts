@@ -187,13 +187,17 @@ export function scanCommentTokens(source: string, extension: string): CommentTok
   const collect = (items: ts.CommentRange[] | undefined): void => {
     for (const item of items ?? []) ranges.set(`${item.pos}:${item.end}`, item);
   };
+  // Closed JSX text is not trivia; text an unclosed tag swallows to EOF is still scanned.
+  const jsxText: [number, number][] = [];
   const visit = (node: ts.Node): void => {
+    if (ts.isJsxText(node) && node.parent.end > node.end) jsxText.push([node.pos, node.end]);
     collect(ts.getLeadingCommentRanges(source, node.getFullStart()));
     collect(ts.getTrailingCommentRanges(source, node.end));
     for (const child of node.getChildren(sourceFile)) visit(child);
   };
   visit(sourceFile);
   return [...ranges.values()]
+    .filter((range) => !jsxText.some(([pos, end]) => range.pos >= pos && range.pos < end))
     .sort((left, right) => left.pos - right.pos)
     .map((range) => {
       const start = range.pos;
