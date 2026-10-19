@@ -74,6 +74,8 @@ if (process.env.DEVKIT_COVERAGE_CHANGED) {
 // carry helper scripts (incl. *.test.mjs) that are repo-coupled and not part of
 // devkit's own test run — scope include so a stray skill script can't redden it.
 export default defineConfig({
+  // Per checkout, not in a node_modules worktrees may share: the pre-push hook reads results.json here.
+  cacheDir: '.devkit/vitest-cache',
   test: {
     ...SHARED_TEST_CONFIG,
     // vitest 5 (#10750) makes inline projects extend the root and concatenate arrays, which ran
