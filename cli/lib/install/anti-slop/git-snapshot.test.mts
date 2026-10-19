@@ -152,21 +152,83 @@ describe('anti-slop staged Git snapshot', () => {
     });
   });
 
-  it.each(['.oxlintrc.json', '.oxlintrc.jsonc', 'oxlint.config.ts', 'oxlint.config.mts'])(
-    'forces a full scan when the recognized root config %s changes',
-    (config) => {
-      const root = repository();
-      writeFileSync(join(root, config), '{}\n');
-      git(root, ['add', config]);
+  it.each([
+    '.oxlintrc.json',
+    '.oxlintrc.jsonc',
+    'oxlint.config.ts',
+    'oxlint.config.mts',
+    'package.json',
+    'bun.lock',
+  ])('forces a full scan when the trigger file %s changes', (config) => {
+    const root = repository();
+    writeFileSync(join(root, config), '{}\n');
+    git(root, ['add', config]);
 
-      withStagedAntiSlopSnapshot(root, (snapshot) => {
-        expect(snapshot.changedFiles).toContain(config);
-        expect(snapshot.fullScan).toBe(true);
-        expect(snapshot.paths).toEqual([]);
-        expect(snapshot.skipped).toBe(false);
-      });
+    withStagedAntiSlopSnapshot(root, (snapshot) => {
+      expect(snapshot.changedFiles).toContain(config);
+      expect(snapshot.fullScan).toBe(true);
+      expect(snapshot.paths).toEqual([]);
+      expect(snapshot.skipped).toBe(false);
+    });
+  });
+
+  // Overlay lints with devkit's own runtime and entry config, which no consumer manifest changes.
+  it.each(['package.json', 'bun.lock', '.oxlintrc.json', '.oxlintrc.jsonc'])(
+    'skips an overlay commit that stages only %s instead of scanning the whole repository',
+    (file) => {
+      const root = repository();
+      writeFileSync(join(root, file), `${EMPTY_BASELINE.trim()}\n\n`);
+      git(root, ['add', file]);
+
+      withStagedAntiSlopSnapshot(
+        root,
+        (snapshot) => {
+          expect(snapshot.changedFiles).toEqual([file]);
+          expect(snapshot.fullScan).toBe(false);
+          expect(snapshot.paths).toEqual([]);
+          expect(snapshot.skipped).toBe(true);
+        },
+        { overlay: true },
+      );
     },
   );
+
+  // A staged baseline still owes the envelope checks (renames, receipts) that only check() runs.
+  it.each(['.anti-slop-baseline.json', '.devkit/anti-slop/marker.json'])(
+    'still forces a full scan when an overlay commit stages %s',
+    (file) => {
+      const root = repository();
+      mkdirSync(join(root, '.devkit', 'anti-slop'), { recursive: true });
+      writeFileSync(join(root, file), `${EMPTY_BASELINE.trim()}\n\n`);
+      git(root, ['add', '-f', file]);
+
+      withStagedAntiSlopSnapshot(
+        root,
+        (snapshot) => {
+          expect(snapshot.fullScan).toBe(true);
+          expect(snapshot.skipped).toBe(false);
+        },
+        { overlay: true },
+      );
+    },
+  );
+
+  it('lints only the staged sources of an overlay version bump that also edits code', () => {
+    const root = repository();
+    writeFileSync(join(root, 'package.json'), '{ "version": "0.2.0" }\n');
+    writeFileSync(join(root, 'src', 'file.ts'), 'export const value = "bumped";\n');
+    git(root, ['add', 'package.json', 'src/file.ts']);
+
+    withStagedAntiSlopSnapshot(
+      root,
+      (snapshot) => {
+        expect(snapshot.fullScan).toBe(false);
+        expect(snapshot.paths).toEqual(['src/file.ts']);
+        expect(snapshot.skipped).toBe(false);
+      },
+      { overlay: true },
+    );
+  });
 
   it('preserves spaces and newlines in staged source paths', () => {
     const root = repository();
