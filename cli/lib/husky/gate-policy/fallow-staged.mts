@@ -29,10 +29,10 @@ export const FALLOW_STAGED = `if command -v fallow >/dev/null 2>&1; then
         # __dk_no_git_env: fallow's snapshot machinery has clobbered a ship worktree before.
         DK_FALLOW_JSON="$(__dk_no_git_env env \${DK_FALLOW_COV:+"FALLOW_COVERAGE=$DK_FALLOW_COV"} \\
             fallow audit --diff-stdin --format json --quiet <"$DK_FALLOW_DIFF")" || DK_FALLOW_RC=$?
-        # Introduced duplication alone is verdict warn, exit 0. Fallow's JSON is one line with escaped
-        # fragments, so only its attribution counter can match this pattern.
+        # Introduced duplication alone is verdict warn, exit 0. Fragments in fallow's JSON escape their
+        # quotes, so only its attribution counter (compact or pretty-printed) can match these.
         [ "$DK_FALLOW_RC" -ne 0 ] || case "$DK_FALLOW_JSON" in
-            *'"duplication_introduced":'[1-9]*) DK_FALLOW_DUP=1 ;;
+            *'"duplication_introduced":'[1-9]* | *'"duplication_introduced": '[1-9]*) DK_FALLOW_DUP=1 ;;
         esac
         # The JSON carries no prose, so anything but a clean pass re-runs for fallow's own report.
         if [ "$DK_FALLOW_RC" -ne 0 ] || [ "$DK_FALLOW_DUP" -eq 1 ] ||

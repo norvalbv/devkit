@@ -1273,14 +1273,24 @@ describe.each(['package', 'standalone'])('staged fallow gate (%s hook)', (builde
 
   const fallowRuns = (calls: string) => calls.match(/^fallow audit/gm)?.length ?? 0;
 
-  it("blocks a duplication-only staged set (verdict warn, exit 0) with fallow's report", () => {
-    const r = run(DUP_ONLY);
-    expect(r.status).toBe(1);
-    expect(r.stdout).toContain('fallow human report');
-    expect(r.stdout).toContain('the staged diff introduces duplication');
-    expect(r.calls).toContain('guard-review record-gate fallow');
-    expect(aiCalls(r.calls)).not.toContain('guard-review');
-  });
+  // Pretty-printed JSON spaces each value; a fallow that switched to it must not fail open.
+  it.each([
+    ['compact', DUP_ONLY],
+    [
+      'pretty-printed',
+      { FALLOW_JSON: '{\n  "verdict": "warn",\n  "duplication_introduced": 2\n}' },
+    ],
+  ])(
+    "blocks a duplication-only staged set (verdict warn, exit 0) with fallow's report (%s)",
+    (_, env) => {
+      const r = run(env);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('fallow human report');
+      expect(r.stdout).toContain('the staged diff introduces duplication');
+      expect(r.calls).toContain('guard-review record-gate fallow');
+      expect(aiCalls(r.calls)).not.toContain('guard-review');
+    },
+  );
 
   it('defers a duplication-only block under dry-gates, so the selected reviewers still run', () => {
     const r = run({ ...DUP_ONLY, DEVKIT_RUN_MODE: 'dry-gates', DEVKIT_REVIEW_GUARDS: 'review' });
