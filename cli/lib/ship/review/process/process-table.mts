@@ -25,10 +25,11 @@ export interface ProcessRecord {
 
 export type ProcessTableReader = (ownershipMarker?: string) => Map<number, ProcessRecord>;
 
-export function processTableOutput(args: string[]): string {
+export function processTableOutput(args: string[], timeout?: number): string {
   const result = spawnSync('/bin/ps', args, {
     encoding: 'utf8',
     maxBuffer: PROCESS_TABLE_MAX_BYTES,
+    timeout,
   });
   if (result.error)
     throw new Error('could not inspect the gate process tree', { cause: result.error });

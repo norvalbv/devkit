@@ -1,6 +1,9 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import type { ProcessRecord } from '../lib/ship/review/process/process-table.mts';
+import {
+  type ProcessRecord,
+  processTableOutput,
+} from '../lib/ship/review/process/process-table.mts';
 import {
   describeSurvivors,
   readSurvivorArgs,
@@ -123,5 +126,9 @@ describe('readSurvivorArgs', () => {
     } finally {
       child.kill('SIGKILL');
     }
+  });
+
+  it('bounds the ps read, so a hung ps cannot stall the reap it runs inside', () => {
+    expect(() => processTableOutput(['-A', '-o', 'pid='], 1)).toThrow(/could not inspect/);
   });
 });
