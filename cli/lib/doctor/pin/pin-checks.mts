@@ -23,7 +23,8 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cmpSemver, DEP, latestTag, lsRemote, pinnedVersion } from '../../../commands/update.mts';
+import { cmpSemver } from '../../../../gate-engine/devkit-version.mts';
+import { DEP, latestTag, lsRemote, pinnedVersion } from '../../../commands/update.mts';
 import { detectGitRoot } from '../../detect-git-root.mts';
 import { readJson } from '../../fs-helpers.mts';
 import { type CheckResult, check } from '../check-result.mts';

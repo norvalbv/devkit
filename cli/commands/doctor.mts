@@ -4,6 +4,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { cmpSemver } from '../../gate-engine/devkit-version.mts';
 import { claudeFamilyKeyLine } from '../../gate-engine/judge/outage/family-override.mts';
 import {
   FANOUT_BASELINE,
@@ -39,6 +40,7 @@ import { checkLockPin, checkPin } from '../lib/doctor/pin/pin-checks.mts';
 import {
   ALLOW_SKEW_ENV,
   delegateToPinned,
+  printNewerOverlayNotice,
   printSkewBanner,
   runnerSkew,
   skewCheck,
@@ -64,7 +66,7 @@ import {
 import { selectedHookAssets } from '../lib/install/hook-registration-ledger/selection.mts';
 import { withInitLock } from '../lib/install/init/init-lock.mts';
 import { checkOxcCapability, syncOxcCapability } from '../lib/install/oxc/lifecycle.mts';
-import { cmpSemver, fetchLatestTag } from './update.mts';
+import { fetchLatestTag } from './update.mts';
 
 // Devkit modules are .mts in source and .mjs when installed; runtime string paths need the live ext.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
@@ -453,6 +455,7 @@ export default async function run(args: string[], cwd: string): Promise<number> 
   // report 0 where package mode reports 1 for the identical condition.
   const skewed = skew.kind === 'older';
   if (cfg.overlay) {
+    if (skew.kind === 'newer') printNewerOverlayNotice(skew);
     const overlay = () => runOverlayDoctor(cwd, cfg, fix);
     // --fix re-runs install's own steps, so it holds init's lock, as package mode's spawned init does.
     return (await (fix ? withInitLock(cwd, 'doctor --fix', overlay) : overlay())) || +skewed;

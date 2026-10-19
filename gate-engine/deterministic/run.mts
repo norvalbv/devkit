@@ -47,6 +47,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { coverageBypassed, deterministicStrict } from '../config.mts';
 import { emitGateBypass, finishGateTiming } from '../judge/gate-events.mts';
 import { markGateRun } from '../judge/run-context.mts';
+import { reportOlderOverlayRunner } from '../overlay-mode.mts';
 import { describeCachedPrefix, prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
 import { type GateFailure, gateEnv, readGateReason, withReasonFiles } from './reason.mts';
 import {
@@ -330,7 +331,8 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
   const startedAt = Date.now();
   const extra = [...(opts.extra ?? []), ...configExtraGates(cwd)];
   const selection = resolveSelection(cwd, opts.only);
-  if (!selection) return finishGateTiming('deterministic', startedAt, 1, 'none');
+  if (!selection || reportOlderOverlayRunner(cwd))
+    return finishGateTiming('deterministic', startedAt, 1, 'none');
   const { reviewMode, effectiveIds } = selection;
   // A review may intentionally run a strict subset. Salt the prefix scope so that subset can never
   // authorize a later full ship/commit against the same staged tree.
