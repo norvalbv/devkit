@@ -1,13 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import {
-  chmodSync,
-  copyFileSync,
-  lstatSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-} from 'node:fs';
+import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,36 +11,32 @@ import { sha256, canonical } from '../claim-inventory.mts';
 import { manifestHash, parseManifest } from './manifest.mts';
 import { measureSpan } from './visibility.mts';
 import { hashLocalModuleClosure } from '../../../module-closure-hash.mts';
+import { commitIndexTree } from '../../../../../ratchets/commit-index.mts';
 
-const git = (cwd: string, args: string[], index?: string) =>
+const isolatedEnv = (): NodeJS.ProcessEnv => ({
+  ...process.env,
+  GIT_DIR: undefined,
+  GIT_COMMON_DIR: undefined,
+  GIT_WORK_TREE: undefined,
+  GIT_INDEX_FILE: undefined,
+  GIT_OPTIONAL_LOCKS: '0',
+});
+
+const git = (cwd: string, args: string[]) =>
   execFileSync('git', args, {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 32 * 1024 * 1024,
-    env: {
-      ...process.env,
-      GIT_DIR: undefined,
-      GIT_COMMON_DIR: undefined,
-      GIT_WORK_TREE: undefined,
-      GIT_INDEX_FILE: index,
-      GIT_OPTIONAL_LOCKS: '0',
-    },
+    env: isolatedEnv(),
   });
 
-// write-tree locks the index it reads, so concurrent runs each write a private copy instead.
-// The copy stays beside the real index because it carries the private source's file paths.
+// The index copy stays in the gitdir, never tmpdir, because it carries the private source's paths.
 function stagedTree(cwd: string): string {
-  const index = git(cwd, ['rev-parse', '--path-format=absolute', '--git-path', 'index']).trim();
-  const scratch = mkdtempSync(path.join(path.dirname(index), 'census-index-'));
-  try {
-    chmodSync(scratch, 0o700);
-    const copy = path.join(scratch, 'index');
-    copyFileSync(index, copy);
-    return git(cwd, ['write-tree'], copy).trim();
-  } finally {
-    rmSync(scratch, { recursive: true, force: true });
-  }
+  const gitDir = git(cwd, ['rev-parse', '--absolute-git-dir']).trim();
+  const staged = commitIndexTree(cwd, isolatedEnv(), gitDir);
+  if (staged.tree === null) throw new Error(staged.error);
+  return staged.tree;
 }
 const groups = [
   ['state-transitions'],

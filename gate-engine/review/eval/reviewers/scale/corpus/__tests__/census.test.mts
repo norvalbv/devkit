@@ -172,6 +172,19 @@ describe('private native source census', () => {
       fx.cleanup();
     }
   });
+  it('never puts the index copy, which names private source paths, in the shared tmpdir', () => {
+    const fx = fixture();
+    const saved = process.env.TMPDIR;
+    process.env.TMPDIR = path.join(fx.repo, 'missing-tmp');
+    try {
+      const report = censusSource(JSON.stringify(fx.manifest), 'case-001', fx.repo);
+      expect(report.tasks).toHaveLength(4);
+    } finally {
+      if (saved === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = saved;
+      fx.cleanup();
+    }
+  });
   it('computes the staged tree while another process holds the index lock', () => {
     const fx = fixture();
     try {
@@ -181,7 +194,9 @@ describe('private native source census', () => {
       const report = censusSource(JSON.stringify(fx.manifest), 'case-001', fx.repo);
       expect(report.tasks).toHaveLength(4);
       expect(readFileSync(path.join(gitDir, 'index')).equals(index)).toBe(true);
-      expect(readdirSync(gitDir).filter((name) => name.startsWith('census-index-'))).toEqual([]);
+      expect(readdirSync(gitDir).filter((name) => name.startsWith('devkit-tree-index-'))).toEqual(
+        [],
+      );
     } finally {
       fx.cleanup();
     }
@@ -197,7 +212,9 @@ describe('private native source census', () => {
       const report = censusSource(JSON.stringify(fx.manifest), 'case-001', linked);
       expect(report.facts.stagedTreeSha).toBe(git('write-tree').trim());
       const gitDir = git('rev-parse', '--absolute-git-dir').trim();
-      expect(readdirSync(gitDir).filter((name) => name.startsWith('census-index-'))).toEqual([]);
+      expect(readdirSync(gitDir).filter((name) => name.startsWith('devkit-tree-index-'))).toEqual(
+        [],
+      );
     } finally {
       rmSync(linked, { recursive: true, force: true });
       fx.cleanup();
