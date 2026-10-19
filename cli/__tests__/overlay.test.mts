@@ -1498,7 +1498,7 @@ describe('overlay hook regeneration (syncOverlayHook + doctor --fix)', () => {
 
     expect(await doctorRun([], root)).toBe(0);
     expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toMatch(
-      /· hook registrations: claude:retired-registration:\.claude\/settings\.json/,
+      /· hook registrations: fallow-gate.sh hooks devkit will not remove: claude:retired-registration:\.claude\/settings\.json/,
     );
     expect(await doctorRun(['--fix'], root)).toBe(0);
     expect(readFileSync(settings, 'utf8')).toBe(before);

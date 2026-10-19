@@ -9,7 +9,6 @@ import {
   ledgerOf,
   otherClaudeSettings,
   providerDocument,
-  readHandlers,
   retiredElsewhere,
   stripReclaimedCommands,
   unrecognisedFallowGates,
@@ -20,6 +19,7 @@ import {
   projectHookRegistrations,
   readHookRegistrationLedger,
 } from './lifecycle.mts';
+import { dataRecord } from './plain-data.mts';
 
 /** Doctor's read-only view of hook registrations. `advisories` are findings devkit must not repair,
  * so they never make `ok` false: an unrecognised fallow-gate.sh spelling is reported, never deleted. */
@@ -48,17 +48,17 @@ export function checkHookRegistrations(
     const legacy = reconcileLegacyHookCommands(ledger?.entries ?? [], provider, rel);
     if (stripReclaimedCommands(document, provider).changed)
       missing.push(`${provider}:retired-registration`);
-    const elsewhere = retiredElsewhere(root, provider, scope);
+    const other = otherClaudeSettings(root, provider, scope);
+    const elsewhere = retiredElsewhere(root, provider, scope, other);
     if (elsewhere)
       (elsewhere.repairable ? missing : advisories).push(
         `${provider}:retired-registration:${elsewhere.rel}`,
       );
-    for (const fileRel of [rel, otherClaudeSettings(root, provider, scope)?.rel]) {
-      if (!fileRel) continue;
-      const unrecognised = unrecognisedFallowGates(readHandlers(root, provider, fileRel), provider);
-      for (const handler of unrecognised)
+    for (const file of [{ rel, document }, other]) {
+      if (!file) continue;
+      for (const handler of unrecognisedFallowGates(dataRecord(file.document), provider))
         advisories.push(
-          `${provider}:unrecognised-fallow-gate ${handlerLocation(fileRel, handler)}: ${handler.command}`,
+          `${provider}:unrecognised-fallow-gate ${handlerLocation(file.rel, handler)}: ${handler.command}`,
         );
     }
     if (legacy.ledgerChanged) missing.push(`${provider}:superseded-registration`);

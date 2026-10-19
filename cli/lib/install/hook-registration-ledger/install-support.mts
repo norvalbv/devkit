@@ -104,10 +104,14 @@ function entryHandlers(event: string, entry: HookEntry | null, flat: boolean): O
   }));
 }
 
-/** Every handler in a provider hook file, read-only. Cursor keeps a flat list per event. */
-export function readHandlers(root: string, provider: AgentProvider, rel: string) {
-  const hooks = dataRecord(dataRecord(providerDocument(root, provider, rel))?.hooks) ?? {};
-  return Object.entries(hooks).flatMap(([event, list]) =>
+/** A provider hook document, as `dataRecord` returns it: only `hooks` is read. */
+interface HookDocument {
+  hooks?: unknown;
+}
+
+/** Every handler in a provider hook document, read-only. Cursor keeps a flat list per event. */
+function handlersOf(document: HookDocument | null, provider: AgentProvider) {
+  return Object.entries(dataRecord(document?.hooks) ?? {}).flatMap(([event, list]) =>
     (Array.isArray(list) ? list : []).flatMap((entry) =>
       entryHandlers(event, dataRecord(entry), provider === 'cursor'),
     ),
@@ -115,11 +119,8 @@ export function readHandlers(root: string, provider: AgentProvider, rel: string)
 }
 
 /** Handlers naming fallow's agent gate in a spelling `isRetired` will not delete. */
-export const unrecognisedFallowGates = (
-  handlers: readonly OwnedHandler[],
-  provider: AgentProvider,
-) =>
-  handlers.filter(
+export const unrecognisedFallowGates = (document: HookDocument | null, provider: AgentProvider) =>
+  handlersOf(document, provider).filter(
     ({ command }) =>
       (FALLOW_GATE_PATH.get(provider)?.test(command) ?? false) && !isRetired(provider, command),
   );
@@ -245,8 +246,12 @@ export function otherClaudeSettings(
 }
 
 /** A retired command in the Claude settings file the scope does NOT own. */
-export function retiredElsewhere(root: string, provider: AgentProvider, scope: HookInstallScope) {
-  const other = otherClaudeSettings(root, provider, scope);
+export function retiredElsewhere(
+  root: string,
+  provider: AgentProvider,
+  scope: HookInstallScope,
+  other = otherClaudeSettings(root, provider, scope),
+) {
   if (!other) return null;
   const { rel, document } = other;
   const stripped = stripReclaimedCommands(document, provider);
