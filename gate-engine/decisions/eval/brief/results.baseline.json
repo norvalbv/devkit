@@ -3,28 +3,28 @@
     {
       "id": "clause-kept-brief-only",
       "label": "Rule kept: brief only, agent cannot read on (best-case tasks)",
-      "k": 2,
+      "k": 36,
       "n": 40,
       "noiseFloor": 0.15
     },
     {
       "id": "clause-kept-read-on",
       "label": "Rule kept: brief, agent may read on (best-case tasks)",
-      "k": 37,
+      "k": 38,
       "n": 40,
       "noiseFloor": 0.15
     },
     {
       "id": "floor-good-brief-only",
       "label": "Edit still correct where no clause binds: brief only (best-case tasks)",
-      "k": 37,
+      "k": 45,
       "n": 45,
       "noiseFloor": 0.15
     },
     {
       "id": "clause-shown-brief-only",
       "label": "Binding clause inside the delivered brief",
-      "k": 0,
+      "k": 40,
       "n": 40,
       "noiseFloor": 0.15
     }
@@ -39,8 +39,8 @@
       "claudeVersion": "2.1.296"
     },
     "q1-abstain-prefusion@brief-only": {
-      "kept": 0,
-      "broken": 5,
+      "kept": 5,
+      "broken": 0,
       "notDone": 0,
       "n": 5,
       "model": "claude-haiku-5-5",
@@ -103,16 +103,16 @@
       "claudeVersion": "2.1.296"
     },
     "q1-fetch-unknown@none": {
-      "kept": 2,
-      "broken": 3,
+      "kept": 1,
+      "broken": 4,
       "notDone": 0,
       "n": 5,
       "model": "claude-haiku-5-5",
       "claudeVersion": "2.1.296"
     },
     "q1-fetch-unknown@brief-only": {
-      "kept": 0,
-      "broken": 5,
+      "kept": 5,
+      "broken": 0,
       "notDone": 0,
       "n": 5,
       "model": "claude-haiku-5-5",
@@ -128,23 +128,23 @@
     },
     "q1-hook-shellout@none": {
       "kept": 0,
-      "broken": 3,
-      "notDone": 2,
+      "broken": 5,
+      "notDone": 0,
       "n": 5,
       "model": "claude-haiku-5-5",
       "claudeVersion": "2.1.296"
     },
     "q1-hook-shellout@brief-only": {
-      "kept": 1,
-      "broken": 4,
+      "kept": 5,
+      "broken": 0,
       "notDone": 0,
       "n": 5,
       "model": "claude-haiku-5-5",
       "claudeVersion": "2.1.296"
     },
     "q1-hook-shellout@read-on": {
-      "kept": 4,
-      "broken": 1,
+      "kept": 5,
+      "broken": 0,
       "notDone": 0,
       "n": 5,
       "model": "claude-haiku-5-5",
@@ -175,8 +175,8 @@
       "claudeVersion": "2.1.296"
     },
     "q1-route-agreement@brief-only": {
-      "kept": 1,
-      "broken": 4,
+      "kept": 5,
+      "broken": 0,
       "notDone": 0,
       "n": 5,
       "model": "claude-haiku-5-5",
@@ -199,8 +199,8 @@
       "claudeVersion": "2.1.296"
     },
     "q1-store-exit4@brief-only": {
-      "kept": 0,
-      "broken": 5,
+      "kept": 5,
+      "broken": 0,
       "notDone": 0,
       "n": 5,
       "model": "claude-haiku-5-5",
@@ -239,9 +239,9 @@
       "claudeVersion": "2.1.296"
     },
     "q2-ckpt@brief-only": {
-      "kept": 1,
+      "kept": 5,
       "broken": 0,
-      "notDone": 4,
+      "notDone": 0,
       "n": 5,
       "model": "claude-haiku-5-5",
       "claudeVersion": "2.1.296"
@@ -271,9 +271,9 @@
       "claudeVersion": "2.1.296"
     },
     "q2-extragates@brief-only": {
-      "kept": 2,
+      "kept": 5,
       "broken": 0,
-      "notDone": 3,
+      "notDone": 0,
       "n": 5,
       "model": "claude-haiku-5-5",
       "claudeVersion": "2.1.296"
@@ -287,8 +287,8 @@
       "claudeVersion": "2.1.296"
     },
     "q2-fallow@brief-only": {
-      "kept": 0,
-      "broken": 5,
+      "kept": 5,
+      "broken": 0,
       "notDone": 0,
       "n": 5,
       "model": "claude-haiku-5-5",
@@ -311,9 +311,9 @@
       "claudeVersion": "2.1.296"
     },
     "q2-optout@brief-only": {
-      "kept": 4,
+      "kept": 5,
       "broken": 0,
-      "notDone": 1,
+      "notDone": 0,
       "n": 5,
       "model": "claude-haiku-5-5",
       "claudeVersion": "2.1.296"
@@ -327,9 +327,9 @@
       "claudeVersion": "2.1.296"
     },
     "q2-shipci@brief-only": {
-      "kept": 0,
-      "broken": 5,
-      "notDone": 0,
+      "kept": 1,
+      "broken": 0,
+      "notDone": 4,
       "n": 5,
       "model": "claude-haiku-5-5",
       "claudeVersion": "2.1.296"
@@ -351,8 +351,8 @@
       "claudeVersion": "2.1.296"
     },
     "q2-telemetry@brief-only": {
-      "kept": 0,
-      "broken": 5,
+      "kept": 5,
+      "broken": 0,
       "notDone": 0,
       "n": 5,
       "model": "claude-haiku-5-5",

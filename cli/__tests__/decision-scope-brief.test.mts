@@ -209,6 +209,33 @@ describe('decision-scope-brief', () => {
     expect(ctx).not.toContain('axis-5');
     expect(ctx).toContain('3 more');
   });
+
+  it('shows a ruling whole up to 2000 chars and cuts a longer one there', () => {
+    const [whole, long] = ['a'.repeat(2000), 'b'.repeat(2001)];
+    stubBin(
+      JSON.stringify([
+        { slug: 'whole', ruling: whole },
+        { slug: 'long', ruling: long },
+      ]),
+    );
+    const ctx = JSON.parse(run({ file_path: 'src/a.ts' })).hookSpecificOutput.additionalContext;
+    expect(ctx.split('\n')).toContain(`- **whole** — ${whole}`);
+    expect(ctx.split('\n')).toContain(`- **long** — ${long.slice(0, 2000)}…`);
+  });
+
+  it('keeps the whole brief within the 10,000 chars Claude Code injects verbatim', () => {
+    stubBin(
+      JSON.stringify(
+        Array.from({ length: 3 }, (_, i) => ({
+          slug: `${i}`.repeat(1500),
+          ruling: 'r'.repeat(2000),
+        })),
+      ),
+    );
+    const ctx = JSON.parse(run({ file_path: 'src/a.ts' })).hookSpecificOutput.additionalContext;
+    expect(ctx).toHaveLength(10_000);
+    expect(ctx.endsWith('…')).toBe(true);
+  });
 });
 
 describe('decision-scope-brief — failure shapes and the real CLI behind it', () => {
@@ -259,7 +286,7 @@ describe('decision-scope-brief — what it asks the CLI to record', () => {
     loggingStubBin(GOVERNED);
     for (let i = 0; i < 4; i += 1) run({ file_path: 'src/a.ts' }, 'Edit', 'argv-session');
     expect(loggedCalls()).toEqual([
-      'scoped-targets --files src/a.ts --brief Edit,3,320',
+      'scoped-targets --files src/a.ts --brief Edit,3,2000',
       expect.stringMatching(/^scoped-targets --files src\/a\.ts --brief-again Edit,\d+$/),
     ]);
   });
@@ -268,7 +295,7 @@ describe('decision-scope-brief — what it asks the CLI to record', () => {
     loggingStubBin('[]');
     for (let i = 0; i < 3; i += 1) run({ file_path: 'src/a.ts' }, 'Write', 'ungoverned');
     expect(loggedCalls()).toEqual(
-      Array(3).fill('scoped-targets --files src/a.ts --brief Write,3,320'),
+      Array(3).fill('scoped-targets --files src/a.ts --brief Write,3,2000'),
     );
   });
 
@@ -290,7 +317,7 @@ describe('decision-scope-brief — what it asks the CLI to record', () => {
     mkdirSync(dir, { recursive: true });
     for (const [slug, ruling] of [
       ['a-short', 'Short.'],
-      ['b-long', 'r'.repeat(500)],
+      ['b-long', 'r'.repeat(2500)],
     ]) {
       writeFileSync(
         join(dir, `${slug}.md`),
@@ -309,7 +336,7 @@ describe('decision-scope-brief — what it asks the CLI to record', () => {
     const row: { shown: string[]; lengths: number[]; cap: number } = JSON.parse(
       readFileSync(sink, 'utf8'),
     );
-    expect(row.lengths).toContain(500);
+    expect(row.lengths).toContain(2500);
     expect(printed).toEqual(row.lengths.map((len, i) => [row.shown.at(i), Math.min(len, row.cap)]));
   });
 });

@@ -138,7 +138,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Edge-case autonomy | no-ship | accepted | stale | no-ship | ? unknown | Judge-free ceiling: 51.2% · Pre-registered target: 35.0% |
 | Decision-log retrieval recall | experimental | accepted | stale | methodology-reset | ? unknown | Gold axis retrieved: 12/12 (100.0%) · Multi-axis set recall: 3/4 (75.0%) |
 | Decision-log save quality | experimental | accepted | stale | coverage | ? unknown | Defect recall (perturbation corpus): 15/15 (100.0%) · False-positive rate at R80: 0/20 (0.0%) |
-| Decision brief: rule kept on edit | experimental | accepted | stale | quality | ? unknown | Rule kept: brief only, agent cannot read on (best-case tasks): 2/40 (5.0%) · Rule kept: brief, agent may read on (best-case tasks): 37/40 (92.5%) |
+| Decision brief: rule kept on edit | experimental | accepted | stale | quality | ↑ improved | Rule kept: brief only, agent cannot read on (best-case tasks): 36/40 (90.0%) · Rule kept: brief, agent may read on (best-case tasks): 38/40 (95.0%) |
 | Semantic search retrieval | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Duplication matcher | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Commit-guard retrieval | shipped | evidence-only | unknown | quality | ? unknown | Clone retrieval recall at 10: 59.0% · Semantic retrieval recall at 10: 25.0% |

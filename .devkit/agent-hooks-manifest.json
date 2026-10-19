@@ -11,7 +11,7 @@
     "base-drift-lib.mjs": "246f868d84a282227030040f5a73074cf1cc1a74cbd92066e5e0c323a2cde1aa",
     "base-drift-session.mjs": "0032670929fb8b1702eea27e4971b1300f6cc41e3d1664be37c5ae2b7040eb02",
     "decision-edit-guard.mjs": "2d2d76fa96e00ffbb2486a28d997b229207f5581bad89565b9b5d1761331ecab",
-    "decision-scope-brief.mjs": "40db3cf6e3d4a59d444f3595f1ccae72b63898d6c955689b9b592069f6a4a6b1",
+    "decision-scope-brief.mjs": "1f4e85c51f885e5f1f2d164f6ff9cec5547307cda10614e7c257e23df8545ae4",
     "prior-art-gate.mjs": "cd203ac92117e29b1f08ec301fc3c799278e8939e79299f9a01902b4a5981a53"
   },
   "providers": {
@@ -24,7 +24,7 @@
         "base-drift-lib.mjs": "246f868d84a282227030040f5a73074cf1cc1a74cbd92066e5e0c323a2cde1aa",
         "base-drift-session.mjs": "0032670929fb8b1702eea27e4971b1300f6cc41e3d1664be37c5ae2b7040eb02",
         "decision-edit-guard.mjs": "2d2d76fa96e00ffbb2486a28d997b229207f5581bad89565b9b5d1761331ecab",
-        "decision-scope-brief.mjs": "40db3cf6e3d4a59d444f3595f1ccae72b63898d6c955689b9b592069f6a4a6b1",
+        "decision-scope-brief.mjs": "1f4e85c51f885e5f1f2d164f6ff9cec5547307cda10614e7c257e23df8545ae4",
         "prior-art-gate.mjs": "cd203ac92117e29b1f08ec301fc3c799278e8939e79299f9a01902b4a5981a53"
       }
     },
@@ -37,7 +37,7 @@
         "base-drift-lib.mjs": "246f868d84a282227030040f5a73074cf1cc1a74cbd92066e5e0c323a2cde1aa",
         "base-drift-session.mjs": "0032670929fb8b1702eea27e4971b1300f6cc41e3d1664be37c5ae2b7040eb02",
         "decision-edit-guard.mjs": "2d2d76fa96e00ffbb2486a28d997b229207f5581bad89565b9b5d1761331ecab",
-        "decision-scope-brief.mjs": "40db3cf6e3d4a59d444f3595f1ccae72b63898d6c955689b9b592069f6a4a6b1",
+        "decision-scope-brief.mjs": "1f4e85c51f885e5f1f2d164f6ff9cec5547307cda10614e7c257e23df8545ae4",
         "prior-art-gate.mjs": "cd203ac92117e29b1f08ec301fc3c799278e8939e79299f9a01902b4a5981a53"
       }
     },
@@ -50,7 +50,7 @@
         "base-drift-lib.mjs": "246f868d84a282227030040f5a73074cf1cc1a74cbd92066e5e0c323a2cde1aa",
         "base-drift-session.mjs": "0032670929fb8b1702eea27e4971b1300f6cc41e3d1664be37c5ae2b7040eb02",
         "decision-edit-guard.mjs": "2d2d76fa96e00ffbb2486a28d997b229207f5581bad89565b9b5d1761331ecab",
-        "decision-scope-brief.mjs": "40db3cf6e3d4a59d444f3595f1ccae72b63898d6c955689b9b592069f6a4a6b1",
+        "decision-scope-brief.mjs": "1f4e85c51f885e5f1f2d164f6ff9cec5547307cda10614e7c257e23df8545ae4",
         "prior-art-gate.mjs": "cd203ac92117e29b1f08ec301fc3c799278e8939e79299f9a01902b4a5981a53"
       }
     }

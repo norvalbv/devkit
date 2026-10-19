@@ -33,9 +33,11 @@ import path from 'node:path';
 
 const MUTATING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
 const PATH_KEYS = ['file_path', 'path', 'target_file', 'target_path'];
-/** Keep a brief short enough to be read: the ruling is the payload, the rest is a pointer. */
-const RULING_CHARS = 320;
+/** The ruling is the payload: a clause cut from view goes unkept, so only outlier rulings are cut. */
+const RULING_CHARS = 2000;
 const MAX_AXES = 3;
+/** Claude Code swaps a longer additionalContext for a file path and a short preview. */
+const MAX_BRIEF_CHARS = 10_000;
 
 function readInput() {
   try {
@@ -204,7 +206,7 @@ function main() {
     `--evidence-change "<what shifted>"\`. Full text: \`guard-decisions show <slug>\`.\n\n` +
     `${lines.join('\n')}${more}`;
 
-  emit(brief);
+  emit(brief.length > MAX_BRIEF_CHARS ? `${brief.slice(0, MAX_BRIEF_CHARS - 1)}…` : brief);
 }
 
 try {
