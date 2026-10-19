@@ -870,9 +870,21 @@ describe('the release-only ruling reaches the reviewers', () => {
     expect(targets.find((t) => t.slug === SLUG)?.via).toBe('scope-match');
   });
 
-  it('does not arm on an unrelated command module', async () => {
-    const targets = await scopedTargets(['cli/commands/doctor.mts'], '', 6, repoRoot);
+  it('governs a source outside its scope once its new dist artifact is staged', async () => {
+    const staged = ['gate-engine/review/new-helper.mts', 'dist/gate-engine/review/new-helper.mjs'];
+    const targets = await scopedTargets(staged, '', 6, repoRoot);
+    const { saltBlock } = await loadReviewerTargetsBlocks(repoRoot, staged);
 
-    expect(targets.map((t) => t.slug)).not.toContain(SLUG);
+    expect(targets.find((t) => t.slug === SLUG)?.via).toBe('scope-match');
+    expect(saltBlock).toContain(`### ${SLUG}`);
   });
+
+  it.each(['cli/commands/doctor.mts', 'gate-engine/review/new-helper.mts'])(
+    'does not arm on %s, which stages no dist path',
+    async (file) => {
+      const targets = await scopedTargets([file], '', 6, repoRoot);
+
+      expect(targets.map((t) => t.slug)).not.toContain(SLUG);
+    },
+  );
 });
