@@ -197,7 +197,8 @@ export function runDiffCoverage(
     return failUnreadable(file, 'is present but not valid coverage data');
   }
   if (Object.keys(cov).length === 0) {
-    return reviewMode ? reviewNotMeasuredEmpty() : failUnreadable(file, 'measured no files');
+    const empty = 'measured no files';
+    return reviewMode ? reviewNotMeasuredEmpty(empty) : failUnreadable(file, empty);
   }
 
   const provenance = checkProvenance(cwd, resolve(cwd, COVERAGE_DIR), artifact, classify);

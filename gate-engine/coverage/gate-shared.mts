@@ -97,10 +97,8 @@ export function reviewNotMeasuredAbsent(cwd: string): number {
   return 2;
 }
 
-export function reviewNotMeasuredEmpty(): number {
-  console.log(
-    `⚠️  Coverage NOT MEASURED in this review — the target's ${COVERAGE_FILE} measured no files.`,
-  );
+export function reviewNotMeasuredEmpty(empty: string): number {
+  console.log(`⚠️  Coverage NOT MEASURED in this review — the target's ${COVERAGE_FILE} ${empty}.`);
   console.log('   Measure it: run `devkit coverage-run` in the target, then review again.');
   console.log('   `devkit ship` and commits still BLOCK on an empty artifact.');
   recordReviewNotice('empty');
