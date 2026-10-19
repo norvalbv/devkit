@@ -349,7 +349,8 @@ function defaultSink(): string {
 
 /** Write one draft, write-once: the draft file is the promotion's audit record. */
 function promote(queue: Queue, id: string | undefined, flags: Flags, telemetryDir: string): number {
-  const candidate = queue.candidates.find((c) => c.invocation_id === id);
+  // The id names the draft file, so only a minted UUID may reach the path.
+  const candidate = queue.candidates.find((c) => c.invocation_id === id && UUID_RE.test(id));
   if (!candidate) {
     console.error(`prior-art mine: no recorded run ${id ?? '(missing id)'}`);
     return 2;

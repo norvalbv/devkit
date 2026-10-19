@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -384,6 +385,13 @@ describe('prior-art miner: promotion', () => {
       delete process.env.DEVKIT_GATE_EVENTS;
     }
     expect(await main(['promote', uuid(99), '--sink', sink])).toBe(2);
+    // A sink id is untrusted input: one shaped like a path must never name the draft file.
+    append(run('../escape', SEED[0]?.request ?? '', JSON.stringify(SEED[0]?.response)));
+    const drafts = path.join(telemetry, 'drafts');
+    const flags = ['--case-id', 'c', '--verdict', 'DISSOLVE_FRAME', '--label-source', labelUrl];
+    const argv = ['promote', '../escape', '--sink', sink, '--drafts', drafts, ...flags];
+    expect(await main([...argv, '--privacy-reviewed'])).toBe(2);
+    expect(existsSync(path.join(telemetry, 'escape.json'))).toBe(false);
   });
 
   it('reads a date-only cutoff as that instant and refuses one it cannot parse', async () => {
