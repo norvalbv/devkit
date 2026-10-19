@@ -354,24 +354,31 @@ describe('prior-art miner: promotion', () => {
     expect(readFileSync(casesPath).equals(corpus)).toBe(true);
   });
 
-  it('names an unwritable drafts directory instead of claiming the draft exists', async () => {
-    seed();
-    const drafts = path.join(telemetry, 'locked');
-    mkdirSync(drafts);
-    chmodSync(drafts, 0o500);
-    const errors: string[] = [];
-    const spy = vi.spyOn(console, 'error').mockImplementation((line) => errors.push(String(line)));
-    try {
-      const argv = ['promote', uuid(1), '--sink', sink, '--drafts', drafts, '--case-id', 'c'];
-      const flags = ['--verdict', 'DISSOLVE_FRAME', '--label-source', labelUrl];
-      expect(await main([...argv, ...flags, '--privacy-reviewed'])).toBe(2);
-    } finally {
-      spy.mockRestore();
-      chmodSync(drafts, 0o700);
-    }
-    expect(errors.join('\n')).not.toContain('already exists');
-    expect(errors.join('\n')).toContain('cannot write');
-  });
+  // chmod cannot lock a directory against root, and Windows has no POSIX directory modes.
+  const canLock = process.getuid?.() !== 0 && process.platform !== 'win32';
+  it.runIf(canLock)(
+    'names an unwritable drafts directory instead of claiming the draft exists',
+    async () => {
+      seed();
+      const drafts = path.join(telemetry, 'locked');
+      mkdirSync(drafts);
+      chmodSync(drafts, 0o500);
+      const errors: string[] = [];
+      const spy = vi
+        .spyOn(console, 'error')
+        .mockImplementation((line) => errors.push(String(line)));
+      try {
+        const argv = ['promote', uuid(1), '--sink', sink, '--drafts', drafts, '--case-id', 'c'];
+        const flags = ['--verdict', 'DISSOLVE_FRAME', '--label-source', labelUrl];
+        expect(await main([...argv, ...flags, '--privacy-reviewed'])).toBe(2);
+      } finally {
+        spy.mockRestore();
+        chmodSync(drafts, 0o700);
+      }
+      expect(errors.join('\n')).not.toContain('already exists');
+      expect(errors.join('\n')).toContain('cannot write');
+    },
+  );
 
   it('writes the candidate queue without touching the corpus', async () => {
     seed();
@@ -401,6 +408,9 @@ describe('prior-art miner: promotion', () => {
     expect(readFileSync(out, 'utf8')).toBe('');
     // A string compare against `yesterday` would admit every event and freeze nothing.
     expect(await main(['--sink', sink, '--out', out, '--as-of', 'yesterday'])).toBe(2);
+    // Date silently rolls 2026-02-30 to March 2 and reads 10/31 as 2001: a wrong freeze, not an error.
+    expect(await main(['--sink', sink, '--out', out, '--as-of', '2026-02-30'])).toBe(2);
+    expect(await main(['--sink', sink, '--out', out, '--as-of', '10/31'])).toBe(2);
   });
 
   it('refuses an unknown verdict or framing and evidence that is not UTF-8', async () => {

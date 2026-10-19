@@ -26,6 +26,8 @@ import {
 import type { Row } from './cases.mts';
 import type { LegsFixture } from './run-agent.mts';
 
+/** A real ISO calendar date or datetime; `new Date` alone rolls 02-30 into March. */
+const AsOf = z.union([z.iso.date(), z.iso.datetime({ offset: true })]);
 const RESEARCH_DIR = path.join(homedir(), '.devkit', 'research', 'prior-art');
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -393,8 +395,9 @@ export async function main(argv: string[]): Promise<number> {
     options: OPTIONS,
     allowPositionals: true,
   });
-  const asOf = flags['as-of'] === undefined ? undefined : new Date(flags['as-of']);
-  if (asOf && Number.isNaN(asOf.getTime())) {
+  const cutoff = flags['as-of'] === undefined ? null : AsOf.safeParse(flags['as-of']);
+  const asOf = cutoff?.success ? new Date(cutoff.data) : undefined;
+  if (cutoff && !cutoff.success) {
     console.error(`prior-art mine: --as-of ${flags['as-of']} is not a date`);
     return 2;
   }
