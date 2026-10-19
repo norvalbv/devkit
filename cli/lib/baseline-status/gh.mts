@@ -202,6 +202,32 @@ export function runsForCommit({
   return runs.filter((run) => run.headBranch === ref && !run.event.startsWith('pull_request'));
 }
 
+/** GitHub's run object projected onto RunRef; the REST schema lets the three `//` fields be null. */
+const RUN_BY_ID_JQ =
+  '{databaseId: .id, attempt: .run_attempt, conclusion: (.conclusion // ""), ' +
+  'status: (.status // ""), headSha: .head_sha, headBranch: (.head_branch // ""), event, ' +
+  'createdAt: .created_at, path}';
+
+/** One run by id, any event or branch, with the workflow file it belongs to. */
+export function runById(cwd: string, id: number): RunRef & { path: string } {
+  const out = gh(['api', `repos/{owner}/{repo}/actions/runs/${id}`, '--jq', RUN_BY_ID_JQ], cwd);
+  let run: (RunRefCandidate & { path?: unknown }) | null;
+  try {
+    run = JSON.parse(out);
+  } catch {
+    run = null;
+  }
+  const path = run?.path ?? null;
+  // Round-trip, as isRunRef compares its text fields: `null` and `7` both fail it.
+  if (path === null || `${path}` !== path || !isRunRef(run)) {
+    throw new GhUnavailable(
+      'gh-failed',
+      `gh api returned run ${id} in a shape this reader cannot use`,
+    );
+  }
+  return { ...run, path: `${path}` };
+}
+
 /** The branch head in the repository gh queries, so the head and its runs share one provenance. */
 export function branchHead({ cwd, ref }: { cwd: string; ref: string }): string {
   let out: string;

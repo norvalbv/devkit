@@ -1,6 +1,12 @@
-/** `devkit baseline-status --test`: one test's verdict, from the names a FAILED file recorded. */
+/** `devkit baseline-status` per-file and per-test verdicts, from one run's summary. */
+import { execFileSync } from 'node:child_process';
+import { relative, resolve, sep } from 'node:path';
+import { detectGitRoot } from '../detect-git-root.mts';
+import { escapesRoot } from './produce.mts';
 import type { FileTests, TestReportSummary } from './produce.mts';
-import type { FileStatus } from './query.mts';
+
+/** What is known about ONE file at the baseline commit. */
+export type FileStatus = 'passed' | 'failed' | 'skipped' | 'excluded' | 'absent' | 'unknown';
 
 export type TestStatus = 'passed' | 'failed' | 'file-passed' | 'unknown';
 
@@ -70,4 +76,78 @@ export function testVerdict(
   if (tests.passed.includes(name)) return { name, status: 'passed' };
   const capped = tests.truncated ? "; this file's name list was capped" : '';
   return unknown(`not in this run's report (misspelt, renamed, skipped or not collected${capped})`);
+}
+
+/** Put a `--file` into the form the summary is keyed by: CWD-resolved, git-root-relative, POSIX. */
+export function normaliseFilePath(cwd: string, path: string): string {
+  const { gitRoot } = detectGitRoot(cwd);
+  // Same POSIX convention as the artifact's keys — a host separator here would miss every one.
+  const rel = relative(gitRoot, resolve(cwd, path)).split(sep).join('/');
+  return escapesRoot(rel) ? path : rel;
+}
+
+/**
+ * Did `path` exist at `sha`? null when the answer cannot be established.
+ *
+ * The commit is probed first: an unfetched commit would otherwise report every path as absent.
+ */
+export function fileExistsAt(cwd: string, sha: string, path: string): boolean | null {
+  const has = (arg: string): boolean => {
+    try {
+      execFileSync('git', ['cat-file', '-e', arg], { cwd, stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!has(`${sha}^{commit}`)) return null;
+  return has(`${sha}:${path}`);
+}
+
+/** One file's verdict at the baseline commit, and why — a named contract, not an inline shape. */
+export interface FileVerdict {
+  status: FileStatus;
+  reason?: string;
+}
+
+/** Resolve one file against a summary at commit `sha`, splitting the kinds of "did not run". */
+export function statusOf({
+  cwd,
+  summary,
+  sha,
+  path,
+}: {
+  cwd: string;
+  summary: TestReportSummary;
+  /** null when the tested commit is unknown: a pull_request summary that recorded no sha. */
+  sha: string | null;
+  path: string;
+}): FileVerdict {
+  // hasOwn, not truthiness: `files.toString` is a FUNCTION on any JSON-parsed object, so a query
+  // for a file named `toString` was answered with an inherited member instead of a real outcome.
+  if (Object.hasOwn(summary.files, path)) return { status: summary.files[path] };
+  if (sha === null) {
+    return {
+      status: 'unknown',
+      reason: 'the run tested a merge commit its summary did not record',
+    };
+  }
+
+  // Not collected by the runner. WHY matters: an agent reads an undifferentiated "did not run" as
+  // reassurance, and a path typo would land in exactly that bucket.
+  const exists = fileExistsAt(cwd, sha, path);
+  if (exists === null) {
+    return {
+      status: 'unknown',
+      reason: `commit ${sha.slice(0, 8)} is not in this checkout — run \`git fetch origin ${sha}\` and retry`,
+    };
+  }
+  if (!exists) {
+    return { status: 'absent', reason: `no such path at ${sha.slice(0, 8)}` };
+  }
+  return {
+    status: 'excluded',
+    reason:
+      "existed at that commit but the test runner did not collect it (check the suite's include globs)",
+  };
 }
