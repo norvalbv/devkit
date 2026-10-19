@@ -336,6 +336,8 @@ SHIP_HOOK_WRAPPER
   elif [ "$hook_setup_failed" -eq 1 ]; then blocked_json='"hook_setup"'; timed_out=false
   elif [ "$rc" -eq 0 ]; then blocked_json=null; timed_out=false
   elif [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then blocked_json='"timeout"'; timed_out=true
+  # The statuses gate-signal-handoff.sh forwards: the operator or a supervisor stopped the chain.
+  elif [ "$rc" -eq 129 ] || [ "$rc" -eq 130 ] || [ "$rc" -eq 131 ] || [ "$rc" -eq 143 ]; then blocked_json='"interrupted"'; timed_out=false
   # NOT a blocked gate: every gate PASSED and `git commit` then died on its finalize ref-update
   # because something moved the ship worktree's HEAD mid-commit. Must be tested BEFORE the gate
   # greps below — a fail-OPEN gate line (`guard-review: … INCONCLUSIVE`, exit 2, chain continues)
@@ -352,11 +354,15 @@ SHIP_HOOK_WRAPPER
   # Whole lines only (a finding may quote one); LC_ALL=C because BSD sed aborts on invalid UTF-8.
   elif shell_gate=$(LC_ALL=C sed -n 's/^✗ staged gate blocked: \([a-z-]*\) (its report is above)$/\1/p' "$log" 2>/dev/null | tail -n 1) &&
     [ -n "$shell_gate" ]; then blocked_json="\"$shell_gate\""; timed_out=false
-  elif grep -q 'decision smells:' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
+  elif grep -qE 'decision smells:|^ *guard-decisions: (judge unavailable|unexpected exit)' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
   elif grep -q 'guard-comments: .* need a decision' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
-  elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
+  # Completeness and the fail-closed judge lines block the review family too (its gate_result family).
+  # Anchored like the hook prints them, so a finding that quotes one cannot claim the block.
+  elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)|^ *(Confirmed completeness gap|guard-review( completeness)?: (judge unavailable|unexpected exit))' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
   else blocked_json='"unknown"'; timed_out=false
   fi
+  # The caller names this token as its terminal cause, but only where it exits on this status.
+  SHIP_BLOCKED_GATE=${blocked_json//\"/}
   if [ "$ship_dry_gates" -eq 0 ]; then
     printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s"%s,"exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
       "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
