@@ -16,12 +16,38 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(scratch, { recursive: true, force: true }));
 
-function nestedVitest(args: string[]) {
+function nestedVitest(args: string[], cwd = REPO, env: NodeJS.ProcessEnv = {}) {
   return testSpawnSync(process.execPath, [VITEST, ...args], {
-    cwd: REPO,
+    cwd,
     encoding: 'utf8',
-    env: { ...process.env, CI: '1' },
+    env: { ...process.env, CI: '1', ...env },
   });
+}
+
+// Builds a scratch project on devkit's own coverage block. The root is realpath'd: a child reports
+// its real path, so a symlinked root (macOS /tmp) silently scores 0%.
+function nestedCoverage(
+  files: Record<string, string>,
+  include: string,
+  args: string[] = [],
+  env: NodeJS.ProcessEnv = {},
+) {
+  const root = realpathSync(scratch);
+  for (const [name, body] of Object.entries(files)) writeFileSync(path.join(root, name), body);
+  writeFileSync(
+    path.join(root, 'vitest.config.mjs'),
+    `import base from ${JSON.stringify(pathToFileURL(path.join(REPO, 'vitest.config.mjs')).href)};\n` +
+      "export default { test: { include: ['*.test.mts'], coverage: base.test.coverage } };\n",
+  );
+  const coverageArgs = [
+    'run',
+    '--root',
+    root,
+    '--coverage.enabled',
+    `--coverage.include=${include}`,
+    `--coverage.reportsDirectory=${path.join(root, 'coverage')}`,
+  ];
+  return { root, result: nestedVitest([...coverageArgs, ...args], root, env) };
 }
 
 describe('devkit vitest config under vitest 5', () => {
@@ -68,54 +94,33 @@ describe('devkit vitest config under vitest 5', () => {
     expect(result.stdout).toBe(marker);
   });
 
-  // Runs devkit's own coverage block end to end. The root is realpath'd: a child reports its real
-  // path, so a symlinked root (macOS /tmp) silently scores 0%.
+  // Runs devkit's own coverage block end to end.
   it('counts lines that only a spawned `node <file>.mts` child executes', () => {
-    const root = realpathSync(scratch);
-    writeFileSync(
-      path.join(root, 'cli.mts'),
-      [
-        'export function classify(n: number): string {',
-        "  if (n < 0) return 'neg';",
-        "  return 'non-neg';",
-        '}',
-        'export function neverCalled(): number {',
-        '  return 1;',
-        '}',
-        'if (process.argv[2]) console.log(classify(Number(process.argv[2])));',
-        '',
-      ].join('\n'),
-    );
-    writeFileSync(
-      path.join(root, 'cli.test.mts'),
-      [
-        "import { spawnSync } from 'node:child_process';",
-        "import { expect, it } from 'vitest';",
-        "it('spawns', () => {",
-        "  const cli = new URL('./cli.mts', import.meta.url).pathname;",
-        "  expect(spawnSync(process.execPath, [cli, '-1'], { encoding: 'utf8' }).stdout).toBe('neg\\n');",
-        '});',
-        '',
-      ].join('\n'),
-    );
-    writeFileSync(
-      path.join(root, 'vitest.config.mjs'),
-      `import base from ${JSON.stringify(pathToFileURL(path.join(REPO, 'vitest.config.mjs')).href)};\n` +
-        "export default { test: { include: ['cli.test.mts'], coverage: base.test.coverage } };\n",
-    );
-    const result = testSpawnSync(
-      process.execPath,
-      [
-        VITEST,
-        'run',
-        '--root',
-        root,
-        '--coverage.enabled',
-        '--coverage.include=cli.mts',
-        '--coverage.reporter=lcovonly',
-        `--coverage.reportsDirectory=${path.join(root, 'coverage')}`,
-      ],
-      { cwd: root, encoding: 'utf8', env: { ...process.env, CI: '1' } },
+    const { root, result } = nestedCoverage(
+      {
+        'cli.mts': [
+          'export function classify(n: number): string {',
+          "  if (n < 0) return 'neg';",
+          "  return 'non-neg';",
+          '}',
+          'export function neverCalled(): number {',
+          '  return 1;',
+          '}',
+          'if (process.argv[2]) console.log(classify(Number(process.argv[2])));',
+          '',
+        ].join('\n'),
+        'cli.test.mts': [
+          "import { spawnSync } from 'node:child_process';",
+          "import { expect, it } from 'vitest';",
+          "it('spawns', () => {",
+          "  const cli = new URL('./cli.mts', import.meta.url).pathname;",
+          "  expect(spawnSync(process.execPath, [cli, '-1'], { encoding: 'utf8' }).stdout).toBe('neg\\n');",
+          '});',
+          '',
+        ].join('\n'),
+      },
+      'cli.mts',
+      ['--coverage.reporter=lcovonly'],
     );
     expect(result.status, result.stderr).toBe(0);
     // lcov `DA:<line>,<hits>`: one record per executable line of cli.mts.
@@ -132,39 +137,20 @@ describe('devkit vitest config under vitest 5', () => {
 
   // Piped, vitest clamps the table to 80 columns, and under an agent it hides fully covered files.
   it('gives test:run:coverage:changed a whole-name row for a fully covered file', () => {
-    const root = realpathSync(scratch);
     const name = 'a-module-with-a-long-name.mts';
-    writeFileSync(path.join(root, name), 'export const one = (): number => 1;\n');
-    writeFileSync(
-      path.join(root, 'one.test.mts'),
-      [
-        "import { expect, it } from 'vitest';",
-        `import { one } from './${name}';`,
-        "it('covers it', () => expect(one()).toBe(1));",
-        '',
-      ].join('\n'),
-    );
-    writeFileSync(
-      path.join(root, 'vitest.config.mjs'),
-      `import base from ${JSON.stringify(pathToFileURL(path.join(REPO, 'vitest.config.mjs')).href)};\n` +
-        "export default { test: { include: ['one.test.mts'], coverage: base.test.coverage } };\n",
-    );
-    const result = testSpawnSync(
-      process.execPath,
-      [
-        VITEST,
-        'run',
-        '--root',
-        root,
-        '--coverage.enabled',
-        `--coverage.include=${name}`,
-        `--coverage.reportsDirectory=${path.join(root, 'coverage')}`,
-      ],
+    const { result } = nestedCoverage(
       {
-        cwd: root,
-        encoding: 'utf8',
-        env: { ...process.env, CI: '1', AI_AGENT: '1', DEVKIT_COVERAGE_CHANGED: '1' },
+        [name]: 'export const one = (): number => 1;\n',
+        'one.test.mts': [
+          "import { expect, it } from 'vitest';",
+          `import { one } from './${name}';`,
+          "it('covers it', () => expect(one()).toBe(1));",
+          '',
+        ].join('\n'),
       },
+      name,
+      [],
+      { AI_AGENT: '1', DEVKIT_COVERAGE_CHANGED: '1' },
     );
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toMatch(/^ a-module-with-a-long-name\.mts +\| +100 /m);
