@@ -84,6 +84,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../../config.mts';
+import { hashLocalModuleClosure } from '../../review/eval/module-closure-hash.mts';
 import { judgeDetailed, matchScope } from '../check-alignment.mts';
 import { currentTarget, parseDecision } from '../decisions.mts';
 import { parseDepthVerdict, runDepthJudge } from '../depth/depth-pass.mts';
@@ -607,12 +608,10 @@ const configKey = (name) =>
 // generated from different rows or a different gate is mechanically skipped, never silently lied.
 const sha12 = (s) => createHash('sha256').update(s).digest('hex').slice(0, 12);
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
-/** Every module whose prompt or parse feeds a verdict; the depth pass lives apart since sc-2769. */
+/** Roots of the hashed judge code: their import closure reaches the judge spawn seam too. */
 export const GATE_SOURCES = ['../detect', '../check-alignment', '../depth/depth-pass'];
-const gateHash = () =>
-  sha12(
-    GATE_SOURCES.map((rel) => readFileSync(path.join(here, `${rel}${SELF_EXT}`), 'utf8')).join(''),
-  );
+export const gateHash = () =>
+  hashLocalModuleClosure(GATE_SOURCES.map((rel) => path.join(here, `${rel}${SELF_EXT}`)));
 
 function main(argv) {
   const args = new Set(argv);
