@@ -401,7 +401,10 @@ the two disagree.
   package and prints `↳ shipping: refreshed managed capability state …`. That refresh touches the
   **working tree only** — it is never staged and never reaches the commit, so the PR branch stays
   self-consistent for its own CI. If you instead see `↳ shipping: managed capability refresh skipped
-— <reason>`, the reason names the fix (usually `devkit doctor --fix`).
+— <reason>`, the reason names the fix (usually `devkit doctor --fix`). In devkit's own repository
+  the reason is `self-host`: the worktree's gates run from its own source, so the error there is real.
+  Regenerate `.devkit/oxc` and `.devkit/anti-slop` from source (`bun run devkit doctor --fix`) and
+  include them in the ship.
 - **On a plain commit**, your checkout's managed state lags the devkit you upgraded to. Run
   `devkit doctor --fix` and commit the refreshed `.devkit/` bytes.
 
