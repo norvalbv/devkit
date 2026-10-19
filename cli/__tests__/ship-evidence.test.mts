@@ -152,10 +152,10 @@ describe('devkit ship evidence block', () => {
     });
     expect(block).toContain('"src/value.test.mjs"');
     expect(block).toMatch(/\(setup \d+s, red \d+s, green \d+s, cleanup \d+s\)/);
-    expect(block).toMatch(/\| red \| PR base \+ PR test files `\w+` \| 1 \| 0 \| 1 \| 0 \|/);
+    expect(block).toContain('| red | PR test files on the PR base | 1 | 0 | 1 | 0 |');
     // One small source file with proof captured at this head, gated by this ship with no bypass.
     expect(block).toContain(
-      `${VERDICT_SLOT} **Merge verdict:** auto-merge-eligible (captured-proof) · advisory, at \`${head.slice(0, 12)}\`\n`,
+      `**Merge verdict:** auto-merge-eligible (captured-proof) · advisory, at \`${head.slice(0, 12)}\` ${VERDICT_SLOT}\n`,
     );
     expect(readEvidenceBlock(block, head)?.mergeVerdict).toEqual({
       verdict: 'auto-merge-eligible',
@@ -377,7 +377,9 @@ describe('evidence outcomes', () => {
     expect(r.status, r.stderr).toBe(0);
     const body = readFileSync(run.gh.state, 'utf8');
     expect(readEvidenceBlock(body, run.head)?.status).toBe('inconclusive');
-    expect(body).toMatch(/red file error, not counted: `"<checkout>\/src\/extra\.test\.mjs"`/);
+    expect(body).toContain(
+      "<details><summary>Did not load on red (1 file): red's counts leave out the tests inside</summary>\n\n- `<checkout>/src/extra.test.mjs`",
+    );
   });
 
   it('abstains as platform-skipped when the selected tests skip on this host', () => {
@@ -427,7 +429,7 @@ describe('evidence outcomes', () => {
 
     expect(run.publish(run.head, { ...shipped, GUARD_COVERAGE_OK: '1' }).status).toBe(0);
     expect(readFileSync(run.gh.state, 'utf8')).toContain(
-      '**Merge verdict:** human-review (gate-bypassed: GUARD_COVERAGE_OK) · advisory',
+      '**Merge verdict:** human-review (gate-bypassed: GUARD_COVERAGE_OK; no-captured-proof: not-run: no-test-change) · advisory',
     );
 
     writeFileSync(run.gh.state, '');

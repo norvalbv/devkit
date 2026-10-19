@@ -99,7 +99,8 @@ interface ParsedVitestReport {
   testResults: ParsedVitestFile[];
 }
 
-const MAX_FAILURES = 10;
+/** The most failures, and the most file errors, a report summary keeps per run. */
+export const MAX_FAILURES = 10;
 const MAX_FAILURE_CHARS = 600;
 const MAX_FAILURE_NAME_CHARS = 240;
 
@@ -375,12 +376,16 @@ function renderExit(operand: RegressionOperandEvidence): string {
   return operand.signal ? `signal ${operand.signal}` : String(operand.exitCode);
 }
 
-export function inlineJson(value: string): string {
-  const json = JSON.stringify(stripVTControlCharacters(value));
-  const longest = Math.max(0, ...(json.match(/`+/g)?.map((run) => run.length) ?? []));
+/** A code span for any text: the fence outruns every backtick run; padding guards edges and ''. */
+export function codeSpan(text: string): string {
+  const longest = Math.max(0, ...(text.match(/`+/g)?.map((run) => run.length) ?? []));
   const fence = '`'.repeat(longest + 1);
-  return `${fence}${json}${fence}`;
+  const pad = text === '' || /^`|`$/.test(text) ? ' ' : '';
+  return `${fence}${pad}${text}${pad}${fence}`;
 }
+
+export const inlineJson = (value: string): string =>
+  codeSpan(JSON.stringify(stripVTControlCharacters(value)));
 
 export function fencedJson(value: readonly string[]): string {
   const json = JSON.stringify(value, null, 2);

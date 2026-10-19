@@ -76,7 +76,7 @@ describe('printVerdict', () => {
     const head = commit({ 'src/fix.mts': lines(12) });
     const printed = verdictFor(root, base, head, shipEnv(head));
     expect(printed.line).toBe(
-      `**Merge verdict:** human-review (over-size: 12/10 lines, 1/4 files, default limit) · advisory, at \`${head.slice(0, 12)}\``,
+      `**Merge verdict:** human-review (over-size: 12/10 lines, 1/4 files, default limit; no-captured-proof: not-run: no-test-change) · advisory, at \`${head.slice(0, 12)}\``,
     );
     expect(printed.verdict?.reasons.map((r) => r.code)).toEqual(['over-size', 'no-captured-proof']);
   });
@@ -104,7 +104,7 @@ describe('printVerdict', () => {
     const base = commit({ 'README.md': 'x\n' });
     const head = commit({ 'src/fix.mts': lines(1) });
     expect(verdictFor(root, base, head, { DEVKIT_NO_TELEMETRY: '1' }).line).toContain(
-      'human-review (bypass-unknown: no devkit ship gate run)',
+      'human-review (bypass-unknown: no devkit ship gate run; no-captured-proof: not-run: no-test-change)',
     );
   });
 

@@ -386,7 +386,7 @@ describe('mergeVerdict', () => {
     const result = mergeVerdict(row.change, row.config ?? null);
     expect(result).toEqual({ verdict: row.verdict, reasons: row.reasons });
     expect(verdictLine(result)).toMatch(
-      new RegExp(`^${row.verdict} \\(${result.reasons[0].code}[:)]`),
+      new RegExp(`^${row.verdict} \\(${result.reasons[0].code}[:;)]`),
     );
   });
 
@@ -446,12 +446,17 @@ describe('mergeVerdict', () => {
 });
 
 describe('verdictLine', () => {
-  it('prints the deciding reason and its detail', () => {
+  it('prints every reason that yields the verdict, deciding one first, with its detail', () => {
     expect(verdictLine(mergeVerdict(change([p('a.mts', 51)]), null))).toBe(
       'human-review (over-size: 51/50 lines, 1/4 files, default limit)',
     );
     expect(verdictLine(mergeVerdict(change([p('a.test.mts')]), null))).toBe(
       'auto-merge-eligible (test-only)',
+    );
+    const both = mergeVerdict(change([p('docs/decisions/x.md'), p('a.mts', 51)]), null);
+    expect(both.reasons.at(-1)?.code).toBe('captured-proof');
+    expect(verdictLine(both)).toBe(
+      'human-review (decision-record; over-size: 51/50 lines, 1/4 files, default limit)',
     );
   });
 

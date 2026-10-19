@@ -1,10 +1,13 @@
 // The devkit-owned evidence block inside a PR body. Every byte outside the markers belongs to the
 // caller or another tool; ship only ever replaces the span between them.
+import { stripVTControlCharacters } from 'node:util';
 import { z } from 'zod';
 import {
+  codeSpan,
   fencedJson,
-  inlineJson,
+  MAX_FAILURES,
   type RegressionEvidence,
+  type RegressionFailureSummary,
   type RegressionOperandEvidence,
 } from '../../baseline-status/regression-evidence.mts';
 import type { MergeVerdict } from '../merge-verdict/verdict.mts';
@@ -32,7 +35,6 @@ const DATA_CLOSE = ' -->';
 const BLOCK = /^<!-- devkit:evidence:begin -->\r?\n[\s\S]*?\n<!-- devkit:evidence:end -->(?=\r?$)/m;
 const BLOCKS = new RegExp(BLOCK.source, 'gm');
 const MARKER = /<!-- devkit:evidence:/g;
-const SHOWN_FAILURES = 3;
 const SHOWN_ARGS = 40;
 const MAX_DETAIL_CHARS = 500;
 const MAX_FAILURE_CHARS = 240;
@@ -60,11 +62,33 @@ export const callerText = (body: string): string => defuse(body.replace(BLOCKS, 
 const clip = (text: string, limit: number): string =>
   text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 
-const plain = (text: string): string =>
-  clip(text.replace(/\s+/g, ' ').trim().replaceAll('<', '&lt;'), MAX_DETAIL_CHARS);
+const flat = (text: string): string => stripVTControlCharacters(text).replace(/\s+/g, ' ').trim();
 
-const failureLine = (label: string, item: { fullName: string; message: string }): string =>
-  `- ${label} ${inlineJson(item.fullName)}: ${inlineJson(clip(item.message, MAX_FAILURE_CHARS))}`;
+const plain = (text: string): string => clip(flat(text).replaceAll('<', '&lt;'), MAX_DETAIL_CHARS);
+
+const failureLine = (item: RegressionFailureSummary): string =>
+  `- ${codeSpan(flat(item.fullName))}: ${codeSpan(flat(clip(item.message, MAX_FAILURE_CHARS)))}`;
+
+/** `n` and its noun; `plus` marks a floor, from a list the report summary cut at its cap. */
+const counted = (n: number, noun: string, plus = ''): string =>
+  `${n}${plus} ${noun}${n === 1 && !plus ? '' : 's'}`;
+
+/** A collapsed section; `summary` is raw HTML, so it carries no markdown. */
+const details = (summary: string, body: string[]): string[] => [
+  `<details><summary>${summary}</summary>`,
+  '',
+  ...body,
+  '',
+  '</details>',
+  '',
+];
+
+/** Every failure the report summary kept, then how many it dropped at its cap. */
+function failureList(title: string, items: RegressionFailureSummary[], total: number): string[] {
+  const rest = total - items.length;
+  const more = rest > 0 ? [`- … and ${rest} more`] : [];
+  return items.length ? details(title, [...items.map(failureLine), ...more]) : [];
+}
 
 const short = (sha: string | null): string => (sha ? `\`${sha.slice(0, 12)}\`` : 'unknown');
 
@@ -83,28 +107,23 @@ function runLines(evidence: RegressionEvidence): string[] {
     argv.length > SHOWN_ARGS
       ? [...argv.slice(0, SHOWN_ARGS), `… ${argv.length - SHOWN_ARGS} more arguments`]
       : argv;
-  const notes = [
-    ...evidence.red.failures
-      .slice(0, SHOWN_FAILURES)
-      .map((item) => failureLine('red failure', item)),
-    ...evidence.red.fileErrors
-      .slice(0, SHOWN_FAILURES)
-      .map((item) => failureLine('red file error, not counted:', item)),
-  ];
+  const { failures, fileErrors, testCounts } = evidence.red;
+  const failed = testCounts?.failed ?? failures.length;
+  const plus = fileErrors.length >= MAX_FAILURES ? '+' : '';
+  const unloaded = counted(fileErrors.length, 'file', plus);
   return [
-    '| run | tree | exit | passed | failed | skipped |',
+    '| run | what ran | exit | passed | failed | skipped |',
     '|---|---|---|---|---|---|',
-    operandRow('red', `PR base + PR test files ${short(evidence.red.sha)}`, evidence.red),
-    operandRow('green', `PR head ${short(evidence.green.sha)}`, evidence.green),
+    operandRow('red', 'PR test files on the PR base', evidence.red),
+    operandRow('green', 'PR head', evidence.green),
     '',
-    ...notes,
-    ...(notes.length ? [''] : []),
-    '<details><summary>Test command</summary>',
-    '',
-    fencedJson(shown),
-    '',
-    '</details>',
-    '',
+    ...failureList(`Failed on red (${counted(failed, 'test')})`, failures, failed),
+    ...failureList(
+      `Did not load on red (${unloaded}): red's counts leave out the tests inside`,
+      fileErrors,
+      fileErrors.length,
+    ),
+    ...details('Test command', [fencedJson(shown)]),
   ];
 }
 
@@ -115,19 +134,20 @@ export function renderEvidenceBlock(
 ): string {
   const label = outcome.reason ? `${outcome.status} (${outcome.reason})` : outcome.status;
   const content = [
-    `**${label}**: ${plain(outcome.detail)}`,
+    `**Evidence:** ${label} — ${plain(outcome.detail)}`,
     `Head ${short(outcome.headSha)} · base ${short(outcome.baseSha)}`,
     '',
     ...(evidence ? runLines(evidence) : []),
-    "Captured runs, not proof of causality. Dependencies are the shipping checkout's installed " +
-      `packages. Stale unless the PR head is \`${outcome.headSha}\`.`,
+    "<sub>Captured runs, not proof of causality. Dependencies are the shipping checkout's " +
+      `installed packages. Stale unless the PR head is \`${outcome.headSha}\`.</sub>`,
   ].join('\n');
   const record = verdict?.verdict ? { ...outcome, mergeVerdict: verdict.verdict } : outcome;
   const data = JSON.stringify(record).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e');
   return [
     EVIDENCE_BEGIN,
     '#### Regression evidence (devkit ship)',
-    `${VERDICT_SLOT}${verdict ? ` ${plain(verdict.line)}` : ''}`,
+    // A line opening with a comment is a raw HTML block, so the slot trails the verdict's markdown.
+    `${verdict ? `${plain(verdict.line)} ` : ''}${VERDICT_SLOT}`,
     defuse(content),
     `${DATA_OPEN}${data}${DATA_CLOSE}`,
     EVIDENCE_END,
