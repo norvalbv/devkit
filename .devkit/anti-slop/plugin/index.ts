@@ -1,4 +1,4 @@
-const activePlugin = (await import("./index.devkit-active.js")).default;
+const activePlugin = (await import("./index.devkit-active.ts")).default;
 const nativeOnly = process.env.DEVKIT_INTERNAL_ANTI_SLOP_MODE === "native-only";
 const plugin = nativeOnly
   ? {

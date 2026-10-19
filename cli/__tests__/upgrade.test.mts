@@ -17,6 +17,10 @@ import {
   antiSlopBaselineMigrationId,
 } from '../lib/install/anti-slop/constants.mts';
 import { captureAntiSlopBaselineActivation } from '../lib/install/anti-slop/managed-state.mts';
+import {
+  writePublishedV059AntiSlopConfig,
+  writeV060AntiSlopConfig,
+} from './_anti-slop-previous-profile.mts';
 import { CLI, readConfig as config, tmpRepos } from './_helpers.mts';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -45,48 +49,24 @@ const run = (root, ...args) =>
 const read = (p) => readFileSync(p, 'utf8');
 const readPkg = (root) => JSON.parse(read(join(root, 'package.json')));
 const devkitRef = (root) => readPkg(root).devDependencies[DEP];
-const EXTERNAL_RECORD_RULE_IDS = [
+const ELAPSED_RULE_ID = 'anti-slop/no-elapsed-time-assertions';
+// Upgrading from v0.60 with the external-record rules still off activates them and every later rule.
+const ACTIVATED_SINCE_V060_OFF = [
   'anti-slop/no-unsafe-external-record-access',
   'anti-slop/no-unsafe-external-record-enumeration',
+  ELAPSED_RULE_ID,
 ];
-
-function disableExternalRecordRules(root) {
-  const path = join(root, '.devkit', 'anti-slop', 'oxlint.json');
-  const managed = JSON.parse(read(path));
-  const rules = managed.rules;
-  for (const ruleId of EXTERNAL_RECORD_RULE_IDS) {
-    if (!Object.hasOwn(rules, ruleId)) throw new Error(`missing managed rule: ${ruleId}`);
-    rules[ruleId] = 'off';
-  }
-  const configBytes = `${JSON.stringify(managed, null, 2)}\n`;
-  writeFileSync(path, configBytes);
-  const manifestPath = join(root, '.devkit', 'anti-slop', 'manifest.json');
-  const manifest = JSON.parse(read(manifestPath));
-  manifest.configDigest = digest(configBytes);
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-}
+const managedConfig = (root) => read(join(root, '.devkit', 'anti-slop', 'oxlint.json'));
 
 function restorePublishedV059AntiSlop(root) {
-  const path = join(root, '.devkit', 'anti-slop', 'oxlint.json');
-  const managed = JSON.parse(read(path));
-  managed.jsPlugins[0].specifier = './plugin/index.js';
-  delete managed.rules['anti-slop/no-unsafe-external-record-access'];
-  delete managed.rules['anti-slop/no-unsafe-external-record-enumeration'];
-  delete managed.overrides[0].rules['anti-slop/no-unsafe-external-record-access'];
-  delete managed.overrides[0].rules['anti-slop/no-unsafe-external-record-enumeration'];
-  const configBytes = `${JSON.stringify(managed, null, 2)}\n`;
+  writePublishedV059AntiSlopConfig(root, managedConfig(root));
+  const configBytes = managedConfig(root);
   if (digest(configBytes) !== '042d879db74dbd032183a444d88d1e2c9fafd904913cde3649410df7b6d31018') {
     throw new Error('published v0.59.0 anti-slop config fixture drifted');
   }
-  writeFileSync(path, configBytes);
   const manifestPath = join(root, '.devkit', 'anti-slop', 'manifest.json');
   const manifest = JSON.parse(read(manifestPath));
-  delete manifest.devkitVersion;
-  manifest.ruleIds = manifest.ruleIds.filter(
-    (ruleId) => !EXTERNAL_RECORD_RULE_IDS.includes(ruleId),
-  );
   manifest.pluginDigest = '890d1ae533a85b859e7bd09c6af46175a9af47facd2d969fd723182567149ba2';
-  manifest.configDigest = digest(configBytes);
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
@@ -190,7 +170,7 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
 
     const up = run(root, 'upgrade');
     expect(up.status, up.stderr || up.stdout).toBe(0);
-    expect(up.stdout).toMatch(/adopted 2 existing finding\(s\).*2 newly activated rule\(s\)/);
+    expect(up.stdout).toMatch(/adopted 2 existing finding\(s\).*3 newly activated rule\(s\)/);
 
     const after = JSON.parse(read(join(root, '.anti-slop-baseline.json')));
     expect(after.entries.filter((entry) => entry.ruleId === before.entries[0].ruleId)).toEqual(
@@ -209,6 +189,25 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
     const bytes = read(join(root, '.anti-slop-baseline.json'));
     expect(run(root, 'upgrade').status).toBe(0);
     expect(read(join(root, '.anti-slop-baseline.json'))).toBe(bytes);
+  });
+
+  it('adopts only elapsed-time findings when upgrading the shipped 17-rule capability', () => {
+    const root = initFixture(['--no-cursor', '--anti-slop']);
+    mkdirSync(join(root, 'src'), { recursive: true });
+    expect(run(root, 'anti-slop', 'create').status).toBe(0);
+    writeV060AntiSlopConfig(root, managedConfig(root), false);
+    writeFileSync(
+      join(root, 'src', 'slow.test.ts'),
+      'const started = Date.now();\nexpect(Date.now() - started).toBeLessThan(5_000);\n',
+    );
+
+    const up = run(root, 'upgrade');
+    expect(up.status, up.stderr || up.stdout).toBe(0);
+    expect(up.stdout).toMatch(/adopted 1 existing finding\(s\).*1 newly activated rule\(s\)/);
+    const baseline = JSON.parse(read(join(root, '.anti-slop-baseline.json')));
+    expect(baseline.entries.map((entry) => entry.ruleId)).toEqual([ELAPSED_RULE_ID]);
+    const checked = run(root, 'anti-slop', 'check');
+    expect(checked.status, checked.stderr || checked.stdout).toBe(0);
   });
 
   it('retries baseline adoption after capability sync completed but the prior upgrade stopped', () => {
@@ -246,19 +245,19 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
     const root = initFixture(['--no-cursor', '--anti-slop']);
     mkdirSync(join(root, 'src'), { recursive: true });
     expect(run(root, 'anti-slop', 'create').status).toBe(0);
-    disableExternalRecordRules(root);
+    writeV060AntiSlopConfig(root, managedConfig(root), true);
     writeFileSync(
       join(root, 'src', 'introduced.ts'),
       'const parsed = JSON.parse(raw); parsed["constructor"];\n',
     );
 
     const activation = captureAntiSlopBaselineActivation(root);
-    expect(activation?.activatedRuleIds).toEqual(new Set(EXTERNAL_RECORD_RULE_IDS));
-    rmSync(join(root, '.anti-slop-baseline.json'), { force: true });
+    expect(activation?.activatedRuleIds).toEqual(new Set(ACTIVATED_SINCE_V060_OFF));
 
-    const premature = run(root, 'anti-slop', 'create');
-    expect(premature.status, premature.stderr || premature.stdout).toBe(0);
-    expect(premature.stdout).toContain('preserved pending release transition');
+    // The old surface lacks a current rule, so create refuses outright instead of writing a receipt.
+    const premature = run(root, 'anti-slop', 'create', '--force');
+    expect(premature.status, premature.stderr || premature.stdout).toBe(1);
+    expect(premature.stderr).toContain('managed rule registry is incomplete');
     expect(existsSync(join(root, ANTI_SLOP_BASELINE_UPGRADE_REL))).toBe(true);
     expect(
       JSON.parse(read(join(root, '.anti-slop-baseline.json'))).migrationReceipts ?? [],
@@ -266,7 +265,7 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
 
     const up = run(root, 'upgrade');
     expect(up.status, up.stderr || up.stdout).toBe(0);
-    expect(up.stdout).toMatch(/adopted 1 existing finding\(s\).*2 newly activated rule\(s\)/);
+    expect(up.stdout).toMatch(/adopted 1 existing finding\(s\).*3 newly activated rule\(s\)/);
     const baseline = JSON.parse(read(join(root, '.anti-slop-baseline.json')));
     expect(baseline.migrationReceipts).toContain(activation?.migrationId);
     expect(baseline.entries).toContainEqual(
@@ -279,7 +278,7 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
     const root = initFixture(['--no-cursor', '--anti-slop']);
     mkdirSync(join(root, 'src'), { recursive: true });
     expect(run(root, 'anti-slop', 'create').status).toBe(0);
-    disableExternalRecordRules(root);
+    writeV060AntiSlopConfig(root, managedConfig(root), true);
 
     const first = run(root, 'upgrade');
     expect(first.status, first.stderr || first.stdout).toBe(0);
@@ -355,11 +354,11 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
     expect(run(root, 'anti-slop', 'create').status).toBe(0);
     const baselinePath = join(root, '.anti-slop-baseline.json');
     const before = read(baselinePath);
-    disableExternalRecordRules(root);
+    writeV060AntiSlopConfig(root, managedConfig(root), true);
 
     const up = run(root, 'upgrade', '--dry-run');
     expect(up.status).toBe(0);
-    expect(up.stdout).toMatch(/would adopt existing findings.*2 newly activated rule\(s\)/);
+    expect(up.stdout).toMatch(/would adopt existing findings.*3 newly activated rule\(s\)/);
     expect(read(baselinePath)).toBe(before);
   });
 
@@ -368,7 +367,7 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
     mkdirSync(join(root, 'src'), { recursive: true });
     expect(run(root, 'anti-slop', 'create').status).toBe(0);
     const baselinePath = join(root, '.anti-slop-baseline.json');
-    disableExternalRecordRules(root);
+    writeV060AntiSlopConfig(root, managedConfig(root), true);
     commitGitBase(root);
     const before = JSON.parse(read(baselinePath));
     writeFileSync(
@@ -399,7 +398,7 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
     for (const removeManagedEvidence of [false, true]) {
       const root = initFixture(['--no-cursor', '--anti-slop']);
       expect(run(root, 'anti-slop', 'create').status).toBe(0);
-      disableExternalRecordRules(root);
+      writeV060AntiSlopConfig(root, managedConfig(root), true);
       rmSync(join(root, '.anti-slop-baseline.json'), { force: true });
       if (removeManagedEvidence) {
         rmSync(join(root, '.devkit', 'anti-slop', 'manifest.json'), { force: true });
@@ -418,7 +417,7 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
       const pending = JSON.parse(read(join(root, ANTI_SLOP_BASELINE_UPGRADE_REL)));
       expect(pending.migrationId).toBe(migrationId);
       expect(pending.activatedRuleIds).toEqual(
-        removeManagedEvidence ? [] : EXTERNAL_RECORD_RULE_IDS,
+        removeManagedEvidence ? [] : ACTIVATED_SINCE_V060_OFF,
       );
       expect(run(root, 'anti-slop', 'create').status).toBe(0);
       expect(JSON.parse(read(join(root, '.anti-slop-baseline.json'))).migrationReceipts).toContain(

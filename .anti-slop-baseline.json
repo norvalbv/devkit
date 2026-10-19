@@ -1267,6 +1267,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-elapsed-time-assertions",
+      "file": "cli/__tests__/judge-preflight-models.test.mts",
+      "diagnostic": "This asserts elapsed wall-clock time. An upper bound fails on a loaded machine with nothing wrong, and raising a lower bound only makes it flakier. Assert the observable outcome (exit status, error text, reaped process, file written); the per-test timeout already catches a hang.",
+      "context": "expect(Date.now() - started).toBeLessThan(5000);",
+      "fingerprint": "1f4e87446f60ecd9e5f1cfdeaed6d8569e375b9b59e9bfa56333901adaa5189f",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-module-mocking",
       "file": "gate-engine/critique/provider-runtime/claude-subagent-stop.test.mts",
       "diagnostic": "Replace module mocking with dependency injection through a real interface, service layer, or faithful test implementation.",
@@ -5035,6 +5043,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-elapsed-time-assertions",
+      "file": "cli/__tests__/ship-evidence.test.mts",
+      "diagnostic": "This asserts elapsed wall-clock time. An upper bound fails on a loaded machine with nothing wrong, and raising a lower bound only makes it flakier. Assert the observable outcome (exit status, error text, reaped process, file written); the per-test timeout already catches a hang.",
+      "context": "expect(Date.now() - started).toBeLessThan(110_000);",
+      "fingerprint": "6f722adb842923f66953caa8dce03bee7d942ca135343968d651c5765a5f57b5",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/review/lens/split.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -5273,6 +5289,14 @@
       "context": "const promiseAction = (() => Promise.resolve('async')) as unknown as () => string;",
       "fingerprint": "733cc0c3bcd7acf992101e97575feec922ccfbc3f7d7e0f0ccc687e55150f065",
       "count": 2
+    },
+    {
+      "ruleId": "anti-slop/no-elapsed-time-assertions",
+      "file": "cli/__tests__/reship-publish-lock.test.mts",
+      "diagnostic": "This asserts elapsed wall-clock time. An upper bound fails on a loaded machine with nothing wrong, and raising a lower bound only makes it flakier. Assert the observable outcome (exit status, error text, reaped process, file written); the per-test timeout already catches a hang.",
+      "context": "expect(Date.now() - started).toBeLessThan(25_000);",
+      "fingerprint": "73c3d22234ec897440437b812fcf724abce0be3bdf472c58a2471ea597234e4a",
+      "count": 1
     },
     {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
@@ -6299,6 +6323,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-elapsed-time-assertions",
+      "file": "cli/__tests__/ship-from-branch.test.mts",
+      "diagnostic": "This asserts elapsed wall-clock time. An upper bound fails on a loaded machine with nothing wrong, and raising a lower bound only makes it flakier. Assert the observable outcome (exit status, error text, reaped process, file written); the per-test timeout already catches a hang.",
+      "context": "expect(Date.now() - started).toBeLessThan(5_000);",
+      "fingerprint": "89af79f24d54aff39f8b7b8b453ca1315b88d2758d28f94ff656c3154d8ee371",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-unsafe-dictionary-type",
       "file": "cli/__tests__/_helpers.mts",
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
@@ -6592,6 +6624,14 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "return typeof value === 'boolean' ? value : fail('INVALID_TYPE', path, 'expected a boolean');",
       "fingerprint": "8e3bbda7fd6246cb33ace20e593e2256c3004ae2933fc9e6ba8a42223e142603",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-elapsed-time-assertions",
+      "file": "cli/__tests__/judge-preflight.test.mts",
+      "diagnostic": "This asserts elapsed wall-clock time. An upper bound fails on a loaded machine with nothing wrong, and raising a lower bound only makes it flakier. Assert the observable outcome (exit status, error text, reaped process, file written); the per-test timeout already catches a hang.",
+      "context": "expect(Date.now() - started).toBeLessThan(5000);",
+      "fingerprint": "8e571525f71db2e91cd8ff7e475c2b324d3166b798bb0576de8c68c02a2120a5",
       "count": 1
     },
     {
@@ -7275,6 +7315,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-elapsed-time-assertions",
+      "file": "cli/__tests__/reship.test.mts",
+      "diagnostic": "This asserts elapsed wall-clock time. An upper bound fails on a loaded machine with nothing wrong, and raising a lower bound only makes it flakier. Assert the observable outcome (exit status, error text, reaped process, file written); the per-test timeout already catches a hang.",
+      "context": "expect(elapsed).toBeLessThan(45_000); // pre-fix: hangs until the leaked child exits (120s)",
+      "fingerprint": "9a56862bc4b62b22ec957f4cef72762f46df06e2ff9b206494371ce45d7b8b5a",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/critique/response-contract.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -7680,6 +7728,14 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "? value.results.filter((row: unknown): row is Json => Boolean(row && typeof row === 'object'))",
       "fingerprint": "a305d71c1b159794e9f9e72ff6cc4be683dd4aa90eb2bf153f702f4bd37390d9",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-elapsed-time-assertions",
+      "file": "cli/__tests__/review.test.mts",
+      "diagnostic": "This asserts elapsed wall-clock time. An upper bound fails on a loaded machine with nothing wrong, and raising a lower bound only makes it flakier. Assert the observable outcome (exit status, error text, reaped process, file written); the per-test timeout already catches a hang.",
+      "context": "expect(elapsedMs, `handover stalled: ${elapsedMs}ms`).toBeLessThan(120_000);",
+      "fingerprint": "a337258130b85902e8282d1120e134ee4b8109e01c5825f822c68e5153f263e0",
       "count": 1
     },
     {
@@ -8651,6 +8707,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-elapsed-time-assertions",
+      "file": "gate-engine/judge/__tests__/judge-exec-telemetry.test.mts",
+      "diagnostic": "This asserts elapsed wall-clock time. An upper bound fails on a loaded machine with nothing wrong, and raising a lower bound only makes it flakier. Assert the observable outcome (exit status, error text, reaped process, file written); the per-test timeout already catches a hang.",
+      "context": "expect(elapsedMs).toBeLessThan(3000); // both killed promptly, not serialized behind the 5s sleep",
+      "fingerprint": "b574f9db06262b902d9019ff897440cb42070925432874705141917c42b51be3",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "cli/lib/install/agent-asset-manifest/codec.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -8984,6 +9048,14 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "typeof value !== 'string' ||",
       "fingerprint": "bc36819499a23587ad45f60d1dc0264ae01f165562ddeaf8464ded0f4977127c",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-elapsed-time-assertions",
+      "file": "cli/__tests__/ship-branch-remote-supervisor.test.mts",
+      "diagnostic": "This asserts elapsed wall-clock time. An upper bound fails on a loaded machine with nothing wrong, and raising a lower bound only makes it flakier. Assert the observable outcome (exit status, error text, reaped process, file written); the per-test timeout already catches a hang.",
+      "context": "expect(Date.now() - started).toBeLessThan(10_000);",
+      "fingerprint": "bc7b0a451ae23612e9b106c1407143f0ccccc4f45651a0763f4e53d9605e2bcf",
       "count": 1
     },
     {
@@ -9809,6 +9881,14 @@
       "context": "expect(out({ stdout: undefined, stderr: undefined } as never)).toBe('');",
       "fingerprint": "ccc09ee51a0854a5ec3eaad93b3de8f2b6262c760e5a49b9f05f98b48df80bfd",
       "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-elapsed-time-assertions",
+      "file": "gate-engine/judge/__tests__/judge-exec-telemetry.test.mts",
+      "diagnostic": "This asserts elapsed wall-clock time. An upper bound fails on a loaded machine with nothing wrong, and raising a lower bound only makes it flakier. Assert the observable outcome (exit status, error text, reaped process, file written); the per-test timeout already catches a hang.",
+      "context": "expect(elapsedMs).toBeLessThan(3000);",
+      "fingerprint": "ccd7e093701c2d129823826296bd57353f48d9f6dbd4d5fc0bb1be58d09e91a1",
+      "count": 3
     },
     {
       "ruleId": "anti-slop/no-unknown-parameters",
@@ -12139,6 +12219,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-elapsed-time-assertions",
+      "file": "cli/__tests__/review-gate-supervisor.test.mts",
+      "diagnostic": "This asserts elapsed wall-clock time. An upper bound fails on a loaded machine with nothing wrong, and raising a lower bound only makes it flakier. Assert the observable outcome (exit status, error text, reaped process, file written); the per-test timeout already catches a hang.",
+      "context": "expect(Date.now() - started).toBeLessThan(WAIT_MS);",
+      "fingerprint": "feef90944346b72861ba186c37157b9802862777d74385f27dde09329d070f16",
+      "count": 2
+    },
+    {
       "ruleId": "anti-slop/no-unsafe-dictionary-type",
       "file": "gate-engine/critique/evidence-record.mts",
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
@@ -12212,6 +12300,7 @@
     }
   ],
   "migrationReceipts": [
-    "anti-slop-activation@0.59.0:50ad2d1deb51ce96445be08275533d8e502efe9dc9788b2148709cc06a1525da"
+    "anti-slop-activation@0.59.0:50ad2d1deb51ce96445be08275533d8e502efe9dc9788b2148709cc06a1525da",
+    "anti-slop-activation@0.71.0:09e5458d89969252a2c0e5d44e327aa9215043176d2db857ca47fbab1d1fac0c"
   ]
 }

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import antiSlop from '../../../commands/oxc/anti-slop.mts';
 import { digest } from '../../fs-helpers.mts';
 import { syncOxcCapability } from '../oxc/lifecycle.mts';
+import { writeV060AntiSlopConfig } from '../../../__tests__/_anti-slop-previous-profile.mts';
 import { resolveOxcRuntime } from '../oxc/runtime.mts';
 import {
   ANTI_SLOP_BASELINE_REL,
@@ -52,11 +53,12 @@ describe('anti-slop capability lifecycle', () => {
       upstreamCommit: '446268e5d15baa968eaec669ff65358d36ae6259',
       pluginApiVersion: '1.78.0',
     });
-    expect(manifest.ruleIds).toHaveLength(17);
+    expect(manifest.ruleIds).toHaveLength(18);
     expect(manifest.ruleIds).toEqual(
       expect.arrayContaining([
         'anti-slop/no-unsafe-external-record-access',
         'anti-slop/no-unsafe-external-record-enumeration',
+        'anti-slop/no-elapsed-time-assertions',
       ]),
     );
     expect(existsSync(join(cwd, '.devkit/anti-slop/plugin/oxlint-plugins-api/index.js'))).toBe(
@@ -93,7 +95,8 @@ describe('anti-slop capability lifecycle', () => {
     );
     writeFileSync(
       join(cwd, 'unsafe-external-record.ts'),
-      'const files = JSON.parse(raw).files; files[key]; Object.entries(files);\n',
+      'const files = JSON.parse(raw).files; files[key]; Object.entries(files);\n' +
+        'expect(Date.now() - started).toBeLessThan(5_000);\n',
     );
     const runtime = resolveOxcRuntime('lint');
     const enabledByDefault = spawnSync(
@@ -109,6 +112,7 @@ describe('anti-slop capability lifecycle', () => {
       expect.arrayContaining([
         'anti-slop(no-unsafe-external-record-access)',
         'anti-slop(no-unsafe-external-record-enumeration)',
+        'anti-slop(no-elapsed-time-assertions)',
       ]),
     );
   });
@@ -227,15 +231,7 @@ describe('anti-slop capability lifecycle', () => {
     );
 
     const configPath = join(cwd, '.devkit/anti-slop/oxlint.json');
-    const previousConfig = JSON.parse(readFileSync(configPath, 'utf8'));
-    previousConfig.rules['anti-slop/no-unsafe-external-record-access'] = 'off';
-    previousConfig.rules['anti-slop/no-unsafe-external-record-enumeration'] = 'off';
-    const previousBytes = `${JSON.stringify(previousConfig, null, 2)}\n`;
-    writeFileSync(configPath, previousBytes);
-    const manifestPath = join(cwd, '.devkit/anti-slop/manifest.json');
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    manifest.configDigest = digest(previousBytes);
-    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    writeV060AntiSlopConfig(cwd, readFileSync(configPath, 'utf8'), true);
     writeFileSync(
       join(cwd, ANTI_SLOP_BASELINE_UPGRADE_REL),
       `${JSON.stringify({
@@ -251,9 +247,10 @@ describe('anti-slop capability lifecycle', () => {
       expect.arrayContaining([
         'anti-slop/no-unsafe-external-record-access',
         'anti-slop/no-unsafe-external-record-enumeration',
+        'anti-slop/no-elapsed-time-assertions',
       ]),
     );
-    expect(pending.activatedRuleIds).toHaveLength(2);
+    expect(pending.activatedRuleIds).toHaveLength(3);
 
     syncAntiSlopCapability(cwd);
     expect(JSON.parse(readFileSync(join(cwd, ANTI_SLOP_BASELINE_UPGRADE_REL), 'utf8'))).toEqual(
@@ -322,15 +319,7 @@ describe('anti-slop capability lifecycle', () => {
         `${JSON.stringify({ schemaVersion: 1, upstreamCommit: ANTI_SLOP_UPSTREAM, entries: [] })}\n`,
       );
       const configPath = join(cwd, '.devkit/anti-slop/oxlint.json');
-      const previousConfig = JSON.parse(readFileSync(configPath, 'utf8'));
-      previousConfig.rules['anti-slop/no-unsafe-external-record-access'] = 'off';
-      previousConfig.rules['anti-slop/no-unsafe-external-record-enumeration'] = 'off';
-      const previousBytes = `${JSON.stringify(previousConfig, null, 2)}\n`;
-      writeFileSync(configPath, previousBytes);
-      const manifestPath = join(cwd, '.devkit/anti-slop/manifest.json');
-      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-      manifest.configDigest = digest(previousBytes);
-      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      writeV060AntiSlopConfig(cwd, readFileSync(configPath, 'utf8'), true);
       return captureAntiSlopBaselineActivation(cwd)?.migrationId;
     });
 
