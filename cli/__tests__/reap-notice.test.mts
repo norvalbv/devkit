@@ -110,7 +110,7 @@ describe('readSurvivorArgs', () => {
     // macOS ps fills an empty argv[0] slot from the environment block that follows argv.
     const child = spawn('/bin/cat', [], {
       argv0: '',
-      env: { LEAK_PROBE: '/probe/sentinel-env-leak' },
+      env: { LEAK_PROBE: 'a /probe/sentinel-env-leak' },
       stdio: ['pipe', 'ignore', 'ignore'],
     });
     try {

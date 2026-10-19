@@ -25,7 +25,7 @@ export interface ProcessRecord {
 
 export type ProcessTableReader = (ownershipMarker?: string) => Map<number, ProcessRecord>;
 
-function processTableOutput(args: string[]): string {
+export function processTableOutput(args: string[]): string {
   const result = spawnSync('/bin/ps', args, {
     encoding: 'utf8',
     maxBuffer: PROCESS_TABLE_MAX_BYTES,
