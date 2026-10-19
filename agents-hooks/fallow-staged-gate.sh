@@ -125,10 +125,8 @@ if [ -n "$FLOOR" ] && [ -n "$VERSION" ]; then
   fi
 fi
 
-# The staged set, captured WITH git's environment intact: inside a devkit ship the exported
-# GIT_DIR/GIT_INDEX_FILE point at the ship worktree's index, and that is precisely the index being
-# committed. Flags mirror gate-engine/review/baseline-gate.mts so binary blobs, renames and a
-# monorepo subdir all resolve the same way there and here.
+# The staged set of ROOT's index: this hook runs before the agent's `git commit`, outside git's env.
+# Flags mirror gate-engine/review/baseline-gate.mts, so binaries, renames and subdirs resolve alike.
 DIFF_FILE="$(mktemp)"
 FALLOW_OUT="$(mktemp)"
 DIFF_ERR="$(mktemp)"
