@@ -395,7 +395,7 @@ publish_requested_pr_body() {
   if ! carried=$(printf '%s' "$BODY" | evidence_caller_body "$REPO" "$PR_URL" && printf .); then
     echo "reship: PR body was not updated: ship could not carry the PR's evidence block (see the evidence: error above)" >&2
     echo "  the commit is already on origin/$BR at $published_commit; no rollback was attempted" >&2
-    echo "  once gh pr view '$PR_URL' works, re-run the same devkit ship command; only the body is updated" >&2
+    echo "  once gh pr view '$PR_URL' works, run: devkit pr-body '$PR_URL' --body-file <file>" >&2
     return 1
   fi
   if ! printf '%s' "${carried%.}" | gh pr edit "$PR_URL" --repo "$REPO" --body-file - >/dev/null; then
@@ -799,11 +799,21 @@ fi
 # Nothing to add? Abort before an empty commit (a re-push with no delta is a no-op, not a commit).
 if git -C "$WT" diff --cached --quiet; then
   reship_refresh_anchors "$SCRIPT_DIR"
-  # A lost push response leaves the exact body-bearing intent in place even though the remote now
-  # contains its commit. Resume must finish that recorded metadata mutation before spending the
-  # intent. The same arm makes an explicit no-delta invocation a safe body-only repair. Serialize
-  # it with body-bearing pushes and re-check the fetched head under the lock so an older repair can
-  # never overwrite the description after a newer publisher advanced the branch.
+  # A fresh explicit body with nothing to commit is refused before any PR mutation: body-only edits
+  # belong to devkit pr-body, which keeps the evidence block and never touches a --resume record.
+  if [ "$UPDATE_PR_BODY" -eq 1 ] && [ "$RESUME" -eq 0 ]; then
+    REFUSED_DELETE_STATUS=0
+    [ -z "${SHIP_INTENT_GENERATION:-}" ] || rewrite_delete_intent || REFUSED_DELETE_STATUS=$?
+    if [ "$REWRITE" -eq 1 ]; then NO_DELTA_REF="origin/$BASE_REF"; else NO_DELTA_REF="origin/$BR"; fi
+    echo "reship: no changes vs $NO_DELTA_REF — nothing to commit, so the PR body was NOT updated" >&2
+    [ "$REFUSED_DELETE_STATUS" -eq 0 ] || echo "  this refused body is still recorded — do NOT --resume it, or it is published; clear the exact file named above" >&2
+    [ "$READY" -eq 0 ] || echo "  the PR was not marked ready either; re-run without --body/--body-file to flip it" >&2
+    echo "  to change only the description: devkit pr-body '$BR' --body-file <file>" >&2
+    [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" nothing-was-pushed
+    exit 1
+  fi
+  # A lost push response leaves the body intent although the remote has its commit: resume finishes
+  # that edit under the publish lock, re-checking the head so it never overwrites a newer publisher.
   BODY_ONLY_UPDATE=0
   BODY_UPDATE_STATUS=0
   if [ "$UPDATE_PR_BODY" -eq 1 ] && [ -z "${SHIP_DRY_RUN:-}" ]; then
@@ -908,6 +918,7 @@ if git -C "$WT" diff --cached --quiet; then
     fi
     body_receipt_delete
     rewrite_publish_lock_release
+    echo "no Git change to push — published the recorded PR body" >&2
     echo "$PR_URL"
     exit 0
   fi
