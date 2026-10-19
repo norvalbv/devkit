@@ -31,9 +31,6 @@ LEDGER=$(clean_session_ledger "$(session_edits_file "$input")")
 trap 'rm -f "$LEDGER"' EXIT
 
 [ -f "package.json" ] || exit 0
-# The consumer's own package manager (sc-1054) — a bun requirement skipped every npm/pnpm/yarn repo.
-PM=$(resolve_pm)
-[ -n "$PM" ] || exit 0
 
 # Does package.json define a given npm-script? (degrade-skip guard.) js_eval, never a bare node
 # probe — that silently skips in a bun-only toolchain (sc-1043).
@@ -46,26 +43,29 @@ truncate() { if [ ${#1} -gt 1500 ]; then echo "${1:0:1500}... (truncated)"; else
 # transitive dependency, and configless it checks against its own defaults (tabs, double quotes), so
 # a repo that formats with prettier/oxfmt/dprint would fail this gate on every file — including ones
 # the session never touched — while its real format gate passes. Scoped to the session's own edited
-# files (biome-supported extensions only), not the whole repo. Its invocation is rendered verbatim
-# from the formatter descriptor (cli/lib/husky/format-fragment.mts) and still runs through bun, so
-# the step skips without bun rather than reporting bun's exit 127 as lint errors.
+# files (biome-supported extensions only), not the whole repo.
 if [ -x "./node_modules/.bin/biome" ] && { [ -f "biome.json" ] || [ -f "biome.jsonc" ]; }; then
   biome_files=()
   while IFS= read -r f; do
     [[ "$f" =~ \.(ts|tsx|js|jsx|json|jsonc)$ ]] && biome_files+=("$f")
   done < "$LEDGER"
-  if [ ${#biome_files[@]} -gt 0 ] && command -v bun &>/dev/null; then
-    lint_output=$(bun run biome check --no-errors-on-unmatched "${biome_files[@]}" 2>&1)
-    if [ $? -ne 0 ]; then
+  if [ ${#biome_files[@]} -gt 0 ]; then
+    lint_output=$("./node_modules/.bin/biome" check --no-errors-on-unmatched "${biome_files[@]}" 2>&1)
+    # Only exit 1 is a finding; 126/127 means the bin's `node` shebang could not run, so stand down.
+    if [ $? -eq 1 ]; then
       echo "Biome lint/format errors detected in files you edited. Please fix these issues:" >&2
       echo "" >&2
       truncate "$lint_output" >&2
       echo "" >&2
-      echo "Run 'bun run biome check --write <file>' to auto-fix." >&2
+      echo "Run './node_modules/.bin/biome check --write <file>' to auto-fix." >&2
       exit 2
     fi
   fi
 fi
+
+# Steps 2-3 run npm-scripts through the consumer's own package manager; step 1 needed none.
+PM=$(resolve_pm)
+[ -n "$PM" ] || exit 0
 
 # 2. Structure/size ESLint — only if the consumer defines a `lint:structure` script.
 # Project-wide tool → run whole-repo, then filter the report to this session's files.

@@ -94,17 +94,18 @@ export interface AgentHookLines {
 
 export function renderAgentHookLines(f: ConsumerFormatter): AgentHookLines {
   const gate = `{ ${f.configProbes.map((p) => `[ -f "${p}" ]`).join(' || ')}; }`;
-  const bin = `[ -x "./node_modules/.bin/${f.tool}" ]`;
+  const path = `./node_modules/.bin/${f.tool}`;
+  const bin = `[ -x "${path}" ]`;
   return {
     'agents-hooks/format-after-edit.sh': [
       `if [[ "$file_path" =~ \\.(ts|tsx|js|jsx|json|jsonc)$ ]] && ${gate}; then`,
-      `  if command -v bun &>/dev/null && [ -f "package.json" ] && ${bin}; then`,
-      `    bun run ${f.tool} ${f.agentArgs.afterEdit} "$file_path" 2>/dev/null || true`,
+      `  if [ -f "package.json" ] && ${bin}; then`,
+      `    "${path}" ${f.agentArgs.afterEdit} "$file_path" >/dev/null 2>&1 || true`,
     ],
     'agents-hooks/lint-check.sh': [
       `if ${bin} && ${gate}; then`,
-      `    lint_output=$(bun run ${f.tool} ${f.agentArgs.lintCheck} "\${biome_files[@]}" 2>&1)`,
-      `      echo "Run 'bun run ${f.tool} ${f.agentArgs.afterEdit} <file>' to auto-fix." >&2`,
+      `    lint_output=$("${path}" ${f.agentArgs.lintCheck} "\${biome_files[@]}" 2>&1)`,
+      `      echo "Run '${path} ${f.agentArgs.afterEdit} <file>' to auto-fix." >&2`,
     ],
   };
 }
