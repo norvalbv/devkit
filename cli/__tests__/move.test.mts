@@ -545,15 +545,95 @@ describe('devkit move — directory and untracked sources', () => {
 
   it('rejects an empty untracked directory without creating temporary filesystem state', () => {
     const root = fixture();
-    mkdirSync(join(root, 'src/renderer/features/empty-rules'));
+    mkdirSync(join(root, 'src/renderer/features/empty-rules/nested'), { recursive: true });
 
     const r = runMoveArgs(root, 'src/renderer/features/empty-rules', 'src/renderer/lib');
 
     expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/cannot move an empty untracked directory safely/);
-    expect(existsSync(join(root, 'src/renderer/features/empty-rules'))).toBe(true);
+    expect(r.stderr).toMatch(/empty directory with no imports to rewrite; drop it .* use mv/);
+    expect(r.stdout).not.toContain('mv ');
+    expect(existsSync(join(root, 'src/renderer/features/empty-rules/nested'))).toBe(true);
     expect(existsSync(join(root, 'src/renderer/lib/empty-rules'))).toBe(false);
     expect(existsSync(join(root, '.git/index.lock'))).toBe(false);
+  });
+
+  it('rejects a trailing empty untracked directory before moving an earlier source', () => {
+    const root = fixture();
+    writePath(root, 'src/renderer/features/new-rules/rule.ts', 'export const rule = 1;\n');
+    writePath(
+      root,
+      'src/renderer/features/b/use.ts',
+      "import { rule } from '@/features/new-rules/rule';\nexport const z = rule;\n",
+    );
+    mkdirSync(join(root, 'src/renderer/features/empty-rules'));
+
+    const r = runMoveArgs(
+      root,
+      'src/renderer/features/new-rules',
+      'src/renderer/features/empty-rules',
+      'src/renderer/lib',
+    );
+
+    expect(r.status).toBe(1);
+    expect(existsSync(join(root, 'src/renderer/features/new-rules/rule.ts'))).toBe(true);
+    expect(existsSync(join(root, 'src/renderer/lib/new-rules'))).toBe(false);
+    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/features/new-rules/rule'");
+    expect(r.stdout).not.toContain('mv ');
+    expect(r.stderr).toMatch(/empty directory.*empty-rules/);
+  });
+
+  it('rejects an empty untracked directory in a dry run', () => {
+    const root = fixture();
+    mkdirSync(join(root, 'src/renderer/features/empty-rules'));
+
+    const r = runMoveArgs(
+      root,
+      'src/renderer/features/empty-rules',
+      'src/renderer/lib',
+      '--dry-run',
+    );
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/empty directory.*empty-rules/);
+    expect(r.stdout).not.toContain('[dry] mv');
+  });
+
+  it('aborts before creating the destination when a source empties after preflight', () => {
+    const root = fixture();
+    writePath(root, 'src/renderer/features/new-rules/rule.ts', 'export const rule = 1;\n');
+    const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+    // The real-index lock exists only while the move revalidates, so this empties the source then.
+    writePath(
+      root,
+      'bin/git',
+      '#!/bin/sh\nif [ "$1" = "ls-files" ] && [ -f "$DEVKIT_MOVE_RACE_LOCK" ]; then rm -f "$DEVKIT_MOVE_RACE_FILE"; fi\nexec "$DEVKIT_MOVE_REAL_GIT" "$@"\n',
+    );
+    chmodSync(join(root, 'bin/git'), 0o755);
+
+    const r = testSpawnSync(
+      process.execPath,
+      [CLI, 'move', 'src/renderer/features/new-rules', 'src/renderer/lib'],
+      {
+        cwd: root,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          DEVKIT_MOVE_RACE_FILE: join(root, 'src/renderer/features/new-rules/rule.ts'),
+          DEVKIT_MOVE_RACE_LOCK: join(root, '.git/index.lock'),
+          DEVKIT_MOVE_REAL_GIT: realGit,
+          PATH: `${join(root, 'bin')}:${process.env.PATH}`,
+        },
+      },
+    );
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/cannot move an empty untracked directory safely/);
+    expect(existsSync(join(root, 'src/renderer/features/new-rules'))).toBe(true);
+    expect(existsSync(join(root, 'src/renderer/lib'))).toBe(false);
+    expect(existsSync(join(root, '.git/index.lock'))).toBe(false);
+    expect(
+      readdirSync(join(root, '.git')).some((name) => name.startsWith('devkit-move-index-')),
+    ).toBe(false);
   });
 
   it('reports the exact source location if the destination becomes a directory during the move', () => {
