@@ -101,12 +101,14 @@ describe('a PASS earned under a waiver, replayed from the review cache', () => {
 // The whole gate, so the valve → settle → cache → replay wiring is proven, not each unit alone.
 describe('runReviewGate — a waived correctness FAIL on an identical re-run', () => {
   const savedSplit = process.env.GUARD_CORRECTNESS_SPLIT;
+  const savedShip = process.env.DEVKIT_SHIP_ID; // a ship runs this suite with its own id set
   beforeEach(() => {
     process.env.GUARD_CORRECTNESS_SPLIT = 'off'; // one correctness judge, one label to count
   });
   afterEach(() => {
     cleanupReviewFixtures();
-    delete process.env.DEVKIT_SHIP_ID;
+    if (savedShip === undefined) delete process.env.DEVKIT_SHIP_ID;
+    else process.env.DEVKIT_SHIP_ID = savedShip;
     if (savedSplit === undefined) delete process.env.GUARD_CORRECTNESS_SPLIT;
     else process.env.GUARD_CORRECTNESS_SPLIT = savedSplit;
   });

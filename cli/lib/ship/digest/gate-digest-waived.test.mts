@@ -110,7 +110,7 @@ describe('a blocked reviewer that also waived findings', () => {
       ),
       row('"type":"ship_result","blocked_gate":"review","exit_code":1'),
     );
-    expect(text).toContain('Gate findings this run (2 gate(s) / 1 finding(s))');
+    expect(text).toContain('Gate findings this run (1):'); // one reviewer, one ID to clear
     expect(text).toContain(`✗ ${JUDGE} — BLOCKED this run: leaks [cccccccccccc]`);
     expect(text).toContain(`   · ${JUDGE} — races waived [${FP}]: a`);
     expect(text).toContain(`   · ${JUDGE} — state waived [${FP2}]: b`);

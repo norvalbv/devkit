@@ -431,7 +431,7 @@ export function render(rows: DigestRow[], logPath = ''): string {
   const cached = rows.filter((r) => r.state === 'cached').length;
   const listed = [...findings, ...missing, ...unverified];
   const total = listed.reduce((n, r) => n + (r.findings ?? 1), 0);
-  const gates = new Set(listed.map((r) => `${r.state}:${r.gate}`)).size;
+  const gates = new Set(listed.map((r) => r.gate)).size;
   // Findings, not gates, are what a reader must clear: one reviewer can block on several IDs.
   const counted = gates === total ? `${total}` : `${gates} gate(s) / ${total} finding(s)`;
   const out = [`📋 Gate findings this run (${counted}):`];
