@@ -109,7 +109,7 @@ ${PATH_SETUP}
 // Emit the deterministic orchestrator only when it has something to run: a selected
 // deterministic guard / anti-slop component (the bin re-reads the selection from
 // .devkit/config.json at commit time), or a structure command joined via --structure.
-function wantsDeterministic(selection: HookSelection): boolean {
+export function wantsDeterministic(selection: HookSelection): boolean {
   if (selection.antiSlop || selection.structureCmd) return true;
   // decisions arms the orchestrator's decision-checks gate, which runs Checks linked to Targets.
   return [...DETERMINISTIC_GUARD_IDS, 'decisions'].some((id) => selection.guards?.includes(id));
