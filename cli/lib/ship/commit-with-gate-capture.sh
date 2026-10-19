@@ -66,6 +66,19 @@ _ship_dry_gates_command() {
   printf '%s\n' "$cmd"
 }
 
+# Usage:  ship_decision_smell_advisory <worktree> <root>   (narration; call as an OR-list)
+# Prints the decisions gate's regex smells before the chain; commit_with_gate_capture repeats them last.
+ship_decision_smell_advisory() {
+  SHIP_DECISION_ADVISORY=""
+  grep -qs 'guard-decisions' "$(gate_worktree_pre_commit "$1" "$2")" "$1/.husky/pre-commit" || return 0
+  local mod out
+  mod="$(dirname "${BASH_SOURCE[0]}")/preflight/decision-smells.mts"
+  [ -f "$mod" ] || mod="$(dirname "${BASH_SOURCE[0]}")/preflight/decision-smells.mjs"
+  out=$(cd "$1" && node "$mod" "$2" 2>/dev/null) || out=""
+  SHIP_DECISION_ADVISORY=$out
+  [ -z "$out" ] || printf '%s\n' "$out" >&2
+}
+
 # Usage:  commit_with_gate_capture <worktree> <root> <branch> <title> <body>
 commit_with_gate_capture() {
   local wt="$1" root="$2" br="$3" title="$4" body="$5"
@@ -554,6 +567,12 @@ SHIP_HOOK_WRAPPER
         echo "ship: the judge preflight found a dark judge — every uncached reviewer will fail closed on the retry. To ship inside this window, $SHIP_JUDGE_REMEDY."
     } >&2 || true
     ;;
+  esac
+  # The smell advisory again, last, when the decisions gate never ran; a timeout or signal keeps its own guidance last.
+  case "$rc" in
+    124|129|130|131|137|143) ;;
+    *) { [ -z "${SHIP_DECISION_ADVISORY:-}" ] || grep -qE 'decision-gate: |decision smells' "$log" 2>/dev/null ||
+      printf '%s\n' "$SHIP_DECISION_ADVISORY"; } >&2 || true ;;
   esac
   unset DEVKIT_SHIP_DRY_GATES_CMD
   return "$rc"
