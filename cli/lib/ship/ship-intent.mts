@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { devkitVersion } from '../../../gate-engine/devkit-version.mts';
 import { emitShipIntentEvent } from './ship-intent-event.mts';
 import { fail, parseArgs } from './ship-intent-args.mts';
+import { appendPathsInPlace, donateIntent } from './intent/donate.mts';
 import {
   advisoryBodyFile,
   bindSourceMembershipForWrite,
@@ -150,18 +151,8 @@ export function writeIntent(
         superseded = true;
         // A losing resume contributes only its explicitly briefed donatePaths. Its stale recorded
         // list must not leak into a newer full invocation; a deleted record stays deleted.
-        if (opts.mergePaths && onDisk !== null) {
-          const ownerPaths = provenStrings(onDisk.paths) ?? [];
-          const merged = [...ownerPaths];
-          for (const p of opts.donatePaths ?? []) if (!merged.includes(p)) merged.push(p);
-          if (merged.length !== ownerPaths.length) {
-            const tmp = `${file}.${process.pid}.tmp`;
-            writeFileSync(tmp, `${JSON.stringify({ ...onDisk, paths: merged }, null, 2)}\n`, {
-              mode: 0o600,
-            });
-            renameSync(tmp, file);
-          }
-        }
+        if (opts.mergePaths && onDisk !== null)
+          appendPathsInPlace(file, onDisk, opts.donatePaths ?? []);
         return;
       }
       // Past the CAS, so onDisk is the record this resume read: its path is the one to carry.
@@ -471,6 +462,8 @@ function main(): number {
   if (sub === 'body-drift')
     return reportBodyDrift(readIntent(root, branch), values.get('generation'));
   if (sub === 'generation') return printGeneration(intentFile(root, branch));
+  if (sub === 'donate')
+    return donateIntent(intentFile(root, branch), values.get('expect-generation'), paths);
   if (sub === 'owns') {
     const generation = values.get('generation');
     if (!generation) return fail('owns: missing --generation');
@@ -484,7 +477,7 @@ function main(): number {
       paths.length > 0 ? paths : undefined,
     );
   return fail(
-    `unknown subcommand '${String(sub)}' (write|read|body-drift|generation|owns|delete|validate-paths|validate-membership|filter-membership|frozen-drift)`,
+    `unknown subcommand '${String(sub)}' (write|read|body-drift|generation|donate|owns|delete|validate-paths|validate-membership|filter-membership|frozen-drift)`,
   );
 }
 

@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -85,5 +85,45 @@ describe('ship_resume_extras_notice', () => {
     expect(source.indexOf('\ntrap cleanup EXIT\n')).toBeGreaterThan(
       source.indexOf('\nRESUME_EXTRAS_UNRECORDED=0\n'),
     );
+  });
+});
+
+describe('ship_exit_donating', () => {
+  /** A stand-in for ship-intent.mts whose `donate` exits with `code`, then the donating exit. */
+  function donatingExit(code: number, env = '') {
+    const stub = join(rootWithDir(), 'stub.mjs');
+    writeFileSync(stub, `process.exit(${code});\n`);
+    return `RESUME_EXTRAS_VALIDATED=1; ${env} SHIP_INTENT=${JSON.stringify(stub)}; RESUME_GENERATION=g; ship_exit_donating 3`;
+  }
+
+  it('a recorded donation keeps the refusal status and replaces the notice', () => {
+    const r = run(['a.ts'], donatingExit(0));
+
+    expect(r.status).toBe(3);
+    expect(r.stderr).toBe(
+      'ship: recorded 1 path(s) briefed by this retry — a bare devkit ship --resume feat/x carries them\n',
+    );
+  });
+
+  it('a missed donation keeps the refusal status and still prints the notice', () => {
+    const r = run(['a.ts'], donatingExit(1));
+
+    expect(r.status).toBe(3);
+    expect(r.stderr).toContain('NOT recorded');
+  });
+
+  it('extras that never passed path validation are not donated, however the stub answers', () => {
+    // A preserved-commit resume skips ship_refuse_unmatched_paths, so its extras may be typos.
+    const r = run(['a.ts'], donatingExit(0, 'RESUME_EXTRAS_VALIDATED=0;'));
+
+    expect(r.status).toBe(3);
+    expect(r.stderr).toContain('NOT recorded');
+  });
+
+  it('--dry-gates never donates', () => {
+    const r = run(['a.ts'], donatingExit(0, 'DRY_GATES=1;'));
+
+    expect(r.status).toBe(3);
+    expect(r.stderr).toContain('NOT recorded');
   });
 });

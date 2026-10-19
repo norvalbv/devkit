@@ -16,6 +16,21 @@ ship_resume_brief() {
   [ "${#RESUME_EXTRA_PATHS[@]}" -eq 0 ] || { RESUME_EXTRAS_UNRECORDED=1; trap ship_resume_extras_notice EXIT; }
 }
 
+RESUME_EXTRAS_VALIDATED=0 # set by the caller once ship_refuse_unmatched_paths passed
+
+# ship_exit_donating <rc> — exit after a content refusal, first adding this retry's validated extras
+# to the record it read (same generation, so no attempt's ownership moves). Else the notice fires.
+ship_exit_donating() {
+  if [ "${RESUME_EXTRAS_UNRECORDED:-0}" -eq 1 ] && [ "${RESUME_EXTRAS_VALIDATED:-0}" -eq 1 ] &&
+    [ "${DRY_GATES:-0}" -eq 0 ] &&
+    node "$SHIP_INTENT" donate --root "$ROOT" --branch "$BR" \
+      --expect-generation "$RESUME_GENERATION" -- "${RESUME_EXTRA_PATHS[@]}"; then
+    RESUME_EXTRAS_UNRECORDED=0
+    echo "ship: recorded ${#RESUME_EXTRA_PATHS[@]} path(s) briefed by this retry — a bare devkit ship --resume $(printf '%q' "$BR") carries them" >&2
+  fi
+  exit "$1"
+}
+
 # ship_resume_extras_notice — EXIT-trap hook reading the caller's BR and RESUME_EXTRA_PATHS. Silent
 # unless the exit is a failure and RESUME_EXTRAS_UNRECORDED is still armed (no record write tried).
 ship_resume_extras_notice() {
