@@ -258,6 +258,7 @@ export function printRelocatedAntiSlopFindings(groups: readonly RelocatedGroup[]
 export function reportRelocatedFailure(
   newErrorCount: number,
   relocated: readonly RelocatedGroup[],
+  overlay: boolean,
   baseRef?: string,
 ): void {
   const errors = relocated.filter((group) => group.severity === 'error');
@@ -265,9 +266,8 @@ export function reportRelocatedFailure(
   failLine(
     `anti-slop: FAIL — ${newErrorCount} new, ${moved} relocated from ${formatSources(errors.flatMap((group) => group.sources))}; baseline unchanged`,
   );
-  failLine(
-    `anti-slop: re-anchor relocated debt with \`${relocationRemedy(baseRef)}\`, then stage ${ANTI_SLOP_BASELINE_REL}`,
-  );
+  const stage = overlay ? '' : `, then stage ${ANTI_SLOP_BASELINE_REL}`;
+  failLine(`anti-slop: re-anchor relocated debt with \`${relocationRemedy(baseRef)}\`${stage}`);
   writeGateReason(
     errors.map(
       (group) =>
