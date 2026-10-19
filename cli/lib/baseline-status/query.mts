@@ -183,6 +183,19 @@ function producerRemedy(workflow: string, artifact: string, branch: string): str
   );
 }
 
+/** What every step of one walk shares; `skippedRuns` and `runsWithoutArtifact` accumulate in place. */
+interface WalkContext {
+  cwd: string;
+  branch: string;
+  workflow: string;
+  artifact: string;
+  maxCommits: number;
+  file?: string;
+  test?: string;
+  skippedRuns: BaselineAnswer['skippedRuns'];
+  runsWithoutArtifact: number;
+}
+
 /** The whole query. Never throws for a knowable-unknown; the caller renders whatever comes back. */
 export function queryBaseline({
   cwd = process.cwd(),
@@ -202,15 +215,28 @@ export function queryBaseline({
   maxRuns?: number;
 } = {}): BaselineAnswer {
   const branch = resolveRef(cwd, ref);
-  workflow = workflowSelector(workflow);
-  const skippedRuns: BaselineAnswer['skippedRuns'] = [];
-  const maxCommits = Math.min(Math.max(maxRuns, 1), MAX_RUNS_CEILING);
+  const ctx: WalkContext = {
+    cwd,
+    branch,
+    workflow: workflowSelector(workflow),
+    artifact,
+    maxCommits: Math.min(Math.max(maxRuns, 1), MAX_RUNS_CEILING),
+    file,
+    test,
+    skippedRuns: [],
+    runsWithoutArtifact: 0,
+  };
+  const { skippedRuns } = ctx;
   let walk: BranchWalk | undefined;
-  let runsWithoutArtifact = 0;
   for (let i = 0; ; i++) {
     let walked: ReturnType<BranchWalk['at']>;
     try {
-      walk ??= new BranchWalk({ cwd, workflow, ref: branch, maxCommits });
+      walk ??= new BranchWalk({
+        cwd,
+        workflow: ctx.workflow,
+        ref: branch,
+        maxCommits: ctx.maxCommits,
+      });
       walked = walk.at(i);
     } catch (e) {
       // Answering from an older commit after a failed lookup would present it as the newest evidence.
@@ -218,57 +244,65 @@ export function queryBaseline({
         e instanceof GhUnavailable
           ? e
           : new GhUnavailable('gh-failed', e instanceof Error ? e.message : String(e));
-      return {
-        ...lookupFailure(failure, { branch, workflow, artifact }),
-        ...walkFields(walk),
-        skippedRuns,
-      };
+      return { ...lookupFailure(failure, ctx), ...walkFields(walk), skippedRuns };
     }
-    if (!walked) break;
-    const { run, behind } = walked;
-    if (!isUsableRun(run)) {
-      skippedRuns.push({
-        runId: run.databaseId,
-        sha: run.headSha,
-        conclusion: run.conclusion || run.status,
-        why: 'did not run to a pass/fail conclusion, so it carries no test report',
-      });
-      continue;
-    }
-    let summary: TestReportSummary;
-    try {
-      summary = loadSummary({ cwd, run, artifact });
-    } catch (e) {
-      const why = e instanceof Error ? e.message : String(e);
-      skippedRuns.push({
-        runId: run.databaseId,
-        sha: run.headSha,
-        conclusion: run.conclusion,
-        why,
-      });
-      // "This run has no artifact" is a fact about the run, so walking on to an older one is right.
-      // ANY other failure — including a native EACCES/ENOSPC that is not a GhUnavailable at all —
-      // means evidence may exist but could not be read, and answering from an older run would
-      // present a stale baseline as the current one.
-      const isMissing = e instanceof GhUnavailable && e.reason === 'no-artifact';
-      if (isMissing) runsWithoutArtifact++;
-      if (!isMissing) {
-        const reason = e instanceof GhUnavailable ? e.reason : 'artifact-unreadable';
-        return { ...unknownAnswer(branch, reason, why), ...walkFields(walk), skippedRuns };
-      }
-      continue;
-    }
-
-    const branchWalk = walk;
-    const answer = answerFromRun({ cwd, run, summary, ref: branch, file, test }, (path) =>
-      findLastPassed({ cwd, walk: branchWalk, artifact, path }),
-    );
-    // The walk-back may have gone further than the answering run.
-    return { ...answer, ...walkFields(walk), commitsBehindHead: behind, skippedRuns };
+    if (!walked) return exhaustedWalk(walk, ctx);
+    const answer = walkStep(walk, walked, ctx);
+    // walkFields after the step: the walk-back may have gone further than the answering run.
+    if (answer) return { ...answer, ...walkFields(walk), skippedRuns };
   }
+}
 
-  const looked = walk?.commitsLooked ?? 0;
-  if (walk?.endedAtShallowBoundary()) {
+/** One walked run: its answer, a named unknown that stops the walk, or undefined to walk on. */
+function walkStep(
+  walk: BranchWalk,
+  { run, behind }: NonNullable<ReturnType<BranchWalk['at']>>,
+  ctx: WalkContext,
+): BaselineAnswer | undefined {
+  const { cwd, branch, artifact, file, test, skippedRuns } = ctx;
+  if (!isUsableRun(run)) {
+    skippedRuns.push({
+      runId: run.databaseId,
+      sha: run.headSha,
+      conclusion: run.conclusion || run.status,
+      why: 'did not run to a pass/fail conclusion, so it carries no test report',
+    });
+    return undefined;
+  }
+  let summary: TestReportSummary;
+  try {
+    summary = loadSummary({ cwd, run, artifact });
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    skippedRuns.push({
+      runId: run.databaseId,
+      sha: run.headSha,
+      conclusion: run.conclusion,
+      why,
+    });
+    // "No artifact" is a fact about the run, so walk on. ANY other failure (even a native EACCES)
+    // means evidence may exist but is unreadable, and an older run would pose as the current baseline.
+    if (e instanceof GhUnavailable && e.reason === 'no-artifact') {
+      ctx.runsWithoutArtifact++;
+      return undefined;
+    }
+    return unknownAnswer(
+      branch,
+      e instanceof GhUnavailable ? e.reason : 'artifact-unreadable',
+      why,
+    );
+  }
+  const answer = answerFromRun({ cwd, run, summary, ref: branch, file, test }, (path) =>
+    findLastPassed({ cwd, walk, artifact, path }),
+  );
+  return { ...answer, commitsBehindHead: behind };
+}
+
+/** The walk ran out of commits without a usable run: name why, and what would fix it. */
+function exhaustedWalk(walk: BranchWalk, ctx: WalkContext): BaselineAnswer {
+  const { branch, workflow, artifact, maxCommits, skippedRuns } = ctx;
+  const looked = walk.commitsLooked;
+  if (walk.endedAtShallowBoundary()) {
     const unknown = unknownAnswer(
       branch,
       'history-unavailable',
@@ -293,7 +327,7 @@ export function queryBaseline({
   };
   // Only where the producer is the gap: a window of cancelled runs is a CI-history fact that no
   // workflow edit fixes, and telling the reader to rewire CI there would be advice about nothing.
-  if (!ranAtAll || runsWithoutArtifact > 0) {
+  if (!ranAtAll || ctx.runsWithoutArtifact > 0) {
     answer.remedy = producerRemedy(workflow, artifact, branch);
   }
   // Rebase merges and path filters leave run-less commits; a full window of them says nothing of CI.
