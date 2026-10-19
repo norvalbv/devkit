@@ -59,6 +59,7 @@ const EXPECTED_ASSETS = [
 const EXPECTED_RUNTIME_MODULES = [
   'gate-engine/review/baseline-fallow-paths',
   'gate-engine/review/baseline-gate',
+  'gate-engine/review/baseline/base-resolve-hook',
 ] as const;
 
 const { mkTmp, cleanup } = rootRegistry();
@@ -78,6 +79,7 @@ function packageFixture(
 ): string {
   const root = mkTmp(prefix);
   for (const assetPath of PACKAGED_REVIEW_ASSET_PATHS) write(root, assetPath);
+  write(root, `gate-engine/review/baseline/base-resolve-hook${extension}`, 'export {};\n');
   write(
     root,
     `gate-engine/review/baseline-fallow-paths${extension}`,
