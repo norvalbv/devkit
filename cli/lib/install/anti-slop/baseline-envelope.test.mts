@@ -75,12 +75,24 @@ describe('anti-slop failure reasons', () => {
       from: [],
       sources: ['src/a.mts'],
     };
-    reportRelocatedFailure(0, [relocated]);
+    reportRelocatedFailure(0, [relocated], false);
     const [summary, remedy, ...locations] = readGateReason(file);
     expect(summary).toBe('anti-slop: FAIL — 0 new, 1 relocated from src/a.mts; baseline unchanged');
-    expect(remedy).toContain('anti-slop: re-anchor relocated debt with `');
+    expect(remedy).toBe(
+      'anti-slop: re-anchor relocated debt with `devkit anti-slop adopt-relocations`, then stage .anti-slop-baseline.json',
+    );
     expect(locations).toEqual([
       'RELOCATED anti-slop/no-unknown-returns src/b.mts:7:39 (1 relocated)',
     ]);
+  });
+
+  it('omits the staging step from the re-anchor command in an overlay install', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const file = reasonFile();
+    const relocated = { ...group('src/b.mts', 7), relocatedCount: 1, from: [], sources: [] };
+    reportRelocatedFailure(0, [relocated], true);
+    expect(readGateReason(file)[1]).toBe(
+      'anti-slop: re-anchor relocated debt with `devkit anti-slop adopt-relocations`',
+    );
   });
 });
