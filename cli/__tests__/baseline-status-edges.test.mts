@@ -1345,6 +1345,27 @@ describe('head resolution and run filtering at the boundaries', () => {
     expect(answer).toMatchObject({ head, skippedRuns: [{ runId: 200, sha: head }] });
   });
 
+  it('stops on a native artifact-read error instead of answering from an older run', () => {
+    // A TMPDIR that is a file makes the download's mkdtemp throw ENOTDIR: a plain Error, no GhUnavailable.
+    withRuns([
+      runRef({ databaseId: 200, headSha: head }),
+      runRef({ databaseId: 100, headSha: older }),
+    ]);
+    withSummary(100, 'passed');
+    const tmp = process.env.TMPDIR;
+    process.env.TMPDIR = join(fixture, 'runs.json');
+    try {
+      const answer = queryBaseline({ cwd: dir, ref: 'main' });
+      expect(answer).toMatchObject({ reason: 'artifact-unreadable', runId: null, head });
+      expect(answer.skippedRuns).toEqual([
+        expect.objectContaining({ runId: 200, why: expect.stringContaining('ENOTDIR') }),
+      ]);
+    } finally {
+      if (tmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = tmp;
+    }
+  });
+
   it('names a lookup failure in the --file walk-back rather than calling it missing history', () => {
     withRuns([runRef({ databaseId: 200, headSha: head }), { headSha: older, databaseId: 'x' }]);
     withSummary(200, 'failed');

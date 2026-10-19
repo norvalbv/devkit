@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RunRef } from '../lib/baseline-status/gh.mts';
 
-/** Turn `dir` into a repo on `main` whose `origin` is itself, so `git ls-remote origin` is offline. */
+/** Turn `dir` into a repo on `main` with an `origin` a test can re-point; heads come from the gh stub. */
 export function seedBranch(dir: string): string {
   const git = (...a: string[]) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' });
   git('init', '-b', 'main');
