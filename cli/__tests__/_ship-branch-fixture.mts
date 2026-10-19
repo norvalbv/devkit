@@ -355,6 +355,14 @@ export function manifestOf(dir) {
   return JSON.parse(readFileSync(join(dir, '.devkit/reconcile-manifest.json'), 'utf8'));
 }
 
+/** The sha a ref names in a bare remote. */
+export function bareSha(bare, ref) {
+  return execFileSync('git', ['-C', bare, 'rev-parse', ref], {
+    env: { ...process.env, ...GIT_ENV },
+    encoding: 'utf8',
+  }).trim();
+}
+
 export function remoteBranchExists(bare, br) {
   try {
     return Boolean(

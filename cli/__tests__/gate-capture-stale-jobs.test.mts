@@ -106,6 +106,15 @@ describe('run_gates_with_capture — timeout attribution', () => {
 
     expect(result.stdout, result.stderr).toContain('RUNNER_RC=1 REAPED=1');
     expect(result.stderr).toContain('could not persist gate output');
+    expect(result.stderr).not.toContain('gate chain passed');
+  });
+
+  // A hook's own exit 124 is a failure, not the supervisor's reap status; it must never publish.
+  it('fails a ship whose gate itself exits 124 while leaving a process behind', () => {
+    const result = runWithShim(':', `${LEAK_AND_EXIT_0}\nprocess.exitCode = 124;`, 30, 'ship');
+
+    expect(result.stdout, result.stderr).toContain('RUNNER_RC=1 REAPED=0');
+    expect(result.stderr).not.toContain('gate chain passed');
   });
 
   it('keeps the ceiling banner when gate output imitates the reap notice', () => {

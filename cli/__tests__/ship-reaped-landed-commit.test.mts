@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 import { rewriteRepo } from './_reship-rewrite-fixture.mts';
 import {
+  bareSha,
   bodyUpdateRepo,
   dirs,
   GIT_ENV,
@@ -27,13 +28,6 @@ function events(sink: string) {
     .trim()
     .split('\n')
     .map((line) => JSON.parse(line));
-}
-
-function bareSha(bare: string, ref: string) {
-  return execFileSync('git', ['--git-dir', bare, 'rev-parse', ref], {
-    env: { ...process.env, ...GIT_ENV },
-    encoding: 'utf8',
-  }).trim();
 }
 
 function shipLeaking(extraPath = '') {
@@ -89,6 +83,7 @@ describe('ship — a landed commit whose hook left a process behind', () => {
 
     expect(r.status, r.stderr).toBe(1);
     expect(r.stderr).toContain('could not persist gate output');
+    expect(r.stderr).not.toContain('gate chain passed');
     expect(remoteBranchExists(bare, 'feat/reaped')).toBe(false);
     expect(localBranchExists(git, 'refs/devkit/ship-receipts/feat/reaped')).toBe(false);
     expect(events(sink).find((e) => e.type === 'ship_result')).toMatchObject({

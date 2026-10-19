@@ -154,7 +154,6 @@ run_gates_with_capture() {
   if [ "$reaped" -eq 1 ] && [ "$rc" -eq 124 ] && [ "$label" = ship ]; then
     rc=0
     RUN_GATES_REAPED=1
-    echo "✓ ship: the gate chain passed; a process it started outlived it and was reaped after $((SECONDS - gate_started))s." >&2
   fi
 
   # The ownership token exists in this parent before target launch. A fresh supervisor can adopt
@@ -215,6 +214,8 @@ run_gates_with_capture() {
     rc=1
   fi
   set -e
+  [ "$rc" -ne 0 ] || [ "$RUN_GATES_REAPED" -ne 1 ] ||
+    echo "✓ ship: the gate chain passed; a process it started outlived it and was reaped after $((SECONDS - gate_started))s." >&2
 
   # 124 is the supervisor's status for two causes: the expiry ceiling, or a command that exited 0 while a
   # process it started was still running and had to be reaped. The supervisor marks the second in the

@@ -4,15 +4,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { devkitVersion } from '../../gate-engine/devkit-version.mts';
-import {
-  testExecFileSync as execFileSync,
-  findModernBash,
-  testSpawnSync as spawnSync,
-} from './_helpers.mts';
+import { findModernBash, testSpawnSync as spawnSync } from './_helpers.mts';
 import { MODERN_BASH_SKIP_NOTE } from './_modern-bash.mts';
 import {
+  bareSha,
   createScopedPreservedCommit,
-  GIT_ENV,
   installHook,
   localBranchExists,
   mintGateAddsRecord,
@@ -55,13 +51,6 @@ function retryShip(dir, publishEnv, branch, paths, shell = '/bin/bash') {
     encoding: 'utf8',
     env: publishEnv,
   });
-}
-
-function bareSha(bare, ref) {
-  return execFileSync('git', ['-C', bare, 'rev-parse', ref], {
-    env: { ...process.env, ...GIT_ENV },
-    encoding: 'utf8',
-  }).trim();
 }
 
 describe('ship-branch.sh — resume past a gate-widened scope', () => {
