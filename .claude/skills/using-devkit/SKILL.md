@@ -105,7 +105,10 @@ devkit command.
   `devkit ship <new-branch> … --base <base>`.
 - **A `--pr` re-ship changes the existing PR description only with explicit `--body` or
   `--body-file`.** Omitting both preserves it; piped stdin remains commit-only. Use `--body ""` to
-  clear the description deliberately.
+  clear the description deliberately. A body flag with no content change is refused, exit 1, "the
+  PR body was NOT updated"; to change only the description run
+  `devkit pr-body <branch> --body-file <file>`. A `--resume` whose commit is already pushed still
+  publishes its recorded body ("published the recorded PR body").
 - **Ship owns the PR body's `<!-- devkit:evidence:begin -->` … `end` block.** When
   `guard.config.json` has an `evidence` entry and the diff adds or changes tests, ship runs them on
   red (PR base plus only the PR's test files) and green (PR head) after the PR opens and writes the
