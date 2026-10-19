@@ -71,6 +71,10 @@ function runLoggingGitStdin(repo, skill, cmd) {
     `#!/bin/sh\nif [ -p /dev/stdin ] || [ -S /dev/stdin ]; then s=piped; else s=closed; fi\necho "$s $*" >> "${log}"\nexec "${realGit}" "$@"\n`,
     { mode: 0o755 },
   );
+  // Positive control: a default sync spawn pipes stdin, so the stand-in must log it as piped.
+  execFileSync(join(bin, 'git'), ['--version']);
+  expect(readFileSync(log, 'utf8')).toMatch(/^piped --version\n$/);
+  rmSync(log);
   const {
     DEVKIT_REVIEW_STAGED_FILES: _inline,
     DEVKIT_REVIEW_STAGED_FILES_PATH: _file,
