@@ -95,8 +95,8 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   prompt, model and cache key. Its PASS is cached, so the next `devkit ship --resume` skips that lens
   — but only when the same paths ship briefed are staged and the `GUARD_REVIEW_*` model env matches.
 - **Reproduce a codex judge's sandbox before trusting a "the sandbox denies X" claim.** `codex
-  sandbox` applies the same host sandbox as the judge's `codex exec` (Seatbelt on macOS, Landlock on
-  Linux), with no model call, and runs the command in your login shell as the judge does. From the
+  sandbox` applies the same host sandbox as the judge's `codex exec` (Seatbelt on macOS, bubblewrap
+  on Linux), with no model call, and runs the command in your login shell as the judge does. From the
   repo root, a workspace-write (investigating) judge's view is:
   `r=$PWD s=$(mktemp -d); cp AGENTS.md "$s"; (cd "$s" && CODEX_HOME=$(mktemp -d) codex sandbox -c 'sandbox_mode="workspace-write"' -c "sandbox_workspace_write.writable_roots=[\"$r/.claude\"]" -- "$SHELL" -lc '<cmd>'); echo "exit $?"`.
   On macOS, add `--log-denials` after `sandbox` to name each denied operation; Linux has no such
