@@ -341,6 +341,22 @@ credits is usually the shared window crossing 100% while the ship ran. An answer
 row's `resets_at` (epoch milliseconds) is the window clearing. `no role` marks a judge on a model the preflight did
 not list. A ship id reused across attempts joins to its newest reading.
 
+## `codex tool gate inactive: saw K of N commands`
+
+A codex judge (`gpt-*` model) runs a PreToolUse hook that allows only reads: shell reads, git reads
+and the reviewer's checklist script. Every call it decides is logged. This warning means the judge
+ran N commands but the hook allowed only K, so some ran unchecked. The verdict stands, and the line is
+recorded as a `gate_degraded` event with cause `tool-gate-inactive`.
+
+The usual cause is a codex release that changed how it trusts or runs hooks. The hook is tested on
+codex-cli 0.150.0, 0.159.3 and 0.162.1. Check `codex --version`; to use a known build, set
+`GUARD_CODEX_BIN` to its path, or move the judge to a claude model. A managed codex config that
+allows only managed hooks has the same effect.
+
+A refused call is a different line: the reviewer's `denied` warning names it (for example
+`Bash: bun test`), and `judge_exec` counts it in `permission_denials`. Judges review by reading;
+tests run in the pre-push suite.
+
 ## A reviewer shows `PASS over an incomplete packet` (or `partial evidence`)
 
 Each AI reviewer reads a capped diff packet. On a large diff, files past the budget are OMITTED or
