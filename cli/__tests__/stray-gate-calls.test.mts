@@ -192,19 +192,19 @@ describe('strayGateCalls', () => {
 
 // A consumer who selected fallow before devkit owned the gate has a block without it: doctor must
 // report that as fixable drift, so `doctor --fix` regenerates it.
-describe('checkHusky — fallow', () => {
-  const doctorOn = (hookText: string, fallow: boolean) => {
-    const root = mkdtempSync(join(tmpdir(), 'dk-doctor-fallow-'));
-    try {
-      execFileSync('git', ['init', '-q'], { cwd: root });
-      mkdirSync(join(root, '.husky'));
-      writeFileSync(join(root, '.husky', 'pre-commit'), hookText);
-      return checkHusky(root, ['review'], fallow);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  };
+function doctorOn(hookText: string, fallow: boolean, guards = ['review']) {
+  const root = mkdtempSync(join(tmpdir(), 'dk-doctor-hook-'));
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    mkdirSync(join(root, '.husky'));
+    writeFileSync(join(root, '.husky', 'pre-commit'), hookText);
+    return checkHusky(root, guards, fallow);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
 
+describe('checkHusky — fallow', () => {
   it('reports a selected fallow gate missing from the block as fixable drift', () => {
     const r = doctorOn(buildFullHook({ guards: ['review'] }), true);
     expect(r).toMatchObject({ status: 'DRIFT', fixable: true });
@@ -216,5 +216,17 @@ describe('checkHusky — fallow', () => {
       'true',
     );
     expect(doctorOn(gutted, true)).toMatchObject({ status: 'DRIFT', fixable: true });
+  });
+});
+
+describe('checkHusky — decisions-only selection', () => {
+  it('flags a hook without the deterministic block, which runs the decision-checks gate', () => {
+    const fresh = buildFullHook({ guards: ['decisions'] });
+    const stale = fresh.replace(/# devkit:deterministic\n[\s\S]*?# \/devkit:deterministic\n/, '');
+    expect(stale).not.toContain('guard-deterministic');
+    const r = doctorOn(stale, false, ['decisions']);
+    expect(r).toMatchObject({ status: 'DRIFT', fixable: true });
+    expect(r.detail).toContain('deterministic gates');
+    expect(doctorOn(fresh, false, ['decisions']).status).toBe('OK');
   });
 });

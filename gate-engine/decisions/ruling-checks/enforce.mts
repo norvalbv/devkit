@@ -40,6 +40,15 @@ interface Link extends LiveLink {
 }
 type ParseLink = (text: string) => LiveLink | null;
 
+/** `p` with symlinks resolved, or as given when it does not exist yet. */
+function canonical(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
 function decisionsDir(cwd: string): string {
   const dir = resolveFromCwd(resolveGuardConfig(cwd), 'decisionsDir');
   if (!dir) throw new Error('decisionsDir did not resolve — check guard config');
@@ -102,7 +111,11 @@ function readLink(cwd: string, rev: '' | 'HEAD', file: string, parse: ParseLink)
 
 /** Every live link in the commit index, plus HEAD's link for each record this commit stages. */
 export async function linkedChecks(cwd: string, staged: string[]): Promise<Link[]> {
-  const rel = path.relative(cwd, decisionsDir(cwd)).split(path.sep).join('/') || '.';
+  const dir = canonical(decisionsDir(cwd));
+  const fromTop = path.relative(canonical(git(cwd, ['rev-parse', '--show-toplevel']).trim()), dir);
+  // A decision log outside the repository is invisible to git, so nothing in it can be linked.
+  if (fromTop.split(path.sep)[0] === '..' || path.isAbsolute(fromTop)) return [];
+  const rel = path.relative(canonical(cwd), dir).split(path.sep).join('/') || '.';
   const indexHits = grepLinked(cwd, '--cached', [rel]).filter((p) => isRecord(rel, p));
   const stagedRecords = staged.filter((p) => isRecord(rel, p));
   // An unborn HEAD has no tree, so it links nothing.

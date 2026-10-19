@@ -3,7 +3,15 @@
  * against real git fixture repos so HEAD, the index and the working tree each say what they say.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -31,6 +39,7 @@ afterEach(() => {
   err = [];
   delete process.env.GUARD_DECISION_CHECKS_OK;
   delete process.env.DEVKIT_GATE_EVENTS;
+  delete process.env.GUARD_DECISIONS_DIR;
   vi.restoreAllMocks();
 });
 
@@ -118,6 +127,32 @@ describe('decision-checks gate', () => {
     const exec = stubSpawn(1);
     expect(await runGate(root, exec)).toBe(0);
     expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('passes, running nothing, when decisionsDir sits outside the repository', async () => {
+    const root = repo();
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'enforce-outside-')));
+    roots.push(outside);
+    write(outside, {
+      'demo.md': record(target('2026-10-01', 'src/**', [`**Check:** ${CHECK} — x`])),
+    });
+    process.env.GUARD_DECISIONS_DIR = outside;
+    stage(root, { 'src/a.txt': 'bad\n' });
+    const exec = stubSpawn(1);
+    expect(await runGate(root, exec)).toBe(0);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('still runs a link when decisionsDir names the repository through a symlink', async () => {
+    const root = repo();
+    const aliasDir = realpathSync(mkdtempSync(join(tmpdir(), 'enforce-alias-')));
+    roots.push(aliasDir);
+    symlinkSync(root, join(aliasDir, 'repo'));
+    process.env.GUARD_DECISIONS_DIR = join(aliasDir, 'repo', 'docs', 'decisions');
+    stage(root, { 'src/a.txt': 'bad\n' });
+    const exec = stubSpawn(1);
+    expect(await runGate(root, exec)).toBe(1);
+    expect(exec).toHaveBeenCalled();
   });
 
   it('runs the Check argv-split with no shell and no stdin, and passes on exit 0', async () => {

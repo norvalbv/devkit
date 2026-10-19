@@ -15,7 +15,12 @@ import { basename, isAbsolute, join } from 'node:path';
 import { REVIEWABLE_GUARD_IDS } from '../components.mts';
 import { detectGitRoot } from '../detect-git-root.mts';
 import { markEnd, markStart } from '../husky/husky.mts';
-import { extractGuardBlock, hookStages, UI_EVIDENCE_ID } from '../husky/husky-block.mts';
+import {
+  extractGuardBlock,
+  hookStages,
+  UI_EVIDENCE_ID,
+  wantsDeterministic,
+} from '../husky/husky-block.mts';
 import { installHealAlias } from '../husky/overlay/heal-alias.mts';
 import { overlayHooksPath } from '../husky/overlay/overlay-home.mts';
 import { firstLine } from '../standalone.mts';
@@ -76,7 +81,7 @@ export function checkHusky(cwd: string, selectedGuards: string[], fallow = false
   const OWN_FRAGMENT = new Set(['decisions', 'review', UI_EVIDENCE_ID]);
   const gates = selectedGuards.filter((guard) => REVIEWABLE_GUARD_IDS.includes(guard));
   const missing: string[] = [];
-  if (gates.some((g) => !OWN_FRAGMENT.has(g)) && !block.includes('guard-deterministic')) {
+  if (wantsDeterministic({ guards: gates }) && !block.includes('guard-deterministic')) {
     missing.push('deterministic gates');
   }
   for (const g of gates) {
