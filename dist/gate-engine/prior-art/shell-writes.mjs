@@ -13,6 +13,22 @@ const INLINE_SCRIPT_FLAGS = new Set(['-c', '-e', '--eval', '-']);
 const SED_IN_PLACE = /^(-[nErsuz]*i|--in-place)/;
 const PERL_IN_PLACE = /^-[0-9alnpsw]*i/;
 const XARGS_VALUE_FLAGS = new Set(['-I', '-n', '-P', '-L', '-d', '-E', '-s']);
+const NO_VALUE_FLAGS = new Set();
+// Flags whose next word is a value, never a file operand (`truncate -s 0 f`, `cp -t dir a b`).
+const TOUCH_VALUE_FLAGS = new Set(['-d', '-t', '-r', '--date', '--reference']);
+const TRUNCATE_VALUE_FLAGS = new Set(['-s', '-r', '--size', '--reference']);
+const COPY_VALUE_FLAGS = new Set([
+    '-S',
+    '-m',
+    '-o',
+    '-g',
+    '--suffix',
+    '--mode',
+    '--owner',
+    '--group',
+]);
+const TARGET_DIR_FLAGS = new Set(['-t', '--target-directory']);
+const ATTACHED_TARGET_DIR = /^(--target-directory=|-t)(.+)$/;
 /** A word's value when it is literal; `null` when an expansion or substitution decides it. */
 function literal(word) {
     return word && !/[$`]/.test(word.text) ? word.value : null;
@@ -41,8 +57,16 @@ function writeRedirect(r) {
 function redirectsWrite(redirects, scope) {
     return redirects.some((r) => writeRedirect(r) && writtenPlace(literal(r.target), scope));
 }
-function operands(args) {
-    return args.filter((a) => !a?.startsWith('-'));
+function operands(args, valueFlags = NO_VALUE_FLAGS) {
+    const found = [];
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i] ?? null;
+        if (!arg?.startsWith('-'))
+            found.push(arg);
+        else if (valueFlags.has(arg))
+            i++;
+    }
+    return found;
 }
 /** Where `patch` writes: `-d DIR`, `-dDIR` or `--directory[=]DIR`, else cwd. */
 function patchDir(args) {
@@ -72,7 +96,8 @@ function interpreterWrites(args, { filter, stdinScript }) {
 }
 /** `xargs [flags] cmd …` and `find … -exec cmd … ;` run `cmd` on paths only known at run time. */
 function wrappedWrites(inner, context) {
-    return inner.length > 0 && verbWrites(inner, { ...context, filter: true, stdinScript: false });
+    const nested = { ...context, filter: true, stdinScript: false, wrapped: true };
+    return inner.length > 0 && verbWrites(inner, nested);
 }
 function xargsInner(args) {
     let i = 0;
@@ -98,8 +123,28 @@ function gitApplyWrites(args, { scope }) {
     }
     return args[i] === 'apply' && writtenPlace(dir, scope);
 }
-const everyOperand = (args, { scope }) => operands(args).some((a) => writtenPlace(a, scope));
-const lastOperand = (args, { scope }) => writtenPlace(operands(args).at(-1) ?? null, scope);
+/** Every operand is written; with none under xargs or find, the run-time operands are. */
+const everyOperand = (valueFlags) => (args, { scope, wrapped }) => {
+    const files = operands(args, valueFlags);
+    return files.length === 0 ? wrapped : files.some((a) => writtenPlace(a, scope));
+};
+/** The `-t DIR`, `-tDIR` or `--target-directory[=]DIR` of cp/mv/install; undefined when absent. */
+function targetDir(args) {
+    for (const [i, a] of args.entries()) {
+        if (a !== null && TARGET_DIR_FLAGS.has(a))
+            return args[i + 1] ?? null;
+        const attached = a === null ? null : ATTACHED_TARGET_DIR.exec(a);
+        if (attached)
+            return attached[2];
+    }
+    return undefined;
+}
+/** `cp`/`mv`/`install` write into their target directory when given, else their last operand. */
+const copyTarget = (args, { scope }) => {
+    const dir = targetDir(args);
+    const target = dir === undefined ? operands(args, COPY_VALUE_FLAGS).at(-1) : dir;
+    return writtenPlace(target ?? null, scope);
+};
 const shellScript = (args, { scope }) => args[0] === '-c' && args[1] != null && scriptWrites(args[1], scope);
 const VERB_RULES = new Map([
     ['xargs', (args, context) => wrappedWrites(xargsInner(args), context)],
@@ -113,12 +158,12 @@ const VERB_RULES = new Map([
             ? inPlaceWrites(args, context.scope)
             : interpreterWrites(args, context),
     ],
-    ['tee', everyOperand],
-    ['touch', everyOperand],
-    ['truncate', everyOperand],
-    ['cp', lastOperand],
-    ['mv', lastOperand],
-    ['install', lastOperand],
+    ['tee', everyOperand(NO_VALUE_FLAGS)],
+    ['touch', everyOperand(TOUCH_VALUE_FLAGS)],
+    ['truncate', everyOperand(TRUNCATE_VALUE_FLAGS)],
+    ['cp', copyTarget],
+    ['mv', copyTarget],
+    ['install', copyTarget],
     ['bash', shellScript],
     ['sh', shellScript],
     ['zsh', shellScript],
@@ -133,7 +178,7 @@ function commandWrites(command, scope, filter) {
         return true;
     const stdinScript = command.redirects.some((r) => STDIN_SCRIPT_REDIRECTS.has(r.operator));
     const words = [command.name, ...command.suffix].map(literal);
-    return verbWrites(words, { scope, filter, stdinScript });
+    return verbWrites(words, { scope, filter, stdinScript, wrapped: false });
 }
 function children(node) {
     switch (node.type) {
