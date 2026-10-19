@@ -30,9 +30,14 @@ const LOCKFILE_LADDER: [lockfile: string, install: string][] = [
 
 export const LOCKFILES = LOCKFILE_LADDER.map(([lockfile]) => lockfile);
 
-/** A regular file (or a link to one), as bash `[ -f ]` tests it: a directory never counts. */
-const hasLockfile = (dir: string, lockfile: string): boolean =>
-  statSync(join(dir, lockfile), { throwIfNoEntry: false })?.isFile() === true;
+/** A regular file or a link to one, as bash `[ -f ]` tests it; a stat error reads as absent. */
+function hasLockfile(dir: string, lockfile: string): boolean {
+  try {
+    return statSync(join(dir, lockfile)).isFile();
+  } catch {
+    return false;
+  }
+}
 
 const validPart = (part: string): boolean =>
   part.length > 0 && part !== '.' && part !== '..' && !part.includes('\\');

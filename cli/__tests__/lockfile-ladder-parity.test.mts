@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -43,9 +43,13 @@ describe('resolve_pm and dependencyInstallRemedy share one lockfile ladder', () 
     },
   );
 
-  it('a directory named like a lockfile counts for neither ladder', () => {
+  // A self-referencing symlink makes stat fail with ELOOP, which bash `-f` also reads as absent.
+  it.each([
+    ['a directory', (path: string) => mkdirSync(path)],
+    ['a symlink loop', (path: string) => symlinkSync(path, path)],
+  ])('%s named like a lockfile counts for neither ladder', (_, make) => {
     const dir = mkdtempSync(join(root, 'repo-'));
-    mkdirSync(join(dir, 'bun.lock'));
+    make(join(dir, 'bun.lock'));
     writeFileSync(join(dir, 'package-lock.json'), '');
     expect(dependencyInstallRemedy(dir)).toBe('npm ci');
     expect(bash('. "$1"; resolve_pm', dir)).toBe('npm');
