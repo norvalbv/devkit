@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import type { Attribution } from '../../baseline-status/attribution.mts';
 import type { UnknownReason } from '../../baseline-status/gh.mts';
 import { classifyChecksFailure, type ExecFailure } from './classify.mts';
+import { withFailedSteps } from './steps.mts';
 import { recordCiEvent } from './telemetry.mts';
 
 /** The five states gh collapses `state` into. Ordered for stable rendering, not by severity. */
@@ -42,6 +43,8 @@ export interface CheckRow {
   state: string;
   link: string;
   workflow: string;
+  /** `check › step` for a still-pending job whose step already failed; set only by steps.mts. */
+  failedSteps?: string[];
 }
 
 /**
@@ -115,7 +118,7 @@ export function summarise(rows: CheckRow[]): Summary {
     failures: rows.filter((r) => r.bucket === 'fail'),
     pending: rows.filter((r) => r.bucket === 'pending'),
     cancelled: rows.filter((r) => r.bucket === 'cancel'),
-    terminal: counts.pending === 0,
+    terminal: counts.pending === 0 || counts.fail > 0, // a red check cannot turn green
     outcome,
   };
 }
@@ -146,12 +149,17 @@ const linked = (rows: CheckRow[]): string =>
   rows.map((r) => (r.link ? `${oneLine(r.name)}:${oneLine(r.link)}` : oneLine(r.name))).join(' ') ||
   'none';
 
+const renderFailedSteps = (rows: CheckRow[]): string => {
+  const steps = rows.flatMap((r) => r.failedSteps ?? []).map(oneLine);
+  return steps.length ? ` failed-steps=${steps.join(',')}` : '';
+};
+
 /** The one machine-readable line. A caller branches on this, never on ship's exit code. */
 export function verdictLine(result: WaitCiResult, pr: string): string {
   const head = `${VERDICT_PREFIX}${result.outcome} pr=${pr}${result.required ? ' scope=required' : ''}`;
   switch (result.outcome) {
     case 'failed':
-      return `${head} failing=${linked(result.failures)}${result.attribution ? ` ${result.attribution.line}` : ''}`;
+      return `${head} failing=${linked(result.failures)}${renderFailedSteps(result.failures)}${result.attribution ? ` ${result.attribution.line}` : ''}`;
     case 'cancelled':
       return `${head} cancelled=${linked(result.cancelled)}`;
     case 'timed-out':
@@ -367,11 +375,15 @@ export function ghChecksPoller(options: ChecksPollerOptions): () => PollResult {
   const exec = options.exec ?? defaultExec(options.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS);
   const args = ['pr', 'checks', options.pr, '--repo', options.repo, '--json', CHECKS_JSON_FIELDS];
   if (options.required) args.push('--required');
-  const unparseable = (raw: string): PollResult => ({
-    kind: 'unavailable',
-    reason: 'gh-json-unparseable',
-    message: `gh pr checks returned JSON this reader cannot use: ${raw.slice(0, 200)}`,
-  });
+  const read = (raw: string): PollResult => {
+    const rows = parseChecksJson(raw);
+    if (rows) return { kind: 'rows', rows: withFailedSteps(rows, { ...options, exec }) };
+    return {
+      kind: 'unavailable',
+      reason: 'gh-json-unparseable',
+      message: `gh pr checks returned JSON this reader cannot use: ${raw.slice(0, 200)}`,
+    };
+  };
   return () => {
     let raw: string;
     try {
@@ -381,14 +393,9 @@ export function ghChecksPoller(options: ChecksPollerOptions): () => PollResult {
       const failure = e as ExecFailure;
       // Exit 8 means pending and gh still prints the rows; read them before classifying.
       const out = failure.stdout === undefined ? '' : String(failure.stdout);
-      if (out.trim()) {
-        const rows = parseChecksJson(out);
-        return rows ? { kind: 'rows', rows } : unparseable(out);
-      }
-      return classifyChecksFailure(failure);
+      return out.trim() ? read(out) : classifyChecksFailure(failure);
     }
-    const rows = parseChecksJson(raw);
-    return rows ? { kind: 'rows', rows } : unparseable(raw);
+    return read(raw);
   };
 }
 
@@ -411,18 +418,26 @@ function flagValue(argv: string[], name: string): string | undefined {
   return i === -1 ? undefined : argv[i + 1];
 }
 
+const unknownAttribution = (reason: string): Attribution => ({
+  token: 'unknown',
+  inherited: null,
+  fresh: null,
+  line: `attribution=unknown reason=${reason}`,
+});
+
 /** Loaded lazily, so a broken import can never cost the verdict line of any outcome. */
-async function attribute(pr: string, failures: CheckRow[]): Promise<Attribution> {
+export async function attribute(
+  { failures, pending }: Pick<WaitCiResult, 'failures' | 'pending'>,
+  pr: string,
+): Promise<Attribution> {
+  // A red that ended the wait early leaves a run unfinished: no summary yet, and more red to come.
+  if (pending.length > 0 || failures.some((f) => f.failedSteps))
+    return unknownAttribution('run-in-progress');
   try {
     const { attributeFailures } = await import('../../baseline-status/attribution.mts');
     return attributeFailures({ cwd: process.cwd(), pr, failures });
   } catch {
-    return {
-      token: 'unknown',
-      inherited: null,
-      fresh: null,
-      line: 'attribution=unknown reason=attribution-error',
-    };
+    return unknownAttribution('attribution-error');
   }
 }
 
@@ -450,7 +465,7 @@ async function main(argv: string[]): Promise<number> {
     intervalMs,
     settleGraceMs,
   }).then((r) => ({ ...r, required }));
-  if (result.outcome === 'failed') result.attribution = await attribute(pr, result.failures);
+  if (result.outcome === 'failed') result.attribution = await attribute(result, pr);
   console.error(verdictLine(result, pr));
   recordCiEvent(result, pr);
   return 0; // the ship already succeeded; this process never speaks for it
