@@ -295,8 +295,9 @@ function check(
     const errors = newGroups.filter((group) => group.severity === 'error');
     const warnings = newGroups.filter((group) => group.severity === 'warning');
     const newErrorCount = errors.reduce((sum, group) => sum + group.additionalCount, 0);
+    const overlay = isOverlayOxcInstall(cwd);
     if (relocated.some((group) => group.severity === 'error')) {
-      reportRelocatedFailure(newErrorCount, relocated, baseRef);
+      reportRelocatedFailure(newErrorCount, relocated, overlay, baseRef);
       recordErrorLocations(errors);
       reportOverlayContract(cwd);
       return 1;
@@ -304,7 +305,6 @@ function check(
     if (errors.length > 0) {
       failLine(`anti-slop: FAIL — ${newErrorCount} new error finding(s); baseline unchanged`);
       recordErrorLocations(errors);
-      const overlay = isOverlayOxcInstall(cwd);
       for (const line of antiSlopFailRemedy(errors, baseline, overlay, baseRef))
         console.error(line);
       // Reported on the FAIL path too: a committer reading a block needs the same standing about
