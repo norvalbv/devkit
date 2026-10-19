@@ -129,13 +129,15 @@ function spawnFor(args, mcp, ws) {
     return cli.codex ? cli : { ...cli, argv: withResultArgs([...mcp.args, ...args]) };
 }
 export function prepareJudgeRun(opts) {
+    // Started before MCP preparation, so judge_exec duration_ms covers it.
+    const startedAt = Date.now();
     const mcp = prepareJudgeMcpProfile(opts.mcpProfile ?? { kind: 'none' }, {
         cwd: opts.cwd ?? process.cwd(),
         env: opts.env,
         allowedTools: allowedToolsFromArgs(opts.args),
         projectRoots: opts.mcpProjectRoots,
     });
-    return { startedAt: Date.now(), mcp };
+    return { startedAt, mcp };
 }
 export function cleanupJudgeRun(run) {
     run.mcp.cleanup();

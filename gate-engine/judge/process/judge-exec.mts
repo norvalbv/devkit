@@ -237,13 +237,15 @@ function spawnFor(args: string[], mcp: PreparedJudgeMcpProfile, ws: CodexSandbox
 }
 
 export function prepareJudgeRun(opts: ExecJudgeOpts): JudgeRun {
+  // Started before MCP preparation, so judge_exec duration_ms covers it.
+  const startedAt = Date.now();
   const mcp = prepareJudgeMcpProfile(opts.mcpProfile ?? { kind: 'none' }, {
     cwd: opts.cwd ?? process.cwd(),
     env: opts.env,
     allowedTools: allowedToolsFromArgs(opts.args),
     projectRoots: opts.mcpProjectRoots,
   });
-  return { startedAt: Date.now(), mcp };
+  return { startedAt, mcp };
 }
 
 export function cleanupJudgeRun(run: JudgeRun): void {
