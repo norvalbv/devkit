@@ -16,12 +16,12 @@
  *                         unavailable retrieval as DEGRADED — sc-2317)
  */
 
-import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   assertStagedSetSane,
   resolveConfigRoots,
+  stagedAcmrNames,
   stagedFilesOverride,
   toGitPathspecs,
 } from '../../_devkit/review-roots.mjs';
@@ -42,11 +42,7 @@ function getStagedFiles() {
   if (override) return override;
   const pathspecs = toGitPathspecs(scanRoots());
   try {
-    const output = execFileSync(
-      'git',
-      ['diff', '--cached', '--name-only', '--diff-filter=ACMR', '--', ...pathspecs],
-      { encoding: 'utf-8' },
-    );
+    const output = stagedAcmrNames(pathspecs);
     // ACMR hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
     // that as zero items — a reviewer that examined nothing must not read as a pass.
     if (!output.trim()) assertStagedSetSane(pathspecs, 'commit-guard');
