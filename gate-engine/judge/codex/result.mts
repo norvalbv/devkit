@@ -15,6 +15,7 @@
 
 import { join } from 'node:path';
 import { type JudgeUsage, withResultArgs } from '../claude-result.mts';
+import { type CodexMcpServerDef, codexMcpArgs } from './mcp.mts';
 import type { CodexWorkspace } from './workspace.mts';
 
 // ── the `codex exec --json` event contract ──────────────────────────────────────────────────────
@@ -197,6 +198,22 @@ export function parseModelSpec(spec: string): ModelSpec {
 const confinedWorkspace = (parts: ClaudeArgvParts, workspace?: CodexWorkspace) =>
   parts.readOnly ? null : (workspace ?? null);
 
+// Workspace-write also grants /tmp and $TMPDIR, which would reopen a checkout that lives under either.
+const NO_TMP_ROOTS = [
+  '-c',
+  'sandbox_workspace_write.exclude_slash_tmp=true',
+  '-c',
+  'sandbox_workspace_write.exclude_tmpdir_env_var=true',
+];
+
+/** The confined judge's temp dirs point into scratch; zsh reads TMPPREFIX for heredocs, not TMPDIR. */
+const confinedEnv = ({ scratch, repoRoot }: CodexWorkspace) => ({
+  // Checklist scripts chdir here (skills/_devkit/review-roots.mjs): state lands where the gate reads it.
+  DEVKIT_JUDGE_REPO_ROOT: repoRoot,
+  TMPDIR: scratch,
+  TMPPREFIX: join(scratch, 'zsh'),
+});
+
 // Claude judges cannot run tests (JUDGE_READ_TOOLS); codex judges have a shell and are told instead.
 export const NO_TEST_RUNS =
   'Do not run tests, test runners or package-manager scripts (bun run, npm run); review by reading. Test execution belongs to the pre-push suite.';
@@ -235,7 +252,9 @@ export function codexExecArgs(
   argv.push(
     '--sandbox',
     parts.readOnly ? 'read-only' : 'workspace-write',
-    ...(confined ? ['-C', confined.scratch, '--add-dir', join(confined.repoRoot, '.claude')] : []),
+    ...(confined
+      ? ['-C', confined.scratch, '--add-dir', join(confined.repoRoot, '.claude'), ...NO_TMP_ROOTS]
+      : []),
     '-c',
     'web_search="disabled"',
     ...mcpArgv,
@@ -259,104 +278,6 @@ export interface JudgeCli {
   extraEnv?: Record<string, string>;
   /** Codex only: the MCP servers actually injected — a dropped one is a server the judge lacks. */
   mcpInjected?: string[];
-}
-
-/** One MCP server definition as the judge registry stores it (claude mcpServers shape). Typed as
- * EXPECTED at the JSON boundary — values are re-checked by representation below, never trusted
- * (the registry is a user-editable file). */
-export interface CodexMcpServerDef {
-  command?: string;
-  args?: string[];
-  env?: Record<string, string>;
-  url?: string;
-}
-
-/** The codex-native translation of a judge MCP profile: `-c` argv plus spawn-env additions. */
-export interface CodexMcpInjection {
-  argv: string[];
-  extraEnv: Record<string, string>;
-  injected: string[];
-}
-
-/** True when the runtime representation is a real string (a JSON number/object is not its own
- * template image) — the same untrusted-boundary idiom gate-engine/config.mts uses. */
-const isStr = (v: string | undefined): v is string => v != null && `${v}` === v;
-
-const MCP_NAME_RE = /^[\w-]+$/;
-const tomlStr = (v: string): string => JSON.stringify(v);
-
-/**
- * Translate the judge's prepared MCP server map into codex-native per-invocation config
- * (`-c mcp_servers.*`, sc-2054). Hermeticity holds: with --ignore-user-config the injected
- * servers are the ONLY servers (codex's twin of --strict-mcp-config). Secrets never ride argv:
- * env VALUES go into the spawn environment and are forwarded by NAME via `env_vars` (codex
- * starts server children env_clear'ed, so nothing else leaks through). The claude
- * `--allowedTools mcp__<server>__<tool>` grants map onto `enabled_tools` — `mcp__<server>__*`
- * grants every tool; a server with NO grant is not injected at all.
- */
-export function codexMcpArgs(
-  servers: Record<string, CodexMcpServerDef>,
-  allowedTools: string[] | null,
-): CodexMcpInjection {
-  const argv: string[] = [];
-  const extraEnv: Record<string, string> = {};
-  const injected: string[] = [];
-  for (const [name, def] of Object.entries(servers)) {
-    if (!MCP_NAME_RE.test(name)) {
-      console.error(
-        `codex judge: mcp server name ${JSON.stringify(name)} not addressable via -c — skipped`,
-      );
-      continue;
-    }
-    const grants = (allowedTools ?? [])
-      .filter((t) => t.startsWith(`mcp__${name}__`))
-      .map((t) => t.slice(`mcp__${name}__`.length));
-    if (allowedTools !== null && grants.length === 0) continue; // no grant → do not inject
-    if (!isStr(def.command) || def.command === '') {
-      // A url-typed server the claude profile admits is not yet expressible on the codex path
-      // (StreamableHttp mapping unverified against the pinned binary) — a VISIBLE opt-out, never
-      // a silent one: the judge runs without this server and the operator can see why.
-      if (isStr(def.url))
-        console.error(
-          `codex judge: mcp server ${name} is url-typed — not yet mapped to codex config; judge runs without it`,
-        );
-      continue;
-    }
-    // Buffered per server: a server that turns out inexpressible (env collision) must leave NO
-    // trace in argv — a half-injected server is worse than an absent one.
-    const serverArgv: string[] = ['-c', `mcp_servers.${name}.command=${tomlStr(def.command)}`];
-    const serverEnv: Record<string, string> = {};
-    const args = Array.isArray(def.args) ? def.args.filter(isStr) : [];
-    if (args.length > 0)
-      serverArgv.push('-c', `mcp_servers.${name}.args=[${args.map(tomlStr).join(',')}]`);
-    let expressible = true;
-    if (def.env && !Array.isArray(def.env)) {
-      const names: string[] = [];
-      for (const [key, value] of Object.entries(def.env)) {
-        if (!isStr(value)) continue;
-        if (key in extraEnv && extraEnv[key] !== value) {
-          console.error(`codex judge: mcp env ${key} collides across servers — ${name} skipped`);
-          expressible = false;
-          break;
-        }
-        serverEnv[key] = value;
-        names.push(key);
-      }
-      if (expressible && names.length > 0)
-        serverArgv.push('-c', `mcp_servers.${name}.env_vars=[${names.map(tomlStr).join(',')}]`);
-    }
-    if (!expressible) continue;
-    if (grants.length > 0 && !grants.includes('*'))
-      serverArgv.push('-c', `mcp_servers.${name}.enabled_tools=[${grants.map(tomlStr).join(',')}]`);
-    serverArgv.push('-c', `mcp_servers.${name}.startup_timeout_sec=10`);
-    // Exec's approval policy is `never`, so an unapproved MCP call is refused; a grant is the approval.
-    if (allowedTools !== null)
-      serverArgv.push('-c', `mcp_servers.${name}.default_tools_approval_mode="approve"`);
-    argv.push(...serverArgv);
-    Object.assign(extraEnv, serverEnv);
-    injected.push(name);
-  }
-  return { argv, extraEnv, injected };
 }
 
 /** The codex binary to spawn: overridable so an operator can pin ONE build when several sit on
@@ -383,16 +304,13 @@ export function judgeCliFor(
   const parts = codexArgvParts(args, forceReadOnlySandbox);
   if (!isCodexModel(parts.model))
     return { bin: 'claude', argv: withResultArgs(args), codex: false };
-  const mcp = codexMcpArgs(mcpServers, parts.allowedTools);
   const confined = confinedWorkspace(parts, workspace);
+  const mcp = codexMcpArgs(mcpServers, parts.allowedTools, confined ? confinedEnv(confined) : {});
   return {
     bin: codexBin(),
     argv: codexExecArgs(parts, mcp.argv, workspace),
     codex: true,
-    // Checklist scripts chdir here (skills/_devkit/review-roots.mjs): state lands where the gate reads it.
-    extraEnv: confined
-      ? { ...mcp.extraEnv, DEVKIT_JUDGE_REPO_ROOT: confined.repoRoot }
-      : mcp.extraEnv,
+    extraEnv: mcp.extraEnv,
     mcpInjected: mcp.injected,
   };
 }

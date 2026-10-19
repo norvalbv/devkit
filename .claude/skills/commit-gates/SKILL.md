@@ -98,13 +98,13 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   sandbox` applies the same host sandbox as the judge's `codex exec` (Seatbelt on macOS, Landlock on
   Linux), with no model call, and runs the command in your login shell as the judge does. From the
   repo root, a workspace-write (investigating) judge's view is:
-  `r=$PWD s=$(mktemp -d); cp AGENTS.md "$s"; (cd "$s" && CODEX_HOME=$(mktemp -d) codex sandbox -c 'sandbox_mode="workspace-write"' -c "sandbox_workspace_write.writable_roots=[\"$r/.claude\"]" -- "$SHELL" -lc '<cmd>'); echo "exit $?"`.
+  `r=$PWD s=$(mktemp -d); cp AGENTS.md "$s"; (cd "$s" && TMPDIR="$s" TMPPREFIX="$s/zsh" CODEX_HOME=$(mktemp -d) codex sandbox -c 'sandbox_mode="workspace-write"' -c "sandbox_workspace_write.writable_roots=[\"$r/.claude\"]" -c sandbox_workspace_write.exclude_slash_tmp=true -c sandbox_workspace_write.exclude_tmpdir_env_var=true -- "$SHELL" -lc '<cmd>'); echo "exit $?"`.
   On macOS, add `--log-denials` after `sandbox` to name each denied operation; Linux has no such
-  flag. A read-only judge runs in the repo root itself: drop the `cd` and the `writable_roots`, and
-  set `sandbox_mode="read-only"`. Both modes read the whole disk and have no network.
-  Workspace-write can write only the scratch cwd, `<repo>/.claude`, `/tmp` and `$TMPDIR`. Run the
-  bare command, not a pipeline, since a pipe's exit status hides the denial. Cite the output in a
-  waive rationale.
+  flag. A read-only judge runs in the repo root itself: drop the `cd`, the `TMPDIR`/`TMPPREFIX`
+  settings and every `sandbox_workspace_write` key, and set `sandbox_mode="read-only"`. Both modes
+  read the whole disk and have no network. Workspace-write can write only the scratch cwd (also its
+  temp dir) and `<repo>/.claude`. Run the bare command, not a pipeline, since a pipe's exit status
+  hides the denial. Cite the output in a waive rationale.
 - **A finding stands for a class.** A finding against a matcher, parser, predicate or validator
   names ONE input the check gets wrong. Before re-shipping, name the property
   that makes it wrong, list the other inputs that share it (every character that continues a path,
