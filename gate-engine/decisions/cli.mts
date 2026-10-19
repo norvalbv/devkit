@@ -35,11 +35,14 @@ import { randomUUID } from 'node:crypto';
 import { readdirSync } from 'node:fs';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
-import { clip } from '../judge/odb-probe.mts';
+import { clip, EVENT_BUDGET } from '../judge/odb-probe.mts';
 import { markGateRun } from '../judge/run-context.mts';
 // Type-only: erased at compile, so naming the envelope here does NOT re-link decisions.mts — the
 // module that is unloadable in exactly the case this file has to answer for.
 import type { QueryEnvelope } from './decisions.mts';
+
+/** What a successful query printed: its retrieval tier and ranked slugs, in order. */
+type QueryRead = Pick<QueryEnvelope, 'source'> & { rows: { slug: string }[] };
 
 /**
  * Sub-engines load dynamically so a missing parser is catchable, and only via STRING LITERALS so the
@@ -65,11 +68,21 @@ function flagValue(args: string[], name: string): string | undefined {
 }
 
 /** Only show and query are logged: an older synced hook's scoped-targets calls write nothing. */
-function emitDecisionRead(cmd: string | undefined, rest: string[]) {
+function emitDecisionRead(cmd: string | undefined, rest: string[], read?: QueryRead) {
   if (cmd === 'show') emitGateEvent({ type: 'decision_read', command: 'show', slugs: [rest[0]] });
-  if (cmd !== 'query') return;
+  if (cmd !== 'query' || !read) return;
   const top = Number.parseInt(flagValue(rest, '--top') ?? '', 10);
-  emitGateEvent({ type: 'decision_read', command: 'query', top: top > 0 ? top : 5 });
+  // `tier`, not `source`: the run envelope owns `source` and would overwrite it.
+  const event = {
+    type: 'decision_read',
+    command: 'query',
+    top: top > 0 ? top : 5,
+    tier: read.source,
+  };
+  const slugs = read.rows.map((row) => row.slug);
+  const sized = () => ({ ...event, slugs, omitted: read.rows.length - slugs.length || undefined });
+  while (slugs.length && Buffer.byteLength(JSON.stringify(sized())) > EVENT_BUDGET) slugs.pop();
+  emitGateEvent(sized());
 }
 
 async function run(argv: string[]) {
@@ -100,8 +113,7 @@ async function run(argv: string[]) {
     return;
   }
   const { main: decisionsMain } = await import('./decisions.mts');
-  await decisionsMain(argv);
-  emitDecisionRead(cmd, rest);
+  emitDecisionRead(cmd, rest, await decisionsMain(argv));
 }
 
 /** The one string a caller can grep for to tell an outage from an answer. */
