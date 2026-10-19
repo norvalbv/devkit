@@ -18,14 +18,17 @@ export interface CollectionError {
   message: string;
 }
 
-const LOCKFILES = [
-  'bun.lock',
-  'bun.lockb',
-  'pnpm-lock.yaml',
-  'yarn.lock',
-  'package-lock.json',
-  'npm-shrinkwrap.json',
+/** Lockfiles in precedence order, each with its frozen install. agents-hooks' resolve_pm mirrors it. */
+const LOCKFILE_LADDER: [lockfile: string, install: string][] = [
+  ['bun.lock', 'bun install --frozen-lockfile'],
+  ['bun.lockb', 'bun install --frozen-lockfile'],
+  ['pnpm-lock.yaml', 'pnpm install --frozen-lockfile'],
+  ['yarn.lock', 'yarn install --immutable'],
+  ['package-lock.json', 'npm ci'],
+  ['npm-shrinkwrap.json', 'npm ci'],
 ];
+
+export const LOCKFILES = LOCKFILE_LADDER.map(([lockfile]) => lockfile);
 
 const validPart = (part: string): boolean =>
   part.length > 0 && part !== '.' && part !== '..' && !part.includes('\\');
@@ -61,14 +64,10 @@ export function missingDeclaredDependencies(
   );
 }
 
-/** The frozen-lockfile install command for the checkout at `dir` (mirrors gate_dependency_install_remedy). */
+/** The frozen-lockfile install command for the checkout at `dir`. */
 export function dependencyInstallRemedy(dir: string): string {
-  const has = (name: string): boolean => existsSync(join(dir, name));
-  if (has('bun.lock') || has('bun.lockb')) return 'bun install --frozen-lockfile';
-  if (has('pnpm-lock.yaml')) return 'pnpm install --frozen-lockfile';
-  if (has('yarn.lock')) return 'yarn install --immutable';
-  if (has('package-lock.json') || has('npm-shrinkwrap.json')) return 'npm ci';
-  return "install dependencies with this repo's package manager";
+  const rung = LOCKFILE_LADDER.find(([lockfile]) => existsSync(join(dir, lockfile)));
+  return rung?.[1] ?? "install dependencies with this repo's package manager";
 }
 
 /** A module-not-found error: what was imported, and the file that imported it. */
