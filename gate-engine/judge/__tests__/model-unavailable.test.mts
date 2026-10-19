@@ -6,7 +6,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { classifyJudgeOutage, type JudgeOutage } from '../outage/classify.mts';
 import { remedyCause, strictRemedy, unavailableMessage } from '../outage/wording.mts';
-import { execJudge } from '../run-judge.mts';
+import { execJudge, execJudgeAsync } from '../run-judge.mts';
 
 /** codex 0.162.1's stderr, verbatim, when a free plan asks for gpt-5.6-sol. */
 const REFUSAL =
@@ -55,7 +55,11 @@ describe('model-unavailable wording', () => {
   });
 });
 
-describe('model-unavailable through execJudge', () => {
+// The async twin reads stderr from its callback, not the thrown error, so both are exercised.
+describe.each([
+  ['execJudge', async (o: Parameters<typeof execJudge>[0]) => execJudge(o)],
+  ['execJudgeAsync', execJudgeAsync],
+] as const)('model-unavailable through %s', (_name, run) => {
   const saved: Record<string, string | undefined> = {};
   const KEYS = ['DEVKIT_GATE_EVENTS', 'DEVKIT_SHIP_ID', 'PATH'];
   let dir: string;
@@ -83,9 +87,9 @@ describe('model-unavailable through execJudge', () => {
     }
   });
 
-  it('persists the kind and excerpt to judge_exec, and hands the refused model to the caller', () => {
+  it('persists the kind and excerpt to judge_exec, and hands the refused model to the caller', async () => {
     const seen: JudgeOutage[] = [];
-    const out = execJudge({
+    const out = await run({
       label: 'review:correctness',
       args: ['-p', '--model', 'opus', 'q'],
       timeout: 20_000,
