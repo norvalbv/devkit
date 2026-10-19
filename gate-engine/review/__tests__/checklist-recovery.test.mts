@@ -278,9 +278,8 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
     const row = events(repo).find(
       (e) => e.type === 'review_result' && e.reviewer === 'api-security-reviewer',
     );
-    // Exit 3, not 1. The husky fragment renders exit 1 as "A reviewer FAILED
-    // (escalation-confirmed)" — a verdict claim about the diff, for what is a judge that never
-    // engaged its workflow. Exit 3 says "judge unavailable after retry", which is the truth.
+    // Exit 3, not 1: a judge that never engaged its workflow is "unavailable after retry" under
+    // strict ship's fail-closed contract, not a block on the diff.
     expect(row?.status).toBe('inconclusive');
     expect(err.mock.calls.flat().join('\n')).not.toContain('REVIEW ERROR');
     expect(loadCache(repo)['api-security-reviewer']).toBeUndefined();
@@ -530,7 +529,8 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
     const exec = failingJudge(repo, [TARGET, `${TARGET}:escalate`]);
     expect(await runReviewGate(repo, { exec })).toBe(1);
     const out = err.mock.calls.flat().join('\n');
-    expect(out).toContain('api-security-reviewer FAILED');
+    expect(out).toContain('api-security-reviewer FAILED (escalation-confirmed)');
+    expect(out).not.toContain('No verdict was reached');
     expect(out).toContain(`api-security-reviewer — ${COUNTED}: ${DENIED}`);
   });
 
@@ -553,7 +553,10 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
       return 'VERDICT: PASS';
     });
     expect(await runReviewGate(repo, { exec })).toBe(1);
-    expect(err.mock.calls.flat().join('\n')).toContain('api-security-reviewer REVIEW ERROR');
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('api-security-reviewer REVIEW ERROR');
+    expect(out).toContain('No verdict was reached on the code — follow the error text above');
+    expect(out).not.toContain('api-security-reviewer FAILED');
   });
 
   it('a recovery judge that returns FAIL blocks the ship on the finding, not the contract', async () => {
