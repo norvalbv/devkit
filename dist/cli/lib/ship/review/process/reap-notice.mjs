@@ -1,6 +1,6 @@
-import { spawnSync } from 'node:child_process';
 import { writeFile } from 'node:fs';
 import { basename } from 'node:path';
+import { processTableOutput } from './process-table.mjs';
 // Names what outlived a clean gate leader at the linger reap. Never prints env or argv past a script
 // path: env holds the ownership token and API keys, and MCP server argv holds tokens.
 const MAX_LISTED = 5;
@@ -16,11 +16,7 @@ export function survivingPids(table, identities) {
         .map(([pid]) => pid);
 }
 function psLines(pids, columns) {
-    const { stdout } = spawnSync('/bin/ps', [...columns, '-p', pids.join(',')], {
-        encoding: 'utf8',
-        timeout: 2_000,
-    });
-    return (stdout ?? '').split('\n');
+    return processTableOutput([...columns, '-p', pids.join(',')]).split('\n');
 }
 /**
  * Env-free `ps` reads (no e/E flag) of the given pids; a pid gone since the sample is skipped. The
@@ -54,10 +50,13 @@ export function readSurvivorArgs(pids) {
 function printable(text) {
     return text.replace(/[^\x20-\x7e]/g, '?').slice(0, FIELD_MAX_CHARS);
 }
+// args[0] must be the executable (ucomm is its possibly truncated basename) before args[1] is read:
+// otherwise macOS has filled args from the environment and every token is an env fragment.
 function executableLabel(row) {
     const named = printable(row.name) || '?';
-    const script = row.args.trim().split(/\s+/)[1];
-    const pathLike = script !== undefined && /^[/.]/.test(script) && !script.includes('=');
+    const [exe = '', script] = row.args.trim().split(/\s+/);
+    const argvIntact = row.name !== '' && basename(exe).startsWith(row.name);
+    const pathLike = argvIntact && script !== undefined && /^[/.]/.test(script) && !script.includes('=');
     return pathLike ? `${named} ${printable(basename(script))}` : named;
 }
 function describeRow(row) {
@@ -66,7 +65,7 @@ function describeRow(row) {
 }
 /**
  * Lines naming the surviving owned processes, topmost first (its parent is not a survivor too),
- * capped with a "+N more" line. Never throws: a failed read names nothing rather than stall a reap.
+ * capped with a "+N more" line. Never throws: a failed read names nothing and the reap proceeds.
  */
 export function describeSurvivors(table, identities, readArgs = readSurvivorArgs) {
     try {
