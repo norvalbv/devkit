@@ -113,7 +113,7 @@ export function renderAgentHookLines(f: ConsumerFormatter): AgentHookLines {
  * Extension-only: devkit cannot know a consumer's authored-file boundary, and NOT derived from
  * `sourceExtensions`, whose edits would then each be a hook-drift event. self-host swaps in a scope.
  */
-export const FORMAT_EXTENSION_FILTER = "grep -E '\\.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$'";
+export const FORMAT_EXTENSION_FILTER = "grep -E '\\.(tsx?|jsx?|mts|cts|mjs|cjs|css|jsonc?)$'";
 
 /**
  * Consumer policy: REPORT, never block — the bin dir belongs to the consumer, so a hoisting quirk
