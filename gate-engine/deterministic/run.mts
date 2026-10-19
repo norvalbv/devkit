@@ -229,7 +229,7 @@ interface RunPlan {
   cachedPrefix: ReturnType<typeof prefixEntry>;
 }
 
-// The accumulated result of running the gates. `fails`, `failed` and `rechecks` stay index-aligned.
+// The accumulated result of running the gates. `fails` and `failed` stay index-aligned per gate.
 interface GateOutcome {
   fails: GateFailure[];
   failed: FailedGate[];
