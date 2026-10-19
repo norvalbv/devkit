@@ -28,8 +28,9 @@ const COPY_VALUE_FLAGS = new Set([
   '--owner',
   '--group',
 ]);
-const TARGET_DIR_FLAGS = new Set(['-t', '--target-directory']);
-const ATTACHED_TARGET_DIR = /^(--target-directory=|-t)(.+)$/;
+const TARGET_DIR_LONG = '--target-directory';
+const SHORT_TARGET_CLUSTER = /^-[a-zA-Z]*t$/;
+const SHORT_TARGET_ATTACHED = /^-t(.+)$/;
 
 type Args = (string | null)[];
 
@@ -159,21 +160,30 @@ const everyOperand =
     return files.length === 0 ? wrapped : files.some((a) => writtenPlace(a, scope));
   };
 
-/** The `-t DIR`, `-tDIR` or `--target-directory[=]DIR` of cp/mv/install; undefined when absent. */
+/** A `--target-directory` long option, or a GNU-unique prefix of it such as `--target-dir`. */
+function targetLong(name: string): boolean {
+  return name.length > 3 && TARGET_DIR_LONG.startsWith(name);
+}
+
+/** cp/mv/install's target directory (`-t DIR`, `-rt DIR`, `-tDIR`, `--target-dir[=]DIR`). */
 function targetDir(args: Args): string | null | undefined {
   for (const [i, a] of args.entries()) {
-    if (a !== null && TARGET_DIR_FLAGS.has(a)) return args[i + 1] ?? null;
-    const attached = a === null ? null : ATTACHED_TARGET_DIR.exec(a);
-    if (attached) return attached[2];
+    if (a === null) continue;
+    const eq = a.indexOf('=');
+    if (targetLong(eq < 0 ? a : a.slice(0, eq)))
+      return eq < 0 ? (args[i + 1] ?? null) : a.slice(eq + 1);
+    if (SHORT_TARGET_CLUSTER.test(a)) return args[i + 1] ?? null;
+    const attached = SHORT_TARGET_ATTACHED.exec(a);
+    if (attached) return attached[1];
   }
   return undefined;
 }
 
 /** `cp`/`mv`/`install` write into their target directory when given, else their last operand. */
-const copyTarget: VerbRule = (args, { scope }) => {
+const copyTarget: VerbRule = (args, { scope, wrapped }) => {
   const dir = targetDir(args);
   const target = dir === undefined ? operands(args, COPY_VALUE_FLAGS).at(-1) : dir;
-  return writtenPlace(target ?? null, scope);
+  return target === undefined ? wrapped : writtenPlace(target, scope);
 };
 const shellScript: VerbRule = (args, { scope }) =>
   args[0] === '-c' && args[1] != null && scriptWrites(args[1], scope);
