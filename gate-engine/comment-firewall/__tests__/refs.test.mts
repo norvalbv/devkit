@@ -159,6 +159,15 @@ describe('forbidden references in changed comments', () => {
     expect(cited(staged(before, after))).toHaveLength(1);
   });
 
+  it('ignores a reference in rendered JSX text that starts with //', () => {
+    expect(cited(staged('const a = 0;\n', 'const el = <p>\n// sc-1234\n</p>;\n'))).toEqual([]);
+  });
+
+  it('does not let a reference in old JSX text excuse a new comment reference', () => {
+    const before = 'const el = <p>\n// sc-1\n</p>;\n';
+    expect(cited(staged(before, 'const el = <p>\n</p>; // sc-1\n'))).toEqual(['sc-1']);
+  });
+
   it('does not let a deletion elsewhere in the hunk excuse a new reference', () => {
     const before = 'const a = 1; // sc-7\nconst b = 1;\nconst c = 1;\n';
     const after = 'const a = 1;\nconst b = 1;\nconst c = 1; // sc-7\n';
