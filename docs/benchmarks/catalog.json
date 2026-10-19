@@ -711,7 +711,7 @@
         "implementation": [
           "gate-engine/decisions/detect.mts",
           "gate-engine/decisions/check-alignment.mts",
-          "gate-engine/decisions/depth-judge.mts"
+          "gate-engine/decisions/depth/depth-pass.mts"
         ],
         "corpus": ["gate-engine/decisions/eval/cases-*.jsonl"],
         "scorer": [
@@ -756,10 +756,10 @@
       "lifecycle": "no-ship",
       "acceptance": "Pre-registered full analysis with robust no-ship decision",
       "hashes": {
-        "implementation": ["gate-engine/edge-cases/eval/prompts.mts"],
-        "corpus": ["gate-engine/edge-cases/eval/cases.jsonl"],
-        "scorer": ["gate-engine/edge-cases/eval/lib/**", "gate-engine/edge-cases/eval/counts.mts"],
-        "runner": ["gate-engine/edge-cases/eval/bench.mts"]
+        "implementation": [],
+        "corpus": [],
+        "scorer": ["gate-engine/edge-cases/eval/lib/**"],
+        "runner": []
       }
     },
     {
@@ -773,7 +773,12 @@
       "acceptance": "Deterministic set-arithmetic scoring, zero LLM calls; seed corpus only until gold cases are harvested from a real corpus",
       "hashes": {
         "implementation": [
-          "gate-engine/decisions/retrieval.mts",
+          "gate-engine/decisions/recall/retrieval.mts",
+          "gate-engine/decisions/recall/embeddings.mts",
+          "gate-engine/decisions/recall/markdown.mts",
+          "gate-engine/decisions/recall/note-relations.mts",
+          "gate-engine/decisions/recall/qualifiers.mts",
+          "gate-engine/decisions/decision-format.mts",
           "gate-engine/decisions/decisions.mts"
         ],
         "corpus": [
@@ -871,7 +876,7 @@
       "acceptance": "Deterministic fixture benchmark",
       "hashes": {
         "implementation": ["gate-engine/co-occurrence/**"],
-        "corpus": ["gate-engine/co-occurrence/fixtures/**"],
+        "corpus": ["gate-engine/co-occurrence/labels.json"],
         "scorer": ["gate-engine/co-occurrence/matcher.mts"],
         "runner": ["gate-engine/co-occurrence/matcher.mts"]
       }
