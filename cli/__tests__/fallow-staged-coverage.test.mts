@@ -191,7 +191,7 @@ describe.skipIf(!hasFallow)('staged fallow gate — measured CRAP at commit', ()
 
     expect(gate.status).toBe(0);
     expect(gate.out).toContain(HINT);
-    expect(gate.out).toContain('No issues in 1 changed file');
+    expect(gate.out).toContain('fallow passed the staged diff');
   });
 
   it('says nothing about coverage in a repo that has no artifact', () => {
