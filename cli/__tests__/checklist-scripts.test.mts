@@ -359,6 +359,36 @@ describe('skill checklist script (spawned source)', () => {
     expect(state.files).toEqual(['src/main.ts']);
   });
 
+  // The header promises "all staged files when unset": a match-nothing fallback would no-op the gate.
+  it.each([
+    ['api-security', '.api-security-review.json', null],
+    ['api-security', '.api-security-review.json', {}],
+    ['backend-performance', '.backend-performance-review.json', null],
+    ['backend-performance', '.backend-performance-review.json', { review: {} }],
+  ])(
+    '%s scans every staged file when review.backendRoots is unset (config %j)',
+    (skill, stateName, config) => {
+      const repo = mkdtempSync(join(tmpdir(), 'checklist-backend-unset-'));
+      dirs.push(repo);
+      const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+      git(['init', '-q']);
+      if (config) writeFileSync(join(repo, 'guard.config.json'), JSON.stringify(config));
+      mkdirSync(join(repo, 'anywhere'), { recursive: true });
+      writeFileSync(
+        join(repo, 'anywhere', 'handler.ts'),
+        'export const login = (password) => db.findMany({ where: { password } });\n',
+      );
+      git(['add', '.']);
+      const script = fileURLToPath(
+        new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
+      );
+      const r = spawnSync('node', [script, 'generate'], { cwd: repo, encoding: 'utf8' });
+      expect(r.status, r.stderr).toBe(0);
+      const state = JSON.parse(readFileSync(join(repo, '.claude', stateName), 'utf8'));
+      expect(state.items).not.toHaveLength(0);
+    },
+  );
+
   it('correctness clears a stale chunk checklist when no configured runtime paths match', () => {
     const repo = mkdtempSync(join(tmpdir(), 'checklist-correctness-empty-chunk-'));
     dirs.push(repo);
