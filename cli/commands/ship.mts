@@ -104,8 +104,9 @@ Usage:
                       working-tree dirt remains untouched. Explicit paths stay the default because
                       dirty-file ownership cannot be inferred safely in a shared checkout. Not valid
                       with --pr; resume remembers the committed-source mode and frozen path set.
-  --body "<text>"     Commit + PR body, inline (no temp file). Wins over stdin; omit it to read the
-                      commit body from stdin (a pipe or here-doc) or to leave the body empty.
+  --body "<text>"     Commit + PR body, inline (no temp file). Wins over stdin; --body "" is an
+                      explicit empty body (with --pr it clears the description). Omit it to read
+                      the commit body from stdin (a pipe or here-doc) or to leave the body empty.
   --body-file <f>     Commit + PR body read from a file. The recorded invocation stores the file's
                       CONTENT, and --resume replays those bytes — a later edit to <f> is NOT picked
                       up until you re-pass --body-file on the resume (--resume warns when <f> and

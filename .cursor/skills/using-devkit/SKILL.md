@@ -103,9 +103,11 @@ devkit command.
   A push onto a merged PR's branch never reaches its base, so `--pr` refuses before gates and again
   before the push. Run the two printed commands: merge `origin/<base>` into this checkout, then
   `devkit ship <new-branch> … --base <base>`.
+- **`--body ""` is an explicit empty body in both modes; the flag's presence is the intent.** A new
+  ship gets an empty commit and PR body and never reads stdin; a `--pr` re-ship clears the PR
+  description. `--body-file` is the file's exact bytes under the same rules.
 - **A `--pr` re-ship changes the existing PR description only with explicit `--body` or
-  `--body-file`.** Omitting both preserves it; piped stdin remains commit-only. Use `--body ""` to
-  clear the description deliberately.
+  `--body-file`.** Omitting both preserves it; piped stdin remains commit-only.
 - **Ship owns the PR body's `<!-- devkit:evidence:begin -->` … `end` block.** When
   `guard.config.json` has an `evidence` entry and the diff adds or changes tests, ship runs them on
   red (PR base plus only the PR's test files) and green (PR head) after the PR opens and writes the

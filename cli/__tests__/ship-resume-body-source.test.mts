@@ -181,6 +181,19 @@ describe('ship --resume banner: body source + PR effect (reship --pr)', () => {
     }
   });
 
+  it('an explicit empty --body on the resume reaches reship and clears the PR body', () => {
+    const s = seedBlockedReship([], 'pr body\n');
+    const r = run(scriptPath, s, ['--resume', 'pr-open', '--body', '']);
+    try {
+      expect(r.status, r.stderr).toBe(0);
+      const line = banner(r.stderr);
+      expect(line).toContain('body 0 bytes (from --body, overriding recorded 7)');
+      expect(line).toContain('commit + PR body');
+    } finally {
+      dropWorktree(s.git, r.stderr);
+    }
+  });
+
   it('a stdin-recorded body replayed with no flag is commit-only and says the PR body is kept', () => {
     const s = seedBlockedReship([], 'pr body\n');
     const r = run(scriptPath, s, ['--resume', 'pr-open']);

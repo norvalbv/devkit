@@ -451,6 +451,29 @@ describe('ship-branch.sh — resume refusals that name their own cause', () => {
     expect(remoteBranchExists(bare, 'feat/no-body-retry')).toBe(true);
   });
 
+  it.each([
+    ['--body', ''],
+    ['--body-file', 'empty.md'],
+  ])(
+    'keeps the generic message reason for an explicit empty %s, never blaming stdin',
+    (flag, value) => {
+      const { dir, env, git } = seedShipRepoLocalRemote();
+      const { publishEnv } = publishEnvFor(dir, env);
+      preserveWithReceipt(dir, env, git, 'feat/explicit-empty');
+      writeFileSync(join(dir, 'empty.md'), '');
+
+      const r = spawnSync(
+        '/bin/bash',
+        [scriptPath, 'feat/explicit-empty', 'ship it', flag, value, '--', 'note.txt'],
+        { cwd: dir, input: '', encoding: 'utf8', env: publishEnv },
+      );
+
+      expect(r.status, r.stderr).toBe(1);
+      expect(r.stderr).toContain('its commit message differs from this ship title/body');
+      expect(r.stderr).not.toContain('re-supply it with --body');
+    },
+  );
+
   // An empty body plus a bodied commit ALSO describes a changed title, where --body would be the same
   // misdiagnosis inverted. The title must match before the body can be called the sole cause.
   it('keeps the generic message reason when the TITLE also changed', () => {

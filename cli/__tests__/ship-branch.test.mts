@@ -1080,6 +1080,32 @@ describe('ship-branch.sh — worktree integration', () => {
     expect(git(['show', '-s', '--format=%b', 'feat/body'])).toMatch(/BODY_INLINE_XYZ/);
   });
 
+  it('--body "" is an explicit empty body, as under --pr: stdin is never read for it', () => {
+    const { dir, env, git } = seedShipRepo();
+    writeFileSync(join(dir, 'note.txt'), 'x\n');
+    const argv = [scriptPath, 'feat/empty', 't', '--body', '', '--', 'note.txt'];
+    const r = spawnSync('/bin/bash', argv, {
+      cwd: dir,
+      input: 'piped text\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(git(['show', '-s', '--format=%b', 'feat/empty']).trim()).toBe('');
+  });
+
+  it.each([
+    ['ship-branch.sh', scriptPath, []],
+    ['reship.sh', reshipScript, ['--pr']],
+  ])('%s refuses a trailing --body with no value', (_name, s, mode) => {
+    const { dir, env } = seedShipRepo();
+    const argv = [s, 'feat/x', 't', ...mode, 'note.txt', '--body'];
+    const r = spawnSync('/bin/bash', argv, { cwd: dir, encoding: 'utf8', env });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('--body requires text');
+  });
+
   // DK-5: the worktree is cut from $BASE (default: this checkout's HEAD; --base: origin's fetched
   // tip), and in-chain gates (fallow) need that SAME commit to scope their own audit correctly —
   // else a --base ship off a stacked branch misreports that branch's pre-existing findings vs main
