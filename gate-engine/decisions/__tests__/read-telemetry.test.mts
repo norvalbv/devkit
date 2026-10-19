@@ -205,6 +205,34 @@ describe('decision_read from show and query', () => {
     ]);
   });
 
+  it('logs the slugs a query printed, in rank order, and its retrieval tier', () => {
+    sixAxes();
+    const json = cli(['query', 'Ruling', '--json']);
+    const printed = JSON.parse(json.stdout).rows.map((row: { slug: string }) => row.slug);
+    expect(printed.length).toBeGreaterThan(1);
+    expect(cli(['query', 'Ruling']).status).toBe(0);
+    expect(cli(['query', 'zzqx']).status).toBe(0);
+    expect(rows()).toMatchObject([
+      { command: 'query', slugs: printed, tier: 'lexical' },
+      { command: 'query', slugs: printed, tier: 'lexical' },
+      { command: 'query', slugs: [], tier: 'none' },
+    ]);
+    expect(rows()[0]).not.toHaveProperty('omitted');
+  });
+
+  it('trims a wide query to the event budget and counts what it dropped', () => {
+    for (let i = 0; i < 60; i += 1)
+      writeAxis(`axis-${String(i).padStart(2, '0')}-${'s'.repeat(40)}`, 'Shared ruling.');
+    expect(cli(['query', 'Shared ruling', '--top', '60']).status).toBe(0);
+    const [row] = rows();
+    expect(row.omitted).toBeGreaterThan(0);
+    expect(row.slugs).toHaveLength(60 - Number(row.omitted));
+    const payload = Object.entries(row).filter(([k]) => !ENVELOPE_KEYS.has(k));
+    expect(Buffer.byteLength(JSON.stringify(Object.fromEntries(payload)))).toBeLessThanOrEqual(
+      EVENT_BUDGET,
+    );
+  });
+
   it('writes no file at all with telemetry off and no sink', () => {
     sixAxes();
     const off = { DEVKIT_NO_TELEMETRY: '1', DEVKIT_GATE_EVENTS: undefined };
