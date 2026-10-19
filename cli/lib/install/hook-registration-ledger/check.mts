@@ -5,10 +5,14 @@ import { type HookInstallScope, hookRegistrationDestination } from './codec.mts'
 import {
   adoptExactLegacy,
   type HookRegistrationOptions,
+  handlerLocation,
   ledgerOf,
+  otherClaudeSettings,
   providerDocument,
+  readHandlers,
   retiredElsewhere,
   stripReclaimedCommands,
+  unrecognisedFallowGates,
 } from './install-support.mts';
 import { reconcileLegacyHookCommands } from './legacy-commands.mts';
 import {
@@ -17,7 +21,8 @@ import {
   readHookRegistrationLedger,
 } from './lifecycle.mts';
 
-/** Doctor's read-only view of hook registrations. `advisories` are findings devkit must not repair. */
+/** Doctor's read-only view of hook registrations. `advisories` are findings devkit must not repair,
+ * so they never make `ok` false: an unrecognised fallow-gate.sh spelling is reported, never deleted. */
 export function checkHookRegistrations(
   root: string,
   componentIds: string[],
@@ -48,6 +53,14 @@ export function checkHookRegistrations(
       (elsewhere.repairable ? missing : advisories).push(
         `${provider}:retired-registration:${elsewhere.rel}`,
       );
+    for (const fileRel of [rel, otherClaudeSettings(root, provider, scope)?.rel]) {
+      if (!fileRel) continue;
+      const unrecognised = unrecognisedFallowGates(readHandlers(root, provider, fileRel), provider);
+      for (const handler of unrecognised)
+        advisories.push(
+          `${provider}:unrecognised-fallow-gate ${handlerLocation(fileRel, handler)}: ${handler.command}`,
+        );
+    }
     if (legacy.ledgerChanged) missing.push(`${provider}:superseded-registration`);
     const effectiveLedger = legacyOwnedComponentIds?.length
       ? ledgerOf(
