@@ -74,10 +74,6 @@ export interface SpawnDenials {
 const DENIED_SHOWN = 3;
 const FAILED_SHOWN = 3;
 
-/** ` [lens]` for a split lens part, so its log lines match its completion line; '' otherwise. */
-const lensTag = (reviewer: Reviewer): string =>
-  reviewer.lens?.length ? ` [${lensGroupId(reviewer.lens)}]` : '';
-
 /** Print the FAILED items behind a voided PASS, so a retry that passes cannot erase them. Display
  * only: the retry prompt keeps names alone, so the next judge is never asked to refute its finding. */
 export function reportFailedItems(reviewer: Reviewer, state: ChecklistState | null): void {
@@ -94,6 +90,10 @@ export function reportFailedItems(reviewer: Reviewer, state: ChecklistState | nu
       `⚠️  guard-review: ${reviewer.name}${lensTag(reviewer)} — (+${failed.length - FAILED_SHOWN} more)`,
     );
 }
+
+/** ` [lens]` for a split lens part, so its log lines match its completion line; '' otherwise. */
+const lensTag = (reviewer: Reviewer): string =>
+  reviewer.lens?.length ? ` [${lensGroupId(reviewer.lens)}]` : '';
 
 /** Name the refused tool calls beside a non-pass outcome; a PASS that lost a test run stays quiet. */
 export function reportDeniedCalls(

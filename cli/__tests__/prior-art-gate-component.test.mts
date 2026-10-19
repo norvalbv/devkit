@@ -5,9 +5,9 @@
  * Two load-bearing properties. It stays OFF unless asked for — it denies harness tool calls, so an
  * unrequested install is a real defect, and `--yes` installs every recommended component, which makes
  * that exactly the case worth pinning. And it never projects to Cursor — the registrations carry no
- * cursorEvent because Cursor has no ExitPlanMode/Task.
+ * cursorEvent because Cursor has no prior-art subagent to satisfy the gate.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { defaultSelection } from '../lib/components.mts';
@@ -24,6 +24,51 @@ const hookPath = (root: string, surface = 'claude') =>
 const readJson = (root: string, rel: string) => JSON.parse(readFileSync(join(root, rel), 'utf8'));
 const claudeHookCommands = (root: string) =>
   JSON.stringify(readJson(root, '.claude/settings.json').hooks ?? {});
+const LEDGER = '.devkit/agent-hook-registrations-manifest.json';
+const HOOK_DOCS = ['.claude/settings.json', '.codex/hooks.json'];
+const PRE_EDIT_COMMAND = `${PRIOR_ART_GATE_HOOK}" edit`;
+const PRE_BASH_COMMAND = `${PRIOR_ART_GATE_HOOK}" bash`;
+/** Registrations added after the gate first shipped, keyed by the command suffix they install. */
+const ADDED = {
+  'prior-art-gate:pre-edit': PRE_EDIT_COMMAND,
+  'prior-art-gate:pre-bash': PRE_BASH_COMMAND,
+};
+
+type HookGroup = { matcher?: string; hooks: { command: string }[] };
+
+/** Rewind an install to the registry before pre-edit and pre-bash existed: handlers and rows go. */
+function stripAdded(root: string): void {
+  const added = Object.values(ADDED);
+  for (const rel of HOOK_DOCS) {
+    const doc = readJson(root, rel);
+    doc.hooks.PreToolUse = doc.hooks.PreToolUse.map((group: HookGroup) => ({
+      ...group,
+      hooks: group.hooks.filter((hook) => !added.some((cmd) => hook.command.endsWith(cmd))),
+    }));
+    writeFileSync(join(root, rel), `${JSON.stringify(doc, null, 2)}\n`);
+  }
+  const ledger = readJson(root, LEDGER);
+  ledger.entries = ledger.entries.filter(
+    (entry: { registrationId: string }) => !Object.hasOwn(ADDED, entry.registrationId),
+  );
+  writeFileSync(join(root, LEDGER), `${JSON.stringify(ledger, null, 2)}\n`);
+}
+
+const installed = (root: string, rel: string, command: string) =>
+  readJson(root, rel).hooks.PreToolUse.some((group: HookGroup) =>
+    group.hooks.some((hook) => hook.command.endsWith(command)),
+  );
+
+/** Per added registration: which hook documents carry it, and which providers the ledger owns. */
+const addedState = (root: string) =>
+  Object.entries(ADDED).map(([id, command]) => ({
+    id,
+    docs: HOOK_DOCS.map((rel) => installed(root, rel, command)),
+    ledger: readJson(root, LEDGER)
+      .entries.filter((e: { registrationId: string }) => e.registrationId === id)
+      .map((e: { provider: string }) => e.provider)
+      .sort(),
+  }));
 
 afterEach(cleanup);
 
@@ -70,6 +115,17 @@ describe('devkit init --prior-art-gate', () => {
       ),
     ).toBe(true);
     expect(
+      flat('PreToolUse').some(
+        (entry: string) =>
+          entry.startsWith('Edit|Write|MultiEdit::') && entry.endsWith(PRE_EDIT_COMMAND),
+      ),
+    ).toBe(true);
+    expect(
+      flat('PreToolUse').some(
+        (entry: string) => entry.startsWith('Bash::') && entry.endsWith(PRE_BASH_COMMAND),
+      ),
+    ).toBe(true);
+    expect(
       flat('PostToolUse').some(
         (entry: string) => entry.startsWith('Task|Agent::') && entry.includes(PRIOR_ART_GATE_HOOK),
       ),
@@ -86,7 +142,33 @@ describe('devkit init --prior-art-gate', () => {
       'utf8',
     );
     expect(ledger).toContain('prior-art-gate:pre-plan');
+    expect(ledger).toContain('prior-art-gate:pre-edit');
+    expect(ledger).toContain('prior-art-gate:pre-bash');
     expect(ledger).toContain('prior-art-gate:post-task');
+  });
+
+  it('an install from before pre-edit and pre-bash gains them on re-run, idempotently', () => {
+    const root = tmpRepo();
+    const init = () => devkit(root, 'init', '--stack', 'generic', '--yes', '--prior-art-gate');
+    expect(init().status).toBe(0);
+    stripAdded(root);
+    // Absent everywhere, so the re-run must take the add path rather than adopting a leftover.
+    expect(addedState(root).map(({ docs, ledger }) => [docs, ledger])).toEqual([
+      [[false, false], []],
+      [[false, false], []],
+    ]);
+
+    expect(init().status).toBe(0);
+    // pre-bash is Claude-only: Codex reports shell as Bash but cannot record a prior-art run.
+    expect(addedState(root)).toEqual([
+      { id: 'prior-art-gate:pre-edit', docs: [true, true], ledger: ['claude', 'codex'] },
+      { id: 'prior-art-gate:pre-bash', docs: [true, false], ledger: ['claude'] },
+    ]);
+    const snapshot = () =>
+      [...HOOK_DOCS, LEDGER].map((rel) => readFileSync(join(root, rel), 'utf8'));
+    const before = snapshot();
+    expect(init().status).toBe(0);
+    expect(snapshot()).toEqual(before);
   });
 
   it('--prior-art-gate with --no-claude deselects the gate with a notice (Claude-only hooks)', () => {

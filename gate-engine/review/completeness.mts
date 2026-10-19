@@ -91,10 +91,8 @@ export function completenessJudgeSetup(
   { mcpProjectRoots }: { mcpProjectRoots?: readonly string[] } = {},
 ) {
   const mcpProfile = namedAgentMcpProfile();
-  const allowedTools = withNamedAgentMcpTools(
-    JUDGE_READ_TOOLS,
-    cfg.indexPath ? cfg.searchTool : '',
-  );
+  const searchTool = cfg.indexPath ? cfg.searchTool : '';
+  const allowedTools = withNamedAgentMcpTools(JUDGE_READ_TOOLS, searchTool);
   const mcpOptions = { cwd, projectRoots: mcpProjectRoots };
   return {
     allowedTools,
