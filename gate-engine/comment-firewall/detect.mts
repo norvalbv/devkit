@@ -11,7 +11,13 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { ts } from 'ts-morph';
 import { resolveGuardConfig, sourceMatchers } from '../config.mts';
-import { gitPrefix } from '../ratchets/git-index.mts';
+import {
+  gitPrefix,
+  nameStatusRecords,
+  type Renames,
+  renamesFrom,
+  splitNul,
+} from '../ratchets/git-index.mts';
 import {
   anchorContext,
   anchorFor,
@@ -65,10 +71,6 @@ function git(cwd: string, args: string[]): string {
   });
 }
 
-function splitNul(value: string): string[] {
-  return value.split('\0').filter(Boolean);
-}
-
 function stagedPaths(cwd: string, ref?: string): Set<string> {
   const args = [
     'diff',
@@ -83,8 +85,6 @@ function stagedPaths(cwd: string, ref?: string): Set<string> {
   return new Set(splitNul(git(cwd, args)));
 }
 
-type Renames = Map<string, { from: string; pure: boolean }>;
-
 /** Staged renames keyed by new path, so a moved file is diffed against its pre-move blob. */
 function stagedRenames(cwd: string, ref?: string): Renames {
   const args = [
@@ -98,15 +98,11 @@ function stagedRenames(cwd: string, ref?: string): Renames {
     '--no-ext-diff',
   ];
   if (ref) args.push(ref);
-  const fields = splitNul(git(cwd, args));
-  const renamed: Renames = new Map();
-  for (let i = 0; i < fields.length;) {
-    const status = fields[i++] ?? '';
-    const from = fields[i++];
-    const newPath = fields[i++];
-    if (from && newPath) renamed.set(newPath, { from, pure: status === 'R100' });
-  }
-  return renamed;
+  return renamesFrom(nameStatusRecords(git(cwd, args)));
+}
+
+function isPure(renames: Renames | null, file: string): boolean {
+  return renames?.get(file)?.pure === true;
 }
 
 interface ChangedPaths {
@@ -124,11 +120,11 @@ function changedPaths(cwd: string): ChangedPaths {
     const mergeParent = stagedPaths(cwd, 'MERGE_HEAD');
     const merge = stagedRenames(cwd, 'MERGE_HEAD');
     const files = firstParent.filter(
-      (file) => mergeParent.has(file) && !(head.get(file)?.pure && merge.get(file)?.pure),
+      (file) => mergeParent.has(file) && !(isPure(head, file) && isPure(merge, file)),
     );
     return { files, head, merge };
   } catch {
-    return { files: firstParent.filter((file) => !head.get(file)?.pure), head, merge: null };
+    return { files: firstParent.filter((file) => !isPure(head, file)), head, merge: null };
   }
 }
 
@@ -437,6 +433,14 @@ function findingFor(
   };
 }
 
+/** One parent's added-line hunks and comment-touch lines, diffing a moved file from its old path. */
+function parentAttribution(cwd: string, file: string, renames: Renames | null, ref?: string) {
+  const from = renames?.get(file)?.from;
+  const hunks = parsePatchHunks(patch(cwd, file, ref, from));
+  const fragments = commentFragmentsAt(cwd, from ?? file, ref ?? 'HEAD');
+  return { hunks, fragments, touch: commentTouchLines(hunks, new Set(fragments.keys())) };
+}
+
 export function detectChangedComments(
   cwd = process.cwd(),
   only?: ReadonlySet<string>,
@@ -462,30 +466,28 @@ export function detectChangedComments(
       continue;
     }
     inventory.files += 1;
-    const headFrom = headRenames.get(file)?.from;
-    const first = parsePatchHunks(patch(cwd, file, undefined, headFrom));
-    let effective = first;
-    const headFragments = commentFragmentsAt(cwd, headFrom ?? file, 'HEAD');
-    let touchLines = commentTouchLines(first, new Set(headFragments.keys()));
+    const first = parentAttribution(cwd, file, headRenames);
+    let effective = first.hunks;
+    let touchLines = first.touch;
     try {
-      const mergeFrom = mergeRenamed?.get(file)?.from;
-      const second = parsePatchHunks(patch(cwd, file, 'MERGE_HEAD', mergeFrom));
-      const secondLines = new Set(second.flatMap((hunk) => [...hunk.addedLines]));
-      const secondTouch = commentTouchLines(
-        second,
-        new Set(commentFragmentsAt(cwd, mergeFrom ?? file, 'MERGE_HEAD').keys()),
-      );
-      effective = first.map((hunk) => ({
+      const second = parentAttribution(cwd, file, mergeRenamed, 'MERGE_HEAD');
+      const secondLines = new Set(second.hunks.flatMap((hunk) => [...hunk.addedLines]));
+      effective = first.hunks.map((hunk) => ({
         ...hunk,
         addedLines: new Set([...hunk.addedLines].filter((line) => secondLines.has(line))),
       }));
-      touchLines = new Set([...touchLines].filter((line) => secondTouch.has(line)));
+      touchLines = new Set([...touchLines].filter((line) => second.touch.has(line)));
     } catch {
       // Ordinary commit: the first-parent staged patch is the complete attribution set.
     }
     const source = stagedBlob(cwd, file);
     const tokens = scanCommentTokens(source, extension);
-    cited.push(...refFindings({ file, tokens, hunks: effective, headFragments }, policy.refs));
+    cited.push(
+      ...refFindings(
+        { file, tokens, hunks: effective, headFragments: first.fragments },
+        policy.refs,
+      ),
+    );
     const paragraphs = changedParagraphs(file, source, tokens, effective, touchLines, inventory);
     for (const paragraph of paragraphs) {
       findings.push(findingFor(file, extension, source, paragraph, effective));
