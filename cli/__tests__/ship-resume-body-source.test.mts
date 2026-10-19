@@ -1,12 +1,14 @@
 /** sc-3411 — a --resume banner names the body that will ship; an override sized as the record
  *  looked exactly like the stale-body failure. */
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import {
+  breakHook,
   dropWorktree,
+  fixHook,
   installHook,
   reshipScript,
   scriptPath,
@@ -135,18 +137,6 @@ describe('ship --resume banner: body source (new-ship)', () => {
     expect(r.stderr).toContain('--body-file: no such file: nope.md');
   });
 });
-
-/** Remove the hook runner so the hook-source preflight refuses before any worktree exists. */
-function breakHook(s) {
-  mkdirSync(join(s.dir, 'src'), { recursive: true });
-  writeFileSync(join(s.dir, 'src/big.ts'), 'export const a = 1;\n');
-  rmSync(join(s.dir, '.husky/_'), { recursive: true, force: true });
-}
-
-function fixHook(s) {
-  mkdirSync(join(s.dir, '.husky/_'), { recursive: true });
-  installHook(s.dir, 'exit 0');
-}
 
 /** Block a reship once on the hook-source preflight, then fix the cause. */
 function seedBlockedReship(argv, input) {
