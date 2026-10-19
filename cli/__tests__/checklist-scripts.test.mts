@@ -59,6 +59,38 @@ function repoWithCraftedFile() {
 
 const run = (repo, args) => spawnSync('node', [SCRIPT, ...args], { cwd: repo, encoding: 'utf8' });
 
+// codex's Linux sandbox denies shutdown(2), so a sync spawn with a piped stdin fails EPERM there
+// and the script silently loses its staged diff. A stand-in git logs each call's stdin kind.
+function runLoggingGitStdin(repo, skill, cmd) {
+  const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  const bin = join(repo, '.bin');
+  mkdirSync(bin);
+  const log = join(repo, 'git-calls.log');
+  writeFileSync(
+    join(bin, 'git'),
+    `#!/bin/sh\nif [ -p /dev/stdin ] || [ -S /dev/stdin ]; then s=piped; else s=closed; fi\necho "$s $*" >> "${log}"\nexec "${realGit}" "$@"\n`,
+    { mode: 0o755 },
+  );
+  // Positive control: a default sync spawn pipes stdin, so the stand-in must log it as piped.
+  execFileSync(join(bin, 'git'), ['--version']);
+  expect(readFileSync(log, 'utf8')).toMatch(/^piped --version\n$/);
+  rmSync(log);
+  const {
+    DEVKIT_REVIEW_STAGED_FILES: _inline,
+    DEVKIT_REVIEW_STAGED_FILES_PATH: _file,
+    ...env
+  } = process.env;
+  const script = fileURLToPath(
+    new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
+  );
+  const r = spawnSync('node', [script, cmd], {
+    cwd: repo,
+    encoding: 'utf8',
+    env: { ...env, PATH: `${bin}:${env.PATH}` },
+  });
+  return { r, calls: readFileSync(log, 'utf8').trim().split('\n') };
+}
+
 describe('skill checklist script (spawned source)', () => {
   // sc-1439: the gate's injected staged list is AUTHORITATIVE — the script reviews exactly those
   // files even when its own root-resolution would find nothing, and when its filters exclude every
@@ -564,6 +596,17 @@ describe('checklist scripts — a pure-deletion staged set is never reported as 
     },
   );
 
+  // The guard's own git read: a piped stdin there swallows EPERM and reports "nothing staged".
+  it.each(CASES.filter(([skill]) => skill !== 'correctness'))(
+    '%s runs its deletion guard with git stdin closed',
+    (skill, root, cmd) => {
+      const { r, calls } = runLoggingGitStdin(repoWithDeletionOnlyIndex(root), skill, cmd);
+      expect(r.stderr).toMatch(/pure deletions/);
+      expect(calls.filter((c) => c.includes('--name-only -- '))).not.toEqual([]);
+      expect(calls.filter((c) => c.startsWith('piped'))).toEqual([]);
+    },
+  );
+
   it('correctness reviews a staged deletion because the diff remains semantic evidence', () => {
     const repo = repoWithDeletionOnlyIndex('src');
     const script = fileURLToPath(
@@ -659,5 +702,32 @@ describe('checklist scripts — a pure-deletion staged set is never reported as 
     const r = spawnSync('node', [script, cmd], { cwd: repo, encoding: 'utf8' });
     expect(r.status, `${skill}: ${r.stdout}${r.stderr}`).toBe(0);
     expect(r.stderr).not.toMatch(/pure deletions/);
+  });
+});
+
+describe('checklist scripts — git runs with stdin closed', () => {
+  it.each(CHECKLIST_CASES)('%s never hands git a piped stdin', (skill) => {
+    const repo = mkdtempSync(join(tmpdir(), 'checklist-stdin-'));
+    dirs.push(repo);
+    const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+    git(['init', '-q']);
+    writeFileSync(
+      join(repo, 'guard.config.json'),
+      JSON.stringify({
+        scanRoots: ['src'],
+        review: { backendRoots: ['src'], frontendRoots: ['src'] },
+      }),
+    );
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'src', 'io.tsx'), 'export const load = (f) => readFileSync(f);\n');
+    git(['add', '-A']);
+    const { r, calls } = runLoggingGitStdin(
+      repo,
+      skill,
+      skill === 'commit-guard' ? 'init' : 'generate',
+    );
+    expect(r.status, `${skill}: ${r.stdout}${r.stderr}`).toBe(0);
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.filter((c) => c.startsWith('piped'))).toEqual([]);
   });
 });
