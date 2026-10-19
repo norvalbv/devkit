@@ -97,6 +97,15 @@ describe('conventions-reviewer brief: Task dispatch needs the diff inline (sc-37
     for (const i of hits) expect(i > start && i < end).toBe(true);
   });
 
+  it('tells a gate judge of either family nothing false about its tools', () => {
+    // A codex gate judge has a shell and no Read tool; only the interactive Task path is Bash-less.
+    const prompt = wrapConventionsPrompt(md, ['src/a.ts'], '<claude-md>rule</claude-md>');
+    const { start, end } = taskParagraph(prompt);
+    const gateText = prompt.slice(0, start) + prompt.slice(end);
+    expect(gateText).not.toMatch(/no Bash/i);
+    expect(gateText).not.toMatch(/use Read\b|Read\/Grep\/Glob are available/);
+  });
+
   it('makes the no-diff reply fail closed: never a PASS, never a clean-review closer', () => {
     const line = noDiffReplyLine();
     expect(parseReviewVerdict(line).verdict).toBeNull();
