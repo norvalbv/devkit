@@ -60,8 +60,9 @@ function getStagedFiles() {
 }
 
 function loadChecklist() {
-  if (!existsSync(CHECKLIST_PATH)) return null;
-  return JSON.parse(readFileSync(CHECKLIST_PATH, 'utf-8'));
+  // Empty means absent: the gate pre-creates the file a confined codex judge may write.
+  const text = existsSync(CHECKLIST_PATH) ? readFileSync(CHECKLIST_PATH, 'utf-8') : '';
+  return text ? JSON.parse(text) : null;
 }
 
 function saveChecklist(data) {

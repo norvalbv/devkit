@@ -11,7 +11,7 @@ import {
   rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { CodexWritablePaths } from './permissions.mts';
 import { needsCodexWorkspace } from './result.mts';
 
@@ -67,6 +67,9 @@ const CREATE_NO_FOLLOW =
 /** The state file's symlink-free path, created empty if absent: Linux bwrap drops missing roots. */
 function writableStateFile(repoRoot: string, rel: string): string {
   const abs = resolve(repoRoot, rel);
+  const inside = relative(repoRoot, abs);
+  if (!inside || inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside))
+    throw new Error(`codex judge: state file ${rel} is not a file inside ${repoRoot}`);
   mkdirSync(dirname(abs), { recursive: true });
   const real = join(realpathSync(dirname(abs)), basename(abs));
   closeSync(openSync(real, CREATE_NO_FOLLOW));

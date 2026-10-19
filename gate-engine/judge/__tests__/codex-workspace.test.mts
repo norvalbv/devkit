@@ -92,6 +92,10 @@ describe('codex judge argv — workspace confinement', () => {
     expect(cli.argv).not.toContain('--add-dir');
     expect(cli.argv).not.toContain('--sandbox');
     expect(cli.argv.join(' ')).toContain(codexPermissionArgs(workspace).join(' '));
+    expect(codexPermissionArgs(workspace).slice(4)).toEqual([
+      '-c',
+      'permissions.devkit_judge.network.enabled=false',
+    ]);
     expect(codexPermissionArgs(workspace)[3]).toBe(
       `permissions.devkit_judge.filesystem={":root"="read",":tmpdir"="write",":slash_tmp"="write","/tmp/scratch"="write","${stateFile}"="write"}`,
     );
@@ -168,6 +172,18 @@ describe('prepareCodexSandbox', () => {
       expect(sandbox.workspace?.stateFile).toBe(path.join(projected, path.basename(STATE)));
       sandbox.cleanup();
     }
+  });
+
+  // The grant must stay inside the checkout even if a caller passes a bad path.
+  it('refuses a state file outside the checkout, or the checkout itself', () => {
+    for (const rel of [path.join(dir, 'abs.json'), '../outside.json', '..', '.'])
+      expect(
+        () => prepareCodexSandbox(INVESTIGATING, { codexWritableFile: rel }, repo),
+        rel,
+      ).toThrow(/is not a file inside/);
+    const dotted = prepareCodexSandbox(INVESTIGATING, { codexWritableFile: '..state.json' }, repo);
+    expect(dotted.workspace?.stateFile).toBe(path.join(repo, '..state.json'));
+    dotted.cleanup();
   });
 
   // A .claude linked onto the checkout once had to be refused: the whole directory was granted.
@@ -286,7 +302,7 @@ describe('the commit-gates skill replay of a workspace-write judge sandbox', () 
     const args = seen.filter((l) => l.startsWith('ARG:')).map((l) => l.slice(4));
     const view = { scratch: seen[0], repoRoot: repo, stateFile: path.join(repo, STATE) };
     const judge = judgeCliFor(INVESTIGATING, {}, false, view).argv;
-    expect(args.slice(0, 5)).toEqual(['sandbox', ...codexPermissionArgs(view)]);
+    expect(args.slice(0, 7)).toEqual(['sandbox', ...codexPermissionArgs(view)]);
     expect(judge.join(' ')).toContain(codexPermissionArgs(view).join(' '));
     expect(args.slice(-3)).toEqual(['/bin/sh', '-lc', 'true']);
     expect(out.trim()).toBe('exit 0');
