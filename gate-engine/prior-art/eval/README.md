@@ -85,3 +85,30 @@ to the acceptance-grade K=3 resumes the 15 banked responses from the checkpoint 
 the missing runs, and a killed run resumes where it stopped. An edited agent/corpus/runner changes
 the fingerprint and ignores the bank (`bench-runs-resume-from-checkpoint`). `BENCH_NO_RESUME=1`
 forces fresh calls.
+
+## Mining production runs
+
+`guard-review record-agent prior-art` archives the exact request and response bytes beside the
+telemetry sink, at `<telemetry-dir>/evidence/<sha256>.gz`, keyed by the receipt's `request_sha256` and
+`output_sha256`. Transcripts are pruned within days and are not byte-exact, so this archive is the
+evidence a candidate is built from. The receipt's `evidence` field says whether the bytes landed
+(`archived`, `disabled` with telemetry off, `too_large` past 8 MiB, `failed`).
+
+```bash
+node gate-engine/prior-art/eval/mine.mts [--sink <gate-events.jsonl>] [--as-of <iso>] [--out <file>]
+node gate-engine/prior-art/eval/mine.mts promote <invocation_id> --case-id <family> \
+  --verdict <V> [--framing <F>] --label-source <url|receipt file> --privacy-reviewed
+```
+
+- **mine** streams the sink and joins each prior-art `judge_exec` to its `agent_feedback` claims on
+  `invocation_id`, writing `~/.devkit/research/prior-art/candidates.jsonl`. Every feedback revision is
+  kept: `heads` are the claims nothing supersedes, two heads read `conflict`, and a broken
+  `supersedes` link reads `dangling`. Copied sink lines collapse, and one id carrying two payloads
+  reads `conflict`. Evidence is `present`, `missing`, `corrupt`, `hash_mismatch` or `not_captured`,
+  never read from a transcript. `--as-of` freezes the queue at a date.
+- **promote** writes one draft, write-once, to `~/.devkit/research/prior-art/drafts/`. The draft is
+  the audit record. It refuses a feedback id or the run's own telemetry as the label source, and it
+  needs a privacy review and a `caseId` family. Its prompt is the archived request plus the
+  excerpts quoted in the archived response, so nothing written after the run reaches the row.
+- Nothing appends to `cases-prior-art.jsonl`. A human authors the gold and decoy slots, and the
+  draft fails `lintRows` until then. Rows sharing a `caseId` must share `holdout`.

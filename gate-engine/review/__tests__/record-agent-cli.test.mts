@@ -10,11 +10,13 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { buildCandidates, readPriorArtEvents } from '../../prior-art/eval/mine.mts';
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'cli.mts');
 
@@ -264,6 +266,7 @@ describe('record-agent request capture and receipt', () => {
       invocation_id: ev?.invocation_id,
       output_sha256: sha(response),
       request_sha256: sha(request),
+      evidence: 'archived',
       checkouts_check: 'unchecked',
       transcript_ref: ev?.transcript_ref,
       telemetry: 'written',
@@ -354,5 +357,58 @@ describe('record-agent request capture and receipt', () => {
     });
     expect(broken.status).toBe(0);
     expect(receipt(broken)).toMatchObject({ telemetry: 'failed' });
+  });
+});
+
+describe('record-agent prior-art evidence archive', () => {
+  const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
+  const archived = (hash: string) =>
+    gunzipSync(readFileSync(path.join(dir, 'telemetry', 'evidence', `${hash}.gz`)));
+
+  it('archives the exact request and response bytes under the receipt hashes', () => {
+    // CRLF, a BOM and an invalid byte: the archive is the only copy that keeps all three exact.
+    const request = Buffer.from([...Buffer.from('\uFEFFpremise\r\n'), 0xff]);
+    const response = Buffer.from([...Buffer.from('verdict\r\n'), 0xfe]);
+    const requestFile = path.join(dir, 'request.bin');
+    writeFileSync(requestFile, request);
+    const r = runCli(['record-agent', 'prior-art', '--request-file', requestFile], response);
+    expect(r.status).toBe(0);
+    const [ev] = events();
+    expect(ev).toMatchObject({ evidence: 'archived' });
+    expect(archived(String(ev?.request_sha256)).equals(request)).toBe(true);
+    expect(archived(String(ev?.output_sha256)).equals(response)).toBe(true);
+    expect(sha(archived(String(ev?.output_sha256)))).toBe(ev?.output_sha256);
+  });
+
+  it('records a line and an archive the miner reads back as present evidence', async () => {
+    const requestFile = path.join(dir, 'request.md');
+    writeFileSync(requestFile, 'premise');
+    runCli(['record-agent', 'prior-art', '--request-file', requestFile], '{"verdict":"x"}');
+    const evidence = path.join(dir, 'telemetry', 'evidence');
+    const { candidates } = buildCandidates(await readPriorArtEvents(sink), evidence);
+    expect(candidates).toMatchObject([
+      { request: { evidence: 'present' }, output: { evidence: 'present' }, copies: 1 },
+    ]);
+  });
+
+  it('persists nothing and says so when telemetry is off', () => {
+    const r = runCli(['record-agent', 'prior-art'], 'verdict', {
+      DEVKIT_GATE_EVENTS: '',
+      DEVKIT_NO_TELEMETRY: '1',
+    });
+    expect(JSON.parse(r.stdout)).toMatchObject({ evidence: 'disabled' });
+    expect(existsSync(path.join(dir, 'telemetry'))).toBe(false);
+  });
+
+  it('reports an oversized response as too_large rather than archiving part of it', () => {
+    const r = runCli(['record-agent', 'prior-art'], 'x'.repeat(8 * 1024 * 1024 + 1));
+    expect(JSON.parse(r.stdout)).toMatchObject({ evidence: 'too_large' });
+    expect(existsSync(path.join(dir, 'telemetry', 'evidence'))).toBe(false);
+  });
+
+  it('archives nothing for any other agent label', () => {
+    const r = runCli(['record-agent', 'feature-critique'], 'verdict');
+    expect(JSON.parse(r.stdout)).not.toHaveProperty('evidence');
+    expect(readdirSync(path.join(dir, 'telemetry'))).not.toContain('evidence');
   });
 });
