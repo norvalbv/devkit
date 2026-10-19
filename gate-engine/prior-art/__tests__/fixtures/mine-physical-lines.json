@@ -1,0 +1,309 @@
+[
+  {
+    "id": "physical-lines",
+    "verdict": "DISSOLVE_FRAME",
+    "request": "## Problem Statement\nThe file-size gate counts comment lines toward its 500-line cap. The comment gate makes us keep a load-bearing comment, and that comment pushes the file over the cap. Exempt justified comment lines from the size cap.\n\n## Symptoms & History\nA file near its cap oscillated 497 / 501 / 503 lines across attempts; two small helpers were deleted only to buy line budget.\n",
+    "response": {
+      "schemaVersion": 1,
+      "kind": "prior_art",
+      "phase": "problem",
+      "status": "reviewed",
+      "problem": {
+        "statement": "Comment lines push files over the size cap.",
+        "restatedFrame": "Assumes comments should be exempt from a cap defined over physical lines.",
+        "assumedConstraints": ["the size cap and the comment gate disagree"]
+      },
+      "verdict": "DISSOLVE_FRAME",
+      "confidence": "high",
+      "legs": [
+        {
+          "leg": "local",
+          "status": "reached",
+          "detail": "searched 1 resolved checkout",
+          "declaredCheckouts": 1,
+          "resolvedCheckouts": 1
+        },
+        {
+          "leg": "github",
+          "status": "reached",
+          "detail": "gh search over the lint plugin"
+        },
+        {
+          "leg": "web",
+          "status": "reached",
+          "detail": "rule documentation"
+        },
+        {
+          "leg": "papers",
+          "status": "unavailable",
+          "detail": "no paper tool"
+        },
+        {
+          "leg": "deep-research",
+          "status": "unavailable",
+          "detail": "MCP not configured"
+        }
+      ],
+      "frameChallenge": {
+        "framing": "DISSOLVES",
+        "upstreamChoice": "the size cap is defined over raw physical lines, comments included",
+        "boundaryMustExist": "no"
+      },
+      "questions": [
+        {
+          "id": "Q1",
+          "status": "NO_EVIDENCE",
+          "finding": "Q1 finding"
+        },
+        {
+          "id": "Q2",
+          "status": "NO_EVIDENCE",
+          "finding": "Q2 finding"
+        },
+        {
+          "id": "Q3",
+          "status": "NO_EVIDENCE",
+          "finding": "Q3 finding"
+        },
+        {
+          "id": "Q4",
+          "status": "NO_EVIDENCE",
+          "finding": "Q4 finding"
+        },
+        {
+          "id": "Q5",
+          "status": "NO_EVIDENCE",
+          "finding": "Q5 finding"
+        },
+        {
+          "id": "Q6",
+          "status": "NO_EVIDENCE",
+          "finding": "Q6 finding"
+        },
+        {
+          "id": "Q7",
+          "status": "NO_EVIDENCE",
+          "finding": "Q7 finding"
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "local",
+          "source": "docs/structure-governance.md",
+          "repoRoot": null,
+          "claim": "The cap deliberately measures physical lines.",
+          "quote": "Every physical line counts, comments included; a file over the cap is split, not trimmed."
+        }
+      ],
+      "suggestedNextStep": {
+        "kind": "reframe",
+        "detail": "Split the file; the two gates are independent constraints."
+      },
+      "routing": null,
+      "summary": "The size cap counts raw lines by design, so a necessary comment can force a split.",
+      "researchReferences": []
+    }
+  },
+  {
+    "id": "policy-excludes-comments",
+    "verdict": "GENUINE_NEW_WORK",
+    "request": "## Problem Statement\nOur size policy says the 500-line cap counts code lines only and excludes comment-only lines, but the size gate counts every line. A load-bearing comment pushes a file over the cap. Make the gate match the policy.\n",
+    "response": {
+      "schemaVersion": 1,
+      "kind": "prior_art",
+      "phase": "problem",
+      "status": "reviewed",
+      "problem": {
+        "statement": "The size gate counts comment lines the policy excludes.",
+        "restatedFrame": "The frame holds: the implementation diverges from its own policy.",
+        "assumedConstraints": ["the size cap and the comment gate disagree"]
+      },
+      "verdict": "GENUINE_NEW_WORK",
+      "confidence": "medium",
+      "legs": [
+        {
+          "leg": "local",
+          "status": "reached",
+          "detail": "searched 1 resolved checkout",
+          "declaredCheckouts": 1,
+          "resolvedCheckouts": 1
+        },
+        {
+          "leg": "github",
+          "status": "reached",
+          "detail": "gh search over the lint plugin"
+        },
+        {
+          "leg": "web",
+          "status": "reached",
+          "detail": "rule documentation"
+        },
+        {
+          "leg": "papers",
+          "status": "unavailable",
+          "detail": "no paper tool"
+        },
+        {
+          "leg": "deep-research",
+          "status": "unavailable",
+          "detail": "MCP not configured"
+        }
+      ],
+      "frameChallenge": {
+        "framing": "HOLDS",
+        "upstreamChoice": null,
+        "boundaryMustExist": "yes"
+      },
+      "questions": [
+        {
+          "id": "Q1",
+          "status": "NO_EVIDENCE",
+          "finding": "Q1 finding"
+        },
+        {
+          "id": "Q2",
+          "status": "NO_EVIDENCE",
+          "finding": "Q2 finding"
+        },
+        {
+          "id": "Q3",
+          "status": "NO_EVIDENCE",
+          "finding": "Q3 finding"
+        },
+        {
+          "id": "Q4",
+          "status": "ANSWERED",
+          "finding": "Q4 finding"
+        },
+        {
+          "id": "Q5",
+          "status": "NO_EVIDENCE",
+          "finding": "Q5 finding"
+        },
+        {
+          "id": "Q6",
+          "status": "NO_EVIDENCE",
+          "finding": "Q6 finding"
+        },
+        {
+          "id": "Q7",
+          "status": "NO_EVIDENCE",
+          "finding": "Q7 finding"
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "local",
+          "source": "docs/structure-governance.md",
+          "repoRoot": null,
+          "claim": "Policy excludes comments, so the gate contradicts it.",
+          "quote": "The cap counts code lines; comment-only lines are excluded."
+        }
+      ],
+      "suggestedNextStep": {
+        "kind": "proceed_to_plan",
+        "detail": "Make the gate skip comment-only lines, as the policy states."
+      },
+      "routing": null,
+      "summary": "The gate contradicts a written policy that excludes comments.",
+      "researchReferences": []
+    }
+  },
+  {
+    "id": "undocumented-counting",
+    "verdict": "INSUFFICIENT_EVIDENCE",
+    "request": "## Problem Statement\nA vendored private linter enforces a 500-line cap and seems to count comment lines. Its counting rule is undocumented and its source is not available. Should comment lines be exempt?\n",
+    "response": {
+      "schemaVersion": 1,
+      "kind": "prior_art",
+      "phase": "problem",
+      "status": "reviewed",
+      "problem": {
+        "statement": "A private linter's line counting is unknown.",
+        "restatedFrame": "Cannot tell whether the cap is meant to include comments.",
+        "assumedConstraints": ["the size cap and the comment gate disagree"]
+      },
+      "verdict": "INSUFFICIENT_EVIDENCE",
+      "confidence": "low",
+      "legs": [
+        {
+          "leg": "local",
+          "status": "unavailable",
+          "detail": "no referenceCheckouts declared",
+          "declaredCheckouts": 0,
+          "resolvedCheckouts": 0
+        },
+        {
+          "leg": "github",
+          "status": "failed",
+          "detail": "gh unauthenticated"
+        },
+        {
+          "leg": "web",
+          "status": "unavailable",
+          "detail": "offline"
+        },
+        {
+          "leg": "papers",
+          "status": "unavailable",
+          "detail": "no paper tool"
+        },
+        {
+          "leg": "deep-research",
+          "status": "unavailable",
+          "detail": "MCP not configured"
+        }
+      ],
+      "frameChallenge": {
+        "framing": "HOLDS",
+        "upstreamChoice": null,
+        "boundaryMustExist": "unknown"
+      },
+      "questions": [
+        {
+          "id": "Q1",
+          "status": "NO_EVIDENCE",
+          "finding": "Q1 finding"
+        },
+        {
+          "id": "Q2",
+          "status": "NO_EVIDENCE",
+          "finding": "Q2 finding"
+        },
+        {
+          "id": "Q3",
+          "status": "NO_EVIDENCE",
+          "finding": "Q3 finding"
+        },
+        {
+          "id": "Q4",
+          "status": "NO_EVIDENCE",
+          "finding": "Q4 finding"
+        },
+        {
+          "id": "Q5",
+          "status": "NO_EVIDENCE",
+          "finding": "Q5 finding"
+        },
+        {
+          "id": "Q6",
+          "status": "NO_EVIDENCE",
+          "finding": "Q6 finding"
+        },
+        {
+          "id": "Q7",
+          "status": "NO_EVIDENCE",
+          "finding": "Q7 finding"
+        }
+      ],
+      "evidence": [],
+      "suggestedNextStep": {
+        "kind": "gather_evidence",
+        "detail": "Obtain the linter's counting rule before deciding."
+      },
+      "routing": null,
+      "summary": "No leg could read the counting rule.",
+      "researchReferences": []
+    }
+  }
+]
