@@ -10,8 +10,11 @@ import {
 import type { MergeVerdict } from '../merge-verdict/verdict.mts';
 import { EVIDENCE_ABSTENTIONS, EVIDENCE_STATUSES, type EvidenceOutcome } from './outcome.mts';
 
-export const EVIDENCE_BEGIN = '<!-- devkit:evidence:begin -->';
-export const EVIDENCE_END = '<!-- devkit:evidence:end -->';
+export const ownedBegin = (ns: string): string => `<!-- devkit:${ns}:begin -->`;
+export const ownedEnd = (ns: string): string => `<!-- devkit:${ns}:end -->`;
+const EVIDENCE = 'evidence';
+export const EVIDENCE_BEGIN = ownedBegin(EVIDENCE);
+export const EVIDENCE_END = ownedEnd(EVIDENCE);
 /** The merge verdict's line; the data line carries its full reason list for later re-scoring. */
 export const VERDICT_SLOT = '<!-- devkit:evidence:verdict -->';
 export const VERDICT_LABEL = '**Merge verdict:**';
@@ -28,10 +31,6 @@ export const verdictUnavailable = (why: string): PrintedVerdict => ({
 });
 const DATA_OPEN = '<!-- devkit:evidence:data ';
 const DATA_CLOSE = ' -->';
-// Whole marker lines only: ship writes them that way, and prose quoting a marker inline is not a block.
-const BLOCK = /^<!-- devkit:evidence:begin -->\r?\n[\s\S]*?\n<!-- devkit:evidence:end -->(?=\r?$)/m;
-const BLOCKS = new RegExp(BLOCK.source, 'gm');
-const MARKER = /<!-- devkit:evidence:/g;
 const SHOWN_FAILURES = 3;
 const SHOWN_ARGS = 40;
 const MAX_DETAIL_CHARS = 500;
@@ -51,16 +50,42 @@ const outcomeSchema = z.strictObject({
     .optional(),
 });
 
-/** A zero-width space after the namespace keeps quoted marker text from ever parsing as a marker. */
-const defuse = (text: string): string => text.replace(MARKER, '<!-- devkit:evidence​:');
+// Whole marker lines only: ship writes them that way, and prose quoting a marker inline is not a block.
+const ownedPattern = (ns: string, flags: string): RegExp =>
+  new RegExp(`^${ownedBegin(ns)}\\r?\\n[\\s\\S]*?\\n${ownedEnd(ns)}(?=\\r?$)`, flags);
 
-/** Caller-authored text never carries evidence: a pasted block is dropped, a stray marker defused. */
-export const callerText = (body: string): string => defuse(body.replace(BLOCKS, ''));
+/** A zero-width space after the namespace keeps quoted marker text from ever parsing as a marker. */
+const defuse = (ns: string, text: string): string =>
+  text.replaceAll(`<!-- devkit:${ns}:`, `<!-- devkit:${ns}​:`);
+
+/** Caller-authored text never carries a ship-owned block: a pasted one is dropped, a marker defused. */
+export const stripOwned = (ns: string, body: string): string =>
+  defuse(ns, body.replace(ownedPattern(ns, 'gm'), ''));
+
+export const findOwned = (ns: string, body: string): string | undefined =>
+  ownedPattern(ns, 'm').exec(body)?.[0];
+
+/** Replace the block in place, or append one; the rest of the body is kept byte for byte. */
+export function upsertOwned(ns: string, body: string, block: string): string {
+  const pattern = ownedPattern(ns, 'm');
+  if (pattern.test(body)) return body.replace(pattern, () => block);
+  const text = body.trimEnd();
+  return text ? `${text}\n\n${block}\n` : `${block}\n`;
+}
+
+/** A caller's replacement body keeps the PR's current block, so an explicit body never deletes it. */
+export function carryOwned(ns: string, callerBody: string, currentBody: string): string {
+  const existing = findOwned(ns, currentBody);
+  const text = stripOwned(ns, callerBody);
+  return existing ? upsertOwned(ns, text, existing) : text;
+}
+
+export const callerText = (body: string): string => stripOwned(EVIDENCE, body);
 
 const clip = (text: string, limit: number): string =>
   text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 
-const plain = (text: string): string =>
+export const plain = (text: string): string =>
   clip(text.replace(/\s+/g, ' ').trim().replaceAll('<', '&lt;'), MAX_DETAIL_CHARS);
 
 const failureLine = (label: string, item: { fullName: string; message: string }): string =>
@@ -128,32 +153,25 @@ export function renderEvidenceBlock(
     EVIDENCE_BEGIN,
     '#### Regression evidence (devkit ship)',
     `${VERDICT_SLOT}${verdict ? ` ${plain(verdict.line)}` : ''}`,
-    defuse(content),
+    defuse(EVIDENCE, content),
     `${DATA_OPEN}${data}${DATA_CLOSE}`,
     EVIDENCE_END,
   ].join('\n');
 }
 
-/** Replace the block in place, or append one; the rest of the body is kept byte for byte. */
-export function upsertEvidenceBlock(body: string, block: string): string {
-  if (BLOCK.test(body)) return body.replace(BLOCK, () => block);
-  const text = body.trimEnd();
-  return text ? `${text}\n\n${block}\n` : `${block}\n`;
-}
+export const upsertEvidenceBlock = (body: string, block: string): string =>
+  upsertOwned(EVIDENCE, body, block);
 
-/** A caller's replacement body keeps the PR's current block, so an explicit body never deletes it. */
-export function carryEvidenceBlock(callerBody: string, currentBody: string): string {
-  const existing = BLOCK.exec(currentBody)?.[0];
-  return existing ? upsertEvidenceBlock(callerText(callerBody), existing) : callerText(callerBody);
-}
+export const carryEvidenceBlock = (callerBody: string, currentBody: string): string =>
+  carryOwned(EVIDENCE, callerBody, currentBody);
 
 /** The recorded outcome, stale when it was produced at another head; null when absent or malformed. */
 export function readEvidenceBlock(
   body: string,
   currentHead: string,
 ): (EvidenceOutcome & { stale: boolean }) | null {
-  const line = BLOCK.exec(body)?.[0]
-    .split('\n')
+  const line = findOwned(EVIDENCE, body)
+    ?.split('\n')
     .map((text) => text.trimEnd())
     .find((text) => text.startsWith(DATA_OPEN) && text.endsWith(DATA_CLOSE));
   if (!line) return null;
