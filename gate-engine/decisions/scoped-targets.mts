@@ -46,6 +46,12 @@ function rulingFor(
   return { ruling: t.ruling, scope: t.scope ?? null };
 }
 
+// Newest ruling first, so a capped prompt keeps the Target just recorded. Content-keyed (never
+// mtime), so the order and every cache salt built from it survive copies, clones and note appends.
+function newestFirst(a: { slug: string; date: string }, b: { slug: string; date: string }) {
+  return b.date.localeCompare(a.date) || a.slug.localeCompare(b.slug);
+}
+
 /**
  * @param files changed files (scope-match key)
  * @param query free-text (plan terms) for the semantic supplement; '' skips it
@@ -60,7 +66,9 @@ export async function scopedTargets(
   const decisionsDir = resolveFromCwd(resolveGuardConfig(cwd), 'decisionsDir');
   if (decisionsDir == null) return []; // fail-open: nothing resolvable → nothing governs
   const scoped = files.length
-    ? loadScopedTargets(decisionsDir).filter((t) => matchScope(files, t.scopeGlobs))
+    ? loadScopedTargets(decisionsDir)
+        .filter((t) => matchScope(files, t.scopeGlobs))
+        .sort(newestFirst)
     : [];
   const scopedSlugs = new Set(scoped.map((t) => t.slug));
   const blocks: GoverningTarget[] = scoped.map((t) => ({

@@ -4,9 +4,13 @@
  * reviewer framing swaps only the words around the rulings, and the size cap drops whole rulings
  * NAMED — silent truncation would read as "no other Targets govern".
  */
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   COMPLETENESS_TARGETS_FRAMING,
+  loadReviewerTargetsBlocks,
   REVIEWER_TARGETS_FRAMING,
   renderTargets,
   type TargetBlock,
@@ -73,5 +77,27 @@ describe('renderTargets — shared governing-Targets block', () => {
     expect(renderTargets([ascii], COMPLETENESS_TARGETS_FRAMING, 2_600)).toContain(
       'x'.repeat(1_000),
     );
+  });
+});
+
+describe('loadReviewerTargetsBlocks — salt stability', () => {
+  it('a note-only append leaves the reviewer salt block byte-identical', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'targets-salt-'));
+    try {
+      const dir = join(root, 'docs', 'decisions');
+      mkdirSync(dir, { recursive: true });
+      const axis = (slug: string, date: string) =>
+        `---\nslug: ${slug}\ncreated: ${date}\n---\n\n## Target · ${date} — ${slug}\n\n**Ruling:** ${slug} ruling\n**Scope:** src/**\n`;
+      writeFileSync(join(dir, 'newer.md'), axis('newer', '2026-06-01'));
+      writeFileSync(join(dir, 'older.md'), axis('older', '2026-01-01'));
+      const before = (await loadReviewerTargetsBlocks(root, ['src/a.ts'])).saltBlock;
+      appendFileSync(join(dir, 'older.md'), '- 2026-07-01 — an implementation note\n');
+      utimesSync(join(dir, 'older.md'), new Date(), new Date('2030-01-01'));
+      const after = (await loadReviewerTargetsBlocks(root, ['src/a.ts'])).saltBlock;
+      expect(after).toBe(before);
+      expect(before.indexOf('### newer')).toBeLessThan(before.indexOf('### older'));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
