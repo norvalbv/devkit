@@ -1,12 +1,13 @@
 /** A blocked hook-source preflight still records, so `--resume` replays it.
  *  dist-integrity-resume.test.mts owns the dist-integrity case. */
 import type { ExecFileSyncOptions } from 'node:child_process';
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { generationAt, NO_RECORD } from '../lib/ship/ship-intent-codec.mts';
 import { readIntent, relIntentPath, writeIntent } from '../lib/ship/ship-intent.mts';
+import { donateIntent } from '../lib/ship/intent/donate.mts';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import {
   dirs,
@@ -21,6 +22,7 @@ import {
 } from './_ship-branch-fixture.mts';
 
 const MISSING_RUNNER_RE = /missing \.husky\/_ in /;
+const shipIntent = fileURLToPath(new URL('../lib/ship/ship-intent.mts', import.meta.url));
 const lines = (n: number) =>
   Array.from({ length: n }, (_, i) => `export const v${i} = ${i};`).join('\n') + '\n';
 
@@ -160,10 +162,14 @@ describe.each(PREFLIGHTS)('reship.sh — a blocking $name preflight is resumable
   });
 });
 
-describe('a --resume that exits before its record write names the extra paths it lost', () => {
-  const NOTICE = (branch: string) =>
-    '1 path(s) briefed by this retry were NOT recorded — a bare --resume will not carry them: src/other.ts\n' +
-    `  re-pass them: devkit ship --resume ${branch} -- src/other.ts\n`;
+describe('a --resume refused before its record write keeps or names its extra paths', () => {
+  const NOTICE = (branch: string, path = 'src/other.ts') =>
+    `1 path(s) briefed by this retry were NOT recorded — a bare --resume will not carry them: ${path}\n` +
+    `  re-pass them: devkit ship --resume ${branch} -- ${path}\n`;
+  const DONATED = (branch: string) =>
+    `ship: recorded 1 path(s) briefed by this retry — a bare devkit ship --resume ${branch} carries them\n`;
+  const intentBytes = (dir: string, branch: string) =>
+    readFileSync(join(dir, relIntentPath(branch)), 'utf8');
 
   it('ship-branch.sh: a directory refusal leaves the record narrow and says so', () => {
     const s = seedShipRepo();
@@ -180,12 +186,51 @@ describe('a --resume that exits before its record write names the extra paths it
     expect(recorded(s.dir, branch).paths).toEqual(['src/big.ts']);
   });
 
-  it('reship.sh: an unreadable --body-file leaves the record narrow and says so', () => {
+  it('ship-branch.sh: an unreadable --body-file records the extra, and a bare --resume ships it', () => {
+    const s = seedShipRepo();
+    breakHook(s);
+    writeFileSync(join(s.dir, 'src/other.ts'), lines(2));
+    const branch = 'feat/pre-kept-extra';
+    expect(run(scriptPath, s, [branch, 't', '--', 'src/big.ts'], {}, 'b\n').status).toBe(1);
+    const generation = recorded(s.dir, branch).generation;
+    const absent = join(s.dir, 'absent.md');
+
+    const retry = run(scriptPath, s, [
+      '--resume',
+      branch,
+      '--body-file',
+      absent,
+      '--',
+      'src/other.ts',
+    ]);
+
+    expect(retry.status, retry.stderr).toBe(1);
+    expect(retry.stderr).toContain(DONATED(branch));
+    expect(retry.stderr).not.toContain('NOT recorded');
+    expect(recorded(s.dir, branch)).toMatchObject({
+      paths: ['src/big.ts', 'src/other.ts'],
+      body: 'b',
+      generation,
+    });
+
+    fixHook(s);
+    const bare = run(scriptPath, s, ['--resume', branch]);
+    try {
+      expect(bare.status, bare.stderr).toBe(0);
+      expect(bare.stderr).toContain('2 paths');
+      expect(bare.stderr).toContain('    src/other.ts\n');
+    } finally {
+      dropWorktree(s.git, bare.stderr);
+    }
+  });
+
+  it('reship.sh: an unreadable --body-file records the extra into the record it read', () => {
     const s = seedReshipRepo();
     breakHook(s);
     writeFileSync(join(s.dir, 'src/other.ts'), lines(2));
     const first = run(reshipScript, s, ['pr-open', 't', '--pr', '--', 'src/big.ts'], {}, 'b\n');
     expect(first.status, first.stderr).toBe(1);
+    const generation = recorded(s.dir, 'pr-open').generation;
 
     const retry = run(scriptPath, s, [
       '--resume',
@@ -196,9 +241,28 @@ describe('a --resume that exits before its record write names the extra paths it
       'src/other.ts',
     ]);
 
-    expect(retry.status, retry.stderr).not.toBe(0);
-    expect(retry.stderr).toContain(NOTICE('pr-open'));
-    expect(recorded(s.dir, 'pr-open').paths).toEqual(['src/big.ts']);
+    expect(retry.status, retry.stderr).toBe(1);
+    expect(retry.stderr).toContain(DONATED('pr-open'));
+    expect(retry.stderr).not.toContain('NOT recorded');
+    expect(recorded(s.dir, 'pr-open')).toMatchObject({
+      paths: ['src/big.ts', 'src/other.ts'],
+      generation,
+    });
+  });
+
+  it('reship.sh: an extra refused as unmatched is never recorded, and the notice names it', () => {
+    const s = seedReshipRepo();
+    breakHook(s);
+    expect(
+      run(reshipScript, s, ['pr-open', 't', '--pr', '--', 'src/big.ts'], {}, 'b\n').status,
+    ).toBe(1);
+    const before = intentBytes(s.dir, 'pr-open');
+
+    const retry = run(scriptPath, s, ['--resume', 'pr-open', '--', 'src/nope.ts']);
+
+    expect(retry.status, retry.stderr).toBe(1);
+    expect(retry.stderr).toContain(NOTICE('pr-open', 'src/nope.ts'));
+    expect(intentBytes(s.dir, 'pr-open')).toBe(before);
   });
 });
 
@@ -277,8 +341,6 @@ describe('the size preview is advisory: a crash in it never ends the ship', () =
 });
 
 describe('ship-branch.sh — a fresh failure record never clobbers a concurrent attempt (sc-2535)', () => {
-  const shipIntent = fileURLToPath(new URL('../lib/ship/ship-intent.mts', import.meta.url));
-
   /** Records a competing attempt the moment the size preview starts — after this attempt took its
    *  generation snapshot, before its failure-path write. */
   const competitorEnv = (s: Seeded, branch: string) =>
@@ -353,6 +415,59 @@ describe('ship-intent generation snapshot', () => {
       title: 't',
       paths: ['a.txt'],
     });
+  });
+
+  it('donate appends to the record it read and keeps that generation', () => {
+    const { dir } = seedShipRepo();
+    const file = join(dir, relIntentPath('feat/snap'));
+    expect(writeIntent(opts(dir), ['a.txt'])).toBe(0);
+    const generation = recorded(dir, 'feat/snap').generation;
+
+    expect(donateIntent(file, generation, ['b.txt', 'a.txt'])).toBe(0);
+    expect(donateIntent(file, generation, ['b.txt'])).toBe(0);
+    expect(recorded(dir, 'feat/snap')).toMatchObject({ generation, paths: ['a.txt', 'b.txt'] });
+    const cli = spawnSync(
+      process.execPath,
+      [
+        shipIntent,
+        'donate',
+        '--root',
+        dir,
+        '--branch',
+        'feat/snap',
+        '--expect-generation',
+        generation,
+        '--',
+        'c.txt',
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(cli.status, cli.stderr).toBe(0);
+    expect(recorded(dir, 'feat/snap').paths).toEqual(['a.txt', 'b.txt', 'c.txt']);
+  });
+
+  it('donate leaves a record another attempt re-recorded, an absent one, or a branch-source one alone', () => {
+    const { dir } = seedShipRepo();
+    const file = join(dir, relIntentPath('feat/snap'));
+    expect(donateIntent(file, 'gone', ['b.txt'])).toBe(1);
+    expect(existsSync(file)).toBe(false);
+
+    expect(writeIntent(opts(dir), ['a.txt'])).toBe(0);
+    const stale = recorded(dir, 'feat/snap').generation;
+    expect(writeIntent(opts(dir), ['a.txt'])).toBe(0); // a concurrent full attempt rotates it
+    const owned = readFileSync(file, 'utf8');
+    const current = recorded(dir, 'feat/snap').generation;
+    expect(donateIntent(file, stale, ['b.txt'])).toBe(1);
+    expect(readFileSync(file, 'utf8')).toBe(owned);
+
+    const branchSource = owned.replace(
+      '"mode": "ship",',
+      '"mode": "ship",\n  "sourceMode": "branch",',
+    );
+    expect(branchSource).not.toBe(owned);
+    writeFileSync(file, branchSource);
+    expect(donateIntent(file, current, ['b.txt'])).toBe(1);
+    expect(readFileSync(file, 'utf8')).toBe(branchSource);
   });
 
   it('a malformed record without a generation reads as NO_RECORD', () => {
@@ -439,4 +554,24 @@ describe('preflight ordering guard', () => {
       );
     }
   });
+
+  it.each([
+    ['ship-branch.sh', scriptPath, 1, 5],
+    ['reship.sh', reshipScript, 2, 3],
+  ])(
+    '%s: every donating exit follows the extra-path validation',
+    (_, script, nChecks, nDonations) => {
+      // A donation ahead of ship_refuse_unmatched_paths would record a refused typo for every
+      // later resume, which never re-checks recorded paths.
+      const lns = readFileSync(script, 'utf8').split('\n');
+      const at = (re: RegExp) => lns.flatMap((l, i) => (re.test(l) ? [i] : []));
+      const checks = at(/^\s*ship_refuse_unmatched_paths /);
+      const donations = at(/ship_exit_donating 1/);
+
+      expect(checks).toHaveLength(nChecks);
+      expect(donations).toHaveLength(nDonations);
+      for (const d of donations) expect(d).toBeGreaterThan(Math.max(...checks));
+      for (const c of checks) expect(lns[c]).toMatch(/\|\| exit 1; RESUME_EXTRAS_VALIDATED=1$/);
+    },
+  );
 });

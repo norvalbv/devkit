@@ -683,7 +683,7 @@ if [ "$FROM_BRANCH" -eq 0 ]; then
   # Only this invocation's argv: recorded paths passed when recorded, and a preserved commit is staged.
   if [ -z "$LOCAL_BRANCH_EXISTS" ]; then
     if [ "$RESUME" -eq 1 ]; then ARGV_PATHS=(${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}); else ARGV_PATHS=("${PATHS[@]}"); fi
-    ship_refuse_unmatched_paths "$ROOT" "$PATCH_BASE" "$BASE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1
+    ship_refuse_unmatched_paths "$ROOT" "$PATCH_BASE" "$BASE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1; RESUME_EXTRAS_VALIDATED=1
   fi
   if [ "$PATCH_BASE" != "$BASE" ]; then
     ship_classify_whole_file "$ROOT" "$BASE" "$PATCH_BASE" -- "${GIT_PATHS[@]}"
@@ -691,7 +691,7 @@ if [ "$FROM_BRANCH" -eq 0 ]; then
     # A preserved-commit retry only warns, so it still reaches the --resume recovery check.
     if ! ship_refuse_whole_file_drift "$ROOT" "$BASE" "$PATCH_BASE" "$BASE_REF" ${LOCAL_BRANCH_EXISTS:+--advise}; then
       echo "ship: preflight — blocked before creating a branch or worktree; nothing was staged or gated." >&2
-      exit 1
+      ship_exit_donating 1
     fi
   fi
 fi
@@ -722,7 +722,7 @@ ship_text_arm_trial() {
   return 1
 }
 if [ "$FROM_BRANCH" -eq 0 ] && [ "$PATCH_BASE" != "$BASE" ] && [ -z "$LOCAL_BRANCH_EXISTS" ]; then
-  ship_text_arm_trial || exit 1
+  ship_text_arm_trial || ship_exit_donating 1
 fi
 
 # Nothing to commit → say so NOW. Staging (below) has exactly three inputs: the tracked diff vs
@@ -777,12 +777,12 @@ if [ "$DRY_GATES" -eq 1 ]; then BODY=""
 elif [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
 elif [ "$BODY_FILE_SET" -eq 1 ] && [ "$BODY_FILE_PREREAD_SET" -eq 1 ]; then BODY="$BODY_FILE_PREREAD" # the bytes the --resume banner sized
 elif [ "$BODY_FILE_SET" -eq 1 ] && [ "$BODY_FILE_PREREAD_SET" -eq 2 ]; then
-  echo "--body-file: $BODY_FILE_PREREAD_ERR: $BODY_FILE_FLAG" >&2; exit 1 # as the banner said; never re-read
+  echo "--body-file: $BODY_FILE_PREREAD_ERR: $BODY_FILE_FLAG" >&2; ship_exit_donating 1 # as the banner said; never re-read
 elif [ "$BODY_FILE_SET" -eq 1 ]; then
-  [ -f "$BODY_FILE_FLAG" ] || { echo "--body-file: no such file: $BODY_FILE_FLAG" >&2; exit 1; }
+  [ -f "$BODY_FILE_FLAG" ] || { echo "--body-file: no such file: $BODY_FILE_FLAG" >&2; ship_exit_donating 1; }
   # cat + sentinel, never $(<file): command substitution strips EVERY trailing newline, silently
   # altering a deliberately-authored body before it is recorded.
-  BODY=$(cat -- "$BODY_FILE_FLAG" && printf x) || { echo "--body-file: unreadable: $BODY_FILE_FLAG" >&2; exit 1; }
+  BODY=$(cat -- "$BODY_FILE_FLAG" && printf x) || { echo "--body-file: unreadable: $BODY_FILE_FLAG" >&2; ship_exit_donating 1; }
   BODY=${BODY%x}
 elif [ "$RESUME" -eq 1 ]; then BODY="$RESUME_BODY"
   # Replaying recorded bytes: say so if the --body-file they came from has since been edited

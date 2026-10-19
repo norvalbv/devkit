@@ -510,7 +510,7 @@ if [ "$REWRITE" -eq 1 ]; then
   EXPECTED_REMOTE=$(git rev-parse "$REWRITE_HEAD_REF")
   BASE=$(git rev-parse "$REWRITE_BASE_REF")
   # A PR-added file the rewrite drops is briefed (required scope, below) yet lives only in the PR head.
-  ship_refuse_unmatched_paths "$ROOT" "$BASE" "$EXPECTED_REMOTE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1
+  ship_refuse_unmatched_paths "$ROOT" "$BASE" "$EXPECTED_REMOTE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1; RESUME_EXTRAS_VALIDATED=1
   REWRITE_BASE_PIN=$BASE
   if [ "$RESUME" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ]; then
     BODY_RECEIPT_REF="$BODY_RECEIPT_PREFIX/$BR/$EXPECTED_REMOTE"
@@ -598,7 +598,7 @@ else
     echo "no remote branch origin/$BR to re-push to — open the PR first (ship without --pr)" >&2; exit 1
   }
   BASE=$(git rev-parse FETCH_HEAD)
-  ship_refuse_unmatched_paths "$ROOT" "$BASE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1
+  ship_refuse_unmatched_paths "$ROOT" "$BASE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1; RESUME_EXTRAS_VALIDATED=1
   # Before the intent write too: no later push can reach a non-open PR, so nothing is worth resuming.
   [ -n "${SHIP_DRY_RUN:-}" ] || reship_refuse_closed_pr "" "nothing pushed" || exit 1
   # Tracked-dist drift is named against the PR's fork point, where CI judges it, not the PR tip,
@@ -631,12 +631,12 @@ WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
 if [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
 elif [ "$BODY_FILE_SET" -eq 1 ] && [ "$BODY_FILE_PREREAD_SET" -eq 1 ]; then BODY="$BODY_FILE_PREREAD" # the bytes the --resume banner sized
 elif [ "$BODY_FILE_SET" -eq 1 ] && [ "$BODY_FILE_PREREAD_SET" -eq 2 ]; then
-  echo "--body-file: $BODY_FILE_PREREAD_ERR: $BODY_FILE_FLAG" >&2; exit 1 # as the banner said; never re-read
+  echo "--body-file: $BODY_FILE_PREREAD_ERR: $BODY_FILE_FLAG" >&2; ship_exit_donating 1 # as the banner said; never re-read
 elif [ "$BODY_FILE_SET" -eq 1 ]; then
-  [ -f "$BODY_FILE_FLAG" ] || { echo "--body-file: no such file: $BODY_FILE_FLAG" >&2; exit 1; }
+  [ -f "$BODY_FILE_FLAG" ] || { echo "--body-file: no such file: $BODY_FILE_FLAG" >&2; ship_exit_donating 1; }
   # cat + sentinel, never $(<file): command substitution strips EVERY trailing newline, silently
   # altering a deliberately-authored body before it is recorded.
-  BODY=$(cat -- "$BODY_FILE_FLAG" && printf x) || { echo "--body-file: unreadable: $BODY_FILE_FLAG" >&2; exit 1; }
+  BODY=$(cat -- "$BODY_FILE_FLAG" && printf x) || { echo "--body-file: unreadable: $BODY_FILE_FLAG" >&2; ship_exit_donating 1; }
   BODY=${BODY%x}
 elif [ "$RESUME" -eq 1 ]; then BODY="$RESUME_BODY"
   # Replaying recorded bytes: say so if the --body-file they came from has since been edited

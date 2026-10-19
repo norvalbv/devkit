@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readIntent, writeIntent } from '../lib/ship/ship-intent.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 import {
   dirs,
@@ -132,6 +133,51 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     expect(r.stderr).toContain('GUARD_SHIP_REPLACE_OK=1');
     expect(r.stderr).toContain(PREFLIGHT_BLOCK);
     expect(localBranchExists(git, 'feat/bin')).toBe(false);
+  });
+
+  it('a --resume refused here still records the path it added, under the generation it read', () => {
+    const fx = seedForked((d) => {
+      writeFileSync(join(d, 'b.dat'), Buffer.from([0x00, 0x01, 0x02]));
+      writeFileSync(join(d, 'f.txt'), TEN_LINES);
+    });
+    const recordedBy = {
+      root: fx.dir,
+      branch: 'feat/drift-resume',
+      mode: 'ship',
+      title: 'ship it',
+      base: 'base',
+      links: [],
+      updatePrBody: false,
+      draft: false,
+      resumed: false,
+      mergePaths: false,
+      body: Buffer.from('b'),
+    };
+    expect(writeIntent(recordedBy, ['f.txt'])).toBe(0); // an earlier attempt's record
+    writeFileSync(join(fx.dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
+    const before = readIntent(fx.dir, 'feat/drift-resume');
+    if (!('intent' in before)) throw new Error(before.reason);
+    advanceBase(fx.bare, (c) => writeFileSync(join(c, 'b.dat'), Buffer.from([0x00, 0x09, 0x09])));
+    writeFileSync(join(fx.dir, 'b.dat'), Buffer.from([0x00, 0xff, 0x43]));
+
+    const retry = spawnSync(
+      '/bin/bash',
+      [scriptPath, '--resume', 'feat/drift-resume', '--', 'b.dat'],
+      {
+        cwd: fx.dir,
+        encoding: 'utf8',
+        env: { ...fx.env, SHIP_DRY_RUN: '1' },
+      },
+    );
+    dropWorktree(fx.git, retry.stderr);
+
+    expect(retry.status, retry.stderr).toBe(1);
+    expect(retry.stderr).toContain(PREFLIGHT_BLOCK);
+    expect(retry.stderr).toContain('ship: recorded 1 path(s) briefed by this retry');
+    expect(readIntent(fx.dir, 'feat/drift-resume')).toMatchObject({
+      intent: { paths: ['f.txt', 'b.dat'], generation: before.intent.generation },
+    });
+    expect(localBranchExists(fx.git, 'feat/drift-resume')).toBe(false);
   });
 
   it('ships the caller’s bytes wholesale on a both-sides binary under GUARD_SHIP_REPLACE_OK', () => {
