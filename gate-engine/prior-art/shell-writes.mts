@@ -14,6 +14,7 @@ const INLINE_SCRIPT_FLAGS = new Set(['-c', '-e', '--eval', '-']);
 const SED_IN_PLACE = /^(-[nErsuz]*i|--in-place)/;
 const PERL_IN_PLACE = /^-[0-9alnpsw]*i/;
 const XARGS_VALUE_FLAGS = new Set(['-I', '-n', '-P', '-L', '-d', '-E', '-s']);
+const XARGS_REPLACE = /^(-I|-i|--replace)/;
 const NO_VALUE_FLAGS: ReadonlySet<string> = new Set();
 // Flags whose next word is a value, never a file operand (`truncate -s 0 f`, `cp -t dir a b`).
 const TOUCH_VALUE_FLAGS = new Set(['-d', '-t', '-r', '--date', '--reference']);
@@ -29,8 +30,9 @@ const COPY_VALUE_FLAGS = new Set([
   '--group',
 ]);
 const TARGET_DIR_LONG = '--target-directory';
-const SHORT_TARGET_CLUSTER = /^-[a-zA-Z]*t$/;
-const SHORT_TARGET_ATTACHED = /^-t(.+)$/;
+// The value-taking short flags of cp/mv/install; getopt gives the rest of a cluster to the first.
+const COPY_SHORT_VALUES = 'Smogt';
+const SHORT_CLUSTER = /^-[^-]/;
 
 type Args = (string | null)[];
 
@@ -47,6 +49,8 @@ interface Context {
   stdinScript: boolean;
   /** run by xargs or find -exec, which supply file operands at run time */
   wrapped: boolean;
+  /** xargs without -I/--replace appends those operands after the command's own words */
+  appended: boolean;
 }
 
 type VerbRule = (args: Args, context: Context) => boolean;
@@ -122,15 +126,25 @@ function interpreterWrites(args: Args, { filter, stdinScript }: Context): boolea
 }
 
 /** `xargs [flags] cmd …` and `find … -exec cmd … ;` run `cmd` on paths only known at run time. */
-function wrappedWrites(inner: Args, context: Context): boolean {
-  const nested = { ...context, filter: true, stdinScript: false, wrapped: true };
+function wrappedWrites(inner: Args, context: Context, appended: boolean): boolean {
+  const nested = { ...context, filter: true, stdinScript: false, wrapped: true, appended };
   return inner.length > 0 && verbWrites(inner, nested);
 }
 
-function xargsInner(args: Args): Args {
+interface XargsCall {
+  inner: Args;
+  /** no `-I X`, `-i` or `--replace` placeholder: operands go after the command's own words */
+  appended: boolean;
+}
+
+function xargsCall(args: Args): XargsCall {
   let i = 0;
-  while (i < args.length && args[i]?.startsWith('-')) i += XARGS_VALUE_FLAGS.has(args[i]!) ? 2 : 1;
-  return args.slice(i);
+  let appended = true;
+  while (i < args.length && args[i]?.startsWith('-')) {
+    if (XARGS_REPLACE.test(args[i]!)) appended = false;
+    i += XARGS_VALUE_FLAGS.has(args[i]!) ? 2 : 1;
+  }
+  return { inner: args.slice(i), appended };
 }
 
 function findInner(args: Args): Args {
@@ -162,7 +176,15 @@ const everyOperand =
 
 /** A `--target-directory` long option, or a GNU-unique prefix of it such as `--target-dir`. */
 function targetLong(name: string): boolean {
-  return name.length > 3 && TARGET_DIR_LONG.startsWith(name);
+  return name.length > 2 && TARGET_DIR_LONG.startsWith(name);
+}
+
+/** The target in a short cluster (`-t DIR`, `-rt DIR`, `-rtDIR`) when `t` is its first value flag. */
+function clusterTarget(cluster: string, next: string | null): string | null | undefined {
+  const at = [...cluster.slice(1)].findIndex((c) => COPY_SHORT_VALUES.includes(c)) + 1;
+  if (at < 1 || cluster[at] !== 't') return undefined;
+  const rest = cluster.slice(at + 1);
+  return rest === '' ? next : rest;
 }
 
 /** cp/mv/install's target directory (`-t DIR`, `-rt DIR`, `-tDIR`, `--target-dir[=]DIR`). */
@@ -172,25 +194,32 @@ function targetDir(args: Args): string | null | undefined {
     const eq = a.indexOf('=');
     if (targetLong(eq < 0 ? a : a.slice(0, eq)))
       return eq < 0 ? (args[i + 1] ?? null) : a.slice(eq + 1);
-    if (SHORT_TARGET_CLUSTER.test(a)) return args[i + 1] ?? null;
-    const attached = SHORT_TARGET_ATTACHED.exec(a);
-    if (attached) return attached[1];
+    const short = SHORT_CLUSTER.test(a) ? clusterTarget(a, args[i + 1] ?? null) : undefined;
+    if (short !== undefined) return short;
   }
   return undefined;
 }
 
 /** `cp`/`mv`/`install` write into their target directory when given, else their last operand. */
-const copyTarget: VerbRule = (args, { scope, wrapped }) => {
+const copyTarget: VerbRule = (args, { scope, appended }) => {
   const dir = targetDir(args);
-  const target = dir === undefined ? operands(args, COPY_VALUE_FLAGS).at(-1) : dir;
-  return target === undefined ? wrapped : writtenPlace(target, scope);
+  if (dir !== undefined) return writtenPlace(dir, scope);
+  // Appending xargs makes its last run-time operand the destination, so it is unknown here.
+  if (appended) return true;
+  return writtenPlace(operands(args, COPY_VALUE_FLAGS).at(-1) ?? null, scope);
 };
 const shellScript: VerbRule = (args, { scope }) =>
   args[0] === '-c' && args[1] != null && scriptWrites(args[1], scope);
 
 const VERB_RULES = new Map<string, VerbRule>([
-  ['xargs', (args, context) => wrappedWrites(xargsInner(args), context)],
-  ['find', (args, context) => wrappedWrites(findInner(args), context)],
+  [
+    'xargs',
+    (args, context) => {
+      const { inner, appended } = xargsCall(args);
+      return wrappedWrites(inner, context, appended);
+    },
+  ],
+  ['find', (args, context) => wrappedWrites(findInner(args), context, false)],
   ['git', gitApplyWrites],
   ['patch', (args, { scope }) => writtenPlace(patchDir(args), scope)],
   ['sed', (args, { scope }) => hasFlag(args, SED_IN_PLACE) && inPlaceWrites(args, scope)],
@@ -222,7 +251,7 @@ function commandWrites(command: Command, scope: Scope, filter: boolean): boolean
   if (redirectsWrite(command.redirects, scope)) return true;
   const stdinScript = command.redirects.some((r) => STDIN_SCRIPT_REDIRECTS.has(r.operator));
   const words = [command.name, ...command.suffix].map(literal);
-  return verbWrites(words, { scope, filter, stdinScript, wrapped: false });
+  return verbWrites(words, { scope, filter, stdinScript, wrapped: false, appended: false });
 }
 
 function children(node: Node): Node[] {
