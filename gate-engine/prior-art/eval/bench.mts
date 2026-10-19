@@ -28,6 +28,8 @@ import { parsePriorArtResponse } from '../response-contract.mts';
 import { casesPath, loadRows, type Row } from './cases.mts';
 import { mapPool, projectResponse, runMatcher, scoreCase } from './matcher.mts';
 import { formatRow, type RowResult, type RunMatch, selectRows } from './report.mts';
+import { workflowMain, workflowPlan } from './workflow/cli.mts';
+import { loadFamilies } from './workflow/families.mts';
 import {
   AGENT_MD_PATH,
   type AgentSource,
@@ -310,10 +312,15 @@ const USAGE =
   '  coverage    lint the corpus and print slot counts (no LLM calls)\n' +
   '  --dev       K=1 scoring run, no baseline write\n' +
   '  --baseline  full run (set BENCH_RUNS=3), writes results.baseline.json\n' +
-  '  --fail      full run, exit 1 on any row flip vs the committed baseline';
+  '  --fail      full run, exit 1 on any row flip vs the committed baseline\n' +
+  '  workflow    the frozen retrieval tier: `bench.mts workflow` prints its usage';
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
+  if (argv[0] === 'workflow') {
+    process.exitCode = await workflowMain(argv.slice(1));
+    return;
+  }
   let only: string | undefined;
   try {
     const flag = { type: 'boolean' } as const;
@@ -340,6 +347,7 @@ async function main(): Promise<void> {
       `prior-art-eval corpus: ${rows.length} rows · ${gold} gold slots · ${decoys} decoy slots · ` +
         `${genuine} genuine controls · ${contractOnly} contract-only`,
     );
+    console.log(workflowPlan(loadFamilies(), 1));
     return;
   }
 

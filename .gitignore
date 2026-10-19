@@ -47,6 +47,7 @@ gate-engine/decisions/eval/progress-*.jsonl
 gate-engine/critique/eval/runs.log
 gate-engine/prior-art/eval/runs.log
 gate-engine/prior-art/eval/checkpoint.jsonl
+gate-engine/prior-art/eval/workflow-checkpoint.jsonl
 gate-engine/critique/eval/transcripts/
 
 # test:run:coverage:changed reports. Root-anchored: an unanchored `coverage/` would also ignore
