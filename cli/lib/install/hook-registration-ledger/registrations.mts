@@ -18,6 +18,8 @@
  * which event). It carries no consumer-specific paths beyond $CLAUDE_PROJECT_DIR.
  */
 
+import type { AgentProvider } from '../agent-assets/agent-providers.mts';
+
 export const PKG = 'node_modules/@norvalbv/devkit';
 
 /** Anchored at the CONSUMER's node_modules, so it carries dist/ and is never .mts — see the
@@ -35,6 +37,8 @@ export interface HookRegistration {
   /** Cursor can expose the same capability under a different native event/matcher pair. */
   cursorEvent?: string;
   cursorMatcher?: string;
+  /** Providers this projects to; absent = every provider that can express the event/matcher. */
+  providers?: readonly AgentProvider[];
   /** Package-relative target of a command that runs a file inside the installed package, carried as
    * data so doctor resolves it without parsing shell. Absent = a consumer-anchored .claude/hooks script. */
   scriptRel?: string;
@@ -171,6 +175,15 @@ export const HOOK_REGISTRATIONS: Record<string, HookRegistration[]> = {
       event: 'PreToolUse',
       matcher: 'Edit|Write|MultiEdit',
       command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs" edit',
+    },
+    // Claude-only: Codex reports shell as Bash but cannot record a prior-art run, and Cursor would map
+    // this to beforeShellExecution. The classifier loads from devkit's build, never this synced copy.
+    {
+      registrationId: 'prior-art-gate:pre-bash',
+      event: 'PreToolUse',
+      matcher: 'Bash',
+      command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs" bash',
+      providers: ['claude'],
     },
     // Run detection is PostToolUse-on-Task, not SubagentStop.
     {
