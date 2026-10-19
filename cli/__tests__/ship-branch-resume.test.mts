@@ -19,6 +19,7 @@ import {
   seedBaseRepo,
   seedShipRepoLocalRemote,
   REAPED_15S_BANNER,
+  REAPED_SLEEP_NOTICE,
 } from './_ship-branch-fixture.mts';
 
 /** createPreservedCommit leaves note.txt UNTRACKED in $ROOT, and git refuses a checkout/merge that
@@ -70,6 +71,10 @@ describe('ship-branch.sh — resume when the base moved', () => {
     // Pair every 124 with OUR banner: testSpawnSync's linger reap also returns 124, so an
     // unpaired status assertion cannot say which supervisor fired.
     expect(first.stderr).toMatch(REAPED_15S_BANNER);
+    // Both the banner and the persisted gate log name what outlived the chain.
+    expect(first.stderr).toMatch(REAPED_SLEEP_NOTICE);
+    const gateLog = /Full log: (.+)$/m.exec(first.stderr)?.[1] ?? '';
+    expect(readFileSync(gateLog, 'utf8')).toMatch(REAPED_SLEEP_NOTICE);
     const preserved = git(['rev-parse', 'feat/base-advance']).trim();
     expect(git(['rev-parse', 'refs/devkit/ship-receipts/feat/base-advance']).trim()).toBe(
       preserved,
