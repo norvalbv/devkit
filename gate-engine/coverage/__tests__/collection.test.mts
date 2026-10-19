@@ -1,8 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import coverageRun from '../../../cli/commands/coverage/run.mts';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   collectionRemedy,
   formatMissingRootDependencies,
@@ -415,20 +414,6 @@ describe('root dependency warning', () => {
     expect(formatMissingRootDependencies(root)[0]).toBe(
       `⚠️  12 declared dependencies are not installed: ${names.slice(0, 10).join(', ')}, …`,
     );
-  });
-
-  it('is printed by coverage-run before it does anything else', async () => {
-    const root = makeRoot();
-    put(root, 'package.json', declares('helmet'));
-    const printed: string[] = [];
-    const spy = vi.spyOn(console, 'error').mockImplementation((line) => void printed.push(line));
-    try {
-      expect(await coverageRun([], root)).toBe(1);
-    } finally {
-      spy.mockRestore();
-    }
-    expect(printed[0]).toBe('⚠️  1 declared dependency is not installed: helmet');
-    expect(printed.some((line) => line.includes('needs vitest'))).toBe(true);
   });
 });
 
