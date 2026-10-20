@@ -494,7 +494,7 @@ describe('mine-telemetry-lib: waiver kind from the gate-events sink', () => {
 
   it('skips unrelated and malformed lines without throwing', () => {
     const index = indexOf('{"type":"gate_result"}', '{"type":"review_result",', 'not json', '');
-    expect(index.lensFp.size + index.byFp.size).toBe(0);
+    expect(index.byLens.size + index.byFp.size).toBe(0);
   });
 
   it('keeps a known kind when a later cached part replays the waiver as {lens, fingerprint}', () => {
@@ -549,6 +549,52 @@ describe('mine-telemetry-lib: waiver kind from the gate-events sink', () => {
     const index = indexOf(fresh('deferred'), later);
     expect(lookupWaiver(index, 's1', R, 'races')?.kind).toBe('deferred');
     expect(lookupWaiver(index, 's2', R, 'races')?.kind).toBe('false-positive');
+  });
+
+  it("gives a cached replay the kind known when it ran, not a later ship's re-waive", () => {
+    const cached = reviewResult('s2', { lens: 'races', fingerprint: FP });
+    const later = reviewResult('s3', {
+      lens: 'races',
+      fingerprint: FP,
+      rationale: 'b',
+      kind: 'false-positive',
+    });
+    expect(lookupWaiver(indexOf(fresh('deferred'), cached, later), 's2', R, 'races')?.kind).toBe(
+      'deferred',
+    );
+  });
+
+  it("keeps a ship's own kind when its later cached replay follows another ship's re-waive", () => {
+    const later = reviewResult('s3', {
+      lens: 'races',
+      fingerprint: FP,
+      rationale: 'b',
+      kind: 'false-positive',
+    });
+    const replay = reviewResult('s1', { lens: 'races', fingerprint: FP });
+    expect(lookupWaiver(indexOf(fresh('deferred'), later, replay), 's1', R, 'races')?.kind).toBe(
+      'deferred',
+    );
+  });
+
+  it("keeps an unknown replay row unknown rather than borrowing a later ship's kind", () => {
+    const replay = reviewResult('s1', { lens: 'races', fingerprint: FP });
+    const later = reviewResult('s3', {
+      lens: 'races',
+      fingerprint: FP,
+      rationale: 'b',
+      kind: 'false-positive',
+    });
+    expect(lookupWaiver(indexOf(replay, later, replay), 's1', R, 'races')).toBeNull();
+  });
+
+  it('ignores a review_result line with no ship_id, which no lens row can match', () => {
+    const shipless = JSON.stringify({
+      type: 'review_result',
+      reviewer: R,
+      waivers: [{ lens: 'races', fingerprint: FP, rationale: 'x', kind: 'deferred' }],
+    });
+    expect(indexOf(shipless).byLens.size).toBe(0);
   });
 
   it('lets the later line win, and reads an unknown kind as null', () => {

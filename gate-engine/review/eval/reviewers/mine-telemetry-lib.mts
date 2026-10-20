@@ -388,7 +388,7 @@ export const isRealDefectWaiver = (waiver) => REAL_DEFECT_WAIVER_KINDS.has(waive
 // commit_review_lenses.lens is the items[] lens, which evidence/items.mts caps at this length.
 const LENS_KEY_CHARS = 200;
 
-export const newWaiverIndex = () => ({ byLens: new Map(), lensFp: new Map(), byFp: new Map() });
+export const newWaiverIndex = () => ({ byLens: new Map(), byFp: new Map() });
 
 const waiverKey = (shipId, reviewer, lens) =>
   `${shipId}::${reviewer}::${String(lens).slice(0, LENS_KEY_CHARS)}`;
@@ -398,7 +398,7 @@ const sinkLineSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('waiver_created'), fingerprint: z.string(), ...waiverFields }),
   z.object({
     type: z.literal('review_result'),
-    ship_id: z.string().optional(),
+    ship_id: z.string(),
     reviewer: z.string(),
     waivers: z
       .array(z.object({ lens: z.string(), fingerprint: z.string(), ...waiverFields }))
@@ -408,8 +408,8 @@ const sinkLineSchema = z.discriminatedUnion('type', [
 
 const waiverFacts = (w) => ({ kind: parseWaiverKind(w.kind), rationale: w.rationale ?? null });
 
-/** Folds one sink line in, later lines winning as in the collector. Cached split parts replay
- * waivers as {lens, fingerprint} only; those fall back to the fingerprint's latest full entry. */
+/** Folds one sink line in, later lines winning as in the collector. A cached split part replays
+ * {lens, fingerprint} only, so its row takes the fingerprint's facts as known at that line. */
 export function indexWaiverLine(index, line) {
   if (!line.includes('"review_result"') && !line.includes('"waiver_created"')) return;
   let json;
@@ -423,19 +423,18 @@ export function indexWaiverLine(index, line) {
   if (e?.type !== 'review_result') return;
   for (const w of e.waivers) {
     const key = waiverKey(e.ship_id, e.reviewer, w.lens);
-    index.lensFp.set(key, w.fingerprint);
-    if (w.rationale === undefined) continue;
-    index.byLens.set(key, waiverFacts(w));
-    index.byFp.set(w.fingerprint, waiverFacts(w));
+    // A replay restates the row's own earlier facts; it never trades them for a later ship's.
+    if (w.rationale === undefined && index.byLens.has(key)) continue;
+    const facts = w.rationale === undefined ? index.byFp.get(w.fingerprint) : waiverFacts(w);
+    if (w.rationale !== undefined) index.byFp.set(w.fingerprint, facts);
+    index.byLens.set(key, facts ?? null);
   }
 }
 
-/** The {kind, rationale} one waived lens row was recorded with — its own ship's entry first, so a
- * later ship's kind on the same fingerprint never relabels it — or null when the sink never named it. */
+/** The {kind, rationale} one waived lens row was recorded with, so a later ship's kind on the same
+ * fingerprint never relabels it; null when the sink never named it. */
 export function lookupWaiver(index, shipId, reviewer, lens) {
-  const key = waiverKey(shipId, reviewer, lens);
-  const fp = index.lensFp.get(key);
-  return index.byLens.get(key) ?? (fp && index.byFp.get(fp)) ?? null;
+  return index.byLens.get(waiverKey(shipId, reviewer, lens)) ?? null;
 }
 
 // ---------------------------------------------------------------------------------------------
