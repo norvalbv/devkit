@@ -162,7 +162,8 @@ describe('devkit ship evidence block', () => {
       reasons: [{ code: 'captured-proof' }],
     });
 
-    // An explicit body with no new commit swaps the caller text and carries the block unchanged.
+    // An explicit body with no new commit is refused and leaves the body and its block untouched.
+    const unreworded = readFileSync(repo.state, 'utf8');
     const reworded = bash(repo.dir, repo.env, [
       reshipScript,
       'feat/fix',
@@ -173,9 +174,10 @@ describe('devkit ship evidence block', () => {
       '--',
       'src/value.mjs',
     ]);
-    expect(reworded.status, reworded.stderr).toBe(0);
+    expect(reworded.status, reworded.stderr).toBe(1);
+    expect(reworded.stderr).toContain("devkit pr-body 'feat/fix'");
     expect(reworded.stderr).not.toContain('evidence: running');
-    expect(readFileSync(repo.state, 'utf8')).toBe(`reworded\n\n${block}\n`);
+    expect(readFileSync(repo.state, 'utf8')).toBe(unreworded);
 
     // A new commit re-runs the evidence and replaces the block in place; other text stays.
     writeFileSync(repo.state, `reworded\n\n${block}\n\n${QAVIS}\n`);
@@ -239,7 +241,7 @@ describe('devkit ship evidence block', () => {
     expect(readFileSync(repo.state, 'utf8')).toContain('mine');
   }, 240_000);
 
-  it('leaves the PR body alone when it cannot be read, and the same command re-run then writes it', () => {
+  it('leaves the PR body alone when it cannot be read, and points the body-only retry at devkit pr-body', () => {
     const repo = shipRepo(null, 'feat/keep');
     write(repo.dir, { 'src/value.mjs': FIXED });
     const shipped = bash(repo.dir, repo.env, [scriptPath, 'feat/keep', 'fix', 'src/value.mjs']);
@@ -254,17 +256,19 @@ describe('devkit ship evidence block', () => {
     const refused = bash(repo.dir, { ...repo.env, GH_VIEW_FAIL: never }, argv);
     expect(refused.status).not.toBe(0);
     expect(refused.stderr).toContain('PR body was not updated');
-    expect(refused.stderr).toContain('re-run the same devkit ship command');
+    expect(refused.stderr).toContain("run: devkit pr-body 'https://github.com/acme/app/pull/42'");
     expect(tipOf(repo.bare, 'feat/keep')).not.toBe(before);
     expect(readFileSync(repo.state, 'utf8')).toBe(`old\n\n${block}\n`);
     expect(readFileSync(repo.log, 'utf8')).not.toContain('pr edit');
 
+    // The commit is already pushed, so the same command now has nothing to commit and is refused.
     const retried = bash(repo.dir, repo.env, argv);
-    expect(retried.status, retried.stderr).toBe(0);
-    expect(readFileSync(repo.state, 'utf8')).toBe(`new\n\n${block}\n`);
+    expect(retried.status).toBe(1);
+    expect(retried.stderr).toContain('the PR body was NOT updated');
+    expect(readFileSync(repo.state, 'utf8')).toBe(`old\n\n${block}\n`);
   }, 240_000);
 
-  it("a refused body update still publishes the pushed commit's evidence, and the re-run carries it", () => {
+  it("a refused body update still publishes the pushed commit's evidence, and a body-only re-run keeps it", () => {
     const repo = shipRepo({ command: COMMAND, timeoutSeconds: 120 }, 'feat/fresh');
     write(repo.dir, { 'src/value.mjs': FIXED });
     const shipped = bash(repo.dir, repo.env, [scriptPath, 'feat/fresh', 'fix', 'src/value.mjs']);
@@ -290,11 +294,12 @@ describe('devkit ship evidence block', () => {
       stale: false,
     });
 
+    const before = readFileSync(repo.state, 'utf8');
     const retried = bash(repo.dir, repo.env, argv);
-    expect(retried.status, retried.stderr).toBe(0);
-    const body = readFileSync(repo.state, 'utf8');
-    expect(body.replace(BLOCK, 'BLOCK')).toBe('new\n\nBLOCK\n');
-    expect(readEvidenceBlock(body, head)).toMatchObject({ stale: false });
+    expect(retried.status).toBe(1);
+    expect(retried.stderr).toContain('the PR body was NOT updated');
+    expect(readFileSync(repo.state, 'utf8')).toBe(before);
+    expect(readEvidenceBlock(before, head)).toMatchObject({ stale: false });
   }, 240_000);
 
   it('bounds a hung test run: ship exits 0, the block says so, and no test process survives', () => {

@@ -431,6 +431,7 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
 
     expect(resumed.status, resumed.stderr).toBe(0);
     expect(readFileSync(ghBody, 'utf8')).toBe(body);
+    expect(resumed.stderr).toContain('no Git change to push — published the recorded PR body');
   });
 
   it('keeps the body intent when the publisher dies between push and PR edit', () => {
@@ -574,20 +575,6 @@ describe('reship — --ready marks the PR ready for review', () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain('--ready could not resolve the PR');
     expect(r.stderr).toMatch(/gh pr ready 'feat\/pr'/);
-  });
-
-  it('still marks the PR ready on a body-only run that exits before the normal tail', () => {
-    const { dir, env, ghLog, ghBody } = bodyUpdateRepo();
-    // a.ts is left byte-identical to origin/feat/pr → no delta, so only the body can change.
-    const r = run(
-      ['feat/pr', 'same content', '--pr', '--body', 'fresh body', '--ready', '--', 'a.ts'],
-      dir,
-      env,
-    );
-
-    expect(r.status, r.stderr).toBe(0);
-    expect(readFileSync(ghBody, 'utf8')).toBe('fresh body'); // the body-only path did run
-    expect(readFileSync(ghLog, 'utf8')).toMatch(/^pr ready 7 --repo acme\/app$/m);
   });
 
   it('converges when the same --ready command is re-run after a transient flip failure', () => {
