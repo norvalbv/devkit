@@ -69,17 +69,16 @@ Hand-written records that sit beside the ledger; each number in them names its p
 Every folder in [`experiments/`](experiments/) dated 2026-08-01 or later whose subject is the
 correctness reviewer and that records a written verdict (adopt, reject, no-ship or do-not-build) has
 a ledger event, whatever the result. A folder with no accepted checkpoint gets an `evidence-only`,
-`committed-summary` event whose `sourceCommit` is the commit that added its README. A folder the rule
-selects but the ledger cannot hold is listed below with the reason.
+`committed-summary` event whose `sourceCommit` is the commit that added its README. A folder that a
+recorded decision keeps out of the tracker is listed below with the reason.
 
 ## Not in the ledger
 
 Correctness experiments with a verdict but no ledger event:
 
-- [`2026-08-04-correctness-lens-split`](experiments/2026-08-04-correctness-lens-split/README.md) — its [ruling](../decisions/correctness-lens-split-ab-unresolved.md) bars publishing any arm to the tracker: the runs used an uncommitted scorer.
-- [`2026-10-12-lens-first-attempt-recall`](experiments/2026-10-12-lens-first-attempt-recall/README.md) — do-not-build (0/20 and 0/20 on two real misses); no suite measures first-attempt recall on real misses.
+- [`2026-08-04-correctness-lens-split`](experiments/2026-08-04-correctness-lens-split/README.md) — its [ruling](../decisions/correctness-lens-split-ab-unresolved.md) published no arm and bars publishing the runs' absolute numbers, which came from an uncommitted scorer; only the relative comparison between arms stays valid.
 
-Decision-log experiments with a verdict; no suite covers the decisions writers:
+Decision-log experiments with a verdict, outside this correctness rule and listed so their results stay findable:
 
 - [`2026-10-11-note-restatement`](experiments/2026-10-11-note-restatement/README.md) — FAIL; the `--kind alters --ruling` option was not built.
 - [`2026-10-11-retarget-carry-replay`](experiments/2026-10-11-retarget-carry-replay/README.md) — FAIL; the writer carried 8 of 18 retired notes (bar 4), so the carry/drop listing was not built.
@@ -230,6 +229,7 @@ Observations below are useful context but are excluded from ordinary accepted tr
 | 2026-09-05 | reviewer-correctness | committed-summary | quality | unknown | A replay of seven FAIL-selected historical inputs produced 57 complete Sol claims, judged blind as 47 real, 9 false and 1 unresolved, with 7 of the 9 false claims from one input. Sol stayed configured by owner decision. Backfilled 2026-10-20 under the ledger's backfill rule. |
 | 2026-09-12 | reviewer-correctness | committed-summary | no-ship | flat | Both candidate instruction changes matched the current instructions exactly on familiar development controls (8/8 bugs blocked and 8/8 repairs accepted each), so no improvement was observed and neither was promoted. Backfilled 2026-10-20 under the ledger's backfill rule. |
 | 2026-10-10 | reviewer-correctness | committed-summary | quality | mixed | For the Claude-family fallback, Haiku 5.5 flagged more labelled bugs than Sonnet 5.5 (92/105 against 84/105, McNemar 10:2, p=0.039) but accepted fewer clean cases (130/180 against 150/179), so the fallback moved to Haiku 5.5. The shipped default stays gpt-5.6-sol, which flagged more bugs than either. Backfilled 2026-10-20 under the ledger's backfill rule. |
+| 2026-10-12 | reviewer-correctness | committed-summary | no-ship | unknown | On two real defects the gate had missed, single Claude-family lens calls (claude-haiku-5-5, no codebase search) caught neither in 0/20 and 0/20 runs, so K-sample voting cannot help on this judge and the planned bench was not built; gpt-5.6-sol was not measured. Backfilled 2026-10-20 under the ledger's backfill rule. |
 
 ## Growth interpretation
 
