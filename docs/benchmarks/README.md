@@ -62,7 +62,27 @@ Hand-written records that sit beside the ledger; each number in them names its p
 - [`source-family-census.md`](source-family-census.md) — source-qualified candidate families and exact native initial-evidence coverage (zero reviewer calls).
 - [`source-family-qualification-2026-09-06.md`](source-family-qualification-2026-09-06.md) — source-controlled reply extraction and unresolved delivery-boundary qualification (sc-2866).
 - [`correctness-rebaseline-2026-09-04.md`](correctness-rebaseline-2026-09-04.md) — correctness re-baselined on the shipped gpt-5.6-sol pin: recall 0.92, clean-pass 0.60, and the precision loss sits entirely in the fix-pair decoys (sc-2494).
-- [`experiments/`](experiments/) — one folder per investigation with its inputs, arms, and reports (latest: [`2026-08-24-codex-judge-probe`](experiments/2026-08-24-codex-judge-probe/README.md) — OpenAI codex-CLI models as gate judges on the round-1 corpus: gpt-5.6-sol@chunk:400 13/23 and gpt-5.6-terra@xhigh WHOLE-diff 11/23 vs sonnet's best 8/23, ~perfect checklist compliance across 840 tasks (839 terminal); chunk size and reasoning effort proved ALTERNATIVE strategies, and terra's effort curve is a cliff at xhigh. Prior: [`2026-08-23-scale-probe`](experiments/2026-08-23-scale-probe/README.md) — whole-diff vs chunked correctness review on 8 real 1k–7.2k-LOC diffs: chunking pooled ≥ whole-diff under all five mining/scoring rulesets tried (shipped ruleset: chunk:1000 8/23 vs whole 5/23 on decontaminated labels), but the ratio moves 1.375×–2.0× with the ruleset so no registered bar is treated as cleared — decision moved to the confirmation round; ~half the round's original labels were test-retest contamination, since fixed; haiku judges failed their arms; full correction record inside. Prior: [`2026-08-22-ship-attempts-research`](experiments/2026-08-22-ship-attempts-research/README.md)).
+- [`experiments/`](experiments/) — one folder per investigation with its inputs, arms, and reports (for example: [`2026-08-24-codex-judge-probe`](experiments/2026-08-24-codex-judge-probe/README.md) — OpenAI codex-CLI models as gate judges on the round-1 corpus: gpt-5.6-sol@chunk:400 13/23 and gpt-5.6-terra@xhigh WHOLE-diff 11/23 vs sonnet's best 8/23, ~perfect checklist compliance across 840 tasks (839 terminal); chunk size and reasoning effort proved ALTERNATIVE strategies, and terra's effort curve is a cliff at xhigh. Prior: [`2026-08-23-scale-probe`](experiments/2026-08-23-scale-probe/README.md) — whole-diff vs chunked correctness review on 8 real 1k–7.2k-LOC diffs: chunking pooled ≥ whole-diff under all five mining/scoring rulesets tried (shipped ruleset: chunk:1000 8/23 vs whole 5/23 on decontaminated labels), but the ratio moves 1.375×–2.0× with the ruleset so no registered bar is treated as cleared — decision moved to the confirmation round; ~half the round's original labels were test-retest contamination, since fixed; haiku judges failed their arms; full correction record inside. Prior: [`2026-08-22-ship-attempts-research`](experiments/2026-08-22-ship-attempts-research/README.md)).
+
+## Backfill rule
+
+Every folder in [`experiments/`](experiments/) dated 2026-08-01 or later whose subject is the
+correctness reviewer and that records a written verdict (adopt, reject, no-ship or do-not-build) has
+a ledger event, whatever the result. A folder with no accepted checkpoint gets an `evidence-only`,
+`committed-summary` event whose `sourceCommit` is the commit that added its README. A folder that a
+recorded decision keeps out of the tracker is listed below with the reason.
+
+## Not in the ledger
+
+Correctness experiments with a verdict but no ledger event:
+
+- [`2026-08-04-correctness-lens-split`](experiments/2026-08-04-correctness-lens-split/README.md) — its [ruling](../decisions/correctness-lens-split-ab-unresolved.md) published no arm and bars publishing the runs' absolute numbers, which came from an uncommitted scorer; only the relative comparison between arms stays valid.
+
+Decision-log experiments with a verdict, outside this correctness rule and listed so their results stay findable:
+
+- [`2026-10-11-note-restatement`](experiments/2026-10-11-note-restatement/README.md) — FAIL; the `--kind alters --ruling` option was not built.
+- [`2026-10-11-retarget-carry-replay`](experiments/2026-10-11-retarget-carry-replay/README.md) — FAIL; the writer carried 8 of 18 retired notes (bar 4), so the carry/drop listing was not built.
+- [`2026-10-16-note-mention-replay`](experiments/2026-10-16-note-mention-replay/README.md) — measured, not built: no arm met the pre-fixed pass rule.
 
 ## Contributor workflow
 
@@ -205,6 +225,11 @@ Observations below are useful context but are excluded from ordinary accepted tr
 | 2026-07-17 | sentry | reported | quality | improved | Source comments report focused-diff and elimination-tier gains, but no immutable accepted checkpoint was preserved. |
 | 2026-07-17 | decisions | local-aggregate | quality | improved | Aggregate-only local ledger evidence is useful for audit but is not accepted history. |
 | 2026-07-07 | commit-guard-retrieval | reported | quality | unknown | Decision prose reports retrieval evidence, but no formal persisted suite checkpoint exists. |
+| 2026-08-24 | reviewer-correctness | committed-summary | quality | mixed | On 7 large real diffs, a different workload from the suite corpus, gpt-5.6-sol at chunk:400 re-found 13/23 labelled defects against Sonnet's best 8/23 and was adopted with extras precision unverified. The re-baseline evt-2026-09-04-reviewer-correctness-fa20ee64d5de later showed suite clean pass 0.60 against Sonnet's 0.83, a drop a harness bug fixed in #581 had hidden. Backfilled 2026-10-20 under the ledger's backfill rule. |
+| 2026-09-05 | reviewer-correctness | committed-summary | quality | unknown | A replay of seven FAIL-selected historical inputs produced 57 complete Sol claims, judged blind as 47 real, 9 false and 1 unresolved, with 7 of the 9 false claims from one input. Sol stayed configured by owner decision. Backfilled 2026-10-20 under the ledger's backfill rule. |
+| 2026-09-12 | reviewer-correctness | committed-summary | no-ship | flat | Both candidate instruction changes matched the current instructions exactly on familiar development controls (8/8 bugs blocked and 8/8 repairs accepted each), so no improvement was observed and neither was promoted. Backfilled 2026-10-20 under the ledger's backfill rule. |
+| 2026-10-10 | reviewer-correctness | committed-summary | quality | mixed | For the Claude-family fallback, Haiku 5.5 flagged more labelled bugs than Sonnet 5.5 (92/105 against 84/105, McNemar 10:2, p=0.039) but accepted fewer clean cases (130/180 against 150/179), so the fallback moved to Haiku 5.5. The shipped default stays gpt-5.6-sol, which flagged more bugs than either. Backfilled 2026-10-20 under the ledger's backfill rule. |
+| 2026-10-12 | reviewer-correctness | committed-summary | no-ship | unknown | On two real defects the gate had missed, single Claude-family lens calls (claude-haiku-5-5, no codebase search) caught neither in 0/20 and 0/20 runs, so K-sample voting cannot help on this judge and the planned bench was not built; gpt-5.6-sol was not measured. Backfilled 2026-10-20 under the ledger's backfill rule. |
 
 ## Growth interpretation
 
