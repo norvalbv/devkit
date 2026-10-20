@@ -9,6 +9,7 @@ import { blockingNote, fingerprint, loadOverrides, reconcile } from '../override
 import {
   shellWord,
   UNSAFE_TEXT_RE,
+  WAIVE_KIND_PLACEHOLDER,
   WAIVE_RATIONALE_PLACEHOLDER,
   waiveCommand,
 } from '../valve/shell-word.mts';
@@ -63,7 +64,12 @@ function expectRoundTrip(shell: string[], lens: string, base: string | null) {
   const args = parseWaiveArgs(shellArgv(shell, command));
   if ('error' in args) throw new Error(`waive refused ${command}: ${args.error}`);
   expect(parseWaiveTarget(args.target)).toEqual({ reviewer: REVIEWER, lens });
-  expect(args).toMatchObject({ itemId: FP, baseSha: base, rationale: WAIVE_RATIONALE_PLACEHOLDER });
+  expect(args).toMatchObject({
+    itemId: FP,
+    baseSha: base,
+    rationale: WAIVE_RATIONALE_PLACEHOLDER,
+    kind: WAIVE_KIND_PLACEHOLDER,
+  });
 }
 
 describe('waiveCommand — round-trips through a real shell into the waive parser', () => {
@@ -98,6 +104,18 @@ describe('waiveCommand — round-trips through a real shell into the waive parse
     const argv = shellArgv(['sh'], command ?? '');
     const cwd = mkdtempSync(join(tmpdir(), 'waive-command-'));
     expect(runWaive(argv, cwd, () => 'tester')).toBe(2);
+  });
+
+  it('is refused with only the rationale edited, since the kind is the placeholder too', () => {
+    const command = waiveCommand({ reviewer: REVIEWER, lens: 'src/a.ts:1', fp: FP, base: BASE });
+    const edited = (command ?? '').replace(
+      WAIVE_RATIONALE_PLACEHOLDER,
+      'the caller holds the lock',
+    );
+    const cwd = mkdtempSync(join(tmpdir(), 'waive-command-'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(runWaive(shellArgv(['sh'], edited), cwd, () => 'tester')).toBe(2);
+    expect(loadOverrides(cwd)).toEqual({});
   });
 });
 
@@ -153,10 +171,18 @@ describe('a printed command, given a real reason, records the waiver its finding
       const note = blockingNote(REVIEWER, [{ lens, fp }], `${BASE}0000`);
       const printed = note.split('\n').find((line) => line.trim().startsWith(PREFIX)) ?? '';
       const reason = 'the lock is held for the whole read-modify-write';
-      const edited = printed.trim().replace(WAIVE_RATIONALE_PLACEHOLDER, reason);
+      const edited = printed
+        .trim()
+        .replace(WAIVE_RATIONALE_PLACEHOLDER, reason)
+        .replace(shellWord(WAIVE_KIND_PLACEHOLDER), 'false-positive');
       vi.spyOn(console, 'error').mockImplementation(() => {});
       expect(runWaive(shellArgv(['sh'], edited), cwd, () => 'tester')).toBe(0);
-      expect(loadOverrides(cwd)[fp]).toMatchObject({ lens, reviewer: REVIEWER, baseSha: BASE });
+      expect(loadOverrides(cwd)[fp]).toMatchObject({
+        lens,
+        reviewer: REVIEWER,
+        baseSha: BASE,
+        kind: 'false-positive',
+      });
       expect(reconcile(cwd, REVIEWER, [lens], 'D', '2026-01-01').blocking).toEqual([]);
     },
   );

@@ -9,6 +9,9 @@
  * same reason: the correlation heuristics are the part worth pinning down with fixtures.
  */
 
+import { z } from 'zod';
+import { parseWaiverKind } from '../../valve/shell-word.mts';
+
 // ---------------------------------------------------------------------------------------------
 // Constants shared with the orchestrator.
 // ---------------------------------------------------------------------------------------------
@@ -340,8 +343,8 @@ export function buildFailFixCandidate({
   };
 }
 
-/** Builds one waived-decoy candidate row. `rationale` stays null until capture point 2
- * (`guard-review waive`) writes it into telemetry — never fabricated here. */
+/** Builds one waived-decoy candidate row. `rationale` and `waiverKind` come from the gate-events
+ * sink (indexWaiverLine) and stay null when no sink line names the waiver — never fabricated. */
 export function buildWaivedCandidate({
   shipId,
   repo,
@@ -355,6 +358,7 @@ export function buildWaivedCandidate({
   failReason,
   disposition,
   rationale = null,
+  waiverKind = null,
 }) {
   return {
     kind: 'waived-decoy',
@@ -372,7 +376,60 @@ export function buildWaivedCandidate({
     failReason: failReason ?? null,
     disposition,
     rationale,
+    waiverKind,
   };
+}
+
+// Waiver kind lookup from the gate-events sink (usage.db has no kind or rationale column).
+
+/** A waiver whose author says the defect is real: never a "this diff is clean" decoy. */
+export const REAL_DEFECT_WAIVER_KINDS = new Set(['deferred', 'pre-existing', 'accepted']);
+// commit_review_lenses.lens is the items[] lens, which evidence/items.mts caps at this length.
+const LENS_KEY_CHARS = 200;
+
+export const newWaiverIndex = () => ({ lensFp: new Map(), byFp: new Map() });
+
+const waiverKey = (shipId, reviewer, lens) =>
+  `${shipId}::${reviewer}::${String(lens).slice(0, LENS_KEY_CHARS)}`;
+
+const waiverFields = { rationale: z.string().optional(), kind: z.string().nullish() };
+const sinkLineSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('waiver_created'), fingerprint: z.string(), ...waiverFields }),
+  z.object({
+    type: z.literal('review_result'),
+    ship_id: z.string().optional(),
+    reviewer: z.string(),
+    waivers: z
+      .array(z.object({ lens: z.string(), fingerprint: z.string(), ...waiverFields }))
+      .default([]),
+  }),
+]);
+
+const waiverFacts = (w) => ({ kind: parseWaiverKind(w.kind), rationale: w.rationale ?? null });
+
+/** Folds one sink line in, later lines winning as in the collector. Cached split parts replay
+ * waivers as {lens, fingerprint} only, so facts key by fingerprint and only full entries set them. */
+export function indexWaiverLine(index, line) {
+  if (!line.includes('"review_result"') && !line.includes('"waiver_created"')) return;
+  let json;
+  try {
+    json = JSON.parse(line);
+  } catch {
+    return;
+  }
+  const e = sinkLineSchema.safeParse(json).data;
+  if (e?.type === 'waiver_created') index.byFp.set(e.fingerprint, waiverFacts(e));
+  if (e?.type !== 'review_result') return;
+  for (const w of e.waivers) {
+    index.lensFp.set(waiverKey(e.ship_id, e.reviewer, w.lens), w.fingerprint);
+    if (w.rationale !== undefined) index.byFp.set(w.fingerprint, waiverFacts(w));
+  }
+}
+
+/** The {kind, rationale} recorded for one waived lens row, or null when the sink never named it. */
+export function lookupWaiver(index, shipId, reviewer, lens) {
+  const fp = index.lensFp.get(waiverKey(shipId, reviewer, lens));
+  return (fp && index.byFp.get(fp)) ?? null;
 }
 
 // ---------------------------------------------------------------------------------------------
