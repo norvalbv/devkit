@@ -97,9 +97,9 @@ function checklistWorkflow(reviewer: ChecklistReviewer, script: string, assetRoo
   return `MANDATORY CHECKLIST WORKFLOW — this stops coverage hallucination and is independently verified:\n${steps}`;
 }
 
-/** The script as a judge types it and as the grant names it; Claude Code matches a quoted path only quoted. */
+/** The script as the judge types it and the grant names it: single-quoted unless shell-plain. */
 export const scriptCommand = (script: string): string =>
-  /\s/.test(script) ? `node "${script}"` : `node ${script}`;
+  /^[\w@%+=:./-]+$/.test(script) ? `node ${script}` : `node '${script.replaceAll("'", `'\\''`)}'`;
 
 const INTERACTIVE_ONLY_RE = /<!-- interactive-only -->[\s\S]*?<!-- \/interactive-only -->\n?/g;
 const PROVIDER_SKILL_PREFIXES = ['.agents/skills/', '.claude/skills/', '.cursor/skills/'];

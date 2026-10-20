@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCache, loadCache, savePasses } from '../cache.mts';
 import { MCP_DEGRADED_REMEDY } from '../evidence/base-context.mts';
 import { parseClaudeArgv } from '../../judge/codex/result.mts';
-import { FOUR_WAY_LENS_GROUPS, lensGroupId } from '../lens/split.mts';
+import { checklistAssetRoot } from '../cascade/consumer-assets.mts';
+import { FOUR_WAY_LENS_GROUPS, lensGroupId, scriptCommand } from '../lens/split.mts';
+import { checklistScriptAt, hasChecklist, REVIEWERS } from '../reviewers.mts';
 import { runReviewGate } from '../run-review.mts';
 import {
   cleanupReviewFixtures,
@@ -134,17 +136,21 @@ describe('reviewer fleet without the codebase MCP server (sc-2837)', () => {
     const exec = passJudge(repo);
     expect(await runReviewGate(repo, { exec })).toBe(0);
     expect(exec.mock.calls.length).toBeGreaterThan(0);
+    const grants = REVIEWERS.filter(hasChecklist).map(
+      (r) => `Bash(${scriptCommand(checklistScriptAt(r, checklistAssetRoot(repo, r)))}:*)`,
+    );
     for (const [{ label, args }] of exec.mock.calls) {
       const bash = args[args.indexOf('--allowedTools') + 1]
         .split(',')
         .filter((tool: string) => tool.startsWith('Bash'));
       expect(bash.length, label).toBeLessThanOrEqual(1);
-      for (const rule of bash) expect(rule, label).toMatch(/^Bash\(node \S+\/checklist\.mjs:\*\)$/);
+      for (const rule of bash) expect(grants, label).toContain(rule);
       // The prompt this same spawn carries must print only the spelling that rule grants.
       const prompt = parseClaudeArgv(args).prompt ?? '';
-      const printed = prompt.match(/node \S+\/checklist\.mjs/g) ?? [];
-      expect(printed.length > 0, label).toBe(bash.length === 1);
-      for (const command of printed) expect(`Bash(${command}:*)`, label).toBe(bash[0]);
+      const command = bash[0]?.slice('Bash('.length, -':*)'.length);
+      expect(command !== undefined && prompt.includes(command), label).toBe(bash.length === 1);
+      const unGranted = command ? prompt.replaceAll(command, '') : prompt;
+      expect(unGranted, label).not.toMatch(/node [^\n]*checklist\.mjs/);
       expect(prompt, label).not.toContain('$SCRIPT');
     }
   });
