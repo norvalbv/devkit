@@ -16,12 +16,12 @@ import {
   histogramKey,
   indexWaiverLine,
   INLINE_DIFF_CAP_BYTES,
+  isRealDefectWaiver,
   isSameDiff,
   lookupWaiver,
   mergeCandidates,
   newWaiverIndex,
   pickFailReason,
-  REAL_DEFECT_WAIVER_KINDS,
   resolveDiffPayload,
   selectFailLensRows,
   sortByTsStart,
@@ -523,7 +523,7 @@ describe('mine-telemetry-lib: waiver kind from the gate-events sink', () => {
 
   // The env channel resets a stored kind and says so with `kind: null`; ignoring it would
   // keep dropping a waiver whose store entry no longer claims a real defect.
-  it('lets an env-channel waiver_created with kind null clear a known kind', () => {
+  it('lets an env-channel waiver_created with kind null clear a known kind for later replays', () => {
     const reset = JSON.stringify({
       type: 'waiver_created',
       fingerprint: FP,
@@ -531,10 +531,24 @@ describe('mine-telemetry-lib: waiver kind from the gate-events sink', () => {
       kind: null,
       by: 'env',
     });
-    expect(lookupWaiver(indexOf(fresh('deferred'), reset), 's1', R, 'races')).toEqual({
+    const cached = reviewResult('s2', { lens: 'races', fingerprint: FP });
+    expect(lookupWaiver(indexOf(fresh('deferred'), reset, cached), 's2', R, 'races')).toEqual({
       kind: null,
       rationale: 'a new env rationale',
     });
+  });
+
+  // One fingerprint recurs across ships of the same diff; each row keeps the kind its ship recorded.
+  it("never relabels a ship's row with a later ship's kind on the same fingerprint", () => {
+    const later = reviewResult('s2', {
+      lens: 'races',
+      fingerprint: FP,
+      rationale: 'b',
+      kind: 'false-positive',
+    });
+    const index = indexOf(fresh('deferred'), later);
+    expect(lookupWaiver(index, 's1', R, 'races')?.kind).toBe('deferred');
+    expect(lookupWaiver(index, 's2', R, 'races')?.kind).toBe('false-positive');
   });
 
   it('lets the later line win, and reads an unknown kind as null', () => {
@@ -551,8 +565,18 @@ describe('mine-telemetry-lib: waiver kind from the gate-events sink', () => {
     );
   });
 
-  it('treats only false-positive and unclassified waivers as decoy material', () => {
-    expect([...REAL_DEFECT_WAIVER_KINDS].sort()).toEqual(['accepted', 'deferred', 'pre-existing']);
+  it.each([
+    ['deferred', true],
+    ['pre-existing', true],
+    ['accepted', true],
+    ['false-positive', false],
+  ])('a %s waiver is a real defect: %s', (kind, real) => {
+    expect(isRealDefectWaiver(lookupWaiver(indexOf(fresh(kind)), 's1', R, 'races'))).toBe(real);
+  });
+
+  it('mints an unclassified or unmatched waiver as before', () => {
+    expect(isRealDefectWaiver({ kind: null, rationale: 'old reason' })).toBe(false);
+    expect(isRealDefectWaiver(null)).toBe(false);
   });
 });
 

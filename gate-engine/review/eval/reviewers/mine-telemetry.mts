@@ -79,12 +79,12 @@ import {
   hasDiffEvidence,
   histogramKey,
   indexWaiverLine,
+  isRealDefectWaiver,
   isSameDiff,
   lookupWaiver,
   mergeCandidates,
   newWaiverIndex,
   pickFailReason,
-  REAL_DEFECT_WAIVER_KINDS,
   resolveDiffPayload,
   selectFailLensRows,
   setHard,
@@ -361,7 +361,7 @@ async function main() {
       continue;
     }
     const waiver = lookupWaiver(waiverIndex, l.ship_id, l.reviewer, l.lens);
-    if (REAL_DEFECT_WAIVER_KINDS.has(waiver?.kind)) {
+    if (isRealDefectWaiver(waiver)) {
       bumpDrop('waived-decoy:real-defect-kind');
       realDefectUrls.push(telemetryUrl('waived-decoy', l.ship_id, l.reviewer, l.lens));
       continue;

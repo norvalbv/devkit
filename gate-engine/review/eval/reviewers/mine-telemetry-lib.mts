@@ -382,12 +382,13 @@ export function buildWaivedCandidate({
 
 // Waiver kind lookup from the gate-events sink (usage.db has no kind or rationale column).
 
+const REAL_DEFECT_WAIVER_KINDS = new Set(['deferred', 'pre-existing', 'accepted']);
 /** A waiver whose author says the defect is real: never a "this diff is clean" decoy. */
-export const REAL_DEFECT_WAIVER_KINDS = new Set(['deferred', 'pre-existing', 'accepted']);
+export const isRealDefectWaiver = (waiver) => REAL_DEFECT_WAIVER_KINDS.has(waiver?.kind);
 // commit_review_lenses.lens is the items[] lens, which evidence/items.mts caps at this length.
 const LENS_KEY_CHARS = 200;
 
-export const newWaiverIndex = () => ({ lensFp: new Map(), byFp: new Map() });
+export const newWaiverIndex = () => ({ byLens: new Map(), lensFp: new Map(), byFp: new Map() });
 
 const waiverKey = (shipId, reviewer, lens) =>
   `${shipId}::${reviewer}::${String(lens).slice(0, LENS_KEY_CHARS)}`;
@@ -408,7 +409,7 @@ const sinkLineSchema = z.discriminatedUnion('type', [
 const waiverFacts = (w) => ({ kind: parseWaiverKind(w.kind), rationale: w.rationale ?? null });
 
 /** Folds one sink line in, later lines winning as in the collector. Cached split parts replay
- * waivers as {lens, fingerprint} only, so facts key by fingerprint and only full entries set them. */
+ * waivers as {lens, fingerprint} only; those fall back to the fingerprint's latest full entry. */
 export function indexWaiverLine(index, line) {
   if (!line.includes('"review_result"') && !line.includes('"waiver_created"')) return;
   let json;
@@ -421,15 +422,20 @@ export function indexWaiverLine(index, line) {
   if (e?.type === 'waiver_created') index.byFp.set(e.fingerprint, waiverFacts(e));
   if (e?.type !== 'review_result') return;
   for (const w of e.waivers) {
-    index.lensFp.set(waiverKey(e.ship_id, e.reviewer, w.lens), w.fingerprint);
-    if (w.rationale !== undefined) index.byFp.set(w.fingerprint, waiverFacts(w));
+    const key = waiverKey(e.ship_id, e.reviewer, w.lens);
+    index.lensFp.set(key, w.fingerprint);
+    if (w.rationale === undefined) continue;
+    index.byLens.set(key, waiverFacts(w));
+    index.byFp.set(w.fingerprint, waiverFacts(w));
   }
 }
 
-/** The {kind, rationale} recorded for one waived lens row, or null when the sink never named it. */
+/** The {kind, rationale} one waived lens row was recorded with — its own ship's entry first, so a
+ * later ship's kind on the same fingerprint never relabels it — or null when the sink never named it. */
 export function lookupWaiver(index, shipId, reviewer, lens) {
-  const fp = index.lensFp.get(waiverKey(shipId, reviewer, lens));
-  return (fp && index.byFp.get(fp)) ?? null;
+  const key = waiverKey(shipId, reviewer, lens);
+  const fp = index.lensFp.get(key);
+  return index.byLens.get(key) ?? (fp && index.byFp.get(fp)) ?? null;
 }
 
 // ---------------------------------------------------------------------------------------------
