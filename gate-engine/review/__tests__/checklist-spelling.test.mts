@@ -1,4 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
 import {
@@ -6,6 +9,7 @@ import {
   checklistContractFor,
   deriveLensReviewer,
   gateBrief,
+  scriptCommand,
 } from '../lens/split.mts';
 import {
   allowedToolsFor,
@@ -19,9 +23,9 @@ const cfg = resolveGuardConfig('/nonexistent-cwd-defaults-only');
 const checklistReviewers = REVIEWERS.filter(hasChecklist);
 const brief = (name: string) =>
   readFileSync(new URL(`../../../agents/${name}.md`, import.meta.url), 'utf8');
-const ROOTS = ['.', '.claude', '.agents', '/opt/devkit pkg'];
-// Every `node …checklist.mjs` spelling a prompt prints, quoted or bare.
-const PRINTED_SCRIPT_RE = /node "[^"]*checklist\.mjs"|node [^\s`"]*checklist\.mjs/g;
+const ROOTS = ['.', '.claude', '.agents', '/opt/devkit pkg', "/opt/dev$k'it"];
+// Each breaks a bare shell word (split, expansion, quoting, separator) or the comma-joined grant list.
+const SHELL_CHARS = [' ', '$', '`', '"', "'", "''", '&', ';', '(', 'é', ','];
 // Interactive-only setup a gate judge must never see: each piece is a spelling the grant refuses.
 const REFUSED_RE = /\$SCRIPT|\$SKILL_DIR|SCRIPT=|for candidate|interactive-only/;
 const CASES = checklistReviewers.flatMap((reviewer) =>
@@ -44,7 +48,9 @@ describe('a gate judge is shown only the checklist spelling its grant allows', (
     );
     const [, granted] = /Bash\((.*):\*\)/.exec(allowedToolsFor(reviewer, cfg, root)) ?? [];
     expect(prompt).not.toMatch(REFUSED_RE);
-    expect(new Set(prompt.match(PRINTED_SCRIPT_RE))).toEqual(new Set([granted]));
+    // A brief line spliced with a raw root would leave a checklist.mjs the grant never names.
+    expect(prompt).toContain(granted);
+    expect(prompt.replaceAll(granted, '')).not.toContain('checklist.mjs');
     expect(prompt).toContain(CHECKLIST_SPELLING_RULE);
   });
 });
@@ -52,11 +58,33 @@ describe('a gate judge is shown only the checklist spelling its grant allows', (
 describe('checklist spelling', () => {
   const [reviewer] = checklistReviewers;
 
-  it('quotes a script path with a space in both the grant and the printed command', () => {
-    const script = checklistScriptAt(reviewer, '/opt/devkit pkg');
-    expect(allowedToolsFor(reviewer, cfg, '/opt/devkit pkg')).toContain(`Bash(node "${script}":*)`);
-    expect(checklistContractFor(reviewer, script)).toContain(
-      `\`node "${script}" ${reviewer.cmds.gen}\``,
+  it.each(SHELL_CHARS)('prints and grants a root holding %j in one spelling', (c) => {
+    const root = `/opt/dev${c}kit`;
+    const cmd = scriptCommand(checklistScriptAt(reviewer, root));
+    expect(cmd).toMatch(/^node '.*'$/);
+    expect(allowedToolsFor(reviewer, cfg, root)).toContain(`,Bash(${cmd}:*)`);
+    expect(checklistContractFor(reviewer, checklistScriptAt(reviewer, root))).toContain(
+      `\`${cmd} ${reviewer.cmds.gen}\``,
+    );
+    expect(gateBrief('node $SCRIPT generate', checklistScriptAt(reviewer, root))).toBe(
+      `${cmd} generate`,
+    );
+  });
+
+  it.each(SHELL_CHARS)('the printed command for a root holding %j runs that script', (c) => {
+    const root = path.join(mkdtempSync(path.join(tmpdir(), 'checklist-spelling-')), `dev${c}kit`);
+    const script = checklistScriptAt(reviewer, root);
+    mkdirSync(path.dirname(script), { recursive: true });
+    writeFileSync(script, 'console.log(process.argv.slice(1).join("|"));\n');
+    const out = execFileSync('sh', ['-c', `${scriptCommand(script)} generate`], {
+      encoding: 'utf8',
+    });
+    expect(out.trim()).toBe(`${script}|generate`);
+  });
+
+  it('leaves a shell-plain path bare', () => {
+    expect(scriptCommand('.claude/skills/x/scripts/checklist.mjs')).toBe(
+      'node .claude/skills/x/scripts/checklist.mjs',
     );
   });
 
@@ -73,6 +101,6 @@ describe('checklist spelling', () => {
   it('prints a path holding replacement-pattern characters byte for byte', () => {
     const script = '/tmp/$&x/skills/correctness/scripts/checklist.mjs';
     const out = gateBrief('node $SCRIPT generate\nRead $SKILL_DIR/SKILL.md', script);
-    expect(out).toBe(`node ${script} generate\nRead /tmp/$&x/skills/correctness/SKILL.md`);
+    expect(out).toBe(`node '${script}' generate\nRead /tmp/$&x/skills/correctness/SKILL.md`);
   });
 });
