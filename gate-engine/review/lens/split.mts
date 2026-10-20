@@ -59,6 +59,7 @@ import { coverageFields, partialEvidenceNote } from '../evidence/packet/coverage
 import { cachedWaivers, type CachedWaiver } from '../overrides.mts';
 import type { ChecklistReviewer, ReviewerSelection } from '../reviewers.mts';
 import { parseReviewVerdict } from '../contracts/response.mts';
+import { shellWord } from '../valve/shell-word.mts';
 
 /**
  * The mandatory-checklist paragraph of a judge prompt.
@@ -97,9 +98,8 @@ function checklistWorkflow(reviewer: ChecklistReviewer, script: string, assetRoo
   return `MANDATORY CHECKLIST WORKFLOW — this stops coverage hallucination and is independently verified:\n${steps}`;
 }
 
-/** The script as the judge types it and the grant names it: single-quoted unless shell-plain. */
-export const scriptCommand = (script: string): string =>
-  /^[\w@%+=:./-]+$/.test(script) ? `node ${script}` : `node '${script.replaceAll("'", `'\\''`)}'`;
+/** The script as the judge types it and the grant names it: one shell word, quoted only if needed. */
+export const scriptCommand = (script: string): string => `node ${shellWord(script)}`;
 
 const INTERACTIVE_ONLY_RE = /<!-- interactive-only -->[\s\S]*?<!-- \/interactive-only -->\n?/g;
 const PROVIDER_SKILL_PREFIXES = ['.agents/skills/', '.claude/skills/', '.cursor/skills/'];

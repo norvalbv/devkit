@@ -24,8 +24,8 @@ const checklistReviewers = REVIEWERS.filter(hasChecklist);
 const brief = (name: string) =>
   readFileSync(new URL(`../../../agents/${name}.md`, import.meta.url), 'utf8');
 const ROOTS = ['.', '.claude', '.agents', '/opt/devkit pkg', "/opt/dev$k'it"];
-// Each breaks a bare shell word (split, expansion, quoting, separator) or the comma-joined grant list.
-const SHELL_CHARS = [' ', '$', '`', '"', "'", "''", '&', ';', '(', 'é', ','];
+// Each breaks a bare shell word: split, expansion, substitution, quoting, or a command separator.
+const SHELL_CHARS = [' ', '$', '`', '"', "'", "''", '&', ';', '(', 'é'];
 // Interactive-only setup a gate judge must never see: each piece is a spelling the grant refuses.
 const REFUSED_RE = /\$SCRIPT|\$SKILL_DIR|SCRIPT=|for candidate|interactive-only/;
 const CASES = checklistReviewers.flatMap((reviewer) =>
@@ -82,9 +82,13 @@ describe('checklist spelling', () => {
     expect(out.trim()).toBe(`${script}|generate`);
   });
 
-  it('leaves a shell-plain path bare', () => {
+  it('leaves a shell-plain path bare, a comma included', () => {
     expect(scriptCommand('.claude/skills/x/scripts/checklist.mjs')).toBe(
       'node .claude/skills/x/scripts/checklist.mjs',
+    );
+    // A bare comma survives the comma-joined --allowedTools merge byte for byte.
+    expect(allowedToolsFor(reviewer, cfg, '/opt/dev,kit')).toContain(
+      `,Bash(node ${checklistScriptAt(reviewer, '/opt/dev,kit')}:*)`,
     );
   });
 
