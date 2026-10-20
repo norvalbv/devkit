@@ -63,6 +63,15 @@ describe('scopedTargets (scope-match)', () => {
     expect(slugs).toEqual(['a', 'b']);
   });
 
+  it('keeps readdir order in-process; only the CLI ranks, so reviewer prompt bytes do not move', async () => {
+    const root = repoWithDecisions([
+      ['aaa-broad', 'src/**', 'Broad'],
+      ['zzz-exact', 'src/foo/x.ts', 'Exact'],
+    ]);
+    const slugs = (await scopedTargets(['src/foo/x.ts'], '', 6, root)).map((x) => x.slug);
+    expect(slugs).toEqual(['aaa-broad', 'zzz-exact']);
+  });
+
   it('returns [] when no scope matches and no query is given', async () => {
     const root = repoWithDecisions([['foo', 'src/foo/**', 'r']]);
     expect(await scopedTargets(['src/other/x.ts'], '', 6, root)).toEqual([]);
