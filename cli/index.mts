@@ -63,6 +63,7 @@ const COMMANDS: Record<string, CommandLoader> = {
   review: () => import('./commands/review.mts'),
   'guard-branch': () => import('./commands/guard-branch.mts'),
   'base-status': () => import('./commands/base-drift/base-status.mts'),
+  'follow-up': () => import('./commands/follow-up/follow-up.mts'),
   'coverage-run': () => import('./commands/coverage/run.mts'),
   'coverage-diff': () => import('./commands/coverage/diff.mts'),
   'test-report-run': () => import('./commands/baseline/test-report-run.mts'),
