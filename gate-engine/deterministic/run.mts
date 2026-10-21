@@ -261,9 +261,12 @@ export function prefixCacheScope(scope?: string, effectiveIds?: string[]): strin
   // The self-host release-only dist extra judges the tree against the PR base and exempts only a
   // release branch, so a tree's PASS under one base or branch must not authorize another.
   const prBase = process.env.DEVKIT_SHIP_PR_BASE_SHA;
-  return prBase
+  const prScope = prBase
     ? `${extraBase ?? 'devkit-guards'}:pr-base:${prBase}:branch:${process.env.DEVKIT_SHIP_BRANCH ?? ''}`
     : extraBase;
+  // guard-structure judges edited-file debt against HEAD (the ship base), so a PASS is base-bound.
+  const shipBase = process.env.DEVKIT_SHIP_BASE_SHA;
+  return shipBase ? `${prScope ?? 'devkit-guards'}:ship-base:${shipBase}` : prScope;
 }
 
 // Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's
@@ -456,13 +459,9 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     console.error('   On commit or ship, decision and reviewer gates run only after these pass.');
     printRecheckFooter(rechecks);
     if (fails.some((f) => f.label.startsWith('structure-lint'))) {
-      console.error(
-        '   Base branch structure debt that your diff did not cause? Re-run with the explicit',
-      );
-      console.error('   one-run assertion:  export GUARD_STRUCTURE_OK=1');
-      console.error(
-        '   A structure violation introduced by your own change must be fixed instead.',
-      );
+      console.error('   guard-structure blocks only violations your change adds, or all when');
+      console.error('   it edits structure policy or deletes/renames. Fix those.');
+      console.error('   GUARD_STRUCTURE_OK=1 is for base debt or a custom structure command.');
     }
     if (fails.some((f) => NOT_FOUND_RE.test(f.label))) {
       console.error(
