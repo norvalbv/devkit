@@ -28,6 +28,10 @@ export function reviewPathWithin(root, candidate) {
     const rel = relative(root, candidate);
     return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`));
 }
+/** True when either path is, or sits inside, the other. */
+export function reviewPathsOverlap(first, second) {
+    return reviewPathWithin(first, second) || reviewPathWithin(second, first);
+}
 /** Resolve an existing directory physically so later containment checks cannot follow an ancestor. */
 export function canonicalReviewDirectory(path, label) {
     let canonical;

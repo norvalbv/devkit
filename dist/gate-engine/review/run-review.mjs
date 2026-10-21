@@ -97,15 +97,16 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             let postHead = null;
             for (let attempt = 0; attempt < 3; attempt += 1) {
                 const h1 = headHash(cwd);
-                const t = stagedTreeHash(cwd);
-                if (h1 !== null && t !== null && headHash(cwd) === h1 && stagedTreeHash(cwd) === t) {
+                const use = 'post-judge tamper check';
+                const t = stagedTreeHash(cwd, use);
+                if (h1 !== null && t !== null && headHash(cwd) === h1 && stagedTreeHash(cwd, use) === t) {
                     postTree = t;
                     postHead = h1;
                     break;
                 }
             }
             if (preJudgeTree === null || postTree === null) {
-                console.error('guard-review: staged tree is UNVERIFIABLE (git write-tree failed — unmerged paths?) — blocking: write-capable judges may run in this gate and their effect on the commit cannot be ruled out. Resolve the index and re-run.');
+                console.error('guard-review: staged tree is UNVERIFIABLE (could not hash the staged tree — reason above) — blocking: write-capable judges may run in this gate and their effect on the commit cannot be ruled out. Resolve the index and re-run.');
                 return timing.finish(1);
             }
             if (postHead === null || postTree !== preJudgeTree || postHead !== preJudgeHead) {
@@ -139,7 +140,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         preJudgeTree = null;
         for (let attempt = 0; attempt < 3; attempt += 1) {
             const before = headHash(cwd);
-            const tree = stagedTreeHash(cwd);
+            const tree = stagedTreeHash(cwd, 'pre-judge tamper baseline');
             if (before !== null && tree !== null && headHash(cwd) === before) {
                 preJudgeTree = tree;
                 preJudgeHead = before;
@@ -193,7 +194,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         // A double swap timed inside this bracket is an actor with full repo write access racing
         // sub-millisecond windows — outside this gate's trust boundary (such an actor can edit .git
         // directly); hashing cannot close it and locking the index would break every parallel tool.
-        if (stagedTreeHash(cwd) !== preJudgeTree)
+        if (stagedTreeHash(cwd, 'review evidence bracket') !== preJudgeTree)
             throw new Error('staged tree changed while review evidence was being read — re-run the gate');
     }
     catch (e) {

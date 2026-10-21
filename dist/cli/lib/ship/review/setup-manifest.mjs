@@ -12,7 +12,7 @@ import { reviewRuntimeFingerprint } from './runtime-fingerprint.mjs';
 import { canonicalReviewDirectory, canonicalReviewLeaf, isSafeReviewRelativePath, reviewPathWithin, } from './runtime-paths.mjs';
 import { OVERLAY_HOOKS_PATH, overlayHooksPathRejection, } from './setup/overlay-hooks-path.mjs';
 import { reviewSetupStat } from './setup/setup-runtime-copy.mjs';
-import { REVIEW_SETUP_ABSENT, REVIEW_SETUP_VERSION, reviewSetupHash, } from './setup-manifest-format.mjs';
+import { REVIEW_SETUP_ABSENT, REVIEW_SETUP_OPTIONAL_PATHS, REVIEW_SETUP_VERSION, reviewSetupHash, } from './setup-manifest-format.mjs';
 import { parseReviewSetupManifest } from './setup-manifest-parse.mjs';
 import { REVIEW_SETUP_DOCTOR as DOCTOR, REVIEW_SETUP_INIT as INIT, REVIEW_SETUP_OVERLAY_DOCTOR as OVERLAY_DOCTOR, parseReviewSetupProfile, } from './setup-profile.mjs';
 import { errorMessage, fail } from './shared/common.mjs';
@@ -20,11 +20,6 @@ import { resolveReviewSource } from './source-projection.mjs';
 const HUSKY_RUNNER_PATHS = [
     ['runner-source', '.husky/_', false],
     ['runner-pre-commit', '.husky/_/pre-commit', true],
-];
-const OPTIONAL_PATHS = [
-    ['correctness-overrides', '.devkit/correctness-overrides.json'],
-    ['biome-runtime', '.devkit/biome'],
-    ['tsconfig-runtime', '.devkit/tsconfig'],
 ];
 const LOCAL_GIT_ENVIRONMENT = [
     'GIT_ALTERNATE_OBJECT_DIRECTORIES',
@@ -209,7 +204,7 @@ function captureSetupPaths(targetRoot, gitRoot, overlay) {
             ? []
             : HUSKY_RUNNER_PATHS.map(([id, path, executable]) => pathState('git', gitRoot, id, path, true, executable))),
         pathState('git', gitRoot, 'effective-hook', hookPath, true, true),
-        ...OPTIONAL_PATHS.map(([id, path]) => pathState('target', targetRoot, id, path, false, false)),
+        ...REVIEW_SETUP_OPTIONAL_PATHS.map(([id, path]) => pathState('target', targetRoot, id, path, false, false)),
     ];
 }
 /** What `overlayHookScriptDir` returns when core.hooksPath is unset — git's own hooks directory. */

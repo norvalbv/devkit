@@ -30,8 +30,8 @@ function truthy(v) {
     return !(t === '' || t === '0' || t === 'false' || t === 'no');
 }
 /** Automatic every-commit capture (transcripts + telemetry). ON by default; DEVKIT_NO_TELEMETRY=1 off. */
-export function telemetryEnabled() {
-    return !truthy(process.env.DEVKIT_NO_TELEMETRY);
+export function telemetryEnabled(env = process.env) {
+    return !truthy(env.DEVKIT_NO_TELEMETRY);
 }
 /**
  * The agent that triggered this run, inferred from its env fingerprint so ship/commit telemetry can
@@ -60,9 +60,9 @@ export function parentSessionId(env = process.env) {
     return id !== undefined && PARENT_SESSION_ID_RE.test(id) ? id : undefined;
 }
 /** The telemetry JSONL sink: the ship's DEVKIT_GATE_EVENTS, else the every-commit default, else none. */
-export function telemetrySink() {
-    return (process.env.DEVKIT_GATE_EVENTS ||
-        (telemetryEnabled()
+export function telemetrySink(env = process.env) {
+    return (env.DEVKIT_GATE_EVENTS ||
+        (telemetryEnabled(env)
             ? path.join(homedir(), '.devkit', 'telemetry', 'gate-events.jsonl')
             : undefined));
 }

@@ -11,6 +11,8 @@ const DETAIL_CAP = 500;
 /**
  * Carries NO `family`: the digest's isBlocking() matches on that field, and a stage holding no exit
  * must never be renderable as the gate that stopped the run.
+ * The ship digest prints `detail` as one line cut at DETAIL_CHARS (cli/lib/ship/digest/fields.mts):
+ * put what the reader must know or do first; the full text belongs on stderr.
  */
 export function emitAdvisoryResult(gate, status, detail) {
     emitGateEvent({

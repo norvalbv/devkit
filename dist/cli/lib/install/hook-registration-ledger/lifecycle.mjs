@@ -28,6 +28,8 @@ function cursorCommand(command) {
         .trim();
 }
 export function nativeProjection(provider, registration) {
+    if (registration.providers && !registration.providers.includes(provider))
+        return null;
     const { event, matcher, command } = registration;
     if (provider === 'claude')
         return { event, matcher, command };
