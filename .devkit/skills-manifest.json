@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "kind": "skills",
   "devkitRef": "v0.71.0",
-  "generatedAt": "2026-10-20T20:13:50.248Z",
+  "generatedAt": "2026-10-21T20:59:14.181Z",
   "files": {
     "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
     "_devkit/review-roots.d.mts": "ef04d721fdb4841e5ee6867b8b6d48769655eabb89d18f60cf7a117b6cb224db",
@@ -36,7 +36,7 @@
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "cbeccff07a87436ec8ef11fd1763d85821c956c7737632c793410bc3e14aba0a"
+    "using-devkit/SKILL.md": "ee9987cd464262365cba6ccf61dae4a9f6244fadbce917dc3a5ee7b4b8028e2d"
   },
   "providers": {
     "claude": {
@@ -73,7 +73,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "cbeccff07a87436ec8ef11fd1763d85821c956c7737632c793410bc3e14aba0a"
+        "using-devkit/SKILL.md": "ee9987cd464262365cba6ccf61dae4a9f6244fadbce917dc3a5ee7b4b8028e2d"
       }
     },
     "codex": {
@@ -110,7 +110,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "cbeccff07a87436ec8ef11fd1763d85821c956c7737632c793410bc3e14aba0a"
+        "using-devkit/SKILL.md": "ee9987cd464262365cba6ccf61dae4a9f6244fadbce917dc3a5ee7b4b8028e2d"
       }
     },
     "cursor": {
@@ -147,7 +147,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "cbeccff07a87436ec8ef11fd1763d85821c956c7737632c793410bc3e14aba0a"
+        "using-devkit/SKILL.md": "ee9987cd464262365cba6ccf61dae4a9f6244fadbce917dc3a5ee7b4b8028e2d"
       }
     }
   }
