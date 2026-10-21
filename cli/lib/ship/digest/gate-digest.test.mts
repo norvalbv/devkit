@@ -878,7 +878,7 @@ describe('a reviewer blocking on several fingerprints (sc-3212)', () => {
     expect(text).toContain('Gate findings this run (1 gate(s) / 3 finding(s))');
     for (const { lens, fp } of THREE) {
       expect(text).toContain(
-        `✗ review:correctness-reviewer — BLOCKED this run: ${lens} [${fp}] — fix it, or: guard-review waive correctness-reviewer:${lens} ${fp} "why this is not a real defect"`,
+        `✗ review:correctness-reviewer — BLOCKED this run: ${lens} [${fp}] — fix it, or: guard-review waive correctness-reviewer:${lens} ${fp} --kind 'false-positive|deferred|pre-existing|accepted' "why this finding is waived"`,
       );
     }
   });
@@ -888,7 +888,7 @@ describe('a reviewer blocking on several fingerprints (sc-3212)', () => {
     const lens = "docs/it's here.ts@CLAUDE.md:12";
     const blocking = [{ lens, fp: '0123456789ab' }];
     const note = blockingNote('correctness-reviewer', blocking, base);
-    const command = /guard-review waive .*"why this is not a real defect"/.exec(note)?.[0];
+    const command = /guard-review waive .*"why this finding is waived"/.exec(note)?.[0];
     expect(command).toContain('--base 5c8482e8fa4e');
     const fields = blockingFields({ blocking: [{ ...blocking[0], base: '5c8482e8fa4e' }] });
     const text = render(

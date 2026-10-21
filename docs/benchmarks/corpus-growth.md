@@ -81,7 +81,7 @@ possible at all; before 2026-08-01 any append reset comparability.
 |---|---|---|---|
 | 0 | Diff-bytes archive on FAIL | **SHIPPED** (#295) | replayable inputs (~12 correctness FAILs/day) |
 | 1 | Fail → fix correlation (collector links consecutive ship attempts; next diff touches flagged lines) | pending (~1 day, dashboard side) | golds, zero human steps |
-| 2 | `guard-review waive <reviewer>[:<lens>] "<rationale>"` | pending (~½ day; the `disposition:'waived'` column exists) | decoys with rationale as note |
+| 2 | `guard-review waive <reviewer>[:<lens>] <fp> --kind <kind> "<rationale>"` | pending (~½ day; the `disposition:'waived'` column exists) | decoys with rationale as note; `deferred`, `pre-existing` and `accepted` kinds are real defects and never mint |
 | 3 | Bot mining (CodeRabbit/Macroscope threads) | **SHIPPED** (#295/#296) | golds + decoys, bootstrap corpus |
 | — | Override valve (`OVERRIDE_<id>_RATIONALE`, `correctness-overrides.json`) | already live — mine `commit_review_lenses` | decoys (historical, unmined) |
 | — | Human PR review comments | banked in the collector, unmined | labels |
