@@ -1,6 +1,6 @@
 #!/bin/bash
 # PostToolUse hook (Edit|Write|MultiEdit; Cursor: afterFileEdit) — format + lint the just-edited file.
-#   1. Biome `check --write` auto-fixes formatting/lint on the single edited file.
+#   1. Biome `check --write` (an overlay Oxfmt repo: its own oxfmt) auto-fixes the single edited file.
 #   2. ESLint surfaces structure/size violations EARLY (before pre-commit blocks). A
 #      non-zero ESLint exit + stderr + exit 2 feeds the message back into the conversation.
 #
@@ -25,6 +25,8 @@ fi
 HOOK_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
 source "$HOOK_DIR/session-edits-lib.sh" 2>/dev/null || true
 WORKSPACE="${CLAUDE_PROJECT_DIR:-$HOOK_DIR/../..}"
+# The checkout holding devkit's own (overlay: git-excluded) config, before WORKSPACE follows a worktree.
+CONFIG_ROOT="$WORKSPACE"
 declare -F hook_workspace &>/dev/null && WORKSPACE=$(hook_workspace "$input" "$WORKSPACE")
 cd "$WORKSPACE" 2>/dev/null || { echo '{}'; exit 0; }
 WORKSPACE=$(pwd)
@@ -61,6 +63,12 @@ if [[ "$file_path" =~ \.(ts|tsx|js|jsx|json|jsonc)$ ]] && { [ -f "biome.json" ] 
   if command -v bun &>/dev/null && [ -f "package.json" ] && [ -x "./node_modules/.bin/biome" ]; then
     bun run biome check --write "$file_path" 2>/dev/null || true
   fi
+fi
+
+# Overlay repos that format with their own Oxfmt (no biome config): the same arm the overlay commit
+# step runs. Only in overlay, where devkit never writes an Oxfmt config, so one present is the repo's.
+if [[ "$file_path" =~ \.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$ ]] && ! { [ -f "biome.json" ] || [ -f "biome.jsonc" ]; } && { [ -f ".oxfmtrc.json" ] || [ -f ".oxfmtrc.jsonc" ] || [ -f "oxfmt.config.ts" ] || [ -f "oxfmt.config.mts" ]; } && [ -x "./node_modules/.bin/oxfmt" ] && devkit_overlay "$CONFIG_ROOT"; then
+  "./node_modules/.bin/oxfmt" --no-error-on-unmatched-pattern --write "$file_path" >/dev/null 2>&1 || true
 fi
 
 # ESLint structure/size check — scoped to the consumer's configured scanRoots. Resolve them by
