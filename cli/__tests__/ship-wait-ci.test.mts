@@ -505,3 +505,161 @@ describe('--wait-ci-required', () => {
     expect(r.stderr).toContain('ship: ci-outcome=passed pr=7 scope=required checks=1');
   });
 });
+
+const STRICT = ['--wait-ci', '--wait-ci-strict'];
+
+function strictShip(flags: string[], rows: string, env: Record<string, string> = {}) {
+  return ship(['feat/strict', 't', ...flags, 'note.txt'], argvLog(), rows, env).r;
+}
+
+/** A --pr re-push of feat/pr; `edit` false leaves a.ts unchanged, so only a --body can publish. */
+function strictReship(argv: string[], env: Record<string, string>, edit = true) {
+  const { dir, env: repoEnv, ghBody } = bodyUpdateRepo();
+  if (edit) writeFileSync(join(dir, 'a.ts'), 'v2\n');
+  const r = spawnSync('/bin/bash', [reshipScript, 'feat/pr', 'add v2', '--pr', ...argv], {
+    cwd: dir,
+    input: 'body\n',
+    encoding: 'utf8',
+    env: { ...process.env, ...repoEnv, ...FAST, ...env },
+  });
+  return { r, ghBody };
+}
+
+/** Runs the wait against a `node` that exits `code`, then prints the recorded status. */
+function waitWithNodeExiting(code: number, strict: number, call = 'ship_run_wait_ci 42 a/b 900 u') {
+  const binDir = mkdtempSync(join(tmpdir(), 'wait-ci-strict-node-'));
+  writeFileSync(join(binDir, 'node'), `#!/bin/sh\nexit ${code}\n`, { mode: 0o755 });
+  return spawnSync(
+    '/bin/bash',
+    [
+      '-c',
+      `set -euo pipefail
+SCRIPT_DIR='${shipLibDir()}'
+. "$SCRIPT_DIR/wait-ci/args.sh"
+WAIT_CI_STRICT=${strict}
+${call}
+echo "status=$WAIT_CI_STATUS"`,
+    ],
+    { encoding: 'utf8', env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` } },
+  );
+}
+
+describe('--wait-ci-strict', () => {
+  it('exits 0 when the verdict is passed', () => {
+    const r = strictShip(STRICT, GREEN);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('ci-outcome=passed pr=42');
+  });
+
+  it.each([
+    ['failed', RED, {}, 'ci-outcome=failed pr=42'],
+    ['unavailable', 'not json', {}, 'ci-outcome=unavailable pr=42'],
+    [
+      'not-run',
+      GREEN,
+      { SHIP_DRY_RUN: '1' },
+      'ci-outcome=not-run pr=? reason=dry-run-opened-no-pr',
+    ],
+  ])('exits 5 on a %s verdict, keeping the verdict line', (_label, rows, env, line) => {
+    const r = strictShip(STRICT, rows, env);
+    expect(r.status, r.stderr).toBe(5);
+    expect(r.stderr).toContain(line);
+  });
+
+  it('keeps the PR URL on stdout and says not to --resume when CI is red', () => {
+    const r = strictShip(STRICT, RED);
+    expect(r.status, r.stderr).toBe(5);
+    expect(r.stdout).toContain(PR_URL);
+    expect(r.stderr).toContain(
+      `the PR is open at ${PR_URL}; its CI is not known green. Do NOT --resume.`,
+    );
+  });
+
+  it('ignores a WAIT_CI_STRICT inherited from the environment', () => {
+    // Only the flag opts in: an exported variable must neither turn red into 5 nor refuse a ship.
+    const red = strictShip(['--wait-ci'], RED, { WAIT_CI_STRICT: '1' });
+    expect(red.status, red.stderr).toBe(0);
+    const plain = strictShip([], GREEN, { WAIT_CI_STRICT: '1' });
+    expect(plain.status, plain.stderr).toBe(0);
+  });
+
+  it('exits 5 after a real re-push to a red PR, with the URL still on stdout', () => {
+    const { r } = strictReship([...STRICT, '--', 'a.ts'], { GH_CHECKS_JSON: RED });
+    expect(r.status, r.stderr).toBe(5);
+    expect(r.stdout).toContain('https://github.com/acme/app/pull/7');
+    expect(r.stderr).toContain('ci-outcome=failed pr=7');
+  });
+
+  it('finishes a body-only update before exiting 5, rather than aborting mid-arm', () => {
+    // reship runs under `set -e`: a wait that exited would skip the body receipt and the URL echo.
+    const argv = ['--body', 'fresh body', ...STRICT, '--', 'a.ts'];
+    const { r, ghBody } = strictReship(argv, { GH_CHECKS_JSON: RED }, false);
+    expect(r.status, r.stderr).toBe(5);
+    expect(readFileSync(ghBody, 'utf8')).toBe('fresh body');
+    expect(r.stdout).toContain('https://github.com/acme/app/pull/7');
+  });
+
+  it('exits 5 for a SHIP_DRY_RUN re-push, as a new ship does, since no verdict was formed', () => {
+    const env = { GH_CHECKS_JSON: GREEN, SHIP_DRY_RUN: '1' };
+    const { r } = strictReship([...STRICT, '--', 'a.ts'], env);
+    expect(r.status, r.stderr).toBe(5);
+    expect(r.stderr).toContain('ci-outcome=not-run pr=? reason=dry-run-opened-no-pr');
+  });
+
+  it('lets a failed --ready flip keep its exit 1', () => {
+    const env = { GH_CHECKS_JSON: GREEN, GH_READY_STATUS: '1' };
+    const { r } = strictReship(['--ready', ...STRICT, '--', 'a.ts'], env);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('ci-outcome=not-run pr=7 reason=ready-flip-failed');
+  });
+
+  it.each([
+    ['new ship', undefined],
+    ['re-push', reshipScript],
+  ])('is refused without --wait-ci on a %s', (_label, script) => {
+    const r = buildAndRun('main', 'git@github.com:acme/app.git', {
+      ...(script
+        ? { script, argv: ['feat/x', 't', '--pr', '--wait-ci-strict', '--', 'note.txt'] }
+        : { extraArgs: ['--wait-ci-strict'] }),
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/--wait-ci-strict has no effect without --wait-ci/);
+    expect(r.stderr).not.toMatch(FLAG_RE);
+  });
+
+  it('is accepted under --resume, where the record cannot carry it', () => {
+    const r = buildAndRun('main', 'git@github.com:acme/app.git', {
+      argv: ['--resume', 'feat/never-shipped', ...STRICT],
+    });
+    expect(r.stderr).not.toMatch(FLAG_RE);
+    expect(r.stderr).not.toMatch(/has no effect without --wait-ci/);
+  });
+
+  it('is rejected in a positional slot instead of shipping a branch named after it', () => {
+    const r = buildAndRun('main', 'git@github.com:acme/app.git', {
+      argv: ['--wait-ci-strict', 'title', 'note.txt'],
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/must come FIRST, before any flag/);
+  });
+
+  it.each([
+    ['a crashed wait to 5, never the "PR did not open" 1', 1, 1, 'status=5'],
+    ['any other module failure to 5', 7, 1, 'status=5'],
+    ['a SIGKILLed wait to 5, not an undocumented 137', 137, 1, 'status=5'],
+    ['a SIGINT status through unchanged', 130, 1, 'status=130'],
+    ['a SIGTERM status through unchanged', 143, 1, 'status=143'],
+    ['a passed wait to 0', 0, 1, 'status=0'],
+    ['nothing at all without the flag', 7, 0, 'status=0'],
+  ])('maps %s', (_label, code, strict, expected) => {
+    const r = waitWithNodeExiting(code, strict);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout.trim()).toBe(expected);
+  });
+
+  it('records 5 for a wait that could not run', () => {
+    const r = waitWithNodeExiting(0, 1, 'ship_run_wait_ci "" a/b 900 u');
+    expect(r.stdout.trim()).toBe('status=5');
+    expect(r.stderr).toContain('ci-outcome=not-run pr=? reason=pr-number-unresolved');
+  });
+});
