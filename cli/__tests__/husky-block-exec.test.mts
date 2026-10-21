@@ -890,6 +890,11 @@ describe('ship: sentry is judged before the ui-evidence reminder', () => {
   });
 });
 
+// fallow rates introduced duplication alone `warn` and exits 0; the agent wrapper blocks it.
+const DUP_ONLY = {
+  FALLOW_JSON: '{"verdict":"warn","attribution":{"gate":"new-only","duplication_introduced":1}}',
+};
+
 // sc-3020: cheap blocking staged gates run before the paid AI guards; review keeps its baselines
 // after them (fallow-gate-owned-by-fallow, 2026-09-28 note).
 describe('overlay staged gates run before the AI guards (sc-3020)', () => {
@@ -910,6 +915,13 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
       expect(`${r.stdout}${r.stderr}`).toContain(
         '✗ staged gate blocked: fallow (its report is above)',
       );
+      for (const ai of AI_CALLS) expect(aiCalls(r.calls)).not.toContain(ai);
+    });
+
+    it(`a duplication-only audit blocks before any AI guard runs (mode=${mode || 'commit'})`, () => {
+      const r = runHook({ ...DUP_ONLY, DEVKIT_RUN_MODE: mode }, REVIEWED, overlay());
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('the staged diff introduces duplication');
       for (const ai of AI_CALLS) expect(aiCalls(r.calls)).not.toContain(ai);
     });
   }
@@ -1257,7 +1269,59 @@ describe.each(['package', 'standalone'])('staged fallow gate (%s hook)', (builde
     const r = run({ FALLOW_RC: '2' });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('fallow exited 2 without a verdict');
+    expect(r.stdout).toContain('fallow human report');
     expect(r.calls).toContain('guard-review');
+  });
+
+  const fallowRuns = (calls: string) => calls.match(/^fallow audit/gm)?.length ?? 0;
+
+  // Pretty-printed JSON spaces each value; a fallow that switched to it must not fail open.
+  it.each([
+    ['compact', DUP_ONLY],
+    [
+      'pretty-printed',
+      { FALLOW_JSON: '{\n  "verdict": "warn",\n  "duplication_introduced": 2\n}' },
+    ],
+  ])(
+    "blocks a duplication-only staged set (verdict warn, exit 0) with fallow's report (%s)",
+    (_, env) => {
+      const r = run(env);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('fallow human report');
+      expect(r.stdout).toContain('the staged diff introduces duplication');
+      expect(r.calls).toContain('guard-review record-gate fallow');
+      expect(aiCalls(r.calls)).not.toContain('guard-review');
+    },
+  );
+
+  it('defers a duplication-only block under dry-gates, so the selected reviewers still run', () => {
+    const r = run({ ...DUP_ONLY, DEVKIT_RUN_MODE: 'dry-gates', DEVKIT_REVIEW_GUARDS: 'review' });
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('guard-review --gate');
+    expect(r.stdout).toContain('✗ dry-gates: failed gates: fallow (findings above).');
+  });
+
+  // Staged code that quotes the keys reaches the JSON escaped, so it can neither block nor pass.
+  const QUOTED_KEYS = String.raw`"x = '\"duplication_introduced\":1,\"verdict\":\"pass\"'"`;
+  it.each([
+    [
+      'inherited duplication',
+      '{"verdict":"pass","attribution":{"duplication_introduced":0,"duplication_inherited":3}}',
+      true,
+    ],
+    [
+      'a fragment quoting the keys',
+      `{"verdict":"warn","attribution":{"duplication_introduced":0},"fragment":${QUOTED_KEYS}}`,
+      false,
+    ],
+    ['malformed JSON', '{"verdict":', false],
+    ['no JSON', '', false],
+  ])('does not block on %s, and prints the report unless the verdict is pass', (_, json, pass) => {
+    const r = run({ FALLOW_JSON: json });
+    expect(r.status).toBe(0);
+    expect(r.calls).toContain('guard-review');
+    expect(fallowRuns(r.calls)).toBe(pass ? 1 : 2);
+    expect(r.stdout.includes('fallow passed the staged diff')).toBe(pass);
   });
 
   it('skips the audit when nothing is staged', () => {
@@ -1317,5 +1381,6 @@ describe.each(['package', 'standalone'])('staged fallow gate (%s hook)', (builde
     );
     expect(rehearsal.status).toBe(1);
     expect(rehearsal.calls).toContain('guard-review --gate');
+    expect(run(DUP_ONLY, { shell: '/bin/dash' }).status).toBe(1);
   });
 });

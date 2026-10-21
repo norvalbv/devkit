@@ -418,6 +418,8 @@ A gate the hook runs as shell blocked the commit: `fallow` (the staged audit), `
 `biome-overlay`. Its own report sits directly above the line; `guard-deterministic` does not re-run
 it, so fix what that report names and re-commit. Under `devkit ship` the block also prints the
 `devkit ship … --dry-gates` command that re-checks the fix on ship's exact staging.
+A fallow report whose verdict reads `warn` still blocks when the staged diff introduces duplication:
+extract the shared code, or mark an intended copy with `// fallow-ignore-next-line code-duplication`.
 
 ## `✗ review: failed gates: <names>`
 
