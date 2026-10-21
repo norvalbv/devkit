@@ -88,6 +88,58 @@ function seedTwoLines() {
   return { dir, bare, git, bareGit, c0, c1 };
 }
 
+function commitFile(dir: string, git: (a: string[]) => string, file: string) {
+  writeFileSync(join(dir, file), `${file}\n`);
+  git(['add', file]);
+  git(['commit', '-q', '-m', file]);
+}
+
+/** Main-based work that MERGED an open parent branch; origin/main is `mainAhead` past the fork. */
+function seedMergedParent(mainAhead: number, parentOwn = 3) {
+  const seeded = seedTwoLines();
+  const { dir, git } = seeded;
+  git(['switch', '-q', '-c', 'parent', 'origin/main']);
+  for (let i = 1; i <= parentOwn; i++) commitFile(dir, git, `p${i}.txt`);
+  git(['push', '-q', 'origin', 'HEAD:parent']);
+  git(['switch', '-q', '-c', 'story', 'origin/main']);
+  for (let i = 1; i <= mainAhead; i++) commitFile(dir, git, `m${i}.txt`);
+  git(['push', '-q', 'origin', 'HEAD:main']);
+  git(['merge', '-q', '--no-edit', 'parent']);
+  git(['fetch', '-q', 'origin']);
+  const oid = (ref: string) => git(['rev-parse', ref]).trim();
+  return { ...seeded, parent: oid('origin/parent'), main: oid('origin/main') };
+}
+
+/** A fast-import stream of `count` commits on refs/heads/<branch>, each rewriting `file`, starting at `from`. */
+function longLineStream(branch: string, from: string, file: string, count: number) {
+  let stream = '';
+  for (let i = 1; i <= count; i++) {
+    const body = `${i}\n`;
+    stream += `commit refs/heads/${branch}\ncommitter a <a@b.c> ${1_700_000_000 + i} +0000\ndata 2\nc\n`;
+    if (i === 1) stream += `from ${from}\n`;
+    stream += `M 644 inline ${file}\ndata ${body.length}\n${body}\n`;
+  }
+  return stream;
+}
+
+/** The advisory, called the way ship-branch.sh calls it: repo, pinned base OID, pinned head, briefed paths. */
+function inboundNote(repo: string, baseOid: string, paths: string[], head = 'HEAD') {
+  const r = spawnSync(
+    '/bin/bash',
+    [
+      '-c',
+      `set -euo pipefail\n. "${lib}/origin-base.sh"\nship_base_inbound_note "$@"`,
+      'bash',
+      repo,
+      baseOid,
+      head,
+      ...paths,
+    ],
+    { cwd: repo, encoding: 'utf8', env: { ...process.env, ...GIT_ENV } },
+  );
+  return { status: r.status, stderr: r.stderr };
+}
+
 describe('ship base relatedness — the refusal (sc-2357)', () => {
   it('refuses a base that does not contain the branch point, and says which branches do', () => {
     const { dir, c0, c1 } = seedTwoLines();
@@ -172,6 +224,7 @@ describe('ship base relatedness — the refusal (sc-2357)', () => {
     const r = relatedness(dir, 'main', c0, {}, 'no-such-ref-here');
 
     expect(r.status).toBe(0);
+    expect(r.stderr).toContain('could not be verified');
   });
 
   it('GUARD_SHIP_BASE_OK proceeds, and says what the override costs', () => {
@@ -334,33 +387,6 @@ describe('ship base relatedness — message shapes the fixtures do not otherwise
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('(origin/line/1.0) is not contained in origin/hotfix/2.0');
     expect(r.stderr).toContain("pass --base 'line/1.0'");
-  });
-
-  it('names the stacking path when an open parent branch was MERGED into main-based work', () => {
-    // The shape a follow-up takes when its parent PR is still open: `--base main` would ship the
-    // parent's files, so the refusal has to name the parent branch as somewhere the work can go.
-    const { dir, git } = seedTwoLines();
-    const commit = (file: string) => {
-      writeFileSync(join(dir, file), `${file}\n`);
-      git(['add', file]);
-      git(['commit', '-q', '-m', file]);
-    };
-    git(['switch', '-q', '-c', 'parent', 'origin/main']);
-    commit('p1.txt');
-    git(['push', '-q', 'origin', 'HEAD:parent']);
-    const parent = git(['rev-parse', 'HEAD']).trim();
-    git(['switch', '-q', '-c', 'story', 'origin/main']);
-    commit('m1.txt');
-    commit('m2.txt'); // main is two ahead, so it stays the nearer ancestor after the merge
-    git(['push', '-q', 'origin', 'HEAD:main']);
-    git(['merge', '-q', '--no-edit', 'parent']);
-    git(['fetch', '-q', 'origin']);
-
-    const r = relatedness(dir, 'parent', parent);
-
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain('(origin/main) is not contained in origin/parent');
-    expect(r.stderr).toContain('to stack on origin/parent instead, redo only this change');
   });
 
   it('caps the contained-by list at four and counts the rest, never listing origin/HEAD', () => {
@@ -530,5 +556,223 @@ describe('ship --base refuses an unrelated base before anything exists (sc-2357)
     );
 
     expect(r.stderr).not.toContain('is not contained in origin/');
+  });
+});
+
+describe('ship base relatedness — work that MERGED another line gets one verdict (sc-5246)', () => {
+  // The story's two variants differ only in which line has more commits; the verdict may not.
+  it.each([
+    { label: 'parent has more commits of its own', mainAhead: 1 },
+    { label: 'main is further ahead than the parent', mainAhead: 4 },
+  ])('ships into either line when $label', ({ mainAhead }) => {
+    const { dir, parent, main } = seedMergedParent(mainAhead);
+
+    for (const [base, oid] of [
+      ['parent', parent],
+      ['main', main],
+    ]) {
+      const r = relatedness(dir, base, oid);
+      expect(r.status, base).toBe(0);
+      expect(r.stderr, base).toBe('');
+    }
+  });
+
+  it('keeps that verdict after origin/main advances past the merged commit', () => {
+    const { dir, git, parent } = seedMergedParent(4);
+    git(['switch', '-q', '-c', 'later', 'origin/main']);
+    commitFile(dir, git, 'later.txt');
+    git(['push', '-q', 'origin', 'HEAD:main']);
+    git(['switch', '-q', 'story']);
+    git(['fetch', '-q', 'origin']);
+
+    expect(relatedness(dir, 'parent', parent).status).toBe(0);
+  });
+
+  it('ships a stack retarget: parent squash-merged, its stale ref kept, main merged in', () => {
+    const { dir, git } = seedTwoLines();
+    git(['switch', '-q', '-c', 'parent', 'origin/main']);
+    commitFile(dir, git, 'p1.txt');
+    git(['push', '-q', 'origin', 'HEAD:parent']);
+    git(['switch', '-q', '-c', 'story']);
+    commitFile(dir, git, 's1.txt');
+    git(['switch', '-q', '-c', 'squash', 'origin/main']);
+    git(['checkout', '-q', 'parent', '--', 'p1.txt']);
+    git(['commit', '-q', '-m', 'squash parent']);
+    git(['push', '-q', 'origin', 'HEAD:main']);
+    git(['switch', '-q', 'story']);
+    git(['fetch', '-q', 'origin']);
+    git(['merge', '-q', '--no-edit', 'origin/main']);
+
+    const r = relatedness(dir, 'main', git(['rev-parse', 'origin/main']).trim());
+
+    expect(r.status).toBe(0);
+  });
+
+  it('still refuses main for a stack on an open parent that is up to date with main', () => {
+    const { dir, git, c0 } = seedTwoLines();
+    git(['switch', '-q', '-c', 'parent', 'origin/main']);
+    commitFile(dir, git, 'p1.txt');
+    git(['push', '-q', 'origin', 'HEAD:parent']);
+    commitFile(dir, git, 's1.txt');
+    git(['fetch', '-q', 'origin']);
+
+    const r = relatedness(dir, 'main', c0);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('(origin/parent) is not contained in origin/main');
+    expect(r.stderr).toContain("pass --base 'parent'");
+  });
+});
+
+describe('ship_base_inbound_note — commits from another line entering through briefed paths (sc-5246)', () => {
+  it("lists the merged-in line's commits on the briefed paths, and names that line", () => {
+    const { dir, parent } = seedMergedParent(1);
+
+    const r = inboundNote(dir, parent, ['m1.txt']);
+
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain(
+      '1 commit(s) on the briefed paths are already on another origin branch',
+    );
+    expect(r.stderr).toContain('(first is on origin/main)');
+    expect(r.stderr).toMatch(/^ {2}[0-9a-f]+ m1\.txt$/m);
+  });
+
+  it("stays silent for the work's own unpushed commits", () => {
+    const { dir, git, parent } = seedMergedParent(1);
+    commitFile(dir, git, 's1.txt');
+
+    expect(inboundNote(dir, parent, ['s1.txt'])).toEqual({ status: 0, stderr: '' });
+  });
+
+  it('stays silent in a shared checkout whose HEAD sits on an old main', () => {
+    const { dir, git } = seedTwoLines();
+    git(['switch', '-q', 'main']);
+    commitFile(dir, git, 's1.txt');
+    git(['switch', '-q', '-c', 'later', 'origin/main']);
+    commitFile(dir, git, 'later.txt');
+    git(['push', '-q', 'origin', 'HEAD:main']);
+    git(['switch', '-q', 'main']);
+    git(['fetch', '-q', 'origin']);
+
+    const r = inboundNote(dir, git(['rev-parse', 'origin/main']).trim(), ['s1.txt', 'f.txt']);
+
+    expect(r).toEqual({ status: 0, stderr: '' });
+  });
+
+  it('matches briefed paths literally, so a bracketed path is not a glob', () => {
+    const { dir, parent } = seedMergedParent(1);
+
+    expect(inboundNote(dir, parent, ['[m]1.txt'])).toEqual({ status: 0, stderr: '' });
+  });
+
+  it('caps the list at five, counts the rest, and never names origin/HEAD', () => {
+    const { dir, git, parent } = seedMergedParent(7);
+    git(['remote', 'set-head', 'origin', 'main']);
+    const paths = Array.from({ length: 7 }, (_, i) => `m${i + 1}.txt`);
+
+    const r = inboundNote(dir, parent, paths);
+
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain('7 commit(s)');
+    expect(r.stderr.match(/^ {2}[0-9a-f]+ m\d\.txt$/gm)).toHaveLength(5);
+    expect(r.stderr).toContain('(+2 more)');
+    expect(r.stderr).toContain('(first is on origin/main)');
+  });
+
+  it('stays silent, and ships, for unpushed work that merged origin/main to catch up', () => {
+    // The everyday update-by-merge shape: everything merged in is already in the base.
+    const { dir, git } = seedTwoLines();
+    git(['switch', '-q', '-c', 'work2', 'origin/main']);
+    commitFile(dir, git, 's1.txt');
+    git(['switch', '-q', '-c', 'later', 'origin/main']);
+    commitFile(dir, git, 'later.txt');
+    git(['push', '-q', 'origin', 'HEAD:main']);
+    git(['switch', '-q', 'work2']);
+    git(['fetch', '-q', 'origin']);
+    git(['merge', '-q', '--no-edit', 'origin/main']);
+    commitFile(dir, git, 'later2.txt');
+    const main = git(['rev-parse', 'origin/main']).trim();
+
+    expect(relatedness(dir, 'main', main)).toEqual({ status: 0, stderr: '' });
+    expect(inboundNote(dir, main, ['s1.txt', 'later.txt', 'later2.txt'])).toEqual({
+      status: 0,
+      stderr: '',
+    });
+  });
+
+  it('survives a list too long for one pipe write under set -euo pipefail', () => {
+    // Taking the first commit through `| head -n 1` SIGPIPEs the writer and errexit kills the ship.
+    const { dir, git, c0 } = seedTwoLines();
+    execFileSync('git', ['-C', dir, 'fast-import', '--quiet'], {
+      input: longLineStream('long', c0, 'big.txt', 3000),
+      env: { ...process.env, ...GIT_ENV },
+    });
+    git(['push', '-q', 'origin', 'long:long']);
+    git(['switch', '-q', '-c', 'story', 'origin/main']);
+    git(['merge', '-q', '--no-edit', 'long']);
+    git(['fetch', '-q', 'origin']);
+
+    const r = inboundNote(dir, c0, ['big.txt']);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('3000 commit(s)');
+    expect(r.stderr).toContain('(+2995 more)');
+  });
+
+  it('prints from a real ship --base run, after the preflight passes', () => {
+    // Each function is unit-tested above; this pins that ship-branch.sh hands it the pinned oids and paths.
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    git(['switch', '-q', '-c', 'parent'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'p.txt'), 'parent\n');
+    git(['add', 'p.txt'], { stdio: 'ignore' });
+    git(['commit', '-q', '-m', 'parent adds p'], { stdio: 'ignore' });
+    git(['push', '-q', 'origin', 'HEAD:parent'], { stdio: 'ignore' });
+    git(['switch', '-q', 'work'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'm.txt'), 'main\n');
+    git(['add', 'm.txt'], { stdio: 'ignore' });
+    git(['commit', '-q', '-m', 'work moves on'], { stdio: 'ignore' });
+    git(['push', '-q', 'origin', 'HEAD:work'], { stdio: 'ignore' });
+    git(['merge', '-q', '--no-edit', 'parent'], { stdio: 'ignore' });
+    git(['fetch', '-q', 'origin'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'p.txt'), 'parent, then the follow-up\n');
+
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/merged', 'ship it', '--base', 'work', '--', 'p.txt'],
+      { cwd: dir, input: 'b\n', encoding: 'utf8', env: { ...env, SHIP_DRY_RUN: '1' } },
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toContain('is not contained in origin/');
+    expect(r.stderr).toContain(
+      '1 commit(s) on the briefed paths are already on another origin branch',
+    );
+    expect(r.stderr).toContain('(first is on origin/parent)');
+    expect(r.stderr).toContain('parent adds p');
+  });
+
+  it("names the work's own earlier push without calling it a merged-in line", () => {
+    // A pushed branch that merged origin/main and ships again: its own commits are on origin too.
+    const { dir, git } = seedTwoLines();
+    git(['switch', '-q', '-c', 'feat', 'origin/main']);
+    commitFile(dir, git, 'x1.txt');
+    git(['push', '-q', 'origin', 'HEAD:feat']);
+    git(['switch', '-q', '-c', 'later', 'origin/main']);
+    commitFile(dir, git, 'later.txt');
+    git(['push', '-q', 'origin', 'HEAD:main']);
+    git(['switch', '-q', 'feat']);
+    git(['fetch', '-q', 'origin']);
+    git(['merge', '-q', '--no-edit', 'origin/main']);
+    const main = git(['rev-parse', 'origin/main']).trim();
+
+    const r = inboundNote(dir, main, ['x1.txt']);
+
+    expect(relatedness(dir, 'main', main).status).toBe(0);
+    expect(r.stderr).toContain(
+      '1 commit(s) on the briefed paths are already on another origin branch',
+    );
+    expect(r.stderr).toContain('(first is on origin/feat)');
+    expect(r.stderr).not.toContain('merged into this work');
   });
 });
