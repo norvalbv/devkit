@@ -427,3 +427,139 @@ describe('missingDeclaredDependencies', () => {
     expect(() => missingDeclaredDependencies(manifest, root)).toThrow('invalid dependency name');
   });
 });
+
+describe('pnpm workspace members', () => {
+  const missing = (root: string, rel: string) => ({
+    specifier: 'helmet',
+    importer: join(root, rel),
+  });
+  const pnpmRoot = (workspace: string) => {
+    const root = makeRoot();
+    put(root, 'package.json');
+    put(root, 'pnpm-lock.yaml', '');
+    put(root, 'pnpm-workspace.yaml', workspace);
+    put(root, 'packages/a/package.json', declares('helmet'));
+    put(root, 'packages/out/package.json', declares('helmet'));
+    return root;
+  };
+
+  it('names the root pnpm install for a listed member, and none for an excluded one', () => {
+    const root = pnpmRoot("packages:\n  - 'packages/*'\n  - '!packages/out'\n");
+    expect(installDirFor(missing(root, 'packages/a/src/x.ts'), root)).toBe(root);
+    expect(
+      collectionRemedy(`Cannot find package 'helmet' imported from ${root}/packages/a/x.ts`, root),
+    ).toBe('pnpm install --frozen-lockfile');
+    expect(installDirFor(missing(root, 'packages/out/x.ts'), root)).toBeNull();
+    put(root, 'pnpm-workspace.yaml', "packages: [./packages/*/, '!./packages/out']");
+    expect(installDirFor(missing(root, 'packages/a/src/x.ts'), root)).toBe(root);
+    expect(installDirFor(missing(root, 'packages/out/x.ts'), root)).toBeNull();
+  });
+
+  // bun installs from bun.lock and reads package.json workspaces; pnpm's member list is not its own.
+  it('ignores pnpm-workspace.yaml when the command printed is not pnpm', () => {
+    const root = pnpmRoot('packages: [packages/*]');
+    put(root, 'bun.lock');
+    expect(installDirFor(missing(root, 'packages/a/src/x.ts'), root)).toBeNull();
+  });
+
+  // pnpm never reads package.json workspaces, so its install would leave such a member uninstalled.
+  it('does not take a pnpm member list from package.json workspaces', () => {
+    const root = pnpmRoot('');
+    rmSync(join(root, 'pnpm-workspace.yaml'));
+    put(root, 'package.json', JSON.stringify({ workspaces: ['packages/*'] }));
+    expect(installDirFor(missing(root, 'packages/a/src/x.ts'), root)).toBeNull();
+  });
+
+  it('reads an unreadable or memberless file as no members, without throwing', () => {
+    const root = pnpmRoot('');
+    for (const text of ['', 'packages: [a', 'packages: 7', 'catalog: {}', 'packages: []']) {
+      put(root, 'pnpm-workspace.yaml', text);
+      expect(installDirFor(missing(root, 'packages/a/src/x.ts'), root)).toBeNull();
+    }
+    rmSync(join(root, 'pnpm-workspace.yaml'));
+    expect(installDirFor(missing(root, 'packages/a/src/x.ts'), root)).toBeNull();
+  });
+
+  it('parses quietly: a YAML warning never reaches the consumer', () => {
+    const warn = vi.spyOn(process, 'emitWarning');
+    const root = pnpmRoot("packages: !foo ['packages/*']");
+    expect(installDirFor(missing(root, 'packages/a/src/x.ts'), root)).toBe(root);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
+describe('several collection errors', () => {
+  const failure = (root: string, test: string, message: string) => ({
+    name: join(root, test),
+    status: 'failed',
+    message,
+    assertionResults: [],
+  });
+  const fromRelay = (root: string, test: string) =>
+    failure(root, test, `Cannot find package 'helmet' imported from ${join(root, 'relay/x.ts')}`);
+  const twoInstalls = () => {
+    const root = makeRoot();
+    put(root, 'relay/package.json', declares('helmet'));
+    put(root, 'relay/bun.lock');
+    put(root, 'web/package.json', declares('zod'));
+    put(root, 'web/bun.lock');
+    const suites = [
+      fromRelay(root, 'a.test.ts'),
+      failure(
+        root,
+        'b.test.ts',
+        `Cannot find package 'zod' imported from ${join(root, 'web/y.ts')}`,
+      ),
+      fromRelay(root, 'c.test.ts'),
+      failure(root, 'd.test.ts', 'SyntaxError: Unexpected token'),
+    ];
+    return { root, suites };
+  };
+  const expected = [
+    '   A dependency is not installed. Run: (cd relay && bun install --frozen-lockfile)',
+    '   For b.test.ts, run: (cd web && bun install --frozen-lockfile)',
+  ];
+  const remedyLines = (lines: string[]) => lines.filter((l) => l.includes('install --'));
+
+  it('prints each distinct install once, naming the file a later one is for', () => {
+    const { root, suites } = twoInstalls();
+    const diagnosis = readDiagnosis(results(root, suites), 1);
+    expect(remedyLines(formatDiagnosis(diagnosis!, root, null))).toEqual(expected);
+  });
+
+  // The "Run:" line sits under "First cause"; it must not claim an install the first file never needed.
+  it('names the file for every install when the first cause is not a missing package', () => {
+    const { root, suites } = twoInstalls();
+    const diagnosis = readDiagnosis(results(root, [suites[3]!, ...suites.slice(0, 3)]), 1);
+    expect(remedyLines(formatDiagnosis(diagnosis!, root, null))).toEqual([
+      '   For a.test.ts, run: (cd relay && bun install --frozen-lockfile)',
+      '   For b.test.ts, run: (cd web && bun install --frozen-lockfile)',
+    ]);
+  });
+
+  it('does the same from the clear marker', () => {
+    const { root, suites } = twoInstalls();
+    writeClearMarker(root, {
+      clearedAt: new Date().toISOString(),
+      previousMtime: null,
+      head: null,
+      failedFiles: suites.map((s) => s.name),
+      collectionErrors: suites.map((s) => ({ file: s.name, message: s.message })),
+    });
+    expect(remedyLines(formatClearMarker(readClearMarker(root)!, root))).toEqual(expected);
+  });
+});
+
+describe('a checkout under a node_modules directory', () => {
+  it('still names the install, while its own node_modules stays an installed package', () => {
+    const app = join(makeRoot(), 'node_modules/app');
+    put(app, 'package.json', declares('helmet'));
+    put(app, 'bun.lock');
+    put(app, 'node_modules/foo/package.json');
+    put(app, 'node_modules/foo/package-lock.json');
+    const missing = (rel: string) => ({ specifier: 'helmet', importer: join(app, rel) });
+    expect(installDirFor(missing('src/x.ts'), app)).toBe(app);
+    expect(installDirFor(missing('node_modules/foo/index.js'), app)).toBe(app);
+  });
+});
