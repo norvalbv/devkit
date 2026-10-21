@@ -106,6 +106,8 @@ while [ "$#" -gt 0 ]; do
       # The PR already exists here, so there is nothing to open as a draft. Name the actual remedy
       # rather than falling through to the generic unknown-flag error.
       echo "--draft applies to a NEW ship (opening the PR); this PR already exists. To convert it back to a draft: gh pr ready --undo $BR" >&2; exit 1 ;;
+    --no-stack)
+      echo "--no-stack applies to a NEW ship (stacking happens when the PR opens); this PR already exists." >&2; exit 1 ;;
     --wait-ci|--wait-ci-required) if [ "$1" = --wait-ci ]; then WAIT_CI=1; else WAIT_CI_REQUIRED=1; fi; shift ;;
     --wait-ci-timeout)
       WAIT_CI_TIMEOUT="${2:?--wait-ci-timeout requires seconds}"; WAIT_CI_TIMEOUT_SET=1; shift 2 ;;
@@ -146,9 +148,9 @@ if [ "$RESUME" -eq 1 ]; then
   SI_FIELDS=()
   while IFS= read -r -d '' si_field; do SI_FIELDS+=("$si_field"); done < "$SI_OUT"
   rm -f "$SI_OUT"
-  # emitFields order as in ship-branch.sh's reader (positional, keep in lockstep); field 5 (draft)
-  # is new-ship-only and skipped here.
-  [ "${#SI_FIELDS[@]}" -ge 12 ] || { echo "recorded invocation is malformed — run the full devkit ship --pr command" >&2; exit 1; }
+  # emitFields order as in ship-branch.sh's reader (positional, keep in lockstep); fields 5 (draft)
+  # and 9 (noStack) are new-ship-only and skipped here.
+  [ "${#SI_FIELDS[@]}" -ge 13 ] || { echo "recorded invocation is malformed — run the full devkit ship --pr command" >&2; exit 1; }
   SI_MODE=${SI_FIELDS[0]}
   if [ "$SI_MODE" = "ship" ]; then
     # The blocked attempt was a NEW ship; hand over. Positive match + one-shot marker — an
@@ -163,10 +165,10 @@ if [ "$RESUME" -eq 1 ]; then
   [ "${SI_FIELDS[4]}" != "1" ] || UPDATE_PR_BODY=1
   RESUME_CREATED=${SI_FIELDS[6]}
   RESUME_GENERATION=${SI_FIELDS[7]}
-  SI_NLINKS=${SI_FIELDS[9]}
+  SI_NLINKS=${SI_FIELDS[10]}
   case "$SI_NLINKS" in *[!0-9]*|'') echo "recorded invocation is malformed (nlinks '$SI_NLINKS')" >&2; exit 1 ;; esac
-  si_i=10
-  si_body_at=$((10 + SI_NLINKS))
+  si_i=11
+  si_body_at=$((11 + SI_NLINKS))
   [ "${#SI_FIELDS[@]}" -gt $((si_body_at + 1)) ] || { echo "recorded invocation is malformed (missing body/paths)" >&2; exit 1; }
   while [ "$si_i" -lt "$si_body_at" ]; do LINK_EXTRA+=("${SI_FIELDS[$si_i]}"); si_i=$((si_i + 1)); done
   RESUME_BODY=${SI_FIELDS[$si_body_at]}

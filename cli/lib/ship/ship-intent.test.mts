@@ -67,6 +67,7 @@ const base = (opts: Partial<Parameters<typeof writeIntent>[0]> = {}, seed: SeedO
   links: [],
   updatePrBody: false,
   draft: false,
+  noStack: false,
   resumed: false,
   mergePaths: false,
   body: Buffer.from('pr body\n'),
@@ -650,23 +651,27 @@ describe('ship-intent read refusals — each names its cause', () => {
     expect('intent' in readIntent(opts.root, 'feat/x')).toBe(true);
   });
 
-  // `draft` post-dates all three schema versions, so every record written before --draft existed
-  // lacks the key. Absent must read as false, NOT malformed: refusing would strand an in-flight
-  // blocked ship, denying it the --resume the block told the operator to run.
-  it('a record predating --draft still reads, defaulting draft to false', () => {
-    const opts = base();
-    writeIntent(opts, ['p.txt']);
-    const file = join(opts.root, relIntentPath('feat/x'));
-    const j = JSON.parse(readFileSync(file, 'utf8'));
-    delete j.draft;
-    writeFileSync(file, JSON.stringify(j));
-    const result = readIntent(opts.root, 'feat/x');
-    expect(
-      'intent' in result,
-      `legacy record must still resume, got: ${reasonOf(opts.root, 'feat/x')}`,
-    ).toBe(true);
-    expect(result.intent.draft).toBe(false);
-  });
+  // `draft` and `noStack` post-date all three schema versions, so older records lack the keys. Absent
+  // reads as false, NOT malformed: refusing would strand a blocked ship's --resume.
+  it.each([['draft'], ['noStack']] as const)(
+    'a record predating the %s key still reads it as false',
+    (key) => {
+      const opts = base();
+      writeIntent(opts, ['p.txt']);
+      const file = join(opts.root, relIntentPath('feat/x'));
+      const j = JSON.parse(readFileSync(file, 'utf8'));
+      writeFileSync(
+        file,
+        JSON.stringify(j, (k, v) => (k === key ? undefined : v)),
+      );
+      const result = readIntent(opts.root, 'feat/x');
+      expect(
+        'intent' in result,
+        `legacy record must still resume, got: ${reasonOf(opts.root, 'feat/x')}`,
+      ).toBe(true);
+      expect(result.intent[key]).toBe(false);
+    },
+  );
 
   // A PRESENT value is still strict-checked: `=== true` would silently read 'true' as false.
   it.each([['true'], [null], [0], [1]])(
@@ -929,7 +934,7 @@ describe('ship-intent CLI protocol', () => {
     const fields = out.toString('utf8').split('\0');
     expect(fields.pop()).toBe(''); // every field NUL-terminated, so the split leaves one empty tail
     // mode, sourceMode, title, base, updatePrBody, draft, createdAt, generation, sourceAttemptId,
-    // nlinks, <links>, body, <paths...>
+    // noStack, nlinks, <links>, body, <paths...>
     expect(fields[0]).toBe('ship');
     expect(fields[1]).toBe('explicit');
     expect(fields[2]).toBe('t');
@@ -939,10 +944,11 @@ describe('ship-intent CLI protocol', () => {
     expect(Number.isFinite(Date.parse(fields[6]))).toBe(true);
     expect(fields[7]).toMatch(/^[0-9a-f-]{36}$/);
     expect(fields[8]).toBe('');
-    expect(fields[9]).toBe('1');
-    expect(fields[10]).toBe('idx');
-    expect(fields[11]).toBe('body line\n');
-    expect(fields.slice(12)).toEqual(['p.txt', 'q dir/r.txt']);
+    expect(fields[9]).toBe('0'); // noStack: not requested here
+    expect(fields[10]).toBe('1');
+    expect(fields[11]).toBe('idx');
+    expect(fields[12]).toBe('body line\n');
+    expect(fields.slice(13)).toEqual(['p.txt', 'q dir/r.txt']);
 
     execFileSync('node', [cliPath, 'delete', '--root', root, '--branch', 'feat/x']);
     expect(existsSync(join(root, relIntentPath('feat/x')))).toBe(false);

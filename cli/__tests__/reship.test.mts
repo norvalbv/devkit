@@ -616,6 +616,15 @@ describe('reship — --ready marks the PR ready for review', () => {
     expect(r.stderr).toContain('gh pr ready --undo feat/open');
     expect(r.stderr).not.toContain('unknown flag');
   });
+
+  it('rejects --no-stack: the PR it would stack already exists', () => {
+    const { dir } = repo();
+    const r = run(['feat/open', 't', '--pr', '--no-stack', '--', 'a.ts'], dir, {
+      SHIP_RESOLVE_ONLY: '1',
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('--no-stack applies to a NEW ship');
+  });
 });
 
 describe('reship --base — replace a conflicted PR from a caller-prepared snapshot (sc-2323)', () => {

@@ -62,6 +62,7 @@ export function writeIntent(
     links: string[];
     updatePrBody: boolean;
     draft: boolean;
+    noStack: boolean;
     resumed: boolean;
     mergePaths: boolean;
     /** The generation this attempt READ before deciding to re-record. When the on-disk record has
@@ -116,6 +117,7 @@ export function writeIntent(
     paths,
     updatePrBody: opts.updatePrBody,
     draft: opts.draft,
+    noStack: opts.noStack,
     bodyB64: opts.body.toString('base64'),
     repo: originRepo(opts.root),
     createdAt: new Date().toISOString(),
@@ -375,14 +377,16 @@ export function readIntent(
     };
   // Each defaults to what an OLDER record implies, then is strict-checked by provenBool (see its
   // coercion note); one at a time so each narrows to boolean without an assertion. V1 is
-  // preserve-only for updatePrBody. `draft` post-dates all three versions, so an ABSENT bit means
-  // false (a ready PR) — refusing would strand an in-flight blocked ship mid---resume. Only
+  // preserve-only for updatePrBody. `draft` and `noStack` post-date every version, so an ABSENT bit
+  // means false (a ready PR) — refusing would strand an in-flight blocked ship mid---resume. Only
   // `undefined` is absence: `?? false` would also swallow a PRESENT null and publish ready.
   const legacy = storedVersion === LEGACY_EXPLICIT_SCHEMA_VERSION;
   const updatePrBody = provenBool(legacy ? false : r.updatePrBody);
   if (updatePrBody === null) return { reason: malformedField('updatePrBody') };
   const draft = provenBool(r.draft === undefined ? false : r.draft);
   if (draft === null) return { reason: malformedField('draft') };
+  const noStack = provenBool(r.noStack === undefined ? false : r.noStack);
+  if (noStack === null) return { reason: malformedField('noStack') };
   const generation = provenString(r.generation);
   if (!generation)
     return {
@@ -416,6 +420,7 @@ export function readIntent(
     paths,
     updatePrBody,
     draft,
+    noStack,
     bodyB64,
     repo,
     createdAt,
@@ -450,6 +455,7 @@ function main(): number {
         links,
         updatePrBody: booleans.has('update-pr-body'),
         draft: booleans.has('draft'),
+        noStack: booleans.has('no-stack'),
         resumed: booleans.has('resumed'),
         mergePaths: booleans.has('merge-paths'),
         expectGeneration: values.get('expect-generation'),
