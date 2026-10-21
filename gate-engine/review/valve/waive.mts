@@ -31,7 +31,12 @@ import {
   withOverridesLock,
 } from '../overrides.mts';
 import { REVIEWERS, type Reviewer } from '../reviewers.mts';
-import { WAIVE_BASE_RE, WAIVE_RATIONALE_PLACEHOLDER } from './shell-word.mts';
+import {
+  parseWaiverKind,
+  WAIVE_BASE_RE,
+  WAIVE_RATIONALE_PLACEHOLDER,
+  WAIVER_KINDS,
+} from './shell-word.mts';
 
 // REVIEWERS is a frozen literal-typed tuple (each entry's own field set, not a common `Reviewer`
 // shape), so `.find` on it directly can't be read through the shared `model` field below — every
@@ -44,6 +49,7 @@ const RATIONALE_MIN_CHARS = 15;
 // same intent to a non-blank but content-free one.
 const PLACEHOLDER_RATIONALES = new Set([
   WAIVE_RATIONALE_PLACEHOLDER,
+  'why this is not a real defect',
   'not a real defect',
   'false positive',
   'n/a',
@@ -56,7 +62,7 @@ const PLACEHOLDER_RATIONALES = new Set([
 ]);
 
 const USAGE =
-  'Usage: guard-review waive <reviewer>[:<lens>] <itemId> [--base <sha>] "<rationale>" | ' +
+  'Usage: guard-review waive <reviewer>[:<lens>] <itemId> [--base <sha>] --kind <kind> "<rationale>" | ' +
   'guard-review waive --list';
 
 /** The base is copied from what the gate printed, never resolved here: this runs in the agent's own
@@ -69,16 +75,30 @@ function takeBaseFlag(rest: string[]) {
   return { rest: [...rest.slice(0, i), ...rest.slice(i + 2)], baseSha: value, bad: false };
 }
 
-/** The argv of `guard-review waive <target> <itemId> [--base <sha>] <rationale…>`, unvalidated
- * beyond shape; the round-trip test parses a printed command through this same function. */
+/** `--kind <kind>` anywhere after the subcommand; the value is validated by runWaive, and a
+ * repeated flag reads as no kind, so it is refused rather than one silently winning. */
+function takeKindFlag(rest: string[]) {
+  const i = rest.indexOf('--kind');
+  if (i === -1) return { rest, kind: null };
+  const kind = rest.lastIndexOf('--kind') === i ? (rest[i + 1] ?? null) : null;
+  return { rest: [...rest.slice(0, i), ...rest.slice(i + 2)], kind };
+}
+
+/** The argv of `guard-review waive <target> <itemId> [--base <sha>] --kind <kind> <rationale…>`,
+ * unvalidated beyond shape; the round-trip test parses a printed command through this same function. */
 export function parseWaiveArgs(rest: string[]) {
   const flag = takeBaseFlag(rest);
   if (flag.bad) return { error: 'base' as const };
-  const [target, itemId, ...rationaleParts] = flag.rest;
+  const { rest: words, kind } = takeKindFlag(flag.rest);
+  const [target, itemId, ...rationaleParts] = words;
   const rationale = rationaleParts.join(' ').trim();
   if (!target || !itemId || !rationale) return { error: 'usage' as const };
-  return { target, itemId, rationale, baseSha: flag.baseSha };
+  return { target, itemId, rationale, baseSha: flag.baseSha, kind };
 }
+
+const KIND_HELP = Object.entries(WAIVER_KINDS)
+  .map(([kind, meaning]) => `  --kind ${kind}: ${meaning}`)
+  .join('\n');
 
 /** Best-effort git identity for the audit trail: user.name, then user.email, then $USER — never
  * throws. `run` is injectable so tests never depend on the executing machine's real git identity. */
@@ -129,14 +149,15 @@ function listWaives(cwd: string): number {
     const who = e.author ?? (typeof e.by === 'string' ? e.by : 'unknown');
     console.log(
       `[${fp}] ${e.reviewer ?? '?'}:${e.lens ?? '(finding)'} — by ${who}${e.at ? ` at ${e.at}` : ''}` +
-        (e.baseSha ? ` · judged against ${e.baseSha.slice(0, 12)}` : ' · base unrecorded'),
+        (e.baseSha ? ` · judged against ${e.baseSha.slice(0, 12)}` : ' · base unrecorded') +
+        ` · ${parseWaiverKind(e.kind) ? `kind ${e.kind}` : 'unclassified'}`,
     );
     console.log(`    ${stripVTControlCharacters(e.rationale ?? '')}`);
   }
   return 0;
 }
 
-/** `guard-review waive <reviewer>[:<lens>] <itemId> <rationale>` → 0 on a recorded waive, 2 on a
+/** `guard-review waive <target> <itemId> --kind <kind> <rationale>` → 0 on a recorded waive, 2 on a
  * refused/malformed request (matches the CLI's existing usage-error convention). `resolveAuthor`
  * is injectable so tests never depend on the executing machine's real git identity. */
 export function runWaive(
@@ -154,7 +175,7 @@ export function runWaive(
     );
     return 2;
   }
-  const { target, itemId, rationale, baseSha } = args;
+  const { target, itemId, rationale, baseSha, kind } = args;
   const { reviewer, lens } = parseWaiveTarget(target);
   const known = REVIEWER_TABLE.find((r) => r.name === reviewer);
   if (!known) {
@@ -172,17 +193,24 @@ export function runWaive(
   if (!FINGERPRINT_RE.test(itemId)) {
     console.error(
       `guard-review: waive — itemId must be the 12-hex fingerprint from the FAIL output, e.g. ` +
-        `\`guard-review waive ${reviewer}:${lens} <fp-from-FAIL-output> "…"\` (got "${itemId}")`,
+        `\`guard-review waive ${reviewer}:${lens} <fp-from-FAIL-output> --kind <kind> "…"\` (got "${itemId}")`,
     );
     return 2;
   }
-  if (rationale.length < RATIONALE_MIN_CHARS || isPlaceholder(rationale)) {
+  // Both checked before returning, so an unedited pasted hint names every edit it needs at once.
+  const badRationale = rationale.length < RATIONALE_MIN_CHARS || isPlaceholder(rationale);
+  if (badRationale)
     console.error(
       `guard-review: waive — rationale must be a real, specific reason (>= ${RATIONALE_MIN_CHARS} ` +
         `chars, not a placeholder), got "${stripVTControlCharacters(rationale)}"`,
     );
-    return 2;
-  }
+  const waiverKind = parseWaiverKind(kind);
+  if (!waiverKind)
+    console.error(
+      `guard-review: waive — --kind must be one of the four kinds` +
+        `${kind ? ` (got "${stripVTControlCharacters(kind)}")` : ''}:\n${KIND_HELP}`,
+    );
+  if (badRationale || !waiverKind) return 2;
   // The lock is try-once (a held lock throws, not queues), so no telemetry I/O may run inside it —
   // the closure only decides and stamps. Telemetry counts DECISIONS: an identical re-run returns
   // null and adds no second ledger row. Append order across concurrent waives is unordered by
@@ -200,13 +228,17 @@ export function runWaive(
       author: resolveAuthor(cwd),
       at: new Date().toISOString(),
       by: 'cli',
+      kind: waiverKind,
     };
     if (baseSha) entry.baseSha = baseSha;
     store[itemId] = entry;
     persist(cwd, store);
     // A changed BASE is a new fact about an existing waiver, not a no-op: without an event the
     // ledger keeps only the first tree the finding was ever judged against (sc-2480).
-    const changed = prior?.rationale !== rationale || prior?.baseSha !== entry.baseSha;
+    const changed =
+      prior?.rationale !== rationale ||
+      prior?.baseSha !== entry.baseSha ||
+      prior?.kind !== waiverKind;
     return changed ? entry.at : null;
   });
   if (recordedAt)
@@ -219,6 +251,7 @@ export function runWaive(
       recorded_at: recordedAt,
       by: 'cli',
       base_sha: baseSha,
+      kind: waiverKind,
     });
   console.error(
     `guard-review: waived ${reviewer}:${lens} [${itemId}] — ${stripVTControlCharacters(rationale)}`,

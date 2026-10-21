@@ -24,9 +24,8 @@
  *                    2026-07-27, when lens/scope capture began) — for those, reconstruction is
  *                    failReason-only, not diffSha256-plus-failReason as it is for the rest.
  *   - waived-decoy — a `commit_review_lenses` row with disposition='waived' (the correctness
- *                    override valve, overrides.mts). Rationale text is NOT in telemetry today
- *                    (only `.devkit/correctness-overrides.json` on whichever checkout wrote it
- *                    has it) — the field is always emitted as `null`, never fabricated.
+ *                    override valve, overrides.mts), with its rationale and kind from the sink;
+ *                    a deferred, pre-existing or accepted kind is a real defect and never mints.
  *
  * Repo scoping: `commit_ships.repo` spans every project ever shipped from on this machine, most
  * of them unrelated private checkouts. Defaults to a `devkit`-only allowlist (see
@@ -50,9 +49,17 @@
  * threshold, sort by recency/reviewer), never propose.mts. Do not wire this file into propose.mts.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import {
@@ -71,12 +78,17 @@ import {
   groupShipsByRepoBranch,
   hasDiffEvidence,
   histogramKey,
+  indexWaiverLine,
+  isRealDefectWaiver,
   isSameDiff,
+  lookupWaiver,
   mergeCandidates,
+  newWaiverIndex,
   pickFailReason,
   resolveDiffPayload,
   selectFailLensRows,
   setHard,
+  telemetryUrl,
 } from './mine-telemetry-lib.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -124,11 +136,27 @@ function resolveDb() {
 // self-contained (same call as mine-bots.mts makes for the usage.db path).
 // ---------------------------------------------------------------------------------------------
 
-function resolveTelemetryDir() {
-  const sink =
+function resolveSink() {
+  return (
     process.env.DEVKIT_GATE_EVENTS ||
-    path.join(os.homedir(), '.devkit', 'telemetry', 'gate-events.jsonl');
-  return path.dirname(sink);
+    path.join(os.homedir(), '.devkit', 'telemetry', 'gate-events.jsonl')
+  );
+}
+
+function resolveTelemetryDir() {
+  return path.dirname(resolveSink());
+}
+
+/** Streams the sink line by line (it runs to hundreds of MB) into the waiver index. */
+async function readWaiverIndex(sink) {
+  const index = newWaiverIndex();
+  if (!existsSync(sink)) {
+    console.error(`mine-telemetry: no gate-events sink at ${sink} — waiver kinds read as null`);
+    return index;
+  }
+  const lines = createInterface({ input: createReadStream(sink), crlfDelay: Infinity });
+  for await (const line of lines) indexWaiverLine(index, line);
+  return index;
 }
 
 /** Reads + gunzips an archived diff if present. Never throws — a corrupt/missing archive entry
@@ -165,7 +193,7 @@ function writeAtomic(rows) {
 // Main.
 // ---------------------------------------------------------------------------------------------
 
-function main() {
+async function main() {
   const dbPath = resolveDb();
   if (!dbPath) {
     process.exit(0);
@@ -324,10 +352,18 @@ function main() {
   }
 
   // ---- waived-decoy -----------------------------------------------------------------------------
+  const waiverIndex = await readWaiverIndex(resolveSink());
+  const realDefectUrls = [];
   for (const l of waivedLenses) {
     const ship = shipsById.get(l.ship_id);
     if (!ship) {
       bumpDrop('waived-decoy:ship-missing');
+      continue;
+    }
+    const waiver = lookupWaiver(waiverIndex, l.ship_id, l.reviewer, l.lens);
+    if (isRealDefectWaiver(waiver)) {
+      bumpDrop('waived-decoy:real-defect-kind');
+      realDefectUrls.push(telemetryUrl('waived-decoy', l.ship_id, l.reviewer, l.lens));
       continue;
     }
     const diffSha256 = scopeByShipReviewer.get(`${l.ship_id}::${l.reviewer}`) ?? null;
@@ -345,9 +381,8 @@ function main() {
         diffPayload: resolveDiffPayload(archived.diffText, archived.relPath),
         failReason: pickFailReason(l.issues_json, null),
         disposition: l.disposition,
-        // Rationale is NOT captured in telemetry today (only in whichever checkout's
-        // .devkit/correctness-overrides.json wrote it) — never fabricated here.
-        rationale: null,
+        rationale: waiver?.rationale ?? null,
+        waiverKind: waiver?.kind ?? null,
       }),
     );
   }
@@ -359,6 +394,8 @@ function main() {
   // url and never removes. The allowlist must be enforced on every write, not just on what a given
   // run discovers fresh.
   const existing = readCandidatesFile(OUT);
+  // A decoy minted before its waiver's kind was known must not outlive the drop.
+  for (const url of realDefectUrls) existing.delete(url);
   let prunedByRepo = 0;
   for (const [url, row] of existing) {
     if (!repoAllowlist.has(row?.repo)) {
@@ -395,4 +432,8 @@ function main() {
 
 const invokedDirectly =
   process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (invokedDirectly) main();
+if (invokedDirectly)
+  main().catch((e) => {
+    console.error(`mine-telemetry: ${e?.stack ?? e}`);
+    process.exit(1);
+  });

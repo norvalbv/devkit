@@ -78,6 +78,12 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   base, so `git show HEAD:<file>`, `grep` and `git diff --stat` in your own checkout can all agree
   with each other and still describe a different tree. Waive on evidence read from the reviewed
   base, and pass the `--base` the block note prints so the record says which tree you checked.
+  Every waive names its `--kind`, which only you can know:
+  - `false-positive`: the finding is wrong; the code does not have this defect.
+  - `deferred`: the defect is real and this change introduced it; it is tracked to fix later.
+  - `pre-existing`: the defect is real but already on the base; this change did not introduce it.
+  - `accepted`: the behaviour is real and deliberate, accepted as a known residual.
+  A real defect waived as `false-positive` mislabels the reviewer's benchmark corpus.
   When a correctness or conventions finding names a concrete input and running that input against
   the reviewed code gives the correct result, waive it with the command and its output as the
   rationale. Do not add tests or edits only to change the diff and re-sample the judge: any real
@@ -119,9 +125,9 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
 - **A `↻ … not converging` line** under a blocked ship's digest means the same reviewer has blocked
   three or more rounds on this branch with no pass between, and its latest blocking-finding count is
   no better than its best earlier round. It says the count is not falling, not which findings recur.
-  Stop re-shipping blind: fix the remaining findings as a class, waive any you judge not real with
-  the `guard-review waive` line and a rationale, or ask the user for the reviewer skip the block note
-  names. `--no-verify` is never the landing path.
+  Stop re-shipping blind: fix the remaining findings as a class, waive the rest with the
+  `guard-review waive` line, the `--kind` that fits and a rationale, or ask the user for the reviewer
+  skip the block note names. `--no-verify` is never the landing path.
 - **Sentry gate** judges commit-message intent for newly introduced runtime error classes. Add the
   capture on the named surface, or surface a disputed verdict to the user before any bypass.
 - **UI evidence** (`ui-evidence`) runs on every commit, plain or shipped, and never blocks. It

@@ -126,7 +126,13 @@ describe('runReviewGate — a waived correctness FAIL on an identical re-run', (
     const fp = printed().match(/waive correctness-reviewer:check-fail-1 ([0-9a-f]{12})/)?.[1] ?? '';
     expect(
       runWaive(
-        [`${REVIEWER}:check-fail-1`, fp, 'a single writer owns the counter, so no race'],
+        [
+          `${REVIEWER}:check-fail-1`,
+          fp,
+          '--kind',
+          'false-positive',
+          'a single writer owns the counter, so no race',
+        ],
         repo,
         () => 'a',
       ),

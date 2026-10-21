@@ -948,6 +948,7 @@ describe('runReviewGate — cascade + exit contract', () => {
         rationale: 'writer holds the shard lock the fixture omits — not a real race',
         recorded_at: expect.any(String),
         recorded_by: 'env',
+        kind: null,
       },
     ]);
   });
@@ -977,17 +978,9 @@ describe('runReviewGate — cascade + exit contract', () => {
       expect(m).toBeTruthy();
       const fp = (m as RegExpMatchArray)[1];
       // 2. record the waive via the CLI writer (no gate re-run yet)
-      expect(
-        runWaive(
-          [
-            'correctness-reviewer:check-fail-1',
-            fp,
-            'writer holds the shard lock — not a real race',
-          ],
-          repo,
-          () => 'Ada Lovelace',
-        ),
-      ).toBe(0);
+      const why = 'writer holds the shard lock — not a real race';
+      const args = ['correctness-reviewer:check-fail-1', fp, '--kind', 'deferred', why];
+      expect(runWaive(args, repo, () => 'Ada Lovelace')).toBe(0);
       // 3. the NEXT gate run consumes it via the same reconcile()/loadOverrides() merge an env
       // override already uses — no new consumption path.
       expect(await runReviewGate(repo, { exec })).toBe(0);
@@ -1006,19 +999,17 @@ describe('runReviewGate — cascade + exit contract', () => {
         {
           fingerprint: fp,
           lens: 'check-fail-1',
-          rationale: 'writer holds the shard lock — not a real race',
+          rationale: why,
           recorded_at: expect.any(String),
           recorded_by: 'cli',
           author: 'Ada Lovelace',
+          kind: 'deferred',
         },
       ]);
-      // The lens's own item[] entry carries disposition + rationale inline — a consumer reading
+      // The lens's own item[] entry carries disposition, rationale and kind inline — a consumer reading
       // items[] never needs to join against the top-level waivers[] to know WHY it was waived.
       const waivedItem = waived.items.find((i) => i.lens === 'check-fail-1');
-      expect(waivedItem).toMatchObject({
-        disposition: 'waived',
-        rationale: 'writer holds the shard lock — not a real race',
-      });
+      expect(waivedItem).toMatchObject({ disposition: 'waived', rationale: why, kind: 'deferred' });
     },
   );
 
