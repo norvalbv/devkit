@@ -13,7 +13,6 @@ import {
   chunkPlanHash,
   identityBytesByPath,
   packDiffIntoChunks,
-  unquoteGitPath,
 } from './chunk.mts';
 import { deriveLensReviewer, lensGroupId } from './groups.mts';
 // Type-only: erased at runtime, so no module cycle with split.mts.
@@ -104,10 +103,7 @@ export function planChunkedParts(
     const sub = chunkDiffText(diffText, files);
     const subId = diffCacheIdentity(sub);
     let chunkBytes = 0;
-    // Same unquote fallback as packDiffIntoChunks: a git-quoted staged name misses the raw key
-    // and would zero this chunk's telemetry bytes.
-    for (const f of files)
-      chunkBytes += packed.bytesByPath.get(f) ?? packed.bytesByPath.get(unquoteGitPath(f)) ?? 0;
+    for (const f of files) chunkBytes += packed.bytesByPath.get(f) ?? 0;
     planEntries.push({ index, files_sha: filesSha, file_count: files.length, bytes: chunkBytes });
     const chunk: ChunkAssignment = {
       index,
