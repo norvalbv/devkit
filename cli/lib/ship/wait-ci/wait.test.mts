@@ -162,6 +162,22 @@ describe('waitForChecks', () => {
     expect(result.outcome).toBe('failed');
   });
 
+  it('outwaits a stale cancel that a re-queued run replaces inside the grace', async () => {
+    // gh keeps a same-SHA cancelled row until the re-queued run starts (cli/cli#14371), so a
+    // cancel seen once is not yet the verdict.
+    const result = await drive(
+      [
+        rows(row('pass', 'CodeRabbit'), row('cancel', 'gate')),
+        rows(row('pass', 'CodeRabbit'), row('cancel', 'gate')),
+        rows(row('pass', 'CodeRabbit'), row('pending', 'gate')),
+        rows(row('pass', 'CodeRabbit'), row('pass', 'gate')),
+      ],
+      { settleGraceMs: 10_000 },
+    ).run();
+    expect(result.outcome).toBe('passed');
+    expect(result.cancelled).toEqual([]);
+  });
+
   it('reports no-checks only once the grace has proven the set really is empty', async () => {
     const early = await drive([rows(), rows(), rows(row('pass', 'gate'))], {
       settleGraceMs: 10_000,
