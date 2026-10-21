@@ -75,7 +75,7 @@ run_gates_with_capture() {
   local supervisor="$(dirname "${BASH_SOURCE[0]}")/review/process/gate-supervisor.mts"
   [ -f "$supervisor" ] || supervisor="$(dirname "${BASH_SOURCE[0]}")/review/process/gate-supervisor.mjs"
   local capture_dir capture_fifo tee_pid supervisor_pid tee_status running
-  local capture_failed cleanup_status drain_deadline drain_stage ownership_token gate_started reaped=0
+  local capture_failed cleanup_status drain_deadline drain_stage ownership_token gate_started reaped=0 reaped_by="" reaped_log
   capture_dir=$(mktemp -d "${TMPDIR:-/tmp}/devkit-review-capture.XXXXXX") || {
     echo "$label: could not create private gate output capture" >&2
     return 1
@@ -200,8 +200,17 @@ run_gates_with_capture() {
   if declare -F review_gate_finished >/dev/null 2>&1; then
     review_gate_finished "$supervisor_pid"
   fi
-  [ ! -e "$capture_dir/reaped" ] || reaped=1
+  if [ -e "$capture_dir/reaped" ]; then
+    reaped=1
+    reaped_by=$(cat -- "$capture_dir/reaped" 2>/dev/null) || reaped_by=""
+  fi
   rm -rf -- "$capture_dir"
+  # Persist the survivors too: the banner below reaches only stderr, never the archived gate log.
+  if [ -n "$reaped_by" ]; then
+    for reaped_log in "${logs[@]}"; do
+      printf '%s: still running when the gate chain was reaped:\n%s\n' "$label" "$reaped_by" >> "$reaped_log" 2>/dev/null || true
+    done
+  fi
   if [ "$rc" -eq 0 ] && { [ "$tee_status" -ne 0 ] || [ "$capture_failed" -ne 0 ]; }; then
     echo "$label: could not persist gate output to $log" >&2
     rc=1
@@ -218,6 +227,7 @@ run_gates_with_capture() {
       if [ "$reaped" -eq 1 ]; then
         echo "⏱  $label: the gate chain exited cleanly, but a process it started outlived it and was reaped after $((SECONDS - gate_started))s (exit 124) — NOT the ${secs}s ceiling."
         echo "   Last stage started: ${last_stage:-unknown stage}"
+        [ -z "$reaped_by" ] || printf '   Still running when reaped:\n%s\n' "$(printf '%s\n' "$reaped_by" | sed 's/^/     /')"
         [ "$label" != ship ] || echo "   The commit may already have landed."
         echo "   Raising SHIP_COMMIT_TIMEOUT will not help."
       else

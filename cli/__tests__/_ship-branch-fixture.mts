@@ -305,6 +305,10 @@ export const LEAKING_HOOK = 'echo run >> "$TEST_HOOK_COUNT"\nsleep 30 &';
 export const REAPED_15S_BANNER =
   /exited cleanly, .*reaped after \d+s \(exit 124\) — NOT the 15s ceiling/;
 
+/** The reap notice naming LEAKING_HOOK's `sleep`, as the banner and the archived gate log print it. */
+export const REAPED_SLEEP_NOTICE =
+  /till running when (?:the gate chain was )?reaped:\n\s*\d+ ppid=\d+ pgid=\d+ up=\S+ sleep$/m;
+
 /** Swap the hook in AFTER seeding: a seeder's own commits would run LEAKING_HOOK with TEST_HOOK_COUNT
  *  unset, and the failed append fails the commit. */
 export function installHook(dir, body) {
