@@ -121,7 +121,7 @@ while [ "$#" -gt 0 ]; do
     --link)
       [ "$RESUME" -eq 0 ] || { echo "--resume replays the recorded invocation — to change --link, run the full devkit ship command (it re-records)" >&2; exit 1; }
       LINK_EXTRA+=("${2:?--link requires a directory}"); shift 2 ;;
-    --body) BODY_FLAG="${2:?--body requires text}"; BODY_SET=1; shift 2 ;;
+    --body) BODY_FLAG="${2?--body requires text}"; BODY_SET=1; shift 2 ;;
     --body-file) BODY_FILE_FLAG="${2:?--body-file requires a path}"; BODY_FILE_SET=1; shift 2 ;;
     --dry-gates)
       [ "$RESUME" -eq 0 ] || { echo "--dry-gates cannot be combined with --resume" >&2; exit 1; }
@@ -1058,7 +1058,7 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
     # already match, or an operator who changed BOTH would be pointed at the wrong half.
     RECOVERY_BODY=$(git log -1 --format=%b "$RECOVERY_COMMIT" 2>/dev/null || true)
     RECOVERY_SUBJECT=$(git log -1 --format=%s "$RECOVERY_COMMIT" 2>/dev/null || true)
-    if [ -z "$BODY" ] && [ -n "$RECOVERY_BODY" ] && [ "$RECOVERY_SUBJECT" = "$TITLE" ]; then
+    if [ "$BODY_SET" -eq 0 ] && [ "$BODY_FILE_SET" -eq 0 ] && [ -z "$BODY" ] && [ -n "$RECOVERY_BODY" ] && [ "$RECOVERY_SUBJECT" = "$TITLE" ]; then
       RECOVERY_REASON="this run supplied no PR body, but its commit has one"
       RECOVERY_HINTS+=("re-supply it with --body \"<text>\" — this run's stdin was empty, and an empty stdin is a valid empty body")
     fi
