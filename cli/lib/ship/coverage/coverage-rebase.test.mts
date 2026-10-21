@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { computePercentages } from '../../../../gate-engine/coverage/run.mts';
 import { coverageMapSchema } from '../../../../gate-engine/coverage/fallow-copy.mts';
+import { publishManifest, stageManifest } from '../../../../gate-engine/coverage/provenance.mts';
 import {
   deriveForeignRoot,
   rebaseCoverageMap,
@@ -193,7 +194,7 @@ describe('rebaseWorktreeCoverage — a private rekeyed copy for fallow', () => {
     const { wt, source, report } = seed('/Users/dev/checkout');
     const out = outFor(wt);
 
-    expect(rebaseWorktreeCoverage(wt, source, out)).toBe('/Users/dev/checkout');
+    expect(rebaseWorktreeCoverage(wt, source, out)).toEqual({ root: '/Users/dev/checkout' });
 
     const rebased = coverageMapSchema.parse(JSON.parse(readFileSync(out, 'utf8')));
     expect(Object.keys(rebased)).toEqual([`${realpathSync(wt)}/src/a.ts`]);
@@ -227,7 +228,7 @@ describe('rebaseWorktreeCoverage — a private rekeyed copy for fallow', () => {
     const report = JSON.stringify(artifact);
     writeFileSync(join(source, 'coverage-final.json'), report);
 
-    expect(rebaseWorktreeCoverage(wt, source, outFor(wt))).toBe('/Users/dev/checkout');
+    expect(rebaseWorktreeCoverage(wt, source, outFor(wt))).toEqual({ root: '/Users/dev/checkout' });
 
     const rebased = coverageMapSchema.parse(JSON.parse(readFileSync(outFor(wt), 'utf8')));
     expect(rebased[`${realpathSync(wt)}/src/a.ts`]).toMatchObject({
@@ -245,6 +246,54 @@ describe('rebaseWorktreeCoverage — a private rekeyed copy for fallow', () => {
 
     expect(rebaseWorktreeCoverage(wt, source, outFor(wt))).toBeNull();
     expect(existsSync(outFor(wt))).toBe(false);
+  });
+});
+
+/** Bind a coverage-run manifest recording `args` to the report currently in `source`. */
+function bindManifest(source: string, args: string[]) {
+  const report = join(source, 'coverage-final.json');
+  const snapshot = { roots: [], head: '', dirty: {}, args };
+  mkdirSync(join(source, '.runs'), { recursive: true });
+  publishManifest(stageManifest(join(source, '.runs'), report, snapshot, 'run-1'), source);
+}
+
+describe('rebaseWorktreeCoverage — a scoped run hands fallow an empty map', () => {
+  it('writes {} for a scoped run, even when the keys already sit at the worktree', () => {
+    const { wt, source } = seed('');
+    const key = `${realpathSync(wt)}/src/a.ts`;
+    writeFileSync(join(source, 'coverage-final.json'), JSON.stringify({ [key]: entry(key, 0) }));
+    bindManifest(source, ['src/a.test.ts']);
+
+    expect(rebaseWorktreeCoverage(wt, source, outFor(wt))).toEqual({
+      scopedArgs: ['src/a.test.ts'],
+    });
+    expect(readFileSync(outFor(wt), 'utf8')).toBe('{}');
+  });
+
+  it('rekeys a full run exactly as before', () => {
+    const { wt, source } = seed('/Users/dev/checkout');
+    bindManifest(source, []);
+
+    expect(rebaseWorktreeCoverage(wt, source, outFor(wt))).toEqual({ root: '/Users/dev/checkout' });
+  });
+
+  it('ignores a scoped manifest bound to other bytes', () => {
+    const { wt, source } = seed('/Users/dev/checkout');
+    bindManifest(source, ['src/a.test.ts']);
+    const key = '/Users/dev/checkout/src/a.ts';
+    writeFileSync(join(source, 'coverage-final.json'), JSON.stringify({ [key]: entry(key, 3) }));
+
+    expect(rebaseWorktreeCoverage(wt, source, outFor(wt))).toEqual({ root: '/Users/dev/checkout' });
+  });
+
+  it('prints the scoped args on stdout for the ship script', () => {
+    const { wt, source } = seed('/Users/dev/checkout');
+    bindManifest(source, ['src/a.test.ts', '-t', 'renders']);
+
+    const r = runCli(wt, source, outFor(wt));
+
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('scoped src/a.test.ts -t renders\n');
   });
 });
 
@@ -358,7 +407,7 @@ describe.skipIf(!hasFallow)('coverage-rebase against the real fallow binary', ()
 
       const before = audit({});
       const out = outFor(wt);
-      expect(rebaseWorktreeCoverage(wt, source, out)).toBe('/other/checkout');
+      expect(rebaseWorktreeCoverage(wt, source, out)).toEqual({ root: '/other/checkout' });
       const after = audit({ FALLOW_COVERAGE: out });
 
       expect(before).toContain('"coverage_source":"estimated"');

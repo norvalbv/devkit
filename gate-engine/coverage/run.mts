@@ -306,12 +306,18 @@ export function runCoverage(cwd = process.cwd()): number {
   return 0;
 }
 
-/** `fallow-copy`: print the path of a clamped coverage copy for FALLOW_COVERAGE, or nothing when
- * fallow reads the artifact unaided. Exit 1 (reason on stderr) when the artifact is unusable. */
+/** `fallow-copy`: print the path of the map for FALLOW_COVERAGE, or nothing when fallow reads the
+ * artifact unaided. Exit 1 (reason on stderr) when the artifact is unusable. */
 function runFallowCopy(cwd: string): number {
   try {
-    const out = writeFallowCopy(repoTop(cwd), cwd);
-    if (out !== null) console.log(out);
+    const copy = writeFallowCopy(repoTop(cwd), cwd);
+    if (copy === null) return 0;
+    console.log(copy.path);
+    if (copy.scopedArgs) {
+      console.error(
+        `devkit fallow gate: the coverage artifact came from a scoped run (\`devkit coverage-run ${copy.scopedArgs.join(' ')}\`) — CRAP is estimated for this audit.`,
+      );
+    }
     return 0;
   } catch (error) {
     console.error(`guard-coverage fallow-copy: ${error instanceof Error ? error.message : error}`);
