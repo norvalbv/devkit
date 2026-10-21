@@ -1,10 +1,13 @@
 /**
  * Repo-supplied command gates: the hook's `--structure` / `--extra` flags and guard.config.json
- * `extraGates`. guard-deterministic runs each one beside the built-in gates; non-zero blocks.
+ * `extraGates`. guard-deterministic runs each one beside the built-in gates; non-zero blocks. Also
+ * the spawn step every gate, built-in or not, goes through.
  */
+import type { execFileSync } from 'node:child_process';
 import { z } from 'zod';
 import { CONFIG_FILENAME, envFlag, resolveGuardConfig } from '../config.mts';
 import { emitGateBypass } from '../judge/gate-events.mts';
+import { gateEnv } from './reason.mts';
 import { DETERMINISTIC } from './registry.mts';
 
 /** One command gate. A missing `cmd` marks a malformed spec, which blocks as unrunnable. */
@@ -84,4 +87,33 @@ export function reportCachedBypasses(ran: string[]): string[] {
     if (ran.includes(gate)) emitGateBypass(gate, `GUARD_${suffix}`);
   }
   return bypassed.map(([, suffix]) => `GUARD_${suffix}`);
+}
+
+// What execFileSync throws: `status` when the child exited, `signal` when one ended it, `code` when
+// the spawn itself failed (ENOENT, EACCES, EAGAIN).
+const spawnErrorSchema = z.object({
+  status: z.number().optional().catch(undefined),
+  signal: z.string().optional().catch(undefined),
+  code: z.string().optional().catch(undefined),
+});
+
+/**
+ * Run one gate as a subprocess: its exit code (0 on success), or `killed:<SIG>` / `spawn-failed:<CODE>`
+ * when it never reached one. stdio is inherited; the gate's failure reason returns via `reasonFile`.
+ */
+export function runArgv(
+  cwd: string,
+  argv: string[],
+  exec: typeof execFileSync,
+  reasonFile: string,
+): number | string {
+  try {
+    exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit', env: gateEnv(reasonFile) });
+    return 0;
+  } catch (e: unknown) {
+    const { status, signal, code } = spawnErrorSchema.safeParse(e).data ?? {};
+    if (status !== undefined) return status;
+    if (signal) return `killed:${signal}`;
+    return code ? `spawn-failed:${code}` : 1;
+  }
 }
