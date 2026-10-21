@@ -315,7 +315,8 @@ describe('commit_with_gate_capture — executable hook proof', () => {
   });
 
   // The preflight's family move must survive to the tail, where a blocked ship is read.
-  const REMEDY = 'move the judges to the claude family: run `export GUARD_REVIEW_MODEL=haiku`';
+  const REMEDY =
+    'To ship inside this window, move the judges to the claude family: run `export GUARD_REVIEW_MODEL=haiku`.';
   const darkJudge = {
     SHIP_JUDGE_REMEDY: REMEDY,
     DK_TEST_CALLER_VARS: `BASE_FLAG=main; PATHS=(src/a.ts)`,

@@ -662,14 +662,14 @@ prepare_gate_worktree() {
 ship_judge_preflight() {
   local root=${1:?root} tool rc
   local script_dir
-  # Global, not local: the gate-capture tail repeats this family move when a gate blocks the attempt.
+  # Global, not local: the gate-capture and dry-gates tails repeat this remedy line verbatim.
   SHIP_JUDGE_REMEDY=""
   script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
   tool="$script_dir/preflight/judge.mts"
   [ -f "$tool" ] || tool="$script_dir/preflight/judge.mjs"
   # A package built without this tool is not a reason to say anything at all.
   [ -f "$tool" ] || return 0
-  # The report streams on stderr; stdout carries only the remedy, so ship's stdout stays the PR URL.
+  # The report streams on stderr; stdout carries only the remedy line; ship's stdout stays the PR URL.
   # $2 is an optional --informational, for a rehearsal that runs no judge.
   if SHIP_JUDGE_REMEDY=$(cd "$root" && node "$tool" "$root" ${2:+"$2"}); then
     rc=0

@@ -1544,7 +1544,7 @@ if [ "$DRY_GATES" -eq 1 ]; then
   fi
   # Last on purpose: a rehearsal is read by tailing, and the head may have scrolled away.
   [ -z "${SHIP_JUDGE_REMEDY:-}" ] ||
-    echo "⚠️  ship: the judge preflight found a dark judge — the real ship's uncached judges will fail closed. To ship inside this window, $SHIP_JUDGE_REMEDY." >&2
+    echo "⚠️  ship: the judge preflight found a dark judge — the real ship's uncached judges will fail closed. $SHIP_JUDGE_REMEDY" >&2
   exit 0
 fi
 
