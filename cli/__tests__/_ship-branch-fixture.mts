@@ -300,10 +300,15 @@ export function seedReshipRepo() {
  *  then returns 124 while reaping that descendant — the Story #1550 state, verbatim. */
 export const LEAKING_HOOK = 'echo run >> "$TEST_HOOK_COUNT"\nsleep 30 &';
 
-/** Ship's banner when a leaking hook's child is reaped under SHIP_COMMIT_TIMEOUT=15: it proves the
- *  124 came from our supervisor, not from spawnSync's own deadline. */
-export const REAPED_15S_BANNER =
-  /exited cleanly, .*reaped after \d+s \(exit 124\) — NOT the 15s ceiling/;
+/** SHIP_COMMIT_TIMEOUT for leaking-hook ships: far above the 5s linger reap, so a slow commit on a
+ *  loaded machine still ends in the reap, and a healthy run never waits it out. */
+export const LEAK_CEILING = '60';
+
+/** Ship's banner when a leaking hook's child is reaped under LEAK_CEILING: it proves the 124 came
+ *  from our supervisor's reap, not from the ceiling or spawnSync's own deadline. */
+export const REAPED_BANNER = new RegExp(
+  `exited cleanly, .*reaped after \\d+s \\(exit 124\\) — NOT the ${LEAK_CEILING}s ceiling`,
+);
 
 /** Swap the hook in AFTER seeding: a seeder's own commits would run LEAKING_HOOK with TEST_HOOK_COUNT
  *  unset, and the failed append fails the commit. */
