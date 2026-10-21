@@ -48,6 +48,7 @@ export const POSITIONAL_REJECTED_FLAGS: readonly string[] = [
   '--with-reviewers',
   '--from-branch',
   '--draft',
+  '--no-stack',
   '--ready',
   '--wait-ci',
   '--wait-ci-timeout',
@@ -70,7 +71,7 @@ export const meta = {
   help: `devkit ship — commit <path...> onto a new branch + open a PR without moving HEAD.
 
 Usage:
-  devkit ship <branch> "<title>" [--dry-gates [--with-reviewers]] [--base <b>] [--from-branch] [--body "<text>"] [--body-file <f>] [--draft] [--link <d>]... [--] <path...>
+  devkit ship <branch> "<title>" [--dry-gates [--with-reviewers]] [--base <b>] [--from-branch] [--body "<text>"] [--body-file <f>] [--draft] [--no-stack] [--link <d>]... [--] <path...>
   devkit ship --pr <branch> "<title>" [--ready] [--body "<text>"] [--link <d>]... [--] <path...>
   devkit ship --resume <branch> [--body-file <f>] [--] <extra-path...>
   devkit ship --queue
@@ -132,6 +133,14 @@ Usage:
                       { "ship": { "command": "devkit ship", "extraArgs": ["--draft"] } } — the
                       "command" key is required, or extraArgs is ignored. The guard drops --draft
                       from its --pr suggestions, where it does not apply.
+  --no-stack          Do not join the new PR to its base PR's GitHub stack. By default, when the
+                      base branch has an open PR that targets the default branch or tops a stack,
+                      ship registers the new PR on it as a GitHub native stack (Stacks REST API via
+                      gh api; no extension needed) and prints \`ship: stacked #N on #M\`. Stacked
+                      PRs merge bottom-up, merging one also merges the PRs below it, and they cannot
+                      use per-PR auto-merge. Best-effort: a refusal prints why and the exact
+                      command to retry by hand, and never fails the ship. New ships only; recorded
+                      for --resume like --draft, and usable in extraArgs the same way.
   --ready             With --pr only: after the re-push lands, mark the PR ready for review — the
                       end of an open-draft → iterate → mark-ready loop. Runs last, so a failure here
                       never costs the pushed commit; it reports the exact \`gh pr ready\` to re-run.
@@ -326,6 +335,7 @@ function routeFlagsOf(args: readonly string[], valueFlags: readonly string[]): S
       arg === '--pr' ||
       arg === '--from-branch' ||
       arg === '--draft' ||
+      arg === '--no-stack' ||
       arg === '--ready' ||
       arg === '--dry-gates'
     )
@@ -344,6 +354,10 @@ function dispatchRejection(args: readonly string[], routeFlags: Set<string>): st
     return [
       '--draft applies to a NEW ship (opening the PR); a --pr re-push targets a PR that already exists.',
       '  To convert that PR back to a draft: gh pr ready --undo <branch>',
+    ];
+  if (routeFlags.has('--pr') && routeFlags.has('--no-stack'))
+    return [
+      '--no-stack applies to a NEW ship (stacking happens when the PR opens); a --pr re-push targets a PR that already exists.',
     ];
   // A new ship is ready-for-review already. `--resume` is exempt: it takes its mode from the RECORD,
   // so a recorded reship legitimately carries no --pr here and reship.sh accepts its --ready.

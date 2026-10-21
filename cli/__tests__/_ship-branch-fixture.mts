@@ -313,6 +313,18 @@ export function installHook(dir, body) {
   chmodSync(hook, 0o755);
 }
 
+/** Remove the hook runner so the hook-source preflight refuses before any worktree exists. */
+export function breakHook(s) {
+  mkdirSync(join(s.dir, 'src'), { recursive: true });
+  writeFileSync(join(s.dir, 'src/big.ts'), 'export const a = 1;\n');
+  rmSync(join(s.dir, '.husky/_'), { recursive: true, force: true });
+}
+
+export function fixHook(s) {
+  mkdirSync(join(s.dir, '.husky/_'), { recursive: true });
+  installHook(s.dir, 'exit 0');
+}
+
 /** ghStub on PATH + a hook-run ledger. Publishing tests need both. */
 export function publishEnvFor(dir, env) {
   const hookCount = join(dir, 'hook-count');

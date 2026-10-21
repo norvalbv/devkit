@@ -9,7 +9,7 @@
  * blocked: the shell settled that and published it on this ship's ship_result row, which this
  * reader consumes, so the two can never disagree.
  */
-import { blockingFindings } from './blocking.mjs';
+import { blockingFindings, judgeFinding } from './blocking.mjs';
 import { count, oneLine, textOf } from './fields.mjs';
 import { scanBackward } from './tail.mjs';
 import { readBranchHistory, renderTrend, summariseTrend } from './trend.mjs';
@@ -153,12 +153,7 @@ export function summarise(events, shipId) {
             const gate = e.gate ?? 'unknown';
             // A row without its own family IS its family — only the deterministic chain reports finer
             // than the blocked_gate vocabulary.
-            attributable.push({
-                gate,
-                family: e.family ?? gate,
-                detail: oneLine(e.detail),
-                state: 'finding',
-            });
+            attributable.push({ gate, family: e.family ?? gate, state: 'finding', ...judgeFinding(e) });
         }
         else if (e.type === 'gate_result' &&
             (e.status === 'could_not_run' || e.status === 'bypassed')) {

@@ -168,7 +168,7 @@ export function judgeStagedIntegrity(cwd = process.cwd(), freeze = freezeIndex) 
     if (frozen === null)
         return {
             ...NOTHING_JUDGED,
-            inert: 'could not freeze the index (unmerged paths, or another git process holds index.lock)',
+            inert: 'could not freeze the index (unmerged paths, or an unreadable index)',
         };
     return judgeSnapshot(corpus, frozen);
 }

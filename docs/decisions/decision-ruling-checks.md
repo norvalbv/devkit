@@ -20,3 +20,4 @@ created: 2026-10-11
 **Scope:** gate-engine/decisions/ruling-checks/**,gate-engine/deterministic/registry.mts
 **Category:** decision-log
 **Source:** collab
+- 2026-10-19 — A decisionsDir outside the repository links nothing, so the gate passes without running a Check, as the other decisionsDir readers (depth pass, gate inputs) already treat it, instead of blocking every commit on git grep's out-of-repository error. The dir is resolved through symlinks first, so an in-repo log named through a symlinked prefix keeps its links. Not handled: linking from a subdirectory under an absolute decisionsDir, which would need a guess at where the gate runs. devkit doctor now reads a decisions-only hook without the deterministic block as drift, using the generator's own wantsDeterministic rule.

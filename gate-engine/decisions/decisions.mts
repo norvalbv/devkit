@@ -362,8 +362,9 @@ export async function cmdQuery(
   }
   assertFullNotJson(json, full);
   if (json) {
-    console.log(JSON.stringify(await queryEnvelope(text, k, cwd), null, 2));
-    return;
+    const envelope = await queryEnvelope(text, k, cwd);
+    console.log(JSON.stringify(envelope, null, 2));
+    return envelope;
   }
   const { source, rows } = await rankAxes(text, k, cwd);
   if (rows.length === 0) {
@@ -374,13 +375,11 @@ export async function cmdQuery(
         ? 'No decisions recorded.'
         : 'No recorded decision rules on this. (searched every axis; nothing matched)',
     );
-    return;
+    return { source, rows };
   }
-  if (full) {
-    printFull(rows, source, paths(cwd).decisionsDir);
-    return;
-  }
-  printRanked(rows, source);
+  if (full) printFull(rows, source, paths(cwd).decisionsDir);
+  else printRanked(rows, source);
+  return { source, rows };
 }
 export async function cmdReindex(cwd = process.cwd()) {
   const { done, total } = await reindexAll(paths(cwd));
@@ -450,14 +449,13 @@ export async function main(argv: string[]) {
       const [text, ...rest] = args;
       const top = flag(rest, '--top');
       const n = top ? Number.parseInt(top, 10) : 5;
-      await cmdQuery(
+      return cmdQuery(
         text,
         n > 0 ? n : 5,
         process.cwd(),
         rest.includes('--json'),
         rest.includes('--full'),
       );
-      break;
     }
     case 'drift':
       process.exitCode = runDrift(process.cwd());

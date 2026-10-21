@@ -246,11 +246,8 @@ function computeDrift(options) {
         return finish(run, report, cached, options, root, commonDir, base.base, head, sha);
     }
     if (ok(run(['merge-base', '--is-ancestor', ref, head]))) {
-        // Ancestry answers the question only if the ref it was measured against is current. After a
-        // failed fetch it is whatever was last cached, so "already contained in HEAD" proves nothing
-        // about origin now — and reporting no-drift here would be a clean exit 0 earned from a failure.
-        if (fetched.freshness === 'unknown')
-            report.silent = 'undetermined';
+        // No drift against the refs on hand. A failed fetch stays loud via freshness 'unknown', which
+        // exitCodeFor and unknownNote answer; 'undetermined' would claim the base moved.
         return report;
     }
     const mergeBase = run(['merge-base', head, ref]);

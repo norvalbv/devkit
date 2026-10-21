@@ -331,7 +331,7 @@ SHIP_HOOK_WRAPPER
   # (the per-gate/per-reviewer events carry the precise cause). Chain order is deterministic →
   # decisions → review, and each hook step is `|| exit`, so exactly one gate blocks; grep in that
   # order attributes it.
-  local blocked_json timed_out
+  local blocked_json timed_out shell_gate
   if [ -n "$blocked_override" ]; then blocked_json=$blocked_override; timed_out=false
   elif [ "$hook_setup_failed" -eq 1 ]; then blocked_json='"hook_setup"'; timed_out=false
   elif [ "$rc" -eq 0 ]; then blocked_json=null; timed_out=false
@@ -348,6 +348,10 @@ SHIP_HOOK_WRAPPER
   # sc-2753: guard-comments aggregates in the deterministic stage; alone, it keeps its own name.
   elif grep -qE '✗ deterministic gates failed: guard-comments(\([^)]*\))?$' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
   elif grep -q '✗ deterministic gates failed' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
+  # A hook-shell gate (fallow, the eslint/biome overlays) keeps its own token, as comments does.
+  # Whole lines only (a finding may quote one); LC_ALL=C because BSD sed aborts on invalid UTF-8.
+  elif shell_gate=$(LC_ALL=C sed -n 's/^✗ staged gate blocked: \([a-z-]*\) (its report is above)$/\1/p' "$log" 2>/dev/null | tail -n 1) &&
+    [ -n "$shell_gate" ]; then blocked_json="\"$shell_gate\""; timed_out=false
   elif grep -q 'decision smells:' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
   elif grep -q 'guard-comments: .* need a decision' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
   elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
@@ -359,6 +363,13 @@ SHIP_HOOK_WRAPPER
       "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$(devkit_parent_session_json)" "$rc" "$timed_out" "$blocked_json" \
       "$(( $(date +%s) - dur_start ))" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
+  fi
+  # The merge verdict reads each PR commit's bypass record by the sha this passing run produced.
+  if [ "$rc" -eq 0 ] && [ "$ship_dry_gates" -eq 0 ]; then
+    local gated_writer
+    gated_writer="$(dirname "${BASH_SOURCE[0]}")/merge-verdict/bypasses.mts"
+    [ -f "$gated_writer" ] || gated_writer="$(dirname "${BASH_SOURCE[0]}")/merge-verdict/bypasses.mjs"
+    [ ! -f "$gated_writer" ] || node "$gated_writer" record "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" >/dev/null 2>&1 || true
   fi
 
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
@@ -491,6 +502,10 @@ SHIP_HOOK_WRAPPER
     # Order matters: stdout joins ship stderr FIRST, then only tee's own complaints are discarded.
     printf '%s\n' "$digest_text" | tee -a "$log" "$ship_log" >&2 2>/dev/null || true
   fi
+  # Name the per-attempt archive: $log is the per-branch file the next attempt overwrites.
+  if [ "$rc" -ne 0 ] && [ "$ship_dry_gates" -eq 0 ] && [ -s "$ship_log" ]; then
+    echo "ship: this attempt's gate log is kept at $ship_log (ship id ${DEVKIT_SHIP_ID:-}); $log is overwritten by the next attempt." >&2 || true
+  fi
 
   # sc-2299. The path brief again, next to the verdict. The resume banner already printed it in FULL,
   # but a blocked ship is read by tailing (the digest note above says so), minutes and often megabytes
@@ -509,12 +524,12 @@ SHIP_HOOK_WRAPPER
   # Gated on the blocked_gate classifier above rather than on `rc != 0`, which is broader than the
   # claim: a hook-setup failure, a 124/137 timeout, a clobbered HEAD and unreadable staged objects
   # all exit non-zero WITHOUT a gate having judged anything, and "the gates judged" would misreport
-  # every one of them. These four are the ATTRIBUTED gate verdicts, and each implies rc != 0 (rc == 0
+  # every one of them. These are the ATTRIBUTED gate verdicts, and each implies rc != 0 (rc == 0
   # short-circuits to null above), so no separate status check is needed. "unknown" is excluded on
   # purpose: it is the classifier's catch-all, so it also covers a commit-msg hook failing after the
   # gates passed, and a line that says "the gates judged" must not be printed on a maybe.
   case "$blocked_json" in
-    '"deterministic"'|'"decisions"'|'"comments"'|'"review"')
+    '"deterministic"'|'"decisions"'|'"comments"'|'"review"'|'"fallow"'|'"eslint-overlay"'|'"biome-overlay"')
     {
       local brief_n=0 brief_list="" brief_p brief_base
       brief_base="${BASE:-}"

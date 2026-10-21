@@ -61,3 +61,16 @@ function manyIssues(e, b, all) {
     const issues = issuesUnder(e, b.lens) ?? 0;
     return issues > 1 ? issues : 0;
 }
+/** A judge FAIL's row: its detail names one finding, so a tally above one says how many to clear. */
+export function judgeFinding(e) {
+    const critical = count(e.tally?.critical);
+    const important = count(e.tally?.important);
+    const n = critical + important;
+    if (n <= 1)
+        return { detail: oneLine(e.detail) };
+    const tally = `${n} findings (${critical} critical, ${important} important)`;
+    return {
+        detail: `${oneLine(e.detail)} · ${tally}, each listed in the log — fix them all`,
+        findings: n,
+    };
+}

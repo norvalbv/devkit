@@ -334,7 +334,10 @@ export function reconcileBranch({ mainRepo, branch, entry, apply, }) {
     // can answer "what did I just fetch?": .git/FETCH_HEAD is one file every peer rewrites, and a
     // peer's fetch of this base advances refs/remotes/origin/<baseRef> between our fetch and our read.
     const pin = `refs/devkit/reconcile/${process.pid}/${entry.baseRef}`;
-    if (git(mainRepo, ['fetch', 'origin', `+refs/heads/${entry.baseRef}:${pin}`]) === null) {
+    // The flags keep the fetch off every shared ref — tracking ref, followed tags, FETCH_HEAD — so a
+    // peer holding one of their locks cannot fail it.
+    const fetchArgs = ['fetch', '--refmap=', '--no-tags', '--no-write-fetch-head', 'origin'];
+    if (git(mainRepo, [...fetchArgs, `+refs/heads/${entry.baseRef}:${pin}`]) === null) {
         return {
             ...base,
             merged: true,

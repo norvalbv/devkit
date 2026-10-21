@@ -80,6 +80,33 @@ describe('scanCommentTokens', () => {
     const [token] = scanCommentTokens('{/* first\n * second\n * third\n */}</div>;\n', 'tsx');
     expect(token?.standalone).toBe(true);
   });
+
+  it.each([
+    ['a // line in JSX text', 'const el = <p>\n// (sc-3836)\n</p>;\nconst v = 1;\n', 'tsx'],
+    ['a code sample in <pre>', 'const el = <pre>\n// a\n// b\n// c\n</pre>;\n', 'tsx'],
+    ['a block delimiter in JSX text', 'const el = <p>\n/* blk */\n</p>;\n', 'tsx'],
+    ['JSX text after a closing tag', 'const el = <p><b>x</b> // text\n</p>;\n', 'tsx'],
+    ['a // line in .jsx JSX text', 'const el = <p>\n// sc-1\n</p>;\n', 'jsx'],
+    ['a // line in .js JSX text', 'const el = <p>\n// sc-1\n</p>;\n', 'js'],
+  ])('ignores %s', (_name, source, extension) => {
+    expect(scanCommentTokens(source, extension)).toEqual([]);
+  });
+
+  it('still reports a comment opening the code an unclosed JSX tag swallows', () => {
+    const source = 'const a = <p>\n// sc-1\nconst b = 1;\n';
+    expect(scanCommentTokens(source, 'tsx').map((token) => token.text)).toEqual(['// sc-1']);
+  });
+
+  it('still finds real comments in and around JSX', () => {
+    const source =
+      'const el = <p>\n{/* real */}\n{\n// inside braces\nx}\n<i\n // attr\n a="1" />\n</p>; // real\n';
+    expect(scanCommentTokens(source, 'tsx').map((token) => token.text)).toEqual([
+      '/* real */',
+      '// inside braces',
+      '// attr',
+      '// real',
+    ]);
+  });
 });
 
 describe('parsePatchHunks', () => {

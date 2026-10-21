@@ -4,10 +4,11 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONFIG_FILENAME } from '../../../../gate-engine/config.mjs';
+import { telemetrySink } from '../../../../gate-engine/judge/run-context.mjs';
 import { VERDICT_LABEL, verdictUnavailable } from '../evidence/block.mjs';
 import { prBase } from '../evidence/red-ref.mjs';
 import { errorMessage, gitEnvironment } from '../review/shared/common.mjs';
-import { shipBypasses, shipRecord } from './bypasses.mjs';
+import { shipBypasses } from './bypasses.mjs';
 import { mergeVerdict, verdictLine } from './verdict.mjs';
 const git = (cwd, args) => execFileSync('git', ['-C', cwd, ...args], {
     encoding: 'utf8',
@@ -25,6 +26,16 @@ export function numstat(cwd, base, head) {
         .map((record) => {
         const [added, deleted, ...path] = record.split('\t');
         return { path: path.join('\t'), added: count(added), deleted: count(deleted) };
+    });
+}
+/** The commits since the PR base, each with its committer time in ms. */
+function prCommits(cwd, base, head) {
+    return git(cwd, ['log', '--format=%H %ct', `${base}..${head}`])
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => {
+        const [sha = '', seconds] = line.split(' ');
+        return { sha, committedMs: Number(seconds) * 1000 };
     });
 }
 /** The base tree's policy, so a PR cannot loosen its own verdict. The checkout's copy stands in only
@@ -48,12 +59,11 @@ export function printVerdict(input) {
         if (title === undefined)
             throw new Error('the PR title was not read');
         const base = prBase(cwd, baseRefOid, head);
-        const commits = Number(git(cwd, ['rev-list', '--count', `${base}..${head}`]));
         const change = {
             headSha: head,
             subject: title,
             paths: numstat(cwd, base, head),
-            bypasses: shipBypasses(shipRecord(env), commits),
+            bypasses: shipBypasses(telemetrySink(env), prCommits(cwd, base, head)),
             evidence: outcome,
         };
         const verdict = mergeVerdict(change, policyText(cwd, base));
