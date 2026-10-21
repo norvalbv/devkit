@@ -18,6 +18,7 @@ import { STRUCTURE_BASELINE_DIR } from '../../gate-engine/ratchets/baseline-path
 import { resolveBaselineRoots } from '../lib/generate/generate-structure-baseline.mts';
 import {
   assertMovedSource,
+  hasFilesystemLeaf,
   moveTrackedWithGit,
   moveUntrackedWithGit,
   trackedPathState,
@@ -283,6 +284,15 @@ export default async function move(args: string[], cwd: string): Promise<number>
     if (physicalTargets.has(m.newAbs))
       return fail(`duplicate destination: ${relative(cwd, m.newAbs)}`);
     physicalTargets.add(m.newAbs);
+    if (
+      !m.trackedAtPreflight &&
+      m.sourceIdentity.isDirectory &&
+      !m.sourceIdentity.isSymbolicLink &&
+      !hasFilesystemLeaf(m.oldAbs)
+    )
+      return fail(
+        `source is an empty directory with no imports to rewrite; drop it from this move and use mv: ${relative(cwd, m.oldAbs)}`,
+      );
     if (lstatOrNull(m.newAbs))
       return fail(`destination already exists: ${relative(cwd, m.newAbs)}`);
     if (trackedPaths.conflictsTarget(toPosix(relative(worktreeRoot, m.newAbs))))

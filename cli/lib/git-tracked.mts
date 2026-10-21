@@ -118,7 +118,7 @@ function assertSourceIdentity(source: string, expected: SourceIdentity): void {
     throw new Error('source changed during move; retry');
 }
 
-function hasFilesystemLeaf(directory: string): boolean {
+export function hasFilesystemLeaf(directory: string): boolean {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.isSymbolicLink()) return true;
     if (hasFilesystemLeaf(join(directory, entry.name))) return true;
