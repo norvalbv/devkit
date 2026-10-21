@@ -524,3 +524,108 @@ describe('ship-branch.sh — resume scope edge cases', () => {
     expect(bareSha(bare, 'feat/nonexistent-path')).toBe(preserved);
   });
 });
+
+/** What `devkit upgrade` leaves behind: a zero-disable legacy size baseline renamed to its
+ *  canonical path, which the size gate then heal-deletes inside the ship worktree. */
+const LEGACY_SIZE = 'eslint/baselines/size.json';
+const CANONICAL_SIZE = '.devkit/baselines/size.json';
+const REMOVE_CANONICAL_HOOK = [
+  'echo run >> "$TEST_HOOK_COUNT"',
+  `rm -f ${CANONICAL_SIZE}`,
+  `git add -A -- ${CANONICAL_SIZE}`,
+];
+
+function seedUpgradedSizeBaseline({ dir, git }) {
+  mkdirSync(join(dir, 'eslint/baselines'), { recursive: true });
+  writeFileSync(join(dir, LEGACY_SIZE), '{"fileDisables":0,"fnDisables":0}\n');
+  git(['add', '--', LEGACY_SIZE], { stdio: 'ignore' });
+  git(['commit', '-q', '--no-verify', '-m', 'seed legacy size baseline'], { stdio: 'ignore' });
+  mkdirSync(join(dir, '.devkit/baselines'), { recursive: true });
+  git(['mv', LEGACY_SIZE, CANONICAL_SIZE], { stdio: 'ignore' });
+  writeFileSync(join(dir, 'note.txt'), 'hi\n');
+}
+
+describe('ship-branch.sh — a briefed new baseline its own gate removed', () => {
+  it('publishes the commit without the removed path', () => {
+    const repo = seedShipRepoLocalRemote();
+    seedUpgradedSizeBaseline(repo);
+    installHook(repo.dir, REMOVE_CANONICAL_HOOK.join('\n'));
+    const { publishEnv } = publishEnvFor(repo.dir, repo.env);
+
+    const ship = retryShip(repo.dir, publishEnv, 'feat/upgrade', [
+      'note.txt',
+      LEGACY_SIZE,
+      CANONICAL_SIZE,
+    ]);
+
+    expect(ship.status, ship.stderr).toBe(0);
+    expect(ship.stderr).toContain(`${CANONICAL_SIZE} was removed during pre-commit`);
+    const sha = bareSha(repo.bare, 'feat/upgrade');
+    expect(
+      repo
+        .git(['diff', '--name-status', `${sha}^`, sha])
+        .trim()
+        .split('\n')
+        .sort(),
+    ).toEqual([`D\t${LEGACY_SIZE}`, 'A\tnote.txt'].sort());
+  }, 240_000);
+
+  // The caller's checkout still holds the canonical file, so a resume that re-added it would
+  // rebuild a tree the gated commit does not have and refuse.
+  it('records the removed path and resumes on it', () => {
+    const repo = seedShipRepoLocalRemote();
+    seedUpgradedSizeBaseline(repo);
+    installHook(repo.dir, [...REMOVE_CANONICAL_HOOK, 'sleep 30 &'].join('\n'));
+    const { hookCount, publishEnv } = publishEnvFor(repo.dir, repo.env);
+    const argv = [
+      scriptPath,
+      'feat/upgrade-resume',
+      'ship it',
+      '--',
+      'note.txt',
+      LEGACY_SIZE,
+      CANONICAL_SIZE,
+    ];
+
+    const first = spawnSync('/bin/bash', argv, {
+      cwd: repo.dir,
+      input: 'pr body\n',
+      encoding: 'utf8',
+      env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
+    });
+
+    expect(first.status, first.stderr).toBe(124);
+    expect(first.stderr).toMatch(REAPED_15S_BANNER);
+    const preserved = repo.git(['rev-parse', 'feat/upgrade-resume']).trim();
+    expect(repo.git(['cat-file', 'blob', 'refs/devkit/ship-gate-adds/feat/upgrade-resume'])).toBe(
+      `${CANONICAL_SIZE}\0`,
+    );
+    expect(existsSync(join(repo.dir, CANONICAL_SIZE))).toBe(true);
+
+    const retry = spawnSync('/bin/bash', argv, {
+      cwd: repo.dir,
+      input: 'pr body\n',
+      encoding: 'utf8',
+      env: publishEnv,
+    });
+
+    expect(retry.status, retry.stderr).toBe(0);
+    expect(retry.stderr).toContain('gate receipt verified');
+    expect(bareSha(repo.bare, 'feat/upgrade-resume')).toBe(preserved);
+    expect(readFileSync(hookCount, 'utf8').trim().split('\n')).toHaveLength(1);
+  }, 240_000);
+
+  it('refuses an empty commit when the gate removed every briefed change', () => {
+    const repo = seedShipRepoLocalRemote();
+    mkdirSync(join(repo.dir, '.devkit/baselines'), { recursive: true });
+    writeFileSync(join(repo.dir, CANONICAL_SIZE), '{"fileDisables":0,"fnDisables":0}\n');
+    installHook(repo.dir, REMOVE_CANONICAL_HOOK.join('\n'));
+    const { publishEnv } = publishEnvFor(repo.dir, repo.env);
+
+    const ship = retryShip(repo.dir, publishEnv, 'feat/emptied', [CANONICAL_SIZE]);
+
+    expect(ship.status, ship.stderr).not.toBe(0);
+    expect(ship.stderr).toContain('nothing to commit');
+    expect(remoteBranchExists(repo.bare, 'feat/emptied')).toBe(false);
+  }, 240_000);
+});

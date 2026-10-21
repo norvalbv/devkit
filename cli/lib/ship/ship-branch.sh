@@ -1100,11 +1100,13 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   # receipt minted by an older devkit) leaves the array empty, and an empty exclude list makes the
   # comparison below byte-identical to the strict one it replaces — fail closed by construction.
   GATE_ADD_EXCLUDE=()
+  GATE_REMOVED=()
   if [ -z "$RECOVERY_REASON" ]; then
     RECOVERY_GATE_ADDS_BLOB=$(git rev-parse -q --verify "$RECOVERY_GATE_ADDS_REF^{blob}" 2>/dev/null || true)
     if [ -n "$RECOVERY_GATE_ADDS_BLOB" ]; then
       while IFS= read -r -d '' gate_path; do
         GATE_ADD_EXCLUDE+=(":(top,exclude,literal)$gate_path")
+        git cat-file -e "$RECOVERY_COMMIT:$gate_path" 2>/dev/null || GATE_REMOVED+=(":(top,literal)$gate_path")
       done < <(git cat-file blob "$RECOVERY_GATE_ADDS_BLOB")
     fi
   fi
@@ -1204,6 +1206,10 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
     # skip. Nothing is lost by skipping: read-tree's index already IS the commit's tree.
     if [ "${#RECOVERY_ADD_PATHS[@]}" -gt 0 ]; then
       GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" add -f -A -- "${RECOVERY_ADD_PATHS[@]}"
+    fi
+    # A gate-removed path is still in the caller's checkout; the gated commit, not that copy, wins.
+    if [ "${#GATE_REMOVED[@]}" -gt 0 ]; then
+      GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" rm -q --cached --ignore-unmatch -- "${GATE_REMOVED[@]}"
     fi
     RECOVERY_TREE=$(GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" write-tree)
     BRANCH_TREE=$(git rev-parse "$RECOVERY_COMMIT^{tree}")
