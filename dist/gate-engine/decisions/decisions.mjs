@@ -169,7 +169,7 @@ function addNote(slug, o, p) {
     }
     const date = today();
     const parsed = parseDecision(readFileSync(file, 'utf8'));
-    const note = noteTextWithRelation(o.note, o.supersedes, parsed.body);
+    const note = noteTextWithRelation(o.note, o.supersedes, parsed.body, slug);
     const body = `${parsed.body.replace(TRAILING_WS_RE, '')}\n${renderNote(date, note)}\n`;
     writeFileAtomic(file, renderDecision({ slug, created: parsed.fm.created || date }, body));
     console.log(`Noted on "${slug}" (${date}).`);
@@ -231,8 +231,9 @@ export async function cmdQuery(text, k = 5, cwd = process.cwd(), json = false, f
     }
     assertFullNotJson(json, full);
     if (json) {
-        console.log(JSON.stringify(await queryEnvelope(text, k, cwd), null, 2));
-        return;
+        const envelope = await queryEnvelope(text, k, cwd);
+        console.log(JSON.stringify(envelope, null, 2));
+        return envelope;
     }
     const { source, rows } = await rankAxes(text, k, cwd);
     if (rows.length === 0) {
@@ -241,13 +242,13 @@ export async function cmdQuery(text, k = 5, cwd = process.cwd(), json = false, f
         console.log(source === 'empty'
             ? 'No decisions recorded.'
             : 'No recorded decision rules on this. (searched every axis; nothing matched)');
-        return;
+        return { source, rows };
     }
-    if (full) {
+    if (full)
         printFull(rows, source, paths(cwd).decisionsDir);
-        return;
-    }
-    printRanked(rows, source);
+    else
+        printRanked(rows, source);
+    return { source, rows };
 }
 export async function cmdReindex(cwd = process.cwd()) {
     const { done, total } = await reindexAll(paths(cwd));
@@ -314,8 +315,7 @@ export async function main(argv) {
             const [text, ...rest] = args;
             const top = flag(rest, '--top');
             const n = top ? Number.parseInt(top, 10) : 5;
-            await cmdQuery(text, n > 0 ? n : 5, process.cwd(), rest.includes('--json'), rest.includes('--full'));
-            break;
+            return cmdQuery(text, n > 0 ? n : 5, process.cwd(), rest.includes('--json'), rest.includes('--full'));
         }
         case 'drift':
             process.exitCode = runDrift(process.cwd());

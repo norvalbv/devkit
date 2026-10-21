@@ -48,7 +48,7 @@ import { coverageBypassed, deterministicStrict } from '../config.mjs';
 import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-events.mjs';
 import { markGateRun } from '../judge/run-context.mjs';
 import { describeCachedPrefix, prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mjs';
-import { gateEnv, readGateReason, reasonDetail, reasonReport, withReasonFiles, } from './reason.mjs';
+import { appendReviewNotice, gateEnv, readGateReason, reasonDetail, reasonReport, withReasonFiles, } from './reason.mjs';
 import { bypassedSuffixes, configExtraGates, reportCachedBypasses, structureBypassed, } from './command-gates.mjs';
 import { printRecheckFooter, recheckCommand, recheckLines, registryRecheck } from './recheck.mjs';
 import { DETERMINISTIC } from './registry.mjs';
@@ -96,8 +96,7 @@ function reviewIds() {
     const selected = new Set(configured);
     return GUARD_COMPONENTS.filter((g) => armed(g, selected)).map((g) => g.id);
 }
-// Split a `--structure` / `--extra` command string into argv tokens. Hoisted (perf: no per-call
-// regex compile).
+// Splits a `--structure` / `--extra` command into argv tokens. Hoisted: no per-call regex compile.
 const WHITESPACE_RE = /\s+/;
 // Rewrites a sibling gate module's `.mjs` literal to the runtime extension. Hoisted (perf: no
 // per-gate regex compile).
@@ -356,10 +355,10 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
                 failRc(`(unexpected:${rc})`);
         });
     });
-    // Before the failure branch, so this prints on a GREEN run too — the case that motivated it: a
-    // fail-open gate's own stderr scrolls past at the same visual weight as a gate that passed.
+    // Before the failure branch: a GREEN run names its opt-outs too, as does review's verdict line.
     if (skipped.length > 0) {
         for (const label of skipped) {
+            appendReviewNotice(`gate=${label} opted-out`);
             emitGateEvent({
                 type: 'gate_result',
                 gate: label.replace(GUARD_PREFIX_RE, ''),

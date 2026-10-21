@@ -34,7 +34,7 @@ import { judgeBinForModel } from '../judge/codex/result.mjs';
 import { renderChangedTargets, renderTargets, stagedTargetChanges, } from './evidence/targets-block.mjs';
 export { renderTargets } from './evidence/targets-block.mjs';
 import { emitCacheHit, emitGateBypass, emitGateEvent, emitGateInfraFailure, emitIntentCacheHit, finishGateTiming, } from '../judge/gate-events.mjs';
-import { JUDGE_ISOLATION } from '../judge/judge-isolation.mjs';
+import { JUDGE_ISOLATION, JUDGE_READ_TOOLS } from '../judge/judge-isolation.mjs';
 import { judgeMcpCapabilityFingerprint, judgeMcpMissingServers, namedAgentMcpProfile, trackMcpSpawns, withNamedAgentMcpTools, } from '../judge/mcp/profile.mjs';
 import { printCachedPass, reportMcpDegraded } from './evidence/base-context.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
@@ -44,14 +44,16 @@ import { buildCappedDiffEvidence } from './diff-evidence.mjs';
 import { commitIndexEnv } from '../ratchets/commit-index.mjs';
 import { headTreeish } from '../ratchets/git-index.mjs';
 import { stagedTreeHash } from './evidence/staged-git.mjs';
+import { findingTally } from './contracts/response.mjs';
 import { cacheKey, parseReviewVerdict, resolveEscalationModel, stripFrontmatter, } from './reviewers.mjs';
 import { agentBody } from './runtime.mjs';
+import { reportNoVerdict } from './valve/inconclusive.mjs';
 const AGENT_NAME = 'feature-completeness-reviewer';
-const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
 /** The exact judge capabilities shared by cache identity, execution, and the benchmark. */
 export function completenessJudgeSetup(cfg, cwd = process.cwd(), { mcpProjectRoots } = {}) {
     const mcpProfile = namedAgentMcpProfile();
-    const allowedTools = withNamedAgentMcpTools(TOOLS, cfg.indexPath ? cfg.searchTool : '');
+    const searchTool = cfg.indexPath ? cfg.searchTool : '';
+    const allowedTools = withNamedAgentMcpTools(JUDGE_READ_TOOLS, searchTool);
     const mcpOptions = { cwd, projectRoots: mcpProjectRoots };
     return {
         allowedTools,
@@ -101,7 +103,7 @@ function snapshotStaged(cwd) {
     try {
         // HEAD before the tree: a commit landing in between widens the evidence, never splits it.
         const base = headTreeish(cwd);
-        const tree = stagedTreeHash(cwd);
+        const tree = stagedTreeHash(cwd, 'completeness evidence identity — falling back to --cached');
         if (!tree)
             return { range: ['--cached'], identity: null };
         const range = [base, tree];
@@ -173,7 +175,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
     // structurally incomplete rather than merely terse. The decisions judge sets the precedent that
     // an LLM verdict rides gate_result. `family` names the blocked_gate token the ship script
     // publishes for this gate's chain, which is what lets a reader join the two vocabularies.
-    const emitVerdict = (status, detail) => emitGateEvent({
+    const emitVerdict = (status, detail, tally) => emitGateEvent({
         type: 'gate_result',
         gate: 'completeness',
         family: 'review',
@@ -185,6 +187,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         // unbounded verdict line would corrupt a CONCURRENT judge's row, not merely its own — and
         // this gate runs in parallel with the reviewer fleet by design.
         detail: detail.slice(0, DETAIL_CAP),
+        tally,
     });
     // A gate that could not reach a verdict produced no outcome, so it takes its OWN event type
     // rather than a status on gate_result — the 2026-08-05 note's ruling, for its stated reason.
@@ -195,7 +198,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
     }
     let prompt;
     let diff;
-    let allowedTools = withNamedAgentMcpTools(TOOLS);
+    let allowedTools = withNamedAgentMcpTools(JUDGE_READ_TOOLS);
     let mcpProfile = namedAgentMcpProfile();
     let capabilityFingerprint = '';
     let mcp;
@@ -370,14 +373,13 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         return finish(0);
     }
     if (verdict !== 'FAIL') {
-        // A response carrying no parseable verdict is a HEALTHY judge breaking its contract, so it is
-        // a non-run rather than a verdict — the same distinction the outage arm draws above.
+        // A healthy judge that broke its contract: a non-run, reported and exited as the fleet's.
         emitNoRun('response_contract');
-        return finish(0);
+        return finish(reportNoVerdict('completeness', raw, envFlag('AI_STRICT')));
     }
     // Above the hard/soft split below: a GUARD_COMPLETENESS_HARD=0 soften still MADE this finding,
     // and a run that exits 0 on it is exactly the run whose reader has nothing else to go on.
-    emitVerdict('fail', reason || 'see transcript');
+    emitVerdict('fail', reason || 'see transcript', findingTally(raw));
     console.error(`guard-review: completeness finding — ${reason || 'see transcript'}`);
     console.error(raw.trim());
     // Hard unless explicitly softened for this one commit (GUARD_COMPLETENESS_HARD=0); unset → block.

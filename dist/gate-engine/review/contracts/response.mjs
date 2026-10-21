@@ -9,6 +9,24 @@ export function issueLocations(issue) {
         line: Number(m[2]),
     }));
 }
+// A completeness finding line, through markdown dressing (`**CRITICAL**:`, `- IMPORTANT:`). The
+// colon is required, so a severity word in prose ("this is a CRITICAL gap") starts no finding.
+export const FINDING_LINE_RE = /^[\s>*#-]*\**(CRITICAL|IMPORTANT|LOW)\**\s*:\s*(.+)$/;
+export const ISSUES_LINE_RE = /^[\s>*#-]*\**ISSUES\**\s*:\s*(\d+)\s*critical\D+(\d+)\s*important\D+(\d+)\s*low/i;
+/** Per severity, the larger of the prefixed lines and the judge's own ISSUES tally: the gate prompt
+ *  requires neither, so a model that drops one still gets counted by the other. */
+export function findingTally(raw) {
+    const lines = normalizeLineEndings(raw).split('\n');
+    const tally = lines
+        .map((line) => line.match(ISSUES_LINE_RE))
+        .filter(Boolean)
+        .at(-1);
+    return {
+        critical: Math.max(linesOf(lines, 'CRITICAL'), Number(tally?.[1] ?? 0)),
+        important: Math.max(linesOf(lines, 'IMPORTANT'), Number(tally?.[2] ?? 0)),
+    };
+}
+const linesOf = (lines, severity) => lines.filter((line) => line.match(FINDING_LINE_RE)?.[1] === severity).length;
 /**
  * Collapse CRLF and bare CR to LF before any line-oriented contract reads a transcript. `\r\n?`
  * rather than `\r\n`: a judge quoting a line out of a CRLF-checked-out file emits a LONE `\r`,
@@ -40,9 +58,9 @@ const ADVISORY_LINE_RE = /^(?:(?![\r\n])[\s*#>-])*ADVISORY:\**[^\S\r\n]*(.+)$/gi
 export const ADVISORY_CAP = 5;
 const ADVISORY_CHARS = 200;
 /** The judge's `ADVISORY:` lines citing a code location — non-blocking, to resolve before merge. */
-export function parseAdvisories(raw) {
+export function parseAdvisories(raw, maxChars = ADVISORY_CHARS) {
     const texts = [...normalizeLineEndings(raw).matchAll(ADVISORY_LINE_RE)]
-        .map((m) => m[1].replace(/\*+/g, '').replace(/\s+/g, ' ').trim().slice(0, ADVISORY_CHARS))
+        .map((m) => m[1].replace(/\*+/g, '').replace(/\s+/g, ' ').trim().slice(0, maxChars))
         // The contract asks for a file:line, so `none` or an echoed `<file:line>` is not a finding.
         .filter((text) => issueLocations(text).length > 0);
     return [...new Set(texts)].slice(0, ADVISORY_CAP);

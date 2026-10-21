@@ -4,15 +4,87 @@
  */
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mjs';
 import { stagedSet } from '../../../../gate-engine/ratchets/git-index.mjs';
+// Runs with every selection: it fails when a module is left unreachable to `vitest related` itself.
+const REACH_TEST = 'cli/__tests__/test-graph-reach.test.mts';
 // vitest's forceRerunTriggers (**/package.json, **/{vitest,vite}.config.*, setupFiles) select the
 // whole suite, which CI already runs.
 const RERUN_TRIGGER_RE = /(^|\/)(package\.json|(vitest|vite)\.config\.[^/]*)$|^vitest\.setup\.mjs$/;
 /** The staged paths handed to `vitest related`, sorted, minus the full-suite triggers. */
 export function relatedPaths(staged) {
     return [...staged].filter((p) => !RERUN_TRIGGER_RE.test(p)).sort();
+}
+// Extensions vite can hold in its module graph; any other staged path never selects a test.
+const MODULE_RE = /\.[cm]?[jt]sx?$|\.json$/;
+/** Staged paths `vitest related` cannot map to a test, such as shell scripts and templates. */
+export function unmappedPaths(paths) {
+    return paths.filter((p) => !MODULE_RE.test(p));
+}
+// `reship.test.mts` first, then `reship-*.test.mts`, then any other test naming reship.sh.
+function nameRank(test, stem) {
+    if (test === `${stem}.test.mts`)
+        return 0;
+    return test.startsWith(stem) ? 1 : 2;
+}
+/** The commit-index test files naming each needle: one ls-files and one grep however many there are. */
+function gitGrepTests(root, needles) {
+    const env = commitIndexEnv(root);
+    const ls = spawnSync('git', ['ls-files', '--cached', '-z'], { cwd: root, env, encoding: 'utf8' });
+    const counts = new Map();
+    for (const f of ls.stdout.split('\0')) {
+        if (f && !f.startsWith('dist/'))
+            counts.set(basename(f), (counts.get(basename(f)) ?? 0) + 1);
+    }
+    // A basename several sources share (README.md, check.sh) names none of them; dist/ only mirrors.
+    const named = needles.filter((n) => (counts.get(n) ?? 0) < 2);
+    const hits = new Map();
+    if (!named.length)
+        return hits;
+    // -o prints `file\0match` per hit; -w keeps a test naming reship.sh from naming ship.sh.
+    const args = ['grep', '--cached', '-zowF', ...named.flatMap((n) => ['-e', n])];
+    const r = spawnSync('git', [...args, '--', ':(glob)**/*.test.mts'], {
+        cwd: root,
+        env,
+        encoding: 'utf8',
+    });
+    if (r.status === 1)
+        return hits;
+    if (r.status !== 0)
+        throw new Error(r.stderr || 'git grep failed');
+    for (const [file, match] of r.stdout.split('\n').map((l) => l.split('\0'))) {
+        if (match)
+            hits.set(match, (hits.get(match) ?? new Set()).add(file));
+    }
+    return hits;
+}
+/** Names each unmapped staged path and the tests that mention it, since vitest related ran none. */
+export function noteUnmapped(root, paths, grep = gitGrepTests) {
+    try {
+        const unmapped = unmappedPaths(paths);
+        if (!unmapped.length)
+            return;
+        const hits = grep(root, [...new Set(unmapped.map((p) => basename(p)))]);
+        const lines = unmapped.flatMap((p) => {
+            const stem = basename(p, extname(p));
+            const tests = [...(hits.get(basename(p)) ?? [])]
+                .map((t) => basename(t))
+                .sort((a, b) => nameRank(a, stem) - nameRank(b, stem));
+            if (!tests.length)
+                return [];
+            const more = tests.length > 3 ? ` (+${tests.length - 3})` : '';
+            return [`  ${p} ← ${tests.slice(0, 3).join(', ')}${more}`];
+        });
+        if (!lines.length)
+            return;
+        console.log(`related-tests: ${lines.length} staged path(s) have no import-graph tests — not run here, CI will:`);
+        console.log(lines.join('\n'));
+    }
+    catch {
+        // Disclosure only: a failed lookup never changes the gate's verdict.
+    }
 }
 /** Exit code of the related-tests run: 0 when nothing is selected, vitest's status otherwise. */
 export function runRelatedTests(root, opts = {}) {
@@ -23,7 +95,7 @@ export function runRelatedTests(root, opts = {}) {
     }
     console.log(`related-tests: ${paths.length} staged path(s)`);
     const vitest = join(root, 'node_modules', '.bin', 'vitest');
-    const args = ['related', '--run', '--reporter=dot', ...paths];
+    const args = ['related', '--run', '--reporter=dot', ...new Set([...paths, REACH_TEST])];
     const result = (opts.exec ?? spawnSync)(vitest, args, { cwd: root, stdio: 'inherit' });
     if (result.error)
         console.error(`✗ related-tests could not run vitest: ${result.error.message}`);
@@ -31,5 +103,7 @@ export function runRelatedTests(root, opts = {}) {
     return result.status ?? 1;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-    process.exitCode = runRelatedTests(process.cwd());
+    const code = runRelatedTests(process.cwd());
+    noteUnmapped(process.cwd(), relatedPaths(stagedSet(process.cwd()) ?? []));
+    process.exitCode = code;
 }

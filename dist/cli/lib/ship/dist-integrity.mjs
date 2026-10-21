@@ -7,7 +7,7 @@
  * are both available. Consumer repos no-op: this is devkit's own release topology, not a portable
  * guard.
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -215,14 +215,12 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
     const physical = filesUnder(root, 'dist');
     const physicalSet = new Set(physical);
     const briefed = new Set(briefedPaths.map(briefPath));
-    // A briefed path this ship stages as a DELETION is the one case where briefing does NOT put the
-    // file in the commit: ship-branch.sh skips the force-add for it on purpose (sc-1489 — otherwise a
-    // regenerable artifact back on disk silently re-adds itself and the deletion can never land). It
-    // reports as D because `git diff <commit>` never sees an untracked file, so a path dropped from
-    // the index while still on disk looks deleted against the base the worktree is cut from.
-    // Plumbing, not porcelain `git diff`: that refreshes and REWRITES the shared index even under
-    // --no-optional-locks, and an A/D answer needs no refresh.
-    const deleted = new Set(git(root, ['diff-index', '--name-only', '-z', '--diff-filter=D', base, '--', 'dist']).filter((file) => briefed.has(file)));
+    // A briefed DELETION is not committed (ship-branch.sh skips its force-add). Judged at the fork point
+    // staging anchors at (patch-anchor.sh), not BASE: an append's BASE is the PR tip, new dist and all.
+    const fork = spawnSync('git', ['-C', root, 'merge-base', base, 'HEAD'], { encoding: 'utf8' });
+    const anchor = fork.stdout.trim() || base;
+    // Plumbing: porcelain `git diff` refreshes and REWRITES the shared index.
+    const deleted = new Set(git(root, ['diff-index', '--name-only', '-z', '--diff-filter=D', anchor, '--', 'dist']).filter((file) => briefed.has(file)));
     // Index membership is not the property that matters — presence in the commit this ship is about
     // to create is. ship-branch.sh and reship.sh `git add -f` every briefed path, so briefing one IS
     // shipping it, and demanding it be pre-staged rejects the artifact a release just generated.
@@ -372,31 +370,20 @@ export function printDistIntegrityFailure(report) {
     }
     return 1;
 }
+const FLAG = /^--(root|base|branch|tree|target)$/;
 function parseArgs(argv) {
-    let root = '';
-    let base = '';
-    let branch;
-    let tree;
+    const flags = {};
     let i = 0;
-    for (; i < argv.length; i++) {
-        if (argv[i] === '--') {
-            i++;
-            break;
-        }
-        if (argv[i] === '--root' && argv[i + 1])
-            root = argv[++i];
-        else if (argv[i] === '--base' && argv[i + 1])
-            base = argv[++i];
-        else if (argv[i] === '--branch' && argv[i + 1])
-            branch = argv[++i];
-        else if (argv[i] === '--tree' && argv[i + 1])
-            tree = argv[++i];
-        else
+    for (; i < argv.length && argv[i] !== '--'; i++) {
+        const name = FLAG.exec(argv[i])?.[1];
+        if (!name || !argv[i + 1])
             throw new Error(`unknown or incomplete argument: ${argv[i]}`);
+        flags[name] = argv[++i];
     }
+    const { base, branch, root, target, tree } = flags;
     if (!root || !base)
-        throw new Error('usage: dist-integrity --root <root> --base <sha> [--branch <name>] [--tree <sha>] -- <paths>');
-    return { base, branch, paths: argv.slice(i), root, tree };
+        throw new Error('usage: dist-integrity --root <root> --base <sha> [--branch <name>] [--tree|--target <sha>] -- <paths>');
+    return { base, branch, paths: argv.slice(i + 1), root, target, tree };
 }
 /** `--ship-staged`: the self-host hook's run inside the ship worktree, judging the staged tree with
  *  that tree's own copy of this script, as CI does. Without CI's PR base exported it no-ops. */
@@ -423,7 +410,7 @@ async function main() {
         // caller's physical build, which a committed tree does not have.
         const report = tree !== undefined ? undefined : await inspectDistIntegrity(root, base, paths);
         const integrity = report === undefined ? 0 : printDistIntegrityFailure(report);
-        const releaseOnly = printReleaseOnlyDist(inspectReleaseOnlyDist(root, base, branch, { tree }));
+        const releaseOnly = printReleaseOnlyDist(inspectReleaseOnlyDist(root, base, branch, args));
         process.exitCode = integrity || releaseOnly;
     }
     catch (error) {

@@ -1,6 +1,8 @@
 /** Relocated anti-slop debt: findings a partial move carried between files Git sees only as edits. */
 import { failLine, writeGateReason } from '../../../../gate-engine/deterministic/reason.mjs';
+import { editedLineCredit, } from './baseline.mjs';
 import { ANTI_SLOP_BASELINE_REL } from './constants.mjs';
+import { formatGroupSites } from './diagnostics.mjs';
 export const relocationKey = (entry) => JSON.stringify([entry.ruleId, entry.diagnostic, entry.context]);
 const countsOf = (entries) => new Map(entries.map((entry) => [entry.fingerprint, entry.count]));
 const copyPool = (vacated) => new Map([...vacated].map(([key, credits]) => [key, credits.map((credit) => ({ ...credit }))]));
@@ -30,6 +32,17 @@ export function relocationBasePaths(bound, sources, keys) {
     }
     return [...paths].sort((a, b) => a.localeCompare(b));
 }
+/** Baselined files with unstaged edits that may hold the half of a move the index does not carry. */
+export function unstagedRelocationSources(bound, newGroups, dirtyPaths) {
+    const errors = newGroups.filter((group) => group.severity === 'error');
+    if (errors.length === 0)
+        return [];
+    const dirty = new Map(dirtyPaths().map((path) => [path, { basePath: path, deleted: false }]));
+    // A file that gained the finding is its destination, never the place it moved out of.
+    const gained = new Set(errors.map((group) => group.fingerprint));
+    const sources = { ...bound, entries: bound.entries.filter((e) => !gained.has(e.fingerprint)) };
+    return relocationBasePaths(sources, dirty, new Set(errors.map((group) => relocationKey(group))));
+}
 /**
  * Debt a changed file provably gave up. Bounded by BOTH its base baseline count and a lint of its
  * base bytes, so unpruned stale credit is never spendable, minus what the candidate still carries.
@@ -37,6 +50,7 @@ export function relocationBasePaths(bound, sources, keys) {
 export function vacatedDebt(bound, inherited, candidateGroups, sources, inLintScope, excludedRuleIds = new Set()) {
     const linted = countsOf(inherited.entries);
     const current = countsOf(candidateGroups);
+    const { consumed } = editedLineCredit(bound.entries, candidateGroups);
     const vacated = new Map();
     const ordered = [...bound.entries].sort((a, b) => a.file.localeCompare(b.file) || a.fingerprint.localeCompare(b.fingerprint));
     for (const entry of ordered) {
@@ -47,7 +61,9 @@ export function vacatedDebt(bound, inherited, candidateGroups, sources, inLintSc
         if (!source.deleted && !inLintScope(entry.file))
             continue;
         const evidenced = Math.min(entry.count, linted.get(entry.fingerprint) ?? 0);
-        const remaining = source.deleted ? 0 : (current.get(entry.fingerprint) ?? 0);
+        const remaining = source.deleted
+            ? 0
+            : (current.get(entry.fingerprint) ?? 0) + (consumed.get(entry.fingerprint) ?? 0);
         if (evidenced <= remaining)
             continue;
         const key = relocationKey(entry);
@@ -147,17 +163,18 @@ export const relocationRemedy = (baseRef) => baseRef
 export function printRelocatedAntiSlopFindings(groups) {
     for (const group of groups) {
         const tag = group.severity === 'error' ? 'RELOCATED' : 'RELOCATED-WARN';
-        console.log(`${tag} ${group.ruleId} ${group.file}:${group.line}:${group.column} <- ${formatSources(group.sources)} (+${group.relocatedCount})`);
+        console.log(`${tag} ${group.ruleId} ${formatGroupSites(group, group.relocatedCount, 'relocated')} <- ${formatSources(group.sources)}`);
         console.log(`      ${group.diagnostic}`);
     }
 }
 /** The FAIL summary once any relocated error exists: new and relocated debt counted apart. */
-export function reportRelocatedFailure(newErrorCount, relocated, baseRef) {
+export function reportRelocatedFailure(newErrorCount, relocated, overlay, baseRef) {
     const errors = relocated.filter((group) => group.severity === 'error');
     const moved = errors.reduce((sum, group) => sum + group.relocatedCount, 0);
     failLine(`anti-slop: FAIL — ${newErrorCount} new, ${moved} relocated from ${formatSources(errors.flatMap((group) => group.sources))}; baseline unchanged`);
-    failLine(`anti-slop: re-anchor relocated debt with \`${relocationRemedy(baseRef)}\`, then stage ${ANTI_SLOP_BASELINE_REL}`);
-    writeGateReason(errors.map((group) => `RELOCATED ${group.ruleId} ${group.file}:${group.line}:${group.column} (+${group.relocatedCount})`));
+    const stage = overlay ? '' : `, then stage ${ANTI_SLOP_BASELINE_REL}`;
+    failLine(`anti-slop: re-anchor relocated debt with \`${relocationRemedy(baseRef)}\`${stage}`);
+    writeGateReason(errors.map((group) => `RELOCATED ${group.ruleId} ${formatGroupSites(group, group.relocatedCount, 'relocated')}`));
 }
 export function relocatedWarningNote(relocated, baseRef) {
     const moved = relocated.reduce((sum, group) => sum + group.relocatedCount, 0);

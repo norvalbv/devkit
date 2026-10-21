@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { setTimeout as sleepFor } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { classifyChecksFailure } from './classify.mjs';
 import { recordCiEvent } from './telemetry.mjs';
 /** The five states gh collapses `state` into. Ordered for stable rendering, not by severity. */
 export const CHECK_BUCKETS = ['pass', 'fail', 'pending', 'skipping', 'cancel'];
@@ -19,6 +20,8 @@ const DEFAULT_CONFIRMATIONS = 2;
 const DEFAULT_SETTLE_GRACE_MS = 30_000;
 const DEFAULT_HEARTBEAT_MS = 60_000;
 const DEFAULT_TRANSIENT_BUDGET = 3;
+/** While gh fails, the poll interval doubles up to this multiple of itself. */
+const MAX_BACKOFF_FACTOR = 6;
 /** Per-poll cap on gh itself: an exec with no bound defeats the deadline this feature exists for. */
 const DEFAULT_EXEC_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_S = 7200;
@@ -125,8 +128,8 @@ export function parseChecksJson(raw) {
     return rows;
 }
 /**
- * Poll until the check set settles, the deadline passes, or gh proves unreachable. The deadline is
- * an absolute epoch computed once, the discipline gate-supervisor.mts uses.
+ * Poll until the check set settles, the deadline passes, or gh fails in a way waiting cannot fix.
+ * The deadline is an absolute epoch computed once, the discipline gate-supervisor.mts uses.
  */
 export async function waitForChecks(options) {
     const now = options.now ?? Date.now;
@@ -145,6 +148,8 @@ export async function waitForChecks(options) {
     let streak = 0;
     let firstTerminalAt = null;
     let transient = 0;
+    let failStreak = 0;
+    let lastFailure = null;
     let overrunUsed = false;
     let polls = 0;
     let last = summarise([]);
@@ -178,12 +183,23 @@ export async function waitForChecks(options) {
         polls++;
         const result = await options.poll(polls);
         if (result.kind === 'unavailable') {
-            if (PERMANENT.has(result.reason) || ++transient >= transientBudget)
+            failStreak++;
+            lastFailure = result;
+            // A network fault heals with time, so only the deadline bounds it; any other reason is capped.
+            const unreachable = result.reason === 'gh-unreachable';
+            if (PERMANENT.has(result.reason) || (!unreachable && ++transient >= transientBudget))
                 return done('unavailable', result);
-            say(`ci: ${result.reason} — retrying (${transient}/${transientBudget})`);
+            if (!unreachable)
+                say(`ci: ${result.reason} — retrying (${transient}/${transientBudget})`);
+            else if (failStreak === 1)
+                say(`ci: gh unreachable (${oneLine(result.message).slice(0, 120)})`);
+            else
+                say('ci: gh unreachable — retrying until the deadline');
         }
         else {
             transient = 0;
+            failStreak = 0;
+            lastFailure = null;
             last = summarise(result.rows);
             say(renderProgress(last));
             if (!last.terminal) {
@@ -208,45 +224,17 @@ export async function waitForChecks(options) {
             }
         }
         if (now() >= deadline) {
+            // Never reached CI, or lost it for a budget's worth of polls: the last snapshot is no answer.
+            if (lastFailure && (failStreak === polls || failStreak >= transientBudget))
+                return done('unavailable', lastFailure);
             if (streak < 1 || overrunUsed)
                 return done('timed-out');
             overrunUsed = true; // one confirming poll past the bound, never more
         }
-        await sleep(intervalMs);
+        // Back off while gh is failing, but never sleep more than one interval past the deadline.
+        const backoff = intervalMs * Math.min(2 ** Math.max(failStreak - 1, 0), MAX_BACKOFF_FACTOR);
+        await sleep(Math.min(backoff, Math.max(intervalMs, deadline - now())));
     }
-}
-/**
- * A deliberate SIBLING of classify() in baseline-status/gh.mts, not an import: that one is reachable
- * only through a helper which discards `e.stdout`, which is exactly the exit-8 path this caller needs.
- */
-export function classifyChecksFailure(e) {
-    if (e?.code === 'ENOENT')
-        return { kind: 'unavailable', reason: 'gh-missing', message: 'the `gh` CLI is not on PATH' };
-    // A killed exec is the per-poll cap firing. Transient on purpose: a stalled network may recover
-    // inside the budget, and the overall deadline still bounds how long that is tried for.
-    if (e?.killed)
-        return { kind: 'unavailable', reason: 'gh-failed', message: 'gh pr checks timed out' };
-    const stderr = String(e?.stderr ?? '');
-    const msg = stderr.trim() || e?.message || String(e);
-    // gh exits 1 both for a PR with no checks and for --required on an unprotected branch. Both are
-    // an empty check set — an answer — not a failure to reach gh.
-    if (/no (required )?checks reported/i.test(stderr))
-        return { kind: 'rows', rows: [] };
-    if (/gh auth login|authentication|not logged/i.test(stderr))
-        return {
-            kind: 'unavailable',
-            reason: 'gh-unauthenticated',
-            message: `gh is not authenticated: ${msg}`,
-        };
-    if (/could not resolve to a pullrequest|no pull requests found/i.test(stderr))
-        return { kind: 'unavailable', reason: 'pr-not-found', message: msg };
-    if (/no git remotes|not a git repository|could not determine|none of the git remotes/i.test(stderr))
-        return {
-            kind: 'unavailable',
-            reason: 'not-a-github-repo',
-            message: `no GitHub remote to query: ${msg}`,
-        };
-    return { kind: 'unavailable', reason: 'gh-failed', message: msg };
 }
 const defaultExec = (timeout) => (args, cwd) => execFileSync('gh', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout });
 /** Build the poller `waitForChecks` drives. It never throws: every outcome is a PollResult. */

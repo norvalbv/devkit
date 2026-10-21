@@ -23,7 +23,7 @@ import { readAgentAssetManifest, resolveLegacyProviderTargets, } from './agent-a
 import { agentAssetDir } from './agent-assets/agent-assets.mjs';
 import { requireAgentProviders } from './agent-assets/agent-providers.mjs';
 import { HOOK_REGISTRATION_LEDGER_REL, hookRegistrationDestination, } from './hook-registration-ledger/codec.mjs';
-import { adopt, adoptExactLegacy, ledgerOf, ownedKey, providerDocument, publishPlan, reclaimRetiredElsewhere, release, skipProvider, stripReclaimedCommands, } from './hook-registration-ledger/install-support.mjs';
+import { adopt, adoptExactLegacy, asDropped, ledgerOf, ownedKey, providerDocument, publishPlan, reclaimRetiredElsewhere, release, reportDropped, skipProvider, stripReclaimedCommands, } from './hook-registration-ledger/install-support.mjs';
 import { reconcileLegacyHookCommands } from './hook-registration-ledger/legacy-commands.mjs';
 import { installProjectedHookRegistrations, projectHookRegistrations, readHookRegistrationLedger, removeLedgerAuthorizedHookRegistrations, transferHookRegistrationScope, withAgentAssetLifecycleLock, } from './hook-registration-ledger/lifecycle.mjs';
 import { HOOK_REGISTRATIONS } from './hook-registration-ledger/registrations.mjs';
@@ -35,15 +35,13 @@ const hookDirs = (targets) => targets.map((target) => agentAssetDir(target, 'hoo
 // kept executable (chmod +x) — the .sh/.mjs are invoked directly by the agent harness.
 /**
  * @param {string} root the git root
- * @param {{ dryRun?: boolean, targets?: string[], only?: string[], skipTracked?: (relPath: string) => boolean, override?: (kind: string, name: string) => boolean }} [opts]
- *   `only` (default all): sync ONLY the named hooks — incremental per-hook adoption. Throws on a name
- *   devkit doesn't ship, and carries the prior manifest forward so an `only` run ADDS to the owned set
- *   rather than shrinking it to the one hook synced. `skipTracked` (overlay-only): leaves a git-tracked
+ * @param {{ dryRun?: boolean, targets?: string[], skipTracked?: (relPath: string) => boolean, override?: (kind: string, name: string) => boolean }} [opts]
+ *   `skipTracked` (overlay-only): leaves a git-tracked
  *   hook script untouched (C2). `override(kind, name)` (default never): a hook script colliding with the
  *   consumer's OWN same-named file (on disk, unmanifested, divergent) is PRESERVED unless
  *   `override('agent-hook', name)` is true.
  */
-export function syncHookScripts(root, { dryRun = false, targets = AGENT_TARGETS, only, desired, skipTracked, override = () => false, } = {}) {
+export function syncHookScripts(root, { dryRun = false, targets = AGENT_TARGETS, desired, skipTracked, override = () => false, } = {}) {
     return withAgentAssetLifecycleLock(root, dryRun, () => {
         const src = join(packageDir(), 'agents-hooks');
         const dirs = hookDirs(targets);
@@ -52,14 +50,6 @@ export function syncHookScripts(root, { dryRun = false, targets = AGENT_TARGETS,
             .map((e) => e.name);
         const manifestPath = join(root, '.devkit', 'agent-hooks-manifest.json');
         const decoded = readAgentAssetManifest(manifestPath, 'hooks');
-        if (only?.length && desired)
-            throw new Error('syncHookScripts: only and desired are mutually exclusive');
-        if (only?.length) {
-            const unknown = only.filter((n) => !rels.includes(n));
-            if (unknown.length)
-                throw new Error(`sync-hooks --only: devkit ships no hook named ${unknown.join(', ')}`);
-            rels = rels.filter((r) => only.includes(r));
-        }
         if (desired) {
             const unknown = desired.filter((name) => !rels.includes(name));
             if (unknown.length)
@@ -82,7 +72,6 @@ export function syncHookScripts(root, { dryRun = false, targets = AGENT_TARGETS,
                 dryRun,
                 skipTracked,
                 override,
-                retainUnspecified: Boolean(only?.length),
                 fileMode: 0o755,
             });
             const reported = new Set();
@@ -100,7 +89,7 @@ export function syncHookScripts(root, { dryRun = false, targets = AGENT_TARGETS,
         assertLegacyAssetWriterCompatible(decoded, targets, 'hooks');
         const prev = decoded?.manifest ?? null;
         const conflicts = new Set(findConflicts(root, src, rels, targets, 'hooks', prev));
-        const files = only?.length ? { ...(prev?.files ?? {}) } : {};
+        const files = {};
         if (desired) {
             const kept = new Set(rels);
             const oldNames = new Set(Object.keys(prev?.files ?? {}).map((rel) => rel.split('/')[0]));
@@ -248,6 +237,8 @@ export function installHookRegistrations(root, componentIds, { dryRun = false, t
                     installed.ownershipEntries.length > 0,
             };
             published = publishPlan(root, plan, entries, published, dryRun);
+            const deselected = asDropped(removed.removed, 'deselected');
+            reportDropped(rel, [...retired.dropped, ...deselected], dryRun);
             if (plan.report)
                 wrote.push(plan.rel);
         }
@@ -301,6 +292,8 @@ export function removeHookRegistrations(root, { dryRun = false, targets = AGENT_
                 changed: retired.changed || removed.changed,
             };
             published = publishPlan(root, plan, entries, published, dryRun);
+            const uninstalled = asDropped(removed.removed, 'uninstalled');
+            reportDropped(rel, [...retired.dropped, ...uninstalled], dryRun);
             if (plan.changed)
                 stripped.add(rel);
         }

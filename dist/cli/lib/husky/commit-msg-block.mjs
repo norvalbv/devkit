@@ -59,7 +59,7 @@ elif [ "$crc" -eq 4 ]; then
     echo "   NOT a gate rejection — no defect was named; the staged content itself is unreadable."
     exit 1
 elif [ "$crc" -eq 3 ]; then
-    echo "   guard-review completeness: judge unavailable — strict ship mode failed closed."
+    echo "   guard-review completeness: judge unavailable or returned no verdict — strict ship mode failed closed."
     echo "   Follow the judge CLI remedy printed above, then re-run devkit ship (cleared judgements are cached)."
     exit 1
 fi

@@ -104,14 +104,6 @@ export const HOOK_REGISTRATIONS = {
             command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/adhd-prompt-anchor.mjs"',
         },
     ],
-    // Deny-once step-0 ordering gate: the first ExitPlanMode or feature-critique dispatch in a
-    // session with no recorded prior-art run is denied once (the denial writes a session snooze);
-    // the PostToolUse half records prior-art runs. Carve-out ruled in
-    // docs/decisions/devkit-gates-repo-not-harness.md (2026-08-09): it orders devkit's OWN shipped
-    // workflow stages and reads only tool identity + subagent_type. Run detection is deliberately
-    // PostToolUse-on-Task, NOT SubagentStop — that capture path stays dead code per
-    // docs/decisions/prior-art-before-plan.md. No cursorEvent: Cursor has no ExitPlanMode/Task, so
-    // nativeProjection skips Cursor entirely.
     // Base-drift advisories (sc-2297). SessionStart carries the whole-repo picture at the moment an
     // agent forms its mental model — the loss this prevents is booked at READ time, hours before any
     // gate runs. PreToolUse narrows to the exact file being written. Both are advisory: they emit
@@ -135,6 +127,8 @@ export const HOOK_REGISTRATIONS = {
             cursorMatcher: 'Write',
         },
     ],
+    // Deny-once step-0 ordering gate: the first file edit, ExitPlanMode or feature-critique dispatch of
+    // a session with no recorded prior-art run is denied once. No cursorEvent: Cursor can't satisfy it.
     priorArtGate: [
         {
             registrationId: 'prior-art-gate:pre-plan',
@@ -142,6 +136,24 @@ export const HOOK_REGISTRATIONS = {
             matcher: 'ExitPlanMode|Task|Agent',
             command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs"',
         },
+        // The `edit` argv only keeps this command distinct from pre-plan's (the ledger rejects one
+        // command under two matcher groups); the script itself decides by tool_name.
+        {
+            registrationId: 'prior-art-gate:pre-edit',
+            event: 'PreToolUse',
+            matcher: 'Edit|Write|MultiEdit',
+            command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs" edit',
+        },
+        // Claude-only: Codex reports shell as Bash but cannot record a prior-art run, and Cursor would map
+        // this to beforeShellExecution. The classifier loads from devkit's build, never this synced copy.
+        {
+            registrationId: 'prior-art-gate:pre-bash',
+            event: 'PreToolUse',
+            matcher: 'Bash',
+            command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs" bash',
+            providers: ['claude'],
+        },
+        // Run detection is PostToolUse-on-Task, not SubagentStop.
         {
             registrationId: 'prior-art-gate:post-task',
             event: 'PostToolUse',
@@ -197,6 +209,15 @@ export const HOOK_REGISTRATIONS = {
             event: 'PostToolUse',
             matcher: 'Edit|Write|MultiEdit',
             command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/anti-slop-preflight.sh"',
+        },
+    ],
+    // comments: the edit-time preview of guard-comments, owned by that guard. Advisory only.
+    comments: [
+        {
+            registrationId: 'comments:preflight',
+            event: 'PostToolUse',
+            matcher: 'Edit|Write|MultiEdit',
+            command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/comment-budget-preflight.mjs"',
         },
     ],
     // fallow: devkit's staged-scope wrapper. Bound to the FALLOW component, not agentHooks — a repo

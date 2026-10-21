@@ -8,7 +8,8 @@ export const REGRESSION_EVIDENCE_SCHEMA = 4;
 export const SKIPPED_ON_GREEN = 'every red-failing test was skipped on green';
 // A repeated name keeps its worst outcome, so a later pass never hides an earlier failure.
 const OUTCOME_RANK = { passed: 0, skipped: 1, failed: 2 };
-const MAX_FAILURES = 10;
+/** The most failures, and the most file errors, a report summary keeps per run. */
+export const MAX_FAILURES = 10;
 const MAX_FAILURE_CHARS = 600;
 const MAX_FAILURE_NAME_CHARS = 240;
 function parseJson(raw) {
@@ -238,12 +239,14 @@ function renderCounts(counts) {
 function renderExit(operand) {
     return operand.signal ? `signal ${operand.signal}` : String(operand.exitCode);
 }
-export function inlineJson(value) {
-    const json = JSON.stringify(stripVTControlCharacters(value));
-    const longest = Math.max(0, ...(json.match(/`+/g)?.map((run) => run.length) ?? []));
+/** A code span for any text: the fence outruns every backtick run; padding guards edges and ''. */
+export function codeSpan(text) {
+    const longest = Math.max(0, ...(text.match(/`+/g)?.map((run) => run.length) ?? []));
     const fence = '`'.repeat(longest + 1);
-    return `${fence}${json}${fence}`;
+    const pad = text === '' || /^`|`$/.test(text) ? ' ' : '';
+    return `${fence}${pad}${text}${pad}${fence}`;
 }
+export const inlineJson = (value) => codeSpan(JSON.stringify(stripVTControlCharacters(value)));
 export function fencedJson(value) {
     const json = JSON.stringify(value, null, 2);
     const longest = Math.max(0, ...(json.match(/~+/g)?.map((run) => run.length) ?? []));

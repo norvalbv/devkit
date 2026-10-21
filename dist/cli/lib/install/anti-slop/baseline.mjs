@@ -44,7 +44,7 @@ export function baselineFromGroups(groups) {
         upstreamCommit: ANTI_SLOP_UPSTREAM,
         entries: [...groups]
             .sort((a, b) => a.fingerprint.localeCompare(b.fingerprint))
-            .map(({ severity: _severity, line: _line, column: _column, ...entry }) => entry),
+            .map(({ severity: _severity, line: _line, column: _column, locations: _locations, ...entry }) => entry),
     };
 }
 export function parseBaseline(json, source = ANTI_SLOP_BASELINE_REL) {
@@ -87,17 +87,52 @@ export function readBaseline(cwd) {
 export function writeBaseline(cwd, baseline) {
     writeFileAtomic(join(cwd, ANTI_SLOP_BASELINE_REL), `${JSON.stringify(baseline, null, 2)}\n`);
 }
+const sameFileKey = (finding) => JSON.stringify([finding.ruleId, finding.file, finding.diagnostic]);
+/**
+ * Second matching pass: an unmatched finding takes over, one-for-one, debt that vanished from an
+ * entry with the same rule, file and diagnostic, so editing elsewhere on a debt line is not new.
+ */
+export function editedLineCredit(entries, groups) {
+    const allowed = new Map(entries.map((entry) => [entry.fingerprint, entry.count]));
+    const current = new Map(groups.map((group) => [group.fingerprint, group.count]));
+    const pool = new Map();
+    for (const entry of [...entries].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint))) {
+        const vanished = entry.count - (current.get(entry.fingerprint) ?? 0);
+        if (vanished <= 0)
+            continue;
+        const key = sameFileKey(entry);
+        pool.set(key, [...(pool.get(key) ?? []), { fingerprint: entry.fingerprint, count: vanished }]);
+    }
+    const credit = { granted: new Map(), consumed: new Map() };
+    const ordered = [...groups].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.column - b.column);
+    for (const group of ordered) {
+        let excess = group.count - (allowed.get(group.fingerprint) ?? 0);
+        for (const source of pool.get(sameFileKey(group)) ?? []) {
+            const take = Math.min(excess, source.count);
+            if (take <= 0)
+                continue;
+            source.count -= take;
+            excess -= take;
+            credit.granted.set(group.fingerprint, (credit.granted.get(group.fingerprint) ?? 0) + take);
+            credit.consumed.set(source.fingerprint, (credit.consumed.get(source.fingerprint) ?? 0) + take);
+        }
+    }
+    return credit;
+}
 export function compareBaseline(baseline, groups) {
     const allowed = new Map(baseline.entries.map((entry) => [entry.fingerprint, entry.count]));
     const current = new Map(groups.map((group) => [group.fingerprint, group.count]));
+    const { granted, consumed } = editedLineCredit(baseline.entries, groups);
+    const swappedCount = [...consumed.values()].reduce((sum, count) => sum + count, 0);
     return {
         newGroups: groups.flatMap((group) => {
-            const additionalCount = Math.max(0, group.count - (allowed.get(group.fingerprint) ?? 0));
+            const additionalCount = Math.max(0, group.count - (allowed.get(group.fingerprint) ?? 0) - (granted.get(group.fingerprint) ?? 0));
             return additionalCount > 0 ? [{ ...group, additionalCount }] : [];
         }),
         currentCount: groups.reduce((sum, group) => sum + group.count, 0),
         debtCount: baseline.entries.reduce((sum, entry) => sum + entry.count, 0),
-        resolvedCount: baseline.entries.reduce((sum, entry) => sum + Math.max(0, entry.count - (current.get(entry.fingerprint) ?? 0)), 0),
+        resolvedCount: baseline.entries.reduce((sum, entry) => sum + Math.max(0, entry.count - (current.get(entry.fingerprint) ?? 0)), 0) - swappedCount,
+        swappedCount,
     };
 }
 /**
@@ -160,10 +195,11 @@ export function baselineIncreases(base, candidate, renames = new Map(), activate
 /** Return only still-present baseline debt; never add an unbaselined current finding. */
 export function pruneBaseline(baseline, groups) {
     const current = new Map(groups.map((group) => [group.fingerprint, group.count]));
+    const { consumed } = editedLineCredit(baseline.entries, groups);
     return {
         ...baseline,
         entries: baseline.entries.flatMap((entry) => {
-            const count = Math.min(entry.count, current.get(entry.fingerprint) ?? 0);
+            const count = Math.min(entry.count, (current.get(entry.fingerprint) ?? 0) + (consumed.get(entry.fingerprint) ?? 0));
             return count > 0 ? [{ ...entry, count }] : [];
         }),
     };

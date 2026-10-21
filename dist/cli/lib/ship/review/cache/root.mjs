@@ -5,7 +5,7 @@ import { lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { runDirectReviewCli } from '../run-direct.mjs';
-import { reviewPathWithin } from '../runtime-paths.mjs';
+import { reviewPathsOverlap, reviewPathWithin } from '../runtime-paths.mjs';
 import { errorMessage, fail, gitEnvironment } from '../shared/common.mjs';
 const REVIEW_CACHE_NAMESPACE = 'devkit-review-cache-v1';
 const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
@@ -128,11 +128,8 @@ function cacheIdentity(commonDirectory, repositoryHistory, targetRelativePath) {
     }
     return hash.digest('hex');
 }
-function pathsOverlap(first, second) {
-    return reviewPathWithin(first, second) || reviewPathWithin(second, first);
-}
 function overlapsAny(path, excludedRoots) {
-    return excludedRoots.some((root) => pathsOverlap(root, path));
+    return excludedRoots.some((root) => reviewPathsOverlap(root, path));
 }
 /** Resolve and create one stable cache namespace for a physical repo + package target. */
 export function reviewCacheRoot(requestedTarget, requestedTempRoot, options = {}) {

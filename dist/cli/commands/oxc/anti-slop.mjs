@@ -196,8 +196,9 @@ function check(cwd, args, envelope = null, baseRef) {
         const errors = newGroups.filter((group) => group.severity === 'error');
         const warnings = newGroups.filter((group) => group.severity === 'warning');
         const newErrorCount = errors.reduce((sum, group) => sum + group.additionalCount, 0);
+        const overlay = isOverlayOxcInstall(cwd);
         if (relocated.some((group) => group.severity === 'error')) {
-            reportRelocatedFailure(newErrorCount, relocated, baseRef);
+            reportRelocatedFailure(newErrorCount, relocated, overlay, baseRef);
             recordErrorLocations(errors);
             reportOverlayContract(cwd);
             return 1;
@@ -205,7 +206,6 @@ function check(cwd, args, envelope = null, baseRef) {
         if (errors.length > 0) {
             failLine(`anti-slop: FAIL — ${newErrorCount} new error finding(s); baseline unchanged`);
             recordErrorLocations(errors);
-            const overlay = isOverlayOxcInstall(cwd);
             for (const line of antiSlopFailRemedy(errors, baseline, overlay, baseRef))
                 console.error(line);
             // Reported on the FAIL path too: a committer reading a block needs the same standing about
@@ -213,7 +213,7 @@ function check(cwd, args, envelope = null, baseRef) {
             reportOverlayContract(cwd);
             return 1;
         }
-        console.log(`anti-slop: PASS — ${comparison.currentCount} current finding(s), ${comparison.resolvedCount} ready to prune${warnings.length ? `, ${warnings.length} warning fingerprint(s)` : ''}${relocatedWarningNote(relocated, baseRef)}`);
+        console.log(`anti-slop: PASS — ${comparison.currentCount} current finding(s), ${comparison.resolvedCount} ready to prune${comparison.swappedCount ? `, ${comparison.swappedCount} carried from edited lines` : ''}${warnings.length ? `, ${warnings.length} warning fingerprint(s)` : ''}${relocatedWarningNote(relocated, baseRef)}`);
         reportOverlayContract(cwd);
         return 0;
     }

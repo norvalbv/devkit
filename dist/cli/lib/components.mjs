@@ -200,10 +200,11 @@ export function applyOverlayConstraints(sel, stack) {
         husky: true,
     };
 }
-/** The line an overlay prints for a component package mode would run but overlay cannot. */
+/** The SKIP line an overlay hook echoes for the structure gate package mode would run but overlay
+ * cannot, naming the repo's own eslint config as the only structure check left. */
 export function overlayStructureNotice(stack) {
     return STRUCTURE_STACKS.has(stack) && !CONFIG_DRIVEN_STRUCTURE.has(stack)
-        ? `structure: not available in overlay for ${stack}`
+        ? `⚠️ structure-lint: SKIPPED in overlay for ${stack} — devkit's structure gate cannot run here; any structure check comes only from this repo's own eslint config, via the eslint overlay step on staged files`
         : null;
 }
 /** Normalise a (possibly partial) selection to a full one — missing keys take recommended defaults. */
@@ -287,7 +288,7 @@ export const OPTIONAL_COMPONENTS = [
         id: 'priorArtGate',
         kind: 'hook',
         label: 'prior-art gate',
-        hint: 'deny-once PreToolUse gate: plans must run (or explicitly skip) step-0 prior-art',
+        hint: 'deny-once PreToolUse gate: run (or explicitly skip) step-0 prior-art before editing',
         flag: '--prior-art-gate',
         since: '0.51.0',
     },

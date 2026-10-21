@@ -33,9 +33,11 @@ import path from 'node:path';
 
 const MUTATING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
 const PATH_KEYS = ['file_path', 'path', 'target_file', 'target_path'];
-/** Keep a brief short enough to be read: the ruling is the payload, the rest is a pointer. */
-const RULING_CHARS = 320;
+/** The ruling is the payload: a clause cut from view goes unkept, so only outlier rulings are cut. */
+const RULING_CHARS = 2000;
 const MAX_AXES = 3;
+/** Claude Code swaps a longer additionalContext for a file path and a short preview. */
+const MAX_BRIEF_CHARS = 10_000;
 
 function readInput() {
   try {
@@ -58,6 +60,25 @@ function resolveBin(root) {
   const which = spawnSync('command', ['-v', 'guard-decisions'], { encoding: 'utf8', shell: true });
   const found = which.stdout?.trim();
   return found || null;
+}
+
+/** `git rev-parse` output lines for `dir`, or [] when it is not inside a git work tree. */
+function revParse(dir, ...args) {
+  const run = spawnSync('git', ['-C', dir, 'rev-parse', ...args], { encoding: 'utf8' });
+  return run.status === 0 ? run.stdout.split('\n') : [];
+}
+
+/**
+ * The checkout to brief on. The payload cwd follows the agent into a linked worktree while
+ * CLAUDE_PROJECT_DIR stays put; a cwd in the same checkout or an unrelated repository keeps the root.
+ */
+function workspaceRoot(input) {
+  const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  if (!input?.cwd?.trim?.()) return root;
+  const at = ['--path-format=absolute', '--show-toplevel', '--git-common-dir'];
+  const [cdup, top, common] = revParse(input.cwd, '--show-cdup', ...at);
+  const [rootTop, rootCommon] = revParse(root, ...at);
+  return common && top !== rootTop && common === rootCommon ? path.resolve(input.cwd, cdup) : root;
 }
 
 /** One brief per (session, file): the stamp marking that `key` was briefed in this session. */
@@ -106,7 +127,7 @@ function main() {
   const file = filePathOf(input);
   if (!file) return;
 
-  const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const root = workspaceRoot(input);
   const rel = path.isAbsolute(file) ? path.relative(root, file) : file;
   // Outside the project (or above it) is not ours to brief on.
   if (!rel || rel.startsWith('..')) return;
@@ -185,7 +206,7 @@ function main() {
     `--evidence-change "<what shifted>"\`. Full text: \`guard-decisions show <slug>\`.\n\n` +
     `${lines.join('\n')}${more}`;
 
-  emit(brief);
+  emit(brief.length > MAX_BRIEF_CHARS ? `${brief.slice(0, MAX_BRIEF_CHARS - 1)}…` : brief);
 }
 
 try {

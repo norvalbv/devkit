@@ -991,10 +991,20 @@ review_phase verdict
 REVIEW_NOTICE_SUFFIX=
 if [ -s "$REVIEW_NOTICES" ]; then
   reasons=$(sed -n 's/^coverage=not-measured reason=\([a-z]*\)$/\1/p' "$REVIEW_NOTICES" | sort -u | paste -sd, - || true)
+  skipped=$(sed -n 's/^gate=\([A-Za-z0-9._-]*\) opted-out$/\1/p' "$REVIEW_NOTICES" | sort -u || true)
+  # A coverage opt-out already reads NOT MEASURED; naming it again would say it twice.
+  [ -z "$reasons" ] || skipped=$(printf '%s\n' "$skipped" | grep -vx guard-coverage || true)
+  skipped=$(printf '%s\n' "$skipped" | sed '/^$/d' | paste -sd, - || true)
+  notices=
   if [ -n "$reasons" ]; then
     REVIEW_NOTICE_SUFFIX=" — coverage NOT MEASURED ($reasons)"
-    REVIEW_NOTICE_TRAILER=" notices=coverage-not-measured"
+    notices=coverage-not-measured
   fi
+  if [ -n "$skipped" ]; then
+    REVIEW_NOTICE_SUFFIX="$REVIEW_NOTICE_SUFFIX — did NOT run: $skipped"
+    notices=${notices:+$notices,}gates-opted-out
+  fi
+  [ -z "$notices" ] || REVIEW_NOTICE_TRAILER=" notices=$notices"
 fi
 
 if [ "$FORMAT_CHANGED" -eq 1 ]; then

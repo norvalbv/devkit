@@ -122,9 +122,9 @@ export const DEFAULTS = Object.freeze({
     noLog: false, // GUARD_NO_LOG / GUARD_DECISION_NO_LLM (+ FRINK_* aliases)
     noLlm: false,
 });
-/** A millisecond duration, or undefined for anything that is not a usable positive number. */
+/** Whole ms, rounded up (Node rejects a fractional child_process timeout); else undefined. */
 function positiveMs(v) {
-    return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
+    return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.ceil(v) : undefined;
 }
 export function envVar(name) {
     const guard = process.env[`GUARD_${name}`];

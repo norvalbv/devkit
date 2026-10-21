@@ -143,7 +143,9 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
     // Both forms name every in-scope staged file; only the checklist reviewers have the Bash to verify a churn
     // count, so the Bash-less one is given the inventory without it.
     // The index the judge's evidence is cut from; grounding refuses a tree restaged after this point.
-    const evidenceTree = responseContractFor(reviewer.responseContract) ? stagedTreeHash(cwd) : null;
+    const evidenceTree = responseContractFor(reviewer.responseContract)
+        ? stagedTreeHash(cwd, 'reviewer evidence tree')
+        : null;
     const inventory = hasChecklist(reviewer)
         ? gitCached(cwd, ['--stat'], files)
         : `STAGED FILES (in scope):\n${gitCached(cwd, ['--name-only'], files)}`;

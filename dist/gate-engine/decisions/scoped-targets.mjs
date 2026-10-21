@@ -17,6 +17,7 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { matchesRepoGlob } from '../../skills/_devkit/review-roots.mjs';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
 import { emitGateEvent } from '../judge/gate-events.mjs';
 import { clip, EVENT_BUDGET } from '../judge/odb-probe.mjs';
@@ -71,6 +72,23 @@ export async function scopedTargets(files, query, k = 6, cwd = process.cwd()) {
         }
     }
     return blocks;
+}
+/** A block's best literal-prefix length over the globs that match `files`; leading `**` scores 0. */
+function specificity(files, block) {
+    let best = -1;
+    for (const glob of block.scope?.split(',').map((g) => g.trim()) ?? []) {
+        const literal = glob.search(/[*?]/);
+        if (files.some((f) => matchesRepoGlob(f, glob)))
+            best = Math.max(best, literal === -1 ? glob.length : literal);
+    }
+    return best;
+}
+/** Scope matches most-specific first (stable, so ties keep readdir order); semantic rows stay last. */
+export function rankBySpecificity(files, blocks) {
+    const scored = blocks.filter((b) => b.via === 'scope-match');
+    const score = new Map(scored.map((b) => [b, specificity(files, b)]));
+    scored.sort((a, b) => (score.get(b) ?? 0) - (score.get(a) ?? 0));
+    return [...scored, ...blocks.filter((b) => b.via !== 'scope-match')];
 }
 function flag(args, name) {
     const i = args.indexOf(name);
@@ -128,6 +146,7 @@ export async function main(args) {
     const query = flag(args, '--query') ?? '';
     const top = Number.parseInt(flag(args, '--top') ?? '6', 10) || 6;
     await scopedTargets(files, query, top)
+        .then((blocks) => rankBySpecificity(files, blocks))
         .then((blocks) => {
         process.stdout.write(JSON.stringify(blocks));
         if (brief && blocks.length)

@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { writeFileAtomic } from './atomic-write.mjs';
 import { currentTarget, hasTargetFields, parseDecision, parseIndex, parseTargetFields, renderDecision, renderIndex, renderNote, renderTarget, foldLines, sanitizeCell, today, warnIfFolded, whyHook, } from './decision-format.mjs';
+import { noteTextWithRelation } from './recall/note-relations.mjs';
 import { effectiveScope } from './recall/retrieval.mjs';
 const TRAILING_WS_RE = /\s*$/;
 const TIMELINE_ENTRY_RE = /^(?:## Target · \d{4}-\d{2}-\d{2}\b.*|- \d{4}-\d{2}-\d{2}\s+—\s+.*)$/gm;
@@ -134,6 +135,14 @@ function warnTargetReplacement(replacedText, body, hasTrailing, options) {
             'append a new rescope note if the amended Scope should govern.');
     }
 }
+/** Name the declared supersession a note amendment drops by not re-passing --supersedes. */
+function warnDroppedAmends(replacedText, supersedes) {
+    if (supersedes?.trim() || !replacedText.replace(NOTE_PREFIX_RE, '').startsWith('**Amends:**')) {
+        return;
+    }
+    console.error('warning: the replaced note carried **Amends:** and this amendment omits --supersedes; ' +
+        'pass the flag again to keep it.');
+}
 function regenerateIndex(paths) {
     const previous = existsSync(paths.indexPath)
         ? parseIndex(readFileSync(paths.indexPath, 'utf8'))
@@ -223,8 +232,10 @@ export function amendDecision(slug, options, paths) {
     const source = workingParsed.body;
     const before = source.slice(0, selected.start).replace(TRAILING_WS_RE, '');
     if (!(options.isTarget && hasTargetFields(options))) {
-        const body = `${before}\n${renderNote(date, options.note ?? '')}\n`;
+        const note = noteTextWithRelation(options.note ?? '', options.supersedes, before, slug);
+        const body = `${before}\n${renderNote(date, note)}\n`;
         writeFileAtomic(file, renderDecision({ slug, created: workingParsed.fm.created || date }, body));
+        warnDroppedAmends(selected.text, options.supersedes);
         console.log(`Amended draft note on "${slug}" (${date}).`);
         return;
     }

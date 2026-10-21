@@ -7,7 +7,7 @@
  *   devkit doctor [--fix]
  *   devkit review [--target <path>] [--base <ref>]
  *   devkit sync-skills [--dry-run]
- *   devkit sync-hooks [--only <a.sh,b.mjs>] [--targets <claude,cursor>] [--dry-run] [--force]
+ *   devkit sync-hooks [--targets <claude,cursor>] [--dry-run] [--force]
  *   devkit sync-hook-runner [--dry-run]
  *   devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes]   (maintainer-only)
  *   devkit --version
@@ -46,6 +46,7 @@ const COMMANDS = {
     review: () => import('./commands/review.mjs'),
     'guard-branch': () => import('./commands/guard-branch.mjs'),
     'base-status': () => import('./commands/base-drift/base-status.mjs'),
+    'follow-up': () => import('./commands/follow-up/follow-up.mjs'),
     'coverage-run': () => import('./commands/coverage/run.mjs'),
     'coverage-diff': () => import('./commands/coverage/diff.mjs'),
     'test-report-run': () => import('./commands/baseline/test-report-run.mjs'),

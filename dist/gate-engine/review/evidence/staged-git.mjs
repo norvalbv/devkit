@@ -5,7 +5,7 @@
  * JSON.stringify-quoted) lets a crafted path like `$(cmd).ts` expand before git runs.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { commitIndexEnv } from '../../ratchets/commit-index.mjs';
+import { commitIndexEnv, commitIndexTree } from '../../ratchets/commit-index.mjs';
 import { normalizeRepositoryFile } from '../../../skills/_devkit/review-roots.mjs';
 export function gitCached(cwd, args, files) {
     const pathspecs = files.map((file) => `:(top,literal)${normalizeRepositoryFile(file, 'review evidence file')}`);
@@ -105,19 +105,21 @@ export function stagedFiles(cwd) {
  * codex judges run workspace-write (the checklist state file needs cwd writes and codex cannot
  * confine cwd), so the gate snapshots the staged tree before the judge wave and refuses to pass
  * if ANY judge changed what would be committed — tamper DETECTION where prevention is impossible.
+ * Hashed from a private index copy so parallel gates never race on index.lock. `use` names what
+ * loses the tree on failure; that stderr line is narration, never part of the return value.
  */
-export function stagedTreeHash(cwd) {
-    try {
-        return (execFileSync('git', ['write-tree'], {
-            cwd,
-            env: commitIndexEnv(cwd),
-            encoding: 'utf8',
-        }).trim() || null);
+export function stagedTreeHash(cwd, use) {
+    const result = commitIndexTree(cwd);
+    if (result.tree !== null)
+        return result.tree;
+    const line = `guard-review: could not hash the staged tree (${use}): ${result.error.replace(/\s+/g, ' ')}\n`;
+    if (!reportedTreeFailures.has(line)) {
+        reportedTreeFailures.add(line);
+        process.stderr.write(line);
     }
-    catch {
-        return null;
-    }
+    return null;
 }
+const reportedTreeFailures = new Set();
 /** HEAD identity, `unborn:<ref>` before the first commit (a determinate state carrying the
  * symbolic target, so even switching unborn branches reads as movement), or null when HEAD is
  * UNREADABLE — callers must fail closed on null, never fold it into a determinate state, or two

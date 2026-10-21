@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+// Frozen review runtime: local imports must be listed in PACKAGED_REVIEW_RUNTIME_MODULE_STEMS.
 import { FALLOW_CONFIG_FILES, parseDiffHunks, rewriteFallowBaseline, } from './baseline-fallow-paths.mjs';
 const METADATA_FILE = 'metadata.json';
 const SOURCE_EXT_RE = /\.(?:[cm]?[jt]sx?)$/i;

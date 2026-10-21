@@ -409,7 +409,7 @@ export function decide(input, cwd, rand) {
     // draft-ness is set when a PR is CREATED — ship rejects `--draft` alongside `--pr`. Splicing the
     // same extras into both suggestions would therefore hand agents a re-push command that always
     // fails. New-ship-only flags are dropped from the --pr form rather than disabling the config.
-    const NEW_SHIP_ONLY = new Set(['--draft']);
+    const NEW_SHIP_ONLY = new Set(['--draft', '--no-stack']);
     const prExtras = joinExtras(cfg.extraArgs.filter((a) => !NEW_SHIP_ONLY.has(a)));
     // A multi-`-m` body is passed via `--body '<body>'` so the agent copy-pastes ONE clean command
     // (no stdin pipe, no temp file) and the body lands on the PR. q() single-quotes it so embedded

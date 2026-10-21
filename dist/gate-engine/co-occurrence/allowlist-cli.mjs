@@ -84,11 +84,14 @@ function usageError(msg) {
 }
 // A frozen baseline entry: 3650-day decay or a "baseline …" description (matcher runBaseline).
 const isBaseline = (p) => String(p.description ?? '').startsWith('baseline ') || (p.decayDays ?? 0) >= BASELINE_DECAY;
-// A decay of < 1 day is instantly expired — the approval would report success yet the gate
-// would keep blocking (a silently useless entry). Reject it rather than write a dead approval.
+// A decay < 1 day is instantly expired, a malformed one silently falls back to the default, and a
+// fraction disagrees with list's whole-day display. Refuse all three before any write.
 function requirePositiveDecay(flags) {
-    const d = numFlag(flags['decay-days']);
-    if (d !== undefined && d < 1)
+    const raw = flags['decay-days'];
+    if (raw === undefined)
+        return undefined;
+    const d = Number(String(raw)); // a bare flag is `true`: String() makes it NaN, not 1
+    if (!Number.isInteger(d) || d < 1)
         usageError('--decay-days must be an integer >= 1.');
     return d;
 }
@@ -232,6 +235,7 @@ const rangeOf = (s, e) => {
 // gate that blocks on its entire pre-existing debt. Prior baseline entries are replaced; entries
 // a human wrote are kept, so a re-freeze never silently discards a reasoned approval.
 function runBaselineClones({ flags }) {
+    const decayDays = requirePositiveDecay(flags) ?? BASELINE_DECAY;
     let scanned;
     try {
         scanned = JSON.parse(readFileSync(0, 'utf8'));
@@ -246,7 +250,6 @@ function runBaselineClones({ flags }) {
     const date = today();
     const kept = clones.filter((c) => !String(c.description ?? '').startsWith('baseline '));
     const seen = new Set(kept.map((c) => c.fragmentHash));
-    const decayDays = numFlag(flags['decay-days']) ?? BASELINE_DECAY;
     let added = 0;
     for (const c of scanned) {
         if (!c.fragmentHash || seen.has(c.fragmentHash))

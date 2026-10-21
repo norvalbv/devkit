@@ -68,12 +68,20 @@ export function groupFindings(findings) {
     for (const finding of findings) {
         const current = groups.get(finding.fingerprint);
         if (!current) {
-            groups.set(finding.fingerprint, { ...finding, count: 1 });
+            const locations = [{ line: finding.line, column: finding.column }];
+            groups.set(finding.fingerprint, { ...finding, count: 1, locations });
             continue;
         }
         current.count += 1;
+        current.locations.push({ line: finding.line, column: finding.column });
         if (finding.severity === 'error')
             current.severity = 'error';
     }
     return [...groups.values()].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint));
+}
+/** Every site of a group, labelled with how many of its identical findings the caller counts. */
+export function formatGroupSites(group, counted, label) {
+    const sites = group.locations.map(({ line, column }) => `${group.file}:${line}:${column}`);
+    const of = group.count > 1 ? ` of ${group.count} identical` : '';
+    return `${sites.join(', ')} (${counted} ${label}${of})`;
 }

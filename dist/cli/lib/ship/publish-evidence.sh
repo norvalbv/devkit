@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Sourced by ship-branch.sh and reship.sh. The PR already exists when these run, so both are
-# fail-open and errexit-safe: evidence can be missing or inconclusive, never a failed or hung ship.
+# Sourced by ship-branch.sh and reship.sh. Evidence is fail-open: missing or inconclusive, never a
+# failed or hung ship. A caller body for an existing PR fails closed when that PR cannot be read.
 # The caller sets SCRIPT_DIR.
 
 evidence_run_script() {

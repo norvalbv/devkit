@@ -34,17 +34,10 @@ export function resolveScope(coverage) {
     }
     return { scope, min: min.data };
 }
-/** Added, modified and renamed regular files between HEAD and the commit's index. */
-function stagedChanges(top) {
-    const tokens = git(top, [
-        'diff',
-        '--cached',
-        '--raw',
-        '-z',
-        '-M',
-        '--diff-filter=AMR',
-        'HEAD',
-    ]).split('\0');
+/** Added, modified and renamed regular files `rev` names: `--cached HEAD` is the commit's index, a
+ * bare merge-base sha is the working tree. */
+function changedFiles(top, rev) {
+    const tokens = git(top, ['diff', '--raw', '-z', '-M', '--diff-filter=AMR', ...rev]).split('\0');
     const out = [];
     for (let i = 0; i < tokens.length;) {
         const head = tokens[i++] ?? '';
@@ -59,22 +52,22 @@ function stagedChanges(top) {
     }
     return out;
 }
-/** Repo-relative path → the lines its staged version adds, for production source with any added. */
-function addedProductionLines(top, classify) {
+/** Repo-relative path → the lines it adds over `rev`, for production source with any added. Shared
+ * with `devkit coverage-diff`, so the report and the gate judge the same lines. */
+export function addedProductionLines(top, isProduction, rev) {
     const out = new Map();
-    for (const { path, from } of stagedChanges(top)) {
-        if (classify(path, false) !== 'production')
+    for (const { path, from } of changedFiles(top, rev)) {
+        if (!isProduction(path))
             continue;
         const spec = from ? [from, path] : [path];
         const patch = git(top, [
             'diff',
-            '--cached',
             '-U0',
             '-M',
             '--no-color',
             '--no-ext-diff',
             '--no-textconv',
-            'HEAD',
+            ...rev,
             '--',
             ...spec,
         ]);
@@ -83,6 +76,20 @@ function addedProductionLines(top, classify) {
             out.set(path, added);
     }
     return out;
+}
+/** The classifier both diff-scope readers use: a package gate owns only its subtree. */
+export function diffClassifier(cwd, top) {
+    return classifier(resolveGuardConfig(cwd).sourceExtensions, relative(canonicalPath(top), canonicalPath(cwd)).replaceAll('\\', '/'));
+}
+const pct = (covered, total) => total === 0 ? '100%' : `${((covered / total) * 100).toFixed(1)}%`;
+/** The added-line verdict; an unmeasured file leads the reason, never a "0/0 (100%)" summary. */
+export function addedLineVerdict(covered, total, unmeasured, min) {
+    const summary = `${covered}/${total} added executable lines covered (${pct(covered, total)}, min ${min}%)`;
+    const files = unmeasured === 1 ? '1 source file' : `${unmeasured} source files`;
+    return {
+        pass: unmeasured === 0 && covered * 100 >= min * total,
+        reason: unmeasured ? `${files} with added lines never measured; ${summary}` : summary,
+    };
 }
 function failAbsent(changed, cwd, top) {
     failLine(`🚫 Coverage gate FAILED — no coverage data (${COVERAGE_FILE} absent) for added lines in:`);
@@ -103,17 +110,19 @@ function failUnreadable(file, why) {
         console.error(line);
     return 1;
 }
-const pct = (covered, total) => total === 0 ? '100%' : `${((covered / total) * 100).toFixed(1)}%`;
 /** The diff-scope gate. Exit 0 pass, 1 fail, 2 review-only NOT MEASURED. */
 export function runDiffCoverage(cwd, coverage, min, reviewMode) {
     const ignored = REPO_KEYS.filter((k) => coverage[k] !== undefined);
     if (ignored.length)
         console.log(`ℹ️  coverage.scope "diff" ignores ${ignored.join(', ')} — those are whole-repo thresholds.`);
     const top = repoTop(cwd);
-    const classify = classifier(resolveGuardConfig(cwd).sourceExtensions, relative(canonicalPath(top), canonicalPath(cwd)).replaceAll('\\', '/'));
+    const classify = diffClassifier(cwd, top);
     let added;
     try {
-        added = addedProductionLines(top, classify);
+        added = addedProductionLines(top, (p) => classify(p, false) === 'production', [
+            '--cached',
+            'HEAD',
+        ]);
     }
     catch {
         failLine('🚫 Coverage gate FAILED — git could not read the staged diff, so the added lines are unknown.');
@@ -194,13 +203,13 @@ export function runDiffCoverage(cwd, coverage, min, reviewMode) {
         if (r.total)
             rows.push(`     ${`${r.covered}/${r.total}`.padStart(7)}  ${displayPath(resolve(top, path), cwd)}${missing}`);
     }
-    const summary = `${covered}/${total} added executable lines covered (${pct(covered, total)}, min ${min}%)`;
-    if (notMeasured.length === 0 && covered * 100 >= min * total) {
-        console.log(`✓ Coverage gate passed (${summary}) — artifact ${run}.`);
+    const verdict = addedLineVerdict(covered, total, notMeasured.length, min);
+    if (verdict.pass) {
+        console.log(`✓ Coverage gate passed (${verdict.reason}) — artifact ${run}.`);
         console.log(artifactLine(file));
         return 0;
     }
-    failLine(`🚫 Coverage gate FAILED — ${summary}:`);
+    failLine(`🚫 Coverage gate FAILED — ${verdict.reason}:`);
     for (const row of rows)
         failLine(row);
     if (notMeasured.length) {

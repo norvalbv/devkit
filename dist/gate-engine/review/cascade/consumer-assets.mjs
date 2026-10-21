@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checklistAssetPath, hasChecklist } from '../reviewers.mjs';
@@ -23,16 +23,31 @@ export function reviewAgentsDir(cwd, cfg, env = process.env) {
 // The running devkit's own root (gate-engine/review/cascade → ../../..), which ships `agents/` and
 // `skills/` — keyed to import.meta.url like JSCPD_OWN_ROOT, never to the consumer's cwd (W-3).
 export const OWN_PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-/** A consumer brief under a devkit reviewer name in `reviewAgentsDir` wins; otherwise the packaged
- *  one is the brief. */
+/** True only in devkit's own repo: the gate code runs from the tree it judges, so that tree's
+ *  `agents/` and `skills/` are the sources; any `.claude` copy is a possibly stale projection. */
+function runsFromJudgedTree(cwd) {
+    try {
+        return realpathSync(OWN_PACKAGE_ROOT) === realpathSync(cwd);
+    }
+    catch {
+        return false;
+    }
+}
+/** The judged tree's own brief in self-host; else a consumer brief under a devkit reviewer name in
+ *  `reviewAgentsDir` wins, and otherwise the packaged one is the brief. */
 export function reviewBriefPath(cwd, cfg, name, packagedRoot = OWN_PACKAGE_ROOT) {
+    if (runsFromJudgedTree(cwd))
+        return path.join(OWN_PACKAGE_ROOT, 'agents', `${name}.md`);
     const consumer = path.join(reviewAgentsDir(cwd, cfg), `${name}.md`);
     return existsSync(consumer) ? consumer : path.join(packagedRoot, 'agents', `${name}.md`);
 }
-/** The skill root a checklist reviewer runs from: a consumer projection wins, else the package. */
+/** The skill root a checklist reviewer runs from: self-host's own `skills/` as a relative '.' (judge
+ *  commands splice it unquoted), else a consumer projection, else the package. */
 export function checklistAssetRoot(cwd, reviewer, packagedRoot = OWN_PACKAGE_ROOT) {
     if (!hasChecklist(reviewer))
         return packagedRoot;
+    if (runsFromJudgedTree(cwd))
+        return '.';
     const relativePath = checklistAssetPath(reviewer);
     return (CONSUMER_SKILL_ROOTS.find((root) => existsSync(path.resolve(cwd, root, relativePath))) ??
         packagedRoot);

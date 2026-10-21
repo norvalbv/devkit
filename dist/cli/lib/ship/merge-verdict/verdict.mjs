@@ -186,8 +186,10 @@ export function mergeVerdict(change, configText) {
         reasons.push({ code: 'test-only' });
     return decide(reasons);
 }
-/** The line the evidence block ends with: the verdict and the reason that decided it. */
+/** The block's verdict text: the verdict and every reason that yields it, the deciding one first. */
 export function verdictLine({ verdict, reasons }) {
-    const { code, detail } = reasons[0];
-    return `${verdict} (${code}${detail ? `: ${detail}` : ''})`;
+    const why = reasons
+        .filter(({ code }) => VERDICT_REASONS[code] === verdict)
+        .map(({ code, detail }) => (detail ? `${code}: ${detail}` : code));
+    return `${verdict} (${why.join('; ')})`;
 }

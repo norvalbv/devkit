@@ -52,11 +52,18 @@ export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
 # supervisor terminates the complete Git/helper process group on expiry (portable on macOS/Linux).
 bounded_remote_git() {
   # .mts in source, built .mjs in an installed consumer (the gate-config-paths dual-ext idiom).
-  local supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mts"
+  local supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mts" out status
   [ -f "$supervisor" ] || supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
-  # -c: a detached auto-gc/maintenance inherits the supervisor's ownership token and is reaped as a
-  # leaked tree, turning a finished fetch into 124 (sc-3761). Remote git never needs maintenance.
-  node "$supervisor" "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git -c gc.auto=0 -c maintenance.auto=false "$@"
+  # A silent 124 is a stall a fresh connection clears; output means git answered, so never re-run it.
+  for _ in 1 2; do
+    status=0
+    # -c: a detached auto-gc/maintenance inherits the supervisor's ownership token and is reaped as a
+    # leaked tree, turning a finished fetch into 124 (sc-3761). Remote git never needs maintenance.
+    out=$(node "$supervisor" "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git -c gc.auto=0 -c maintenance.auto=false "$@") || status=$?
+    [ "$status" -eq 124 ] && [ -z "$out" ] || break
+  done
+  [ -z "$out" ] || printf '%s\n' "$out"
+  return "$status"
 }
 
 # `--resume <branch>` replays the invocation the previous attempt recorded (ship-intent.mts). A
@@ -82,7 +89,7 @@ if [ "$RESUME" -eq 1 ]; then
     'ship --resume <branch> [--body-file <f>] [--] <extra-path...>'
 else
   ship_assert_positional_args "$BR" "$TITLE" \
-    'ship <branch> "<title>" [--base <b>] [--body "<text>"] [--body-file <f>] [--draft] [--link <d>]... [--] <path...>'
+    'ship <branch> "<title>" [--base <b>] [--body "<text>"] [--body-file <f>] [--draft] [--no-stack] [--link <d>]... [--] <path...>'
 fi
 
 # Arg grammar: branch + title are the first two positionals (above). The rest is a mix of
@@ -99,6 +106,7 @@ BODY_FILE_PREREAD_SET=0  # --resume banner's one --body-file read: 1 = bytes kep
 BASE_FLAG=""       # --base <branch>? else base off this checkout's HEAD/current branch
 FROM_BRANCH=0      # derive a frozen committed path set from origin/<base>..HEAD
 DRAFT=0            # --draft opens the PR as a draft; default stays ready-for-review
+NO_STACK=0         # --no-stack skips registering the PR in its base PR's GitHub stack
 RESUME_READY=0     # --ready seen under --resume, before the record reveals ship-vs-reship mode
 WAIT_CI=0          # --wait-ci polls the PR's checks after everything else is durable
 WAIT_CI_TIMEOUT=900
@@ -128,6 +136,9 @@ while [ "$#" -gt 0 ]; do
       # Allowed under --resume: the restore below only turns draft ON, so a retry can upgrade a
       # recorded non-draft. No --no-draft: once the PR exists, `gh pr ready` owns that direction.
       DRAFT=1; shift ;;
+    --no-stack)
+      # Allowed under --resume like --draft: the restore below only turns the opt-out ON.
+      NO_STACK=1; shift ;;
     --ready)
       # Under --resume the MODE is not known yet: a recorded reship arrives here first and execs into
       # reship.sh below, which does accept --ready. Rejecting at parse time would kill that hand-off
@@ -180,8 +191,8 @@ if [ "$RESUME" -eq 1 ]; then
   while IFS= read -r -d '' si_field; do SI_FIELDS+=("$si_field"); done < "$SI_OUT"
   rm -f "$SI_OUT"
   # emitFields order: mode sourceMode title base updatePrBody draft createdAt generation sourceAttemptId
-  # nlinks links... body paths... — positional, in lockstep with reship.sh's reader.
-  [ "${#SI_FIELDS[@]}" -ge 12 ] || { echo "recorded invocation is malformed — run the full devkit ship command" >&2; exit 1; }
+  # noStack nlinks links... body paths... — positional, in lockstep with reship.sh's reader.
+  [ "${#SI_FIELDS[@]}" -ge 13 ] || { echo "recorded invocation is malformed — run the full devkit ship command" >&2; exit 1; }
   SI_MODE=${SI_FIELDS[0]}
   if [ "$SI_MODE" = "reship" ]; then
     # The blocked attempt was a `--pr` re-push; hand over so the agent needn't remember which form
@@ -208,10 +219,11 @@ if [ "$RESUME" -eq 1 ]; then
   RESUME_CREATED=${SI_FIELDS[6]}
   RESUME_GENERATION=${SI_FIELDS[7]}
   RESUME_SOURCE_ATTEMPT_ID=${SI_FIELDS[8]}
-  SI_NLINKS=${SI_FIELDS[9]}
+  [ "${SI_FIELDS[9]}" != "1" ] || NO_STACK=1
+  SI_NLINKS=${SI_FIELDS[10]}
   case "$SI_NLINKS" in *[!0-9]*|'') echo "recorded invocation is malformed (nlinks '$SI_NLINKS')" >&2; exit 1 ;; esac
-  si_i=10
-  si_body_at=$((10 + SI_NLINKS))
+  si_i=11
+  si_body_at=$((11 + SI_NLINKS))
   [ "${#SI_FIELDS[@]}" -gt $((si_body_at + 1)) ] || { echo "recorded invocation is malformed (missing body/paths)" >&2; exit 1; }
   while [ "$si_i" -lt "$si_body_at" ]; do LINK_EXTRA+=("${SI_FIELDS[$si_i]}"); si_i=$((si_i + 1)); done
   RESUME_BODY=${SI_FIELDS[$si_body_at]}
@@ -350,6 +362,7 @@ if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; then
          exit 1
        fi ;;
     2) ;; # no matching remote branch → safe to create it
+    124) echo "could not verify remote branch (ls-remote exit 124: no clean finish within the ${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}s bound) — machine load or network; re-run ship, or raise DEVKIT_REMOTE_TIMEOUT_SECONDS" >&2; exit 1 ;;
     *) echo "could not verify remote branch (ls-remote exit $remote_check) — refusing to push" >&2; exit 1 ;;
   esac
 fi
@@ -480,19 +493,57 @@ else
   BASE=$(git rev-parse HEAD)   # pin once: shared HEAD may advance mid-run
 fi
 
+# Lists index/worktree/untracked/ignored overlays on the NUL-separated members; 1 when any, 2 when
+# unlisted. Callers sit in `||`, where errexit is off, so every listing failure returns explicitly.
+ship_refuse_overlays() {  # <root> <source-head> <members-file> [header-prefix]
+  local root=$1 head=$2 members=$3 prefix=${4:-} found=0 kind p listed
+  local sel=()
+  while IFS= read -r -d '' p; do sel+=(":(top,literal)$p"); done < "$members"
+  [ "${#sel[@]}" -gt 0 ] || return 0
+  listed=$(mktemp "${TMPDIR:-/tmp}/ship-branch-overlays.XXXXXX") || return 2
+  for kind in index worktree untracked ignored; do
+    case "$kind" in
+      index) git -C "$root" diff --cached --name-only -z "$head" -- "${sel[@]}" ;;
+      worktree) git -C "$root" diff --name-only -z -- "${sel[@]}" ;;
+      untracked) git -C "$root" ls-files -o --exclude-standard -z -- "${sel[@]}" ;;
+      ignored) git -C "$root" ls-files -o -i --exclude-standard -z -- "${sel[@]}" ;;
+    esac | node "$SHIP_INTENT" filter-membership --members-file "$members" > "$listed" \
+      || { echo "--from-branch: could not list $kind overlays on --from-branch paths" >&2; rm -f "$listed"; return 2; }
+    while IFS= read -r -d '' p; do
+      [ "$found" -eq 1 ] || echo "${prefix}--from-branch refuses uncommitted overlays on --from-branch paths; commit or remove these exact overlays:" >&2
+      found=1
+      printf '  %q (%s)\n' "$p" "$kind" >&2
+    done < "$listed"
+  done
+  rm -f "$listed"
+  [ "$found" -eq 0 ]
+}
+
 if [ "$FROM_BRANCH" -eq 1 ]; then
   if [ -z "$LOCAL_BRANCH_EXISTS" ]; then
     set +e
     git -C "$ROOT" merge-base --is-ancestor "$BASE" "$SOURCE_HEAD" >/dev/null 2>&1
     ancestry_status=$?
     set -e
+    ANCESTRY_MSG=
     case "$ancestry_status" in
       0) ;;
-      1) echo "${SELF_DEFER:+ship: also blocked — }--from-branch: origin/$BASE_REF (${BASE:0:7}) is not an ancestor of HEAD (${SOURCE_HEAD:0:7}); rebase/merge the base, or deepen a shallow checkout, then retry" >&2
-         [ -n "$SELF_DEFER" ] || exit 1 ;;
+      1) ANCESTRY_MSG="--from-branch: origin/$BASE_REF (${BASE:0:7}) is not an ancestor of HEAD (${SOURCE_HEAD:0:7}); rebase/merge the base, or deepen a shallow checkout, then retry"
+         [ "$RESUME" -eq 0 ] || { echo "$ANCESTRY_MSG" >&2; exit 1; } ;;
       *) echo "--from-branch: could not verify ancestry (git exit $ancestry_status); fetch/deepen the repository and retry" >&2; exit 1 ;;
     esac
-    if [ -n "$SELF_DEFER" ]; then
+    if [ -n "$SELF_DEFER$ANCESTRY_MSG" ]; then
+      # Blocked: name every cheap blocker in remedy order. `git rebase` refuses a dirty tracked tree, so
+      # overlays on the paths this branch committed (merge-base..HEAD) print before the ancestry blocker.
+      also=${SELF_DEFER:+ship: also blocked — }
+      BLOCKED_PATHS_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-branch-blocked-paths.XXXXXX")
+      if MERGE_BASE=$(git -C "$ROOT" merge-base "$BASE" "$SOURCE_HEAD" 2>/dev/null) \
+        && git -C "$ROOT" diff --name-only --no-renames -z "$MERGE_BASE" "$SOURCE_HEAD" -- \
+          | node "$SHIP_INTENT" validate-paths > "$BLOCKED_PATHS_FILE"; then
+        ship_refuse_overlays "$ROOT" "$SOURCE_HEAD" "$BLOCKED_PATHS_FILE" "$also" || also="ship: also blocked — "
+      fi
+      rm -f "$BLOCKED_PATHS_FILE"
+      [ -z "$ANCESTRY_MSG" ] || echo "${also}${ANCESTRY_MSG}" >&2
       gate_hook_source_preflight "$ROOT" "$BASE" shipping || true   # read-only; prints its own blocker
       exit 1
     fi
@@ -585,30 +636,8 @@ if [ "$FROM_BRANCH" -eq 1 ]; then
     # or both. Do not reject a member merely because it is a directory in the current checkout: a
     # valid file -> directory transition yields both the deleted file `foo` and added `foo/bar`.
 
-    INDEX_OVERLAYS=$(mktemp "${TMPDIR:-/tmp}/ship-branch-index.XXXXXX")
-    WORKTREE_OVERLAYS=$(mktemp "${TMPDIR:-/tmp}/ship-branch-worktree.XXXXXX")
-    UNTRACKED_OVERLAYS=$(mktemp "${TMPDIR:-/tmp}/ship-branch-untracked.XXXXXX")
-    IGNORED_OVERLAYS=$(mktemp "${TMPDIR:-/tmp}/ship-branch-ignored.XXXXXX")
-    git -C "$ROOT" diff --cached --name-only -z "$SOURCE_HEAD" -- "${GIT_PATHS[@]}" \
-      | node "$SHIP_INTENT" filter-membership --members-file "$BRANCH_MEMBERS_FILE" > "$INDEX_OVERLAYS"
-    git -C "$ROOT" diff --name-only -z -- "${GIT_PATHS[@]}" \
-      | node "$SHIP_INTENT" filter-membership --members-file "$BRANCH_MEMBERS_FILE" > "$WORKTREE_OVERLAYS"
-    git -C "$ROOT" ls-files -o --exclude-standard -z -- "${GIT_PATHS[@]}" \
-      | node "$SHIP_INTENT" filter-membership --members-file "$BRANCH_MEMBERS_FILE" > "$UNTRACKED_OVERLAYS"
-    git -C "$ROOT" ls-files -o -i --exclude-standard -z -- "${GIT_PATHS[@]}" \
-      | node "$SHIP_INTENT" filter-membership --members-file "$BRANCH_MEMBERS_FILE" > "$IGNORED_OVERLAYS"
-    if [ -s "$INDEX_OVERLAYS" ] || [ -s "$WORKTREE_OVERLAYS" ] || [ -s "$UNTRACKED_OVERLAYS" ] || [ -s "$IGNORED_OVERLAYS" ]; then
-      echo "--from-branch refuses uncommitted overlays on --from-branch paths; commit or remove these exact overlays:" >&2
-      for overlay_pair in \
-        "$INDEX_OVERLAYS:index" "$WORKTREE_OVERLAYS:worktree" \
-        "$UNTRACKED_OVERLAYS:untracked" "$IGNORED_OVERLAYS:ignored"; do
-        overlay_file=${overlay_pair%:*}; overlay_kind=${overlay_pair##*:}
-        while IFS= read -r -d '' p; do printf '  %q (%s)\n' "$p" "$overlay_kind" >&2; done < "$overlay_file"
-      done
-      rm -f "$BRANCH_MEMBERS_FILE" "$INDEX_OVERLAYS" "$WORKTREE_OVERLAYS" "$UNTRACKED_OVERLAYS" "$IGNORED_OVERLAYS"
-      exit 1
-    fi
-    rm -f "$BRANCH_MEMBERS_FILE" "$INDEX_OVERLAYS" "$WORKTREE_OVERLAYS" "$UNTRACKED_OVERLAYS" "$IGNORED_OVERLAYS"
+    ship_refuse_overlays "$ROOT" "$SOURCE_HEAD" "$BRANCH_MEMBERS_FILE" || { rm -f "$BRANCH_MEMBERS_FILE"; exit 1; }
+    rm -f "$BRANCH_MEMBERS_FILE"
     CURRENT_HEAD=$(git -C "$ROOT" rev-parse HEAD)
     [ "$CURRENT_HEAD" = "$SOURCE_HEAD" ] || {
       echo "--from-branch: HEAD moved while the committed snapshot was prepared (${SOURCE_HEAD:0:7} -> ${CURRENT_HEAD:0:7}); retry" >&2
@@ -656,6 +685,11 @@ WHOLE_EXCLUDES=()
 PATCH_BASE=$BASE
 if [ "$FROM_BRANCH" -eq 0 ]; then
   PATCH_BASE=$(ship_patch_base "$ROOT" "$BASE")
+  # Only this invocation's argv: recorded paths passed when recorded, and a preserved commit is staged.
+  if [ -z "$LOCAL_BRANCH_EXISTS" ]; then
+    if [ "$RESUME" -eq 1 ]; then ARGV_PATHS=(${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}); else ARGV_PATHS=("${PATHS[@]}"); fi
+    ship_refuse_unmatched_paths "$ROOT" "$PATCH_BASE" "$BASE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1
+  fi
   if [ "$PATCH_BASE" != "$BASE" ]; then
     ship_classify_whole_file "$ROOT" "$BASE" "$PATCH_BASE" -- "${GIT_PATHS[@]}"
     echo "ship: origin/$BASE_REF moved to ${BASE:0:7} since this checkout forked at ${PATCH_BASE:0:7} — staging is anchored at the fork point and three-way merged." >&2
@@ -795,6 +829,7 @@ if [ "$DRY_GATES" -eq 0 ]; then
   # Any boolean added here must ALSO join the allowlist in ship-intent-args.mts:16-22, or its
   # `--flag` is treated as value-taking and silently eats the next argv entry.
   [ "$DRAFT" -eq 0 ] || SHIP_INTENT_ARGS+=(--draft)
+  [ "$NO_STACK" -eq 0 ] || SHIP_INTENT_ARGS+=(--no-stack)
   # The body file's path rides the record so a later resume can warn when it drifts (sc-2527); a
   # resume that replayed the recorded body keeps the recorded path, and --body clears it.
   [ "$BODY_FILE_SET" -eq 0 ] || SHIP_INTENT_ARGS+=(--body-file-path "$BODY_FILE_FLAG")
@@ -1686,6 +1721,9 @@ git update-ref -d "$RECOVERY_RECEIPT_REF" "${RECOVERY_COMMIT:-${SHIP_COMMIT:-}}"
 # concurrent actor could legitimately advance, whereas this blob is devkit-private, rewritten whole
 # on every ship to this branch, and worthless once the commit it describes is published.
 git update-ref -d "$RECOVERY_GATE_ADDS_REF" 2>/dev/null || true
+# Joins the PR to its base PR's GitHub stack; best-effort, so it runs only once nothing is at stake.
+STACK_LINK="$SCRIPT_DIR/stack/link.mts"; [ -f "$STACK_LINK" ] || STACK_LINK="$SCRIPT_DIR/stack/link.mjs"
+[ "$NO_STACK" -eq 1 ] || [ -z "$PR_NUM" ] || node "$STACK_LINK" "$REPO" "$PR_NUM" || true
 # After every ref is settled, so a ship killed during the bounded test runs loses no recovery state.
 [ -z "$PR_NUM" ] || publish_evidence_block "$WT" "$PR_NUM" "$REPO" "${RECOVERY_COMMIT:-$SHIP_COMMIT}"
 git worktree remove --force "$WT" 2>/dev/null || true

@@ -5,8 +5,8 @@
  * Reviewer.model). A 0.80-precision HARD block would false-block ~1-in-5 clean commits and get
  * disabled. Warn-only doesn't help — the commit still lands and the external bots still comment,
  * which is exactly what this reviewer exists to pre-empt. So a FAIL BLOCKS, but each finding can be
- * overridden with a stated rationale: a real bug can't be honestly waived (so it gets fixed →
- * pre-empted), a false positive is waived with a recorded reason (→ no friction, and the rationale
+ * overridden with a rationale and a kind: a real defect is waived only as deferred, pre-existing
+ * or accepted, a false positive with a recorded reason (→ no friction, and the rationale
  * is the signal to sharpen the reviewer later). Same shape as the dup-detection allowlist.
  *
  * A finding's FINGERPRINT = sha12(reviewer + failed-lens + sha256(diffCacheIdentity(the staged
@@ -31,7 +31,7 @@ import { CORRECTNESS_OVERRIDES_FILE as OVERRIDES_FILE } from '../deterministic/g
 import { diffCacheIdentity } from '../judge/diff-focus.mjs';
 import { emitGateEvent } from '../judge/gate-events.mjs';
 import { reviewBaseContext, shortSha } from './evidence/base-context.mjs';
-import { UNSAFE_TEXT_RE, waiveCommand } from './valve/shell-word.mjs';
+import { parseWaiverKind, UNSAFE_TEXT_RE, waiveCommand, } from './valve/shell-word.mjs';
 import { conventionWaiverLenses, parseConventionFindingCandidates, } from './evidence/conventions.mjs';
 /** A fingerprint (see `fingerprint` below) is always this shape — shared by the env-var parser and
  * the `waive` CLI's itemId validation, so both channels accept exactly the same ids. */
@@ -214,6 +214,8 @@ export function reconcile(cwd, reviewerName, failedLenses, diffText, now, env = 
                     rationale: envRationale,
                     at: now,
                     by: 'env',
+                    // A new rationale may no longer fit the old kind, and the env channel cannot state one.
+                    kind: undefined,
                     ...(baseSha ? { baseSha } : { baseSha: undefined }),
                 };
                 changed = true;
@@ -234,6 +236,7 @@ export function reconcile(cwd, reviewerName, failedLenses, diffText, now, env = 
                     ...(typeof entry.author === 'string' && entry.author.trim()
                         ? { author: entry.author.trim() }
                         : {}),
+                    kind: parseWaiverKind(entry.kind),
                 });
             else
                 blocking.push({ lens, fp });
@@ -256,6 +259,7 @@ export function reconcile(cwd, reviewerName, failedLenses, diffText, now, env = 
             recorded_at: now,
             by: 'env',
             base_sha: baseSha,
+            kind: null,
         });
     return result;
 }

@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants as fsConstants, cpSync, existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { digest } from '../fs-helpers.mjs';
 import { reviewRepositorySnapshotFingerprint } from '../ship/review/repository/state.mjs';
@@ -10,6 +11,15 @@ const MAX_REPORT_BYTES = 64 * 1024 * 1024;
 const MAX_FINGERPRINT_FILE_BYTES = 8 * 1024 * 1024;
 const regressionGitEnvironment = () => gitEnvironment({ GIT_LITERAL_PATHSPECS: '1' });
 export class RegressionUsageError extends Error {
+}
+export function regressionTempBase(callerRoot) {
+    const base = realpathSync(tmpdir());
+    const fromCaller = relative(callerRoot, base);
+    if (fromCaller === '' ||
+        (fromCaller !== '..' && !fromCaller.startsWith(`..${sep}`) && !isAbsolute(fromCaller))) {
+        throw new RegressionUsageError('temporary directory must be outside the caller repository');
+    }
+    return base;
 }
 function git(root, args) {
     const result = spawnSync('git', ['-c', 'core.hooksPath=/dev/null', '-C', root, ...args], {

@@ -231,12 +231,13 @@ const UNREADABLE = {
     readHead: () => null,
     readDiff: () => '',
 };
+const GROUNDING_USE = 'conventions grounding — a FAIL will read as unsubstantiated';
 /**
  * The production source, pinned when the cascade starts: the staged tree and HEAD the judge was shown.
  * A later restage cannot ground a quote. Unmerged or unreadable state grounds nothing (→ inconclusive).
  */
 export function stagedGroundingSource(cwd, files, pinnedTree) {
-    const tree = stagedTreeHash(cwd);
+    const tree = stagedTreeHash(cwd, GROUNDING_USE);
     const head = headHash(cwd);
     // `pinnedTree` is the index the judge's evidence was cut from; a restage since then grounds nothing.
     if (tree === null || head === null || (pinnedTree !== undefined && pinnedTree !== tree))
@@ -248,7 +249,7 @@ export function stagedGroundingSource(cwd, files, pinnedTree) {
     const literal = (file) => `:(top,literal)${file}`;
     return {
         reviewedFiles: files,
-        isCurrent: () => stagedTreeHash(cwd) === tree,
+        isCurrent: () => stagedTreeHash(cwd, GROUNDING_USE) === tree,
         readStaged: memo((file) => blob(tree, file)),
         readHead: memo((file) => blob(base, renameSource(file) ?? file)),
         // --no-color/--no-ext-diff: the consumer's git config must not change the bytes parsed here.

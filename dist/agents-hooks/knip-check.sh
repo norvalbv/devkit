@@ -18,22 +18,18 @@ echo "$input" | grep -q '"stop_hook_active":[[:space:]]*true' && exit 0
 
 # Absolute hook dir BEFORE cd — a relative $0 would dangle after the chdir.
 HOOK_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
-cd "${CLAUDE_PROJECT_DIR:-$HOOK_DIR/../..}" 2>/dev/null || exit 0
+source "$HOOK_DIR/session-edits-lib.sh" 2>/dev/null || true
+WORKSPACE="${CLAUDE_PROJECT_DIR:-$HOOK_DIR/../..}"
+declare -F hook_workspace &>/dev/null && WORKSPACE=$(hook_workspace "$input" "$WORKSPACE")
+cd "$WORKSPACE" 2>/dev/null || exit 0
 
 # Session scoping — only report knip findings for files THIS session edited (ledger written
-# by format-after-edit.sh; see session-edits-lib.sh). Missing lib (sync-hooks --only) or no
+# by format-after-edit.sh; see session-edits-lib.sh). Missing lib or no
 # session edits → FAIL-OPEN: a session that edited nothing is never blocked at stop.
-source "$HOOK_DIR/session-edits-lib.sh" 2>/dev/null || true
 declare -F session_edits_file &>/dev/null || exit 0
 LEDGER=$(clean_session_ledger "$(session_edits_file "$input")")
 [ -n "$LEDGER" ] || exit 0
 trap 'rm -f "$LEDGER"' EXIT
-
-# A lib older than the runner helpers (sync-hooks --only refreshes this hook, not the lib) keeps
-# the pre-sc-1054 behaviour: bun or nothing.
-declare -F js_eval &>/dev/null || js_eval() { command -v bun &>/dev/null && bun -e "$1"; }
-declare -F resolve_pm &>/dev/null || resolve_pm() { command -v bun &>/dev/null && echo bun; }
-declare -F pm_run &>/dev/null || pm_run() { "$1" run "$2"; }
 
 [ -f "package.json" ] || exit 0
 PM=$(resolve_pm)
