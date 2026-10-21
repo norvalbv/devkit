@@ -504,6 +504,9 @@ ship_pin_origin_base() {
       2) rm -f "$advert"
          echo "--base: no branch origin/$base_ref (a PR base must be a remote branch — not a sha or a tag)" >&2
          return 1 ;;
+      124) rm -f "$advert"
+         echo "$label: could not verify origin/$base_ref (ls-remote exit 124: no clean finish within the ${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}s bound) — machine load or network; re-run ship, or raise DEVKIT_REMOTE_TIMEOUT_SECONDS" >&2
+         return 1 ;;
       *) rm -f "$advert"
          echo "$label: could not verify origin/$base_ref (ls-remote exit $status)" >&2
          return 1 ;;

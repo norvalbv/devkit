@@ -160,10 +160,11 @@ const RECOVERY_SETTLE_MARGIN_MS = 15_000;
  * recovering the evidence behind 0d759d4). Do not reconcile one literal to the other.
  */
 function recoveryBudgetMs(gateStartMs) {
+    // Floored: it becomes a judge's child_process timeout, which Node rejects unless whole.
     const deadline = Number(process.env.DEVKIT_GATE_DEADLINE_MS);
     if (Number.isFinite(deadline) && deadline > 0)
-        return deadline - Date.now();
-    return Number(process.env.SHIP_COMMIT_TIMEOUT ?? 3600) * 1000 - (Date.now() - gateStartMs);
+        return Math.floor(deadline - Date.now());
+    return Math.floor(Number(process.env.SHIP_COMMIT_TIMEOUT ?? 3600) * 1000 - (Date.now() - gateStartMs));
 }
 /**
  * Re-run each parked cascade SERIALLY (the whole point: one judge in flight), settle it through
@@ -189,7 +190,7 @@ export async function runDeferredRecoveries(parked, results, ctx, runOne, gateSt
             results[p.index] = settleReviewOutcome(ctx, p.task, skipped, 0);
             continue;
         }
-        console.error(`guard-review: ${p.task.sel.reviewer.name} — checklist contract not satisfied under the concurrent wave; retrying solo (${p.reason})`);
+        console.error(`guard-review: ${taskLabel(p.task)} — checklist contract not satisfied under the concurrent wave; retrying solo (${p.reason})`);
         const t0 = Date.now();
         const res = await runOne(p.task, p.reason, remaining - RECOVERY_SETTLE_MARGIN_MS);
         results[p.index] = settleReviewOutcome(ctx, p.task, res, Date.now() - t0, true);

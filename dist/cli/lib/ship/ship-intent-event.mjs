@@ -18,6 +18,7 @@ export function emitShipIntentEvent(intent, resumed) {
         // `command` is documented as the REPLAYABLE invocation, so the draft bit has to appear here —
         // without it the recorded command replays as a ready PR.
         ...(intent.draft ? ['--draft'] : []),
+        ...(intent.noStack ? ['--no-stack'] : []),
     ];
     const body = Buffer.from(intent.bodyB64, 'base64');
     const commandParts = sourceMode === 'branch' && resumed

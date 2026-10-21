@@ -150,7 +150,11 @@ export function scanCommentTokens(source, extension) {
         for (const item of items ?? [])
             ranges.set(`${item.pos}:${item.end}`, item);
     };
+    // Closed JSX text is not trivia; text an unclosed tag swallows to EOF is still scanned.
+    const jsxText = [];
     const visit = (node) => {
+        if (ts.isJsxText(node) && node.parent.end > node.end)
+            jsxText.push([node.pos, node.end]);
         collect(ts.getLeadingCommentRanges(source, node.getFullStart()));
         collect(ts.getTrailingCommentRanges(source, node.end));
         for (const child of node.getChildren(sourceFile))
@@ -158,6 +162,7 @@ export function scanCommentTokens(source, extension) {
     };
     visit(sourceFile);
     return [...ranges.values()]
+        .filter((range) => !jsxText.some(([pos, end]) => range.pos >= pos && range.pos < end))
         .sort((left, right) => left.pos - right.pos)
         .map((range) => {
         const start = range.pos;
@@ -360,7 +365,7 @@ function findingFor(file, extension, source, paragraph, hunks) {
         textLines,
     };
 }
-export function detectChangedComments(cwd = process.cwd()) {
+export function detectChangedComments(cwd = process.cwd(), only) {
     const cfg = resolveGuardConfig(cwd);
     const roots = cfg.scanRoots.map((root) => normalizedRoot(cwd, root));
     const isConfiguredSource = sourceMatchers(cfg.sourceExtensions).isSource;
@@ -374,6 +379,8 @@ export function detectChangedComments(cwd = process.cwd()) {
         decisionsDir !== '' && [...stagedPaths(cwd)].some((file) => insideRoots(file, [decisionsDir]));
     const { files, head: headRenames, merge: mergeRenamed } = changedPaths(cwd);
     for (const file of files.sort()) {
+        if (only && !only.has(file))
+            continue;
         if (!insideRoots(file, roots) || !isConfiguredSource(file))
             continue;
         const extension = extensionOf(file);
