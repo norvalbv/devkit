@@ -138,9 +138,9 @@ export function settleReviewOutcome(
     reviewer: res.name,
     status: res.status,
     escalated: res.escalated,
-    // First-pass model that actually ran (pin-aware); firstModel only when no judge ran at
-    // all (missing brief / engine error), keeping the field always present for consumers.
-    model: res.model ?? ctx.firstModel,
+    // First-pass model that actually ran; when no judge ran, the reviewer's pin else firstModel,
+    // keeping the field always present for consumers.
+    model: res.model ?? t.sel.reviewer.model ?? ctx.firstModel,
     reason: res.reason,
     // Machine cause, so a consumer never parses the human-readable reason (gate-verdict-attribution).
     // JSON.stringify drops it when absent, which is exactly the pass/fail case.
