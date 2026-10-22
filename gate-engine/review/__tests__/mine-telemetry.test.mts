@@ -14,9 +14,13 @@ import {
   groupShipsByRepoBranch,
   hasDiffEvidence,
   histogramKey,
+  indexWaiverLine,
   INLINE_DIFF_CAP_BYTES,
+  isRealDefectWaiver,
   isSameDiff,
+  lookupWaiver,
   mergeCandidates,
+  newWaiverIndex,
   pickFailReason,
   resolveDiffPayload,
   selectFailLensRows,
@@ -456,7 +460,169 @@ describe('mine-telemetry-lib: buildWaivedCandidate', () => {
       url: 'telemetry://waived-decoy/E593DD18/correctness-reviewer/writer-reader-contracts',
       disposition: 'waived',
       rationale: null,
+      waiverKind: null,
     });
+  });
+});
+
+describe('mine-telemetry-lib: waiver kind from the gate-events sink', () => {
+  const R = 'correctness-reviewer';
+  const FP = 'a1b2c3d4e5f6';
+  type SinkWaiver = { lens: string; fingerprint: string; rationale?: string; kind?: string };
+  const reviewResult = (ship: string, waiver: SinkWaiver) =>
+    JSON.stringify({ type: 'review_result', ship_id: ship, reviewer: R, waivers: [waiver] });
+  // The full RecordedWaiver shape the gate writes, extra fields included.
+  const fresh = (kind: string, lens = 'races') =>
+    reviewResult('s1', {
+      lens,
+      fingerprint: FP,
+      rationale: 'why',
+      kind,
+      ...{ recorded_at: '2026-10-20T00:00:00Z', recorded_by: 'cli', author: 'Ada' },
+    });
+  const indexOf = (...lines: string[]) => {
+    const index = newWaiverIndex();
+    for (const line of lines) indexWaiverLine(index, line);
+    return index;
+  };
+
+  it('reads a review_result waiver back by ship, reviewer and lens', () => {
+    const index = indexOf(fresh('deferred'));
+    expect(lookupWaiver(index, 's1', R, 'races')).toEqual({ kind: 'deferred', rationale: 'why' });
+    expect(lookupWaiver(index, 's2', R, 'races')).toBeNull();
+  });
+
+  it('skips unrelated and malformed lines without throwing', () => {
+    const index = indexOf('{"type":"gate_result"}', '{"type":"review_result",', 'not json', '');
+    expect(index.byLens.size + index.byFp.size).toBe(0);
+  });
+
+  it('keeps a known kind when a later cached part replays the waiver as {lens, fingerprint}', () => {
+    const cached = reviewResult('s2', { lens: 'races', fingerprint: FP });
+    const index = indexOf(fresh('deferred'), cached);
+    expect(lookupWaiver(index, 's2', R, 'races')?.kind).toBe('deferred');
+  });
+
+  it('fills the rationale of a waiver recorded before kinds existed, with a null kind', () => {
+    const legacy = reviewResult('s1', { lens: 'races', fingerprint: FP, rationale: 'old reason' });
+    expect(lookupWaiver(indexOf(legacy), 's1', R, 'races')).toEqual({
+      kind: null,
+      rationale: 'old reason',
+    });
+  });
+
+  it('takes the kind from a waiver_created event alone', () => {
+    const created = JSON.stringify({
+      type: 'waiver_created',
+      fingerprint: FP,
+      kind: 'pre-existing',
+    });
+    const cached = reviewResult('s1', { lens: 'races', fingerprint: FP });
+    expect(lookupWaiver(indexOf(created, cached), 's1', R, 'races')?.kind).toBe('pre-existing');
+  });
+
+  // The env channel resets a stored kind and says so with `kind: null`; ignoring it would
+  // keep dropping a waiver whose store entry no longer claims a real defect.
+  it('lets an env-channel waiver_created with kind null clear a known kind for later replays', () => {
+    const reset = JSON.stringify({
+      type: 'waiver_created',
+      fingerprint: FP,
+      rationale: 'a new env rationale',
+      kind: null,
+      by: 'env',
+    });
+    const cached = reviewResult('s2', { lens: 'races', fingerprint: FP });
+    expect(lookupWaiver(indexOf(fresh('deferred'), reset, cached), 's2', R, 'races')).toEqual({
+      kind: null,
+      rationale: 'a new env rationale',
+    });
+  });
+
+  // One fingerprint recurs across ships of the same diff; each row keeps the kind its ship recorded.
+  it("never relabels a ship's row with a later ship's kind on the same fingerprint", () => {
+    const later = reviewResult('s2', {
+      lens: 'races',
+      fingerprint: FP,
+      rationale: 'b',
+      kind: 'false-positive',
+    });
+    const index = indexOf(fresh('deferred'), later);
+    expect(lookupWaiver(index, 's1', R, 'races')?.kind).toBe('deferred');
+    expect(lookupWaiver(index, 's2', R, 'races')?.kind).toBe('false-positive');
+  });
+
+  it("gives a cached replay the kind known when it ran, not a later ship's re-waive", () => {
+    const cached = reviewResult('s2', { lens: 'races', fingerprint: FP });
+    const later = reviewResult('s3', {
+      lens: 'races',
+      fingerprint: FP,
+      rationale: 'b',
+      kind: 'false-positive',
+    });
+    expect(lookupWaiver(indexOf(fresh('deferred'), cached, later), 's2', R, 'races')?.kind).toBe(
+      'deferred',
+    );
+  });
+
+  it("keeps a ship's own kind when its later cached replay follows another ship's re-waive", () => {
+    const later = reviewResult('s3', {
+      lens: 'races',
+      fingerprint: FP,
+      rationale: 'b',
+      kind: 'false-positive',
+    });
+    const replay = reviewResult('s1', { lens: 'races', fingerprint: FP });
+    expect(lookupWaiver(indexOf(fresh('deferred'), later, replay), 's1', R, 'races')?.kind).toBe(
+      'deferred',
+    );
+  });
+
+  it("keeps an unknown replay row unknown rather than borrowing a later ship's kind", () => {
+    const replay = reviewResult('s1', { lens: 'races', fingerprint: FP });
+    const later = reviewResult('s3', {
+      lens: 'races',
+      fingerprint: FP,
+      rationale: 'b',
+      kind: 'false-positive',
+    });
+    expect(lookupWaiver(indexOf(replay, later, replay), 's1', R, 'races')).toBeNull();
+  });
+
+  it('ignores a review_result line with no ship_id, which no lens row can match', () => {
+    const shipless = JSON.stringify({
+      type: 'review_result',
+      reviewer: R,
+      waivers: [{ lens: 'races', fingerprint: FP, rationale: 'x', kind: 'deferred' }],
+    });
+    expect(indexOf(shipless).byLens.size).toBe(0);
+  });
+
+  it('lets the later line win, and reads an unknown kind as null', () => {
+    expect(
+      lookupWaiver(indexOf(fresh('deferred'), fresh('false-positive')), 's1', R, 'races'),
+    ).toMatchObject({ kind: 'false-positive' });
+    expect(lookupWaiver(indexOf(fresh('constructor')), 's1', R, 'races')?.kind).toBeNull();
+  });
+
+  it('matches a long lens on its first 200 chars, as commit_review_lenses stores it', () => {
+    const lens = `src/${'deep/'.repeat(60)}a.ts@CLAUDE.md:1`;
+    expect(lookupWaiver(indexOf(fresh('accepted', lens)), 's1', R, lens.slice(0, 200))?.kind).toBe(
+      'accepted',
+    );
+  });
+
+  it.each([
+    ['deferred', true],
+    ['pre-existing', true],
+    ['accepted', true],
+    ['false-positive', false],
+  ])('a %s waiver is a real defect: %s', (kind, real) => {
+    expect(isRealDefectWaiver(lookupWaiver(indexOf(fresh(kind)), 's1', R, 'races'))).toBe(real);
+  });
+
+  it('mints an unclassified or unmatched waiver as before', () => {
+    expect(isRealDefectWaiver({ kind: null, rationale: 'old reason' })).toBe(false);
+    expect(isRealDefectWaiver(null)).toBe(false);
   });
 });
 

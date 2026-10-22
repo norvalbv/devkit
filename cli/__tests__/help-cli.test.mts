@@ -55,6 +55,9 @@ describe('devkit help surface', () => {
     expect(r.stdout).toMatch(/NOT replayed by --resume/);
     // The opt-in's trap: gh omits required checks that have not reported, so empty is never green.
     expect(r.stdout).toMatch(/--wait-ci-required[\s\S]*REPORTED[\s\S]*never passed/);
+    // The strict opt-in: a non-passed verdict is exit 5, and 5 is never a cue to --resume.
+    expect(r.stdout).toMatch(/--wait-ci-strict[\s\S]*exit 5 unless the verdict is passed/);
+    expect(r.stdout).toMatch(/--wait-ci-strict, which exits 5/);
   });
 
   it('rejects --from-branch with --pr at the dispatcher boundary', () => {

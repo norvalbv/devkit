@@ -1,8 +1,8 @@
 /** What both coverage gate modes print and classify with: remedies, path listing, review notices. */
 import { execFileSync } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { sourceMatchers } from '../config.mjs';
+import { appendReviewNotice } from '../deterministic/reason.mjs';
 import { emitGateEvent } from '../judge/gate-events.mjs';
 import { canonicalPath } from './dependencies.mjs';
 import { displayPath, formatClearMarker, readClearMarker } from './failures.mjs';
@@ -67,21 +67,9 @@ export function emitProvenance(p) {
 export function artifactLine(file) {
     return `   read ${canonicalPath(file)}`;
 }
-/** Tell review-target.sh's verdict line that coverage went unmeasured. Written only into this review's
- * own temp root, so a nested run cannot reach an outer review's file. Advisory: never throws. */
+/** Tell review-target.sh's verdict line that coverage went unmeasured. */
 export function recordReviewNotice(reason) {
-    const file = process.env.DEVKIT_REVIEW_NOTICES;
-    const root = process.env.DEVKIT_REVIEW_TEMP_ROOT;
-    if (!file || !root || !isAbsolute(file) || !isAbsolute(root))
-        return;
-    if (!resolve(file).startsWith(`${resolve(root)}/`))
-        return;
-    try {
-        appendFileSync(file, `coverage=not-measured reason=${reason}\n`);
-    }
-    catch {
-        // The deterministic runner's skip banner still names the gate.
-    }
+    appendReviewNotice(`coverage=not-measured reason=${reason}`);
 }
 export function reviewNotMeasuredAbsent(cwd) {
     console.log(`⚠️  Coverage NOT MEASURED in this review — no ${COVERAGE_FILE} in the target checkout.`);

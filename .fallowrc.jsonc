@@ -34,8 +34,8 @@
   "ignoreDependencies": [
     "jscpd", // spawned as a BINARY by guard-clone (clone-detector.mjs), never imported
     "@typescript/native", // Devkit-only TypeScript 7 CLI, invoked by package scripts rather than imported
-    // Imported ONLY by templates/**/eslint.config.mjs — shipped text the CONSUMER installs into its
-    // own repo; deliberately NOT a devkit dependency (see template headers).
+    // Loaded lazily through createRequire in gate-engine/structure/source-parser.mts, which fallow
+    // does not trace as an import.
     "@typescript-eslint/parser"
   ],
   // Quality BARS (not ignores — every file is still analyzed; findings over the bar are refactored,

@@ -92,13 +92,19 @@ function callerDrift(root, base) {
     }
     return rewritten.sort();
 }
+/** Rewrites vs `base` of only the dist `target` tracks: a PR tip's own new artifacts are CI's `A`. */
+function trackedDrift(root, base, target) {
+    const tracked = new Set(git(root, ['ls-tree', '-r', '--name-only', '-z', target, '--', 'dist']).split('\0'));
+    const drift = callerDrift(root, base).filter((file) => tracked.has(file));
+    return { active: true, releaseOnly: [], drift, against: target };
+}
 /** With `tree` (CI: the PR head's committed tree) this refuses; without it (ship's caller-side
- *  preflight) it only names the working tree's drift, so nobody sorts it by hand. */
-export function inspectReleaseOnlyDist(root, base, branch, { tree } = {}) {
+ *  preflight) it only names the working tree's drift from `target` (default `base`). */
+export function inspectReleaseOnlyDist(root, base, branch, { tree, target } = {}) {
     if (!isDevkit(root, base, tree))
         return { active: false, releaseOnly: [], drift: [] };
     if (tree === undefined)
-        return { active: true, releaseOnly: [], drift: callerDrift(root, base) };
+        return trackedDrift(root, base, target ?? base);
     const diff = ['diff', '--no-renames', '--name-status', '-z', base, tree, '--', 'dist'];
     const rewritten = statusPairs(git(root, diff))
         .filter(([status]) => !FEATURE_SAFE.has(status))
@@ -113,7 +119,7 @@ export function printReleaseOnlyDist(report) {
     if (!report.active)
         return 0;
     if (report.drift.length > 0) {
-        console.error(`devkit ship: ${report.drift.length} regenerated dist file(s) are release-only drift from main — leave them out of the brief:`);
+        console.error(`devkit ship: ${report.drift.length} regenerated dist file(s) are release-only drift from ${report.against?.slice(0, 12) ?? 'the base'} — leave them out of the brief:`);
         for (const file of report.drift.slice(0, DRIFT_LISTED))
             console.error(`    ${file}`);
         const rest = report.drift.length - DRIFT_LISTED;

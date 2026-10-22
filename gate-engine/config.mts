@@ -95,6 +95,8 @@ export interface GuardConfig {
   uiEvidence: { paths: string[] };
   /** Validated where it runs: deterministic/command-gates.mts configExtraGates. */
   extraGates: unknown;
+  /** The raw `structure` block, validated where it runs: structure/verdict.mts. */
+  structureRaw: unknown;
   noLog: boolean;
   noLlm: boolean;
   cwd: string;
@@ -230,9 +232,9 @@ export const DEFAULTS = Object.freeze({
   noLlm: false,
 });
 
-/** A millisecond duration, or undefined for anything that is not a usable positive number. */
+/** Whole ms, rounded up (Node rejects a fractional child_process timeout); else undefined. */
 function positiveMs(v: unknown): number | undefined {
-  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.ceil(v) : undefined;
 }
 
 export function envVar(name: string): string | undefined {
@@ -412,6 +414,7 @@ function resolveLoadedGuardConfig(file: RawGuardConfigFile, cwd: string): GuardC
     research: { referenceCheckouts: globs(file.research?.referenceCheckouts) },
     uiEvidence: { paths: globs(file.uiEvidence?.paths) },
     extraGates: file.extraGates,
+    structureRaw: file.structure,
     noLog: noLogEnv ?? Boolean(file.noLog ?? DEFAULTS.noLog),
     noLlm: noLlmEnv ?? Boolean(file.noLlm ?? DEFAULTS.noLlm),
     // Echo the resolution base so engines never have to re-derive it (and never reach

@@ -79,7 +79,7 @@ describe('devkit upgrade — optional component offer', () => {
 
     expect(up.stdout).toContain('3c. newly bundled optional skills / hooks / tools');
     expect(up.stdout).toMatch(/devkit bundles the i-have-adhd skill/i);
-    expect(up.stdout).toContain('--adhd');
+    expect(up.stdout).toContain("enable with 'devkit init --adhd'");
     // Reported, not applied.
     expect(existsSync(join(root, '.claude', 'skills', 'i-have-adhd'))).toBe(false);
     // Core Oxc is reconciled independently of optional-component offers.
@@ -153,6 +153,7 @@ describe('devkit upgrade — optional component offer', () => {
     const up = run(root, 'upgrade');
     expect(up.status, up.stderr || up.stdout).toBe(0);
     expect(up.stdout).toMatch(/devkit bundles the i-have-adhd skill/i);
+    expect(up.stdout).toContain("enable with 'devkit init --overlay --adhd'");
     expect(config(root).components.adhd).toBeUndefined();
     expect(up.stdout).not.toMatch(/devkit bundles the Oxc tool/i);
     expect(config(root).components.oxc).toBeUndefined();

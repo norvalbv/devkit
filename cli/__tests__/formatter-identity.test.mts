@@ -89,14 +89,16 @@ describe('the gate — exact comparisons', () => {
   it('an invocation with an extra flag is not the rendered line (`check --unsafe` fails)', () => {
     const bad = withHook('agents-hooks/format-after-edit.sh', (t) =>
       t.replace(
-        'bun run biome check --write "$file_path"',
-        'bun run biome check --write --unsafe "$file_path"',
+        '"./node_modules/.bin/biome" check --write "$file_path"',
+        '"./node_modules/.bin/biome" check --write --unsafe "$file_path"',
       ),
     );
     const out = checkFormatterIdentity(bad).join('\n');
-    expect(out).toMatch(/no longer carries `bun run biome check --write "\$file_path"/);
     expect(out).toMatch(
-      /runs biome in a line the descriptor does not render: `bun run biome check --write --unsafe/,
+      /no longer carries `"\.\/node_modules\/\.bin\/biome" check --write "\$file_path"/,
+    );
+    expect(out).toMatch(
+      /runs biome in a line the descriptor does not render: `"\.\/node_modules\/\.bin\/biome" check --write --unsafe/,
     );
   });
 
@@ -155,10 +157,10 @@ describe('the gate — exact comparisons', () => {
       agentArgs: { afterEdit: '--write', lintCheck: '--check' },
     });
     expect(lines['agents-hooks/format-after-edit.sh']).toContain(
-      '    bun run oxfmt --write "$file_path" 2>/dev/null || true',
+      '    "./node_modules/.bin/oxfmt" --write "$file_path" >/dev/null 2>&1 || true',
     );
     expect(lines['agents-hooks/lint-check.sh'].join('\n')).toContain(
-      'bun run oxfmt --check "${biome_files[@]}"',
+      '"./node_modules/.bin/oxfmt" --check "${biome_files[@]}"',
     );
     expect(Object.values(lines).flat().join('\n')).not.toMatch(/oxfmt check/);
   });
@@ -194,7 +196,9 @@ describe('the gate — exact comparisons', () => {
 
   it('switching the descriptor to another tool fails on the un-migrated hooks and presets', () => {
     const out = checkFormatterIdentity({ ...current, formatter: OXFMT }).join('\n');
-    expect(out).toMatch(/no longer carries `bun run oxfmt check --write "\$file_path"/);
+    expect(out).toMatch(
+      /no longer carries `"\.\/node_modules\/\.bin\/oxfmt" check --write "\$file_path"/,
+    );
     expect(out).toMatch(/names biome outside a comment/);
     expect(out).toMatch(/biome\/base\.jsonc leaves the biome formatter on/);
     // Omission counts as ON (Biome's default); only an explicit false is off.

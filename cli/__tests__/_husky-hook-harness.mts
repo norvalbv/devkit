@@ -56,7 +56,7 @@ interface FragmentRun {
 }
 
 // Stubs log to calls.log and exit with the named env knob, so ordering is read off the log.
-function writeStub(path, name, rcVar) {
+export function writeStub(path, name, rcVar) {
   writeFileSync(
     path,
     `#!/bin/sh\necho "${name} $*" >> "$HOME/calls.log"\ncat >/dev/null\nexit \${${rcVar}:-0}\n`,

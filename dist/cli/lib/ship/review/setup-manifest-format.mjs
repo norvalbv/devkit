@@ -2,6 +2,12 @@
 import { createHash } from 'node:crypto';
 export const REVIEW_SETUP_VERSION = 1;
 export const REVIEW_SETUP_ABSENT = 'absent';
+/** Target paths the setup authority freezes, present or absent; no gate projection may supply them. */
+export const REVIEW_SETUP_OPTIONAL_PATHS = [
+    ['correctness-overrides', '.devkit/correctness-overrides.json'],
+    ['biome-runtime', '.devkit/biome'],
+    ['tsconfig-runtime', '.devkit/tsconfig'],
+];
 const SHA256 = /^[a-f0-9]{64}$/;
 export function reviewSetupHash(value) {
     return createHash('sha256').update(JSON.stringify(value)).digest('hex');

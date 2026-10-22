@@ -4,7 +4,7 @@
  * Backend Performance Review Checklist
  *
  * Checks backend code against performance best practices.
- * Only runs on backend files (src/main/, vercel-serverless/, socket-server/).
+ * Scope: guard.config.json review.backendRoots (all staged files when unset).
  */
 
 import { execFileSync } from 'node:child_process';

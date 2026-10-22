@@ -41,7 +41,7 @@ import { randomUUID } from 'node:crypto';
 import { readdirSync } from 'node:fs';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
 import { emitGateEvent } from '../judge/gate-events.mjs';
-import { clip } from '../judge/odb-probe.mjs';
+import { clip, EVENT_BUDGET } from '../judge/odb-probe.mjs';
 import { markGateRun } from '../judge/run-context.mjs';
 /**
  * Sub-engines load dynamically so a missing parser is catchable, and only via STRING LITERALS so the
@@ -63,13 +63,24 @@ function flagValue(args, name) {
     return i === -1 ? undefined : args[i + 1];
 }
 /** Only show and query are logged: an older synced hook's scoped-targets calls write nothing. */
-function emitDecisionRead(cmd, rest) {
+function emitDecisionRead(cmd, rest, read) {
     if (cmd === 'show')
         emitGateEvent({ type: 'decision_read', command: 'show', slugs: [rest[0]] });
-    if (cmd !== 'query')
+    if (cmd !== 'query' || !read)
         return;
     const top = Number.parseInt(flagValue(rest, '--top') ?? '', 10);
-    emitGateEvent({ type: 'decision_read', command: 'query', top: top > 0 ? top : 5 });
+    // `tier`, not `source`: the run envelope owns `source` and would overwrite it.
+    const event = {
+        type: 'decision_read',
+        command: 'query',
+        top: top > 0 ? top : 5,
+        tier: read.source,
+    };
+    const slugs = read.rows.map((row) => row.slug);
+    const sized = () => ({ ...event, slugs, omitted: read.rows.length - slugs.length || undefined });
+    while (slugs.length && Buffer.byteLength(JSON.stringify(sized())) > EVENT_BUDGET)
+        slugs.pop();
+    emitGateEvent(sized());
 }
 async function run(argv) {
     const [cmd, ...rest] = argv;
@@ -101,8 +112,7 @@ async function run(argv) {
         return;
     }
     const { main: decisionsMain } = await import('./decisions.mjs');
-    await decisionsMain(argv);
-    emitDecisionRead(cmd, rest);
+    emitDecisionRead(cmd, rest, await decisionsMain(argv));
 }
 /** The one string a caller can grep for to tell an outage from an answer. */
 const UNAVAILABLE_MARKER = 'decision engine UNAVAILABLE';

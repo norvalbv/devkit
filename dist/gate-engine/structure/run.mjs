@@ -27,7 +27,7 @@ import { resolveGuardConfig } from '../config.mjs';
 import { gitPrefix, splitNul } from '../ratchets/git-index.mjs';
 import { buildStructureConfigs } from './eslint-config.mjs';
 import { eslintNodeFlags, LINKED_ISOLATED_STORE, linkedIsolatedStore, } from './eslint-node-flags.mjs';
-import { clean, combineStructureResults, couldNotRun, violations, withUncompiledWalls, } from './verdict.mjs';
+import { clean, combineStructureResults, couldNotRun, violations, withStructureConfigGaps, } from './verdict.mjs';
 export { combineStructureResults };
 // ESLint throws "No files matching the pattern" for an absent tree and "…are ignored" when every file
 // in a present tree is ignored — both mean "nothing to lint" (clean), not a failure. Hoisted (perf).
@@ -277,7 +277,7 @@ export async function runStagedStructureGate(cwd = process.cwd()) {
             results.push(runPresetLint(cwd, presetFiles));
         if (grammarFiles.length)
             results.push(await runGrammarLint(cwd, grammarFiles));
-        return withUncompiledWalls(cwd, combineStructureResults(results));
+        return withStructureConfigGaps(cwd, combineStructureResults(results));
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -288,7 +288,7 @@ export async function runStagedStructureGate(cwd = process.cwd()) {
  * present scanRoots); explicit `targets` lint through the grammar leg only. */
 export async function runStructureGate(cwd = process.cwd(), targets) {
     try {
-        return withUncompiledWalls(cwd, await structureLegs(cwd, targets));
+        return withStructureConfigGaps(cwd, await structureLegs(cwd, targets));
     }
     catch (e) {
         return couldNotRun(e instanceof Error ? e.message : String(e));

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hashLocalModuleClosure } from '../../review/eval/module-closure-hash.mts';
 import type { CriticSource } from './run-critic.mts';
 
 export interface SalvagedTrial {
@@ -33,12 +34,11 @@ export const sha12 = (value: string) =>
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 
-export const runnerHash = () =>
-  sha12(
-    readFileSync(path.join(here, `run-critic${SELF_EXT}`), 'utf8') +
-      readFileSync(path.join(here, `matcher${SELF_EXT}`), 'utf8') +
-      readFileSync(path.join(here, `../response-contract${SELF_EXT}`), 'utf8'),
-  );
+/** Roots of the hashed runner code: run-critic's import closure includes the judge spawn seam. */
+export const RUNNER_ROOTS = ['run-critic', 'matcher', '../response-contract'].map((rel) =>
+  path.join(here, `${rel}${SELF_EXT}`),
+);
+export const runnerHash = () => hashLocalModuleClosure(RUNNER_ROOTS);
 
 export const salvageFingerprint = (
   critic: Pick<CriticSource, 'model' | 'raw'>,

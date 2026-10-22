@@ -84,6 +84,7 @@ BODY_FILE_PREREAD_SET=0  # --resume banner's one --body-file read: 1 = bytes kep
 UPDATE_PR_BODY=0   # explicit body flag? Refresh the existing PR too; recorded across --resume
 READY=0            # --ready marks the PR ready-for-review after the push lands
 WAIT_CI=0          # --wait-ci polls the PR's checks after the re-push is durable
+WAIT_CI_STRICT=0   # --wait-ci-strict: exit 5 unless the verdict is passed
 WAIT_CI_TIMEOUT=900
 WAIT_CI_TIMEOUT_SET=0
 while [ "$#" -gt 0 ]; do
@@ -106,7 +107,10 @@ while [ "$#" -gt 0 ]; do
       # The PR already exists here, so there is nothing to open as a draft. Name the actual remedy
       # rather than falling through to the generic unknown-flag error.
       echo "--draft applies to a NEW ship (opening the PR); this PR already exists. To convert it back to a draft: gh pr ready --undo $BR" >&2; exit 1 ;;
+    --no-stack)
+      echo "--no-stack applies to a NEW ship (stacking happens when the PR opens); this PR already exists." >&2; exit 1 ;;
     --wait-ci|--wait-ci-required) if [ "$1" = --wait-ci ]; then WAIT_CI=1; else WAIT_CI_REQUIRED=1; fi; shift ;;
+    --wait-ci-strict) WAIT_CI_STRICT=1; shift ;;
     --wait-ci-timeout)
       WAIT_CI_TIMEOUT="${2:?--wait-ci-timeout requires seconds}"; WAIT_CI_TIMEOUT_SET=1; shift 2 ;;
     --resume) echo "--resume must come FIRST: devkit ship --resume <branch> [--] <extra-path...>" >&2; exit 1 ;;
@@ -146,9 +150,9 @@ if [ "$RESUME" -eq 1 ]; then
   SI_FIELDS=()
   while IFS= read -r -d '' si_field; do SI_FIELDS+=("$si_field"); done < "$SI_OUT"
   rm -f "$SI_OUT"
-  # emitFields order as in ship-branch.sh's reader (positional, keep in lockstep); field 5 (draft)
-  # is new-ship-only and skipped here.
-  [ "${#SI_FIELDS[@]}" -ge 12 ] || { echo "recorded invocation is malformed — run the full devkit ship --pr command" >&2; exit 1; }
+  # emitFields order as in ship-branch.sh's reader (positional, keep in lockstep); fields 5 (draft)
+  # and 9 (noStack) are new-ship-only and skipped here.
+  [ "${#SI_FIELDS[@]}" -ge 13 ] || { echo "recorded invocation is malformed — run the full devkit ship --pr command" >&2; exit 1; }
   SI_MODE=${SI_FIELDS[0]}
   if [ "$SI_MODE" = "ship" ]; then
     # The blocked attempt was a NEW ship; hand over. Positive match + one-shot marker — an
@@ -163,10 +167,10 @@ if [ "$RESUME" -eq 1 ]; then
   [ "${SI_FIELDS[4]}" != "1" ] || UPDATE_PR_BODY=1
   RESUME_CREATED=${SI_FIELDS[6]}
   RESUME_GENERATION=${SI_FIELDS[7]}
-  SI_NLINKS=${SI_FIELDS[9]}
+  SI_NLINKS=${SI_FIELDS[10]}
   case "$SI_NLINKS" in *[!0-9]*|'') echo "recorded invocation is malformed (nlinks '$SI_NLINKS')" >&2; exit 1 ;; esac
-  si_i=10
-  si_body_at=$((10 + SI_NLINKS))
+  si_i=11
+  si_body_at=$((11 + SI_NLINKS))
   [ "${#SI_FIELDS[@]}" -gt $((si_body_at + 1)) ] || { echo "recorded invocation is malformed (missing body/paths)" >&2; exit 1; }
   while [ "$si_i" -lt "$si_body_at" ]; do LINK_EXTRA+=("${SI_FIELDS[$si_i]}"); si_i=$((si_i + 1)); done
   RESUME_BODY=${SI_FIELDS[$si_body_at]}
@@ -788,7 +792,7 @@ fi
 if [ "$REWRITE_ALREADY_PUBLISHED" -eq 1 ] && [ -n "${SHIP_DRY_RUN:-}" ]; then
   echo "DRY: gated rewrite ${EXPECTED_REMOTE:0:7} is already on origin/$BR; skipped reconcile + the recorded PR-body update and kept its intent for a real run." >&2
   [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" dry-run-opened-no-pr
-  exit 0
+  exit "$WAIT_CI_STATUS"
 fi
 if [ "$REWRITE" -eq 1 ] && [ "${#MISSING_SCOPE[@]}" -gt 0 ] && [ "$REWRITE_ALREADY_PUBLISHED" -eq 0 ]; then
   echo "rewrite brief omits paths from the existing PR:" >&2
@@ -848,7 +852,7 @@ if git -C "$WT" diff --cached --quiet; then
   if [ "$RESUME" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ] && [ -n "${SHIP_DRY_RUN:-}" ]; then
     echo "DRY: no commit delta; skipped the recorded PR-body update and kept its intent for a real run." >&2
     [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" dry-run-opened-no-pr
-    exit 0
+    exit "$WAIT_CI_STATUS"
   fi
   # --ready is a state change on the PR, not on the push, so an empty delta does not excuse skipping
   # it. Done ONCE here rather than per exit arm below, and deliberately BEFORE the record is
@@ -909,7 +913,7 @@ if git -C "$WT" diff --cached --quiet; then
     body_receipt_delete
     rewrite_publish_lock_release
     echo "$PR_URL"
-    exit 0
+    exit "$WAIT_CI_STATUS"
   fi
   if [ "$RESUME" -eq 1 ]; then
     # Converged, not "pushed": THIS run pushed nothing — the recorded content is simply already
@@ -919,7 +923,7 @@ if git -C "$WT" diff --cached --quiet; then
     else
       echo "no changes vs origin/$BR — everything recorded is already on the remote; $SI_NOTE" >&2
     fi
-    exit 0
+    exit "$WAIT_CI_STATUS"
   fi
   if [ "$REWRITE" -eq 1 ]; then
     echo "no changes vs origin/$BASE_REF — nothing to publish as a replacement; $SI_NOTE" >&2
@@ -928,7 +932,7 @@ if git -C "$WT" diff --cached --quiet; then
   fi
   # An empty delta is normally an error — the caller asked to push something and there was nothing.
   # But if the flip above ran, the requested end state IS now reality, so the retry has converged.
-  [ "$NO_DELTA_READY" -eq 0 ] || { echo "marked the PR ready; there was nothing left to re-push" >&2; exit 0; }
+  [ "$NO_DELTA_READY" -eq 0 ] || { echo "marked the PR ready; there was nothing left to re-push" >&2; exit "$WAIT_CI_STATUS"; }
   exit 1
 fi
 
@@ -1016,7 +1020,7 @@ if [ -n "${SHIP_DRY_RUN:-}" ]; then
   trap - EXIT  # keep the worktree for inspection
   echo "DRY: worktree kept at $WT. Remove with: git worktree remove --force '$WT'" >&2
   [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" dry-run-opened-no-pr
-  exit 0
+  exit "$WAIT_CI_STATUS"
 fi
 
 # An append fast-forwards. An explicit rewrite uses the exact PR-head OID captured before gates as
@@ -1255,3 +1259,4 @@ else
   [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" pr-url-unresolved
   echo "re-pushed to origin/$BR"
 fi
+exit "$WAIT_CI_STATUS"

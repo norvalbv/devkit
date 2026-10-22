@@ -456,6 +456,18 @@ describe('catalog and generated views', () => {
     expect(errors).toContain('Orphan benchmark runner: gate-engine/new/eval/bench.mts');
   });
 
+  it('reports a hash entry that matches no tracked file, and accepts an empty group', () => {
+    const source = repositorySource(ROOT, 'working');
+    const catalog = loadCatalog(source);
+    const files = readableSnapshot(source);
+    delete files['gate-engine/decisions/depth/depth-pass.mts'];
+    const errors = validateCatalog(memory(files), catalog);
+    expect(errors).toContain(
+      'Suite decisions: hashes.implementation entry matches no tracked file: gate-engine/decisions/depth/depth-pass.mts',
+    );
+    expect(errors.filter((error) => error.startsWith('Suite edge-cases'))).toEqual([]);
+  });
+
   it('rejects an accepted baseline replacement that was not published', () => {
     const source = repositorySource(ROOT, 'working');
     const catalog = loadCatalog(source);

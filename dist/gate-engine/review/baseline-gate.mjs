@@ -10,6 +10,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+// Frozen review runtime: local imports must be listed in PACKAGED_REVIEW_RUNTIME_MODULE_STEMS.
+import { baseResolveEnv } from './baseline/base-resolve-hook.mjs';
 import { FALLOW_CONFIG_FILES, parseDiffHunks, rewriteFallowBaseline, } from './baseline-fallow-paths.mjs';
 const METADATA_FILE = 'metadata.json';
 const SOURCE_EXT_RE = /\.(?:[cm]?[jt]sx?)$/i;
@@ -34,6 +36,7 @@ function run(command, args, cwd, options = {}) {
     const capture = options.capture ?? false;
     const result = spawnSync(command, args, {
         cwd,
+        env: options.env,
         encoding: 'utf8',
         maxBuffer: 256 * 1024 * 1024,
         stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
@@ -142,13 +145,13 @@ function parseEslintOutput(stdout, command) {
         fail(`${command} returned invalid JSON: ${String(error)}`);
     }
 }
-function runEslint(binary, cwd, config, paths) {
+function runEslint(binary, cwd, config, paths, env) {
     const results = [];
     for (let offset = 0; offset < paths.length; offset += 200) {
         const chunk = paths.slice(offset, offset + 200);
         if (chunk.length === 0)
             continue;
-        const result = run(binary, ['-c', config, '-f', 'json', '--no-error-on-unmatched-pattern', '--', ...chunk], cwd, { capture: true, validStatuses: [0, 1] });
+        const result = run(binary, ['-c', config, '-f', 'json', '--no-error-on-unmatched-pattern', '--', ...chunk], cwd, { capture: true, validStatuses: [0, 1], env });
         results.push(...parseEslintOutput(result.stdout, binary));
     }
     return results;
@@ -217,7 +220,9 @@ export function runEslintBaseline(runtimeDir) {
     const finalPaths = changes.map((change) => change.finalPath);
     const renameMap = new Map(baseChanges.map((change) => [change.basePath, change.finalPath]));
     console.log('🧱 devkit eslint overlay (merge-base regression check)...');
-    const base = normalizeEslintFindings(runEslint(binary, baseCwd, config, basePaths), baseCwd, renameMap);
+    // The final config with base packages: a plugin rooted at its install must judge the base tree.
+    const baseEnv = baseResolveEnv(metadata.finalWorktree, metadata.baseWorktree);
+    const base = normalizeEslintFindings(runEslint(binary, baseCwd, config, basePaths, baseEnv), baseCwd, renameMap);
     const current = normalizeEslintFindings(runEslint(binary, finalCwd, config, finalPaths), finalCwd);
     const introduced = subtractFindings(base, current);
     if (introduced.length === 0) {

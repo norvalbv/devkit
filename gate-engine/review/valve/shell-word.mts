@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 // Paths and lenses may hold spaces or shell metacharacters. `#` is always quoted: zsh's
 // extendedglob reads a bare mid-word `#` as a glob operator.
 const SHELL_SAFE_WORD_RE = /^[\w@%+=:,./-]+$/;
@@ -8,7 +10,23 @@ export const shellWord = (word: string): string =>
   SHELL_SAFE_WORD_RE.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
 
 /** The rationale a printed waive command carries; waive rejects it unedited, by design. */
-export const WAIVE_RATIONALE_PLACEHOLDER = 'why this is not a real defect';
+export const WAIVE_RATIONALE_PLACEHOLDER = 'why this finding is waived';
+
+/** What a waiver says about its finding, chosen by the author at waive time (`--kind`). */
+const waiverKindSchema = z.enum(['false-positive', 'deferred', 'pre-existing', 'accepted']);
+export type WaiverKind = z.infer<typeof waiverKindSchema>;
+export const WAIVER_KINDS = {
+  'false-positive': 'The finding is wrong. The code does not have this defect.',
+  deferred: 'The defect is real and this change introduced it. It is tracked to fix later.',
+  'pre-existing':
+    'The defect is real, but it exists on the base. This change did not introduce it.',
+  accepted: 'The behaviour is real and deliberate. The author accepts it as a known residual.',
+} as const satisfies Record<WaiverKind, string>;
+/** A recorded or typed kind, or null when it is none of the four (absent, misspelt, hand-edited). */
+export const parseWaiverKind = (kind: string | null | undefined): WaiverKind | null =>
+  waiverKindSchema.safeParse(kind).data ?? null;
+/** Names every kind and is itself no kind, so waive rejects it unedited, like the rationale. */
+export const WAIVE_KIND_PLACEHOLDER = Object.keys(WAIVER_KINDS).join('|');
 
 /** The `--base` shape the waive CLI accepts. */
 export const WAIVE_BASE_RE = /^[0-9a-f]{7,40}$/;
@@ -27,5 +45,6 @@ export function waiveCommand(w: {
   if (!w.lens || w.lens.search(UNSAFE_TEXT_RE) !== -1) return null;
   const base = w.base && WAIVE_BASE_RE.test(w.base) ? ` --base ${w.base}` : '';
   const target = shellWord(`${w.reviewer}:${w.lens}`);
-  return `guard-review waive ${target} ${w.fp}${base} "${WAIVE_RATIONALE_PLACEHOLDER}"`;
+  const kind = shellWord(WAIVE_KIND_PLACEHOLDER);
+  return `guard-review waive ${target} ${w.fp}${base} --kind ${kind} "${WAIVE_RATIONALE_PLACEHOLDER}"`;
 }

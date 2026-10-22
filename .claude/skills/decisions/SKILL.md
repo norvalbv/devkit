@@ -156,7 +156,7 @@ Every consumer reads the **current (last) Target block** of an axis. None is sho
 
 | Consumer | Sees | Limit |
 |---|---|---|
-| Pre-edit brief | Ruling | 3 axes, first 320 chars of each Ruling |
+| Pre-edit brief | Ruling | 3 axes, first 2000 chars of each Ruling |
 | Decision judge (`detect`) | Ruling of scope-matched axes | 4,096-byte block |
 | Domain reviewers | Ruling of scope-matched axes, plus semantic hits | 8,192-byte block |
 | Completeness judge | Ruling of scope-matched axes, plus semantic hits | none |
@@ -205,8 +205,9 @@ The **`brainstorming` skill is the trigger**. There, before the user picks:
 
 `.husky/pre-commit` smells an architectural diff (dep change · cross-boundary · module replace ·
 legacy deletion) with **no decision staged**; `claude -p` clears a routine change, else **blocks**
-("record a Target, or `GUARD_NO_LOG=1` if minor"). A Stop hook also nudges at turn-end while the
-*why* is live (snoozed once per session).
+("record a Target, or `GUARD_NO_LOG=1` if minor"). With the opt-in `agentHooks` component
+(`devkit init --agent-hooks`, plus `--overlay` or `--standalone` to match the install), a Stop hook
+also nudges at turn-end about smells in files this session edited, once per distinct decision.
 
 ## Capture C — alignment check (`guard-decisions check-alignment --gate`) — the flip-flop guard
 

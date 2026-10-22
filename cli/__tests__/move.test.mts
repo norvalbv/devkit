@@ -16,81 +16,26 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CLI, rootRegistry, testSpawnSync } from './_helpers.mts';
+import { CLI, testSpawnSync } from './_helpers.mts';
+import {
+  cleanup,
+  DEFAULT_TSCONFIG,
+  fakeGit,
+  fixture,
+  git,
+  MOVE_ARGS,
+  mkTmp,
+  read,
+  runMove,
+  runMoveArgs,
+  waitForPath,
+  writePath,
+} from './_move-fixture.mts';
 
 // Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
 void (() => import('../commands/move.mts'));
 
-const { mkTmp, cleanup } = rootRegistry();
 afterEach(cleanup);
-
-const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe' });
-
-const DEFAULT_TSCONFIG = JSON.stringify({
-  compilerOptions: { paths: { '@/*': ['./src/renderer/*'] } },
-  include: ['src'],
-});
-
-const writePath = (root, rel, content) => {
-  mkdirSync(join(root, rel, '..'), { recursive: true });
-  writeFileSync(join(root, rel), content);
-};
-
-function fixture(tsconfigText = DEFAULT_TSCONFIG) {
-  const root = mkTmp('move-');
-  writePath(root, 'package.json', JSON.stringify({ name: 'fx', version: '0.0.0', type: 'module' }));
-  writePath(root, 'tsconfig.json', tsconfigText);
-  // the file to move + a non-moved dependency it imports relatively (tests re-anchor)
-  writePath(
-    root,
-    'src/renderer/features/a/util.ts',
-    "import { helper } from './helper';\nexport const x = helper;\n",
-  );
-  writePath(root, 'src/renderer/features/a/helper.ts', 'export const helper = 1;\n');
-  // colocated test sibling — moves WITH util
-  writePath(
-    root,
-    'src/renderer/features/a/util.test.ts',
-    "import { x } from './util';\nexport const t = x;\n",
-  );
-  // relative importer (same dir) + alias importer (other feature)
-  writePath(
-    root,
-    'src/renderer/features/a/sibling.ts',
-    "import { x } from './util';\nexport const y = x;\n",
-  );
-  writePath(
-    root,
-    'src/renderer/features/b/use.ts',
-    "import { x } from '@/features/a/util';\nexport const z = x;\n",
-  );
-  // vi.mock + dynamic import string args
-  writePath(
-    root,
-    'src/renderer/features/c/c.test.ts',
-    "import { vi } from 'vitest';\nvi.mock('@/features/a/util');\nexport const load = () => import('@/features/a/util');\n",
-  );
-  writePath(
-    root,
-    '.devkit/baselines/structure/renderer.mjs',
-    'export const rendererStructureBaseline = [\n  "features/a/util.ts",\n  "features/a/util.test.ts",\n  "keep/other.ts"\n];\n',
-  );
-  git(root, 'init', '-q');
-  git(root, 'add', '-A');
-  return root;
-}
-
-const read = (root, rel) => readFileSync(join(root, rel), 'utf8');
-const runMoveArgs = (cwd, ...args) =>
-  testSpawnSync(process.execPath, [CLI, 'move', ...args], { cwd, encoding: 'utf8' });
-// A readiness wait, not a speed assertion: tsconfig is now read and walked before the first git call.
-const waitForPath = async (path) => {
-  for (let attempt = 0; attempt < 400; attempt++) {
-    if (existsSync(path)) return;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
-  }
-  throw new Error(`timed out waiting for ${path}`);
-};
 
 describe('devkit move', () => {
   it('relocates a file and rewrites all references in their own style + prunes baseline', () => {
@@ -545,15 +490,95 @@ describe('devkit move — directory and untracked sources', () => {
 
   it('rejects an empty untracked directory without creating temporary filesystem state', () => {
     const root = fixture();
-    mkdirSync(join(root, 'src/renderer/features/empty-rules'));
+    mkdirSync(join(root, 'src/renderer/features/empty-rules/nested'), { recursive: true });
 
     const r = runMoveArgs(root, 'src/renderer/features/empty-rules', 'src/renderer/lib');
 
     expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/cannot move an empty untracked directory safely/);
-    expect(existsSync(join(root, 'src/renderer/features/empty-rules'))).toBe(true);
+    expect(r.stderr).toMatch(/empty directory with no imports to rewrite; drop it .* use mv/);
+    expect(r.stdout).not.toContain('mv ');
+    expect(existsSync(join(root, 'src/renderer/features/empty-rules/nested'))).toBe(true);
     expect(existsSync(join(root, 'src/renderer/lib/empty-rules'))).toBe(false);
     expect(existsSync(join(root, '.git/index.lock'))).toBe(false);
+  });
+
+  it('rejects a trailing empty untracked directory before moving an earlier source', () => {
+    const root = fixture();
+    writePath(root, 'src/renderer/features/new-rules/rule.ts', 'export const rule = 1;\n');
+    writePath(
+      root,
+      'src/renderer/features/b/use.ts',
+      "import { rule } from '@/features/new-rules/rule';\nexport const z = rule;\n",
+    );
+    mkdirSync(join(root, 'src/renderer/features/empty-rules'));
+
+    const r = runMoveArgs(
+      root,
+      'src/renderer/features/new-rules',
+      'src/renderer/features/empty-rules',
+      'src/renderer/lib',
+    );
+
+    expect(r.status).toBe(1);
+    expect(existsSync(join(root, 'src/renderer/features/new-rules/rule.ts'))).toBe(true);
+    expect(existsSync(join(root, 'src/renderer/lib/new-rules'))).toBe(false);
+    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/features/new-rules/rule'");
+    expect(r.stdout).not.toContain('mv ');
+    expect(r.stderr).toMatch(/empty directory.*empty-rules/);
+  });
+
+  it('rejects an empty untracked directory in a dry run', () => {
+    const root = fixture();
+    mkdirSync(join(root, 'src/renderer/features/empty-rules'));
+
+    const r = runMoveArgs(
+      root,
+      'src/renderer/features/empty-rules',
+      'src/renderer/lib',
+      '--dry-run',
+    );
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/empty directory.*empty-rules/);
+    expect(r.stdout).not.toContain('[dry] mv');
+  });
+
+  it('aborts before creating the destination when a source empties after preflight', () => {
+    const root = fixture();
+    writePath(root, 'src/renderer/features/new-rules/rule.ts', 'export const rule = 1;\n');
+    const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+    // The real-index lock exists only while the move revalidates, so this empties the source then.
+    writePath(
+      root,
+      'bin/git',
+      '#!/bin/sh\nif [ "$1" = "ls-files" ] && [ -f "$DEVKIT_MOVE_RACE_LOCK" ]; then rm -f "$DEVKIT_MOVE_RACE_FILE"; fi\nexec "$DEVKIT_MOVE_REAL_GIT" "$@"\n',
+    );
+    chmodSync(join(root, 'bin/git'), 0o755);
+
+    const r = testSpawnSync(
+      process.execPath,
+      [CLI, 'move', 'src/renderer/features/new-rules', 'src/renderer/lib'],
+      {
+        cwd: root,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          DEVKIT_MOVE_RACE_FILE: join(root, 'src/renderer/features/new-rules/rule.ts'),
+          DEVKIT_MOVE_RACE_LOCK: join(root, '.git/index.lock'),
+          DEVKIT_MOVE_REAL_GIT: realGit,
+          PATH: `${join(root, 'bin')}:${process.env.PATH}`,
+        },
+      },
+    );
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/cannot move an empty untracked directory safely/);
+    expect(existsSync(join(root, 'src/renderer/features/new-rules'))).toBe(true);
+    expect(existsSync(join(root, 'src/renderer/lib'))).toBe(false);
+    expect(existsSync(join(root, '.git/index.lock'))).toBe(false);
+    expect(
+      readdirSync(join(root, '.git')).some((name) => name.startsWith('devkit-move-index-')),
+    ).toBe(false);
   });
 
   it('reports the exact source location if the destination becomes a directory during the move', () => {
@@ -794,7 +819,7 @@ describe('devkit move — directory and untracked sources', () => {
     expect(existsSync(join(root, 'src/renderer/features/a/util.ts'))).toBe(true);
   });
 
-  it('keeps a nested repository opaque to the outer AST rewrite', () => {
+  it('refuses before moving when a moved nested repository would keep a dangling alias', () => {
     const root = fixture();
     writePath(root, 'src/renderer/features/package/outer.ts', 'export const outer = 1;\n');
     writePath(
@@ -803,29 +828,109 @@ describe('devkit move — directory and untracked sources', () => {
       "import { outer } from '@/features/package/outer';\nexport const inner = outer;\n",
     );
     writePath(root, 'src/renderer/features/package/nested/.git/HEAD', 'ref: refs/heads/main\n');
-    const nestedBefore = read(root, 'src/renderer/features/package/nested/inner.ts');
+
+    const r = runMoveArgs(root, 'src/renderer/features/package', 'src/renderer/lib');
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      "src/renderer/features/package/nested/inner.ts: '@/features/package/outer' → '@/lib/package/outer' (nested repository src/renderer/features/package/nested)",
+    );
+    expect(r.stdout).not.toContain('mv ');
+    expect(existsSync(join(root, 'src/renderer/features/package/nested/inner.ts'))).toBe(true);
+  });
+
+  it('still moves a directory holding a nested repository whose imports stay inside it', () => {
+    const root = fixture();
+    writePath(
+      root,
+      'src/renderer/features/package/nested/inner.ts',
+      "import { o } from './other';\nexport const inner = o;\n",
+    );
+    writePath(root, 'src/renderer/features/package/nested/other.ts', 'export const o = 1;\n');
+    writePath(root, 'src/renderer/features/package/nested/.git/HEAD', 'ref: refs/heads/main\n');
+    const innerBefore = read(root, 'src/renderer/features/package/nested/inner.ts');
 
     const r = runMoveArgs(root, 'src/renderer/features/package', 'src/renderer/lib');
 
     expect(r.status, r.stderr).toBe(0);
-    expect(read(root, 'src/renderer/lib/package/nested/inner.ts')).toBe(nestedBefore);
+    expect(r.stderr).not.toContain('nested repositor');
+    expect(read(root, 'src/renderer/lib/package/nested/inner.ts')).toBe(innerBefore);
     expect(existsSync(join(root, 'src/renderer/lib/package/nested/.git/HEAD'))).toBe(true);
   });
 
-  it('keeps an unrelated nested repository opaque to the outer AST rewrite', () => {
-    const root = fixture();
+  const nestedImporter = (root) => {
     writePath(
       root,
       'src/renderer/vendor/nested.ts',
       "import { x } from '@/features/a/util';\nexport const nested = x;\n",
     );
     writePath(root, 'src/renderer/vendor/.git/HEAD', 'ref: refs/heads/main\n');
+  };
+  const NESTED_LINE =
+    "src/renderer/vendor/nested.ts: '@/features/a/util' → '@/lib/utils/util' (nested repository src/renderer/vendor)";
+
+  it('refuses before moving when an unrelated nested repository imports a moved file', () => {
+    const root = fixture();
+    nestedImporter(root);
+
+    for (const extra of [[], ['--dry-run']]) {
+      const r = runMoveArgs(
+        root,
+        'src/renderer/features/a/util.ts',
+        'src/renderer/lib/utils',
+        ...extra,
+      );
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain(NESTED_LINE);
+      expect(r.stderr).toContain('--allow-nested-dangling');
+      expect(r.stdout).not.toContain('mv ');
+    }
+    expect(existsSync(join(root, 'src/renderer/features/a/util.ts'))).toBe(true);
+  });
+
+  it('moves anyway under --allow-nested-dangling and leaves the nested repository untouched', () => {
+    const root = fixture();
+    nestedImporter(root);
     const nestedBefore = read(root, 'src/renderer/vendor/nested.ts');
 
-    const r = runMoveArgs(root, 'src/renderer/features/a/util.ts', 'src/renderer/lib/utils');
+    const r = runMoveArgs(
+      root,
+      'src/renderer/features/a/util.ts',
+      'src/renderer/lib/utils',
+      '--allow-nested-dangling',
+    );
 
     expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain(`⚠ 1 specifier(s) in nested repositories`);
+    expect(r.stderr).toContain(NESTED_LINE);
     expect(read(root, 'src/renderer/vendor/nested.ts')).toBe(nestedBefore);
+    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
+  });
+
+  it('refuses a source inside a nested repository', () => {
+    const root = fixture();
+    nestedImporter(root);
+
+    const r = runMoveArgs(root, 'src/renderer/vendor/nested.ts', 'src/renderer/lib');
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      'source is inside nested repository src/renderer/vendor: src/renderer/vendor/nested.ts',
+    );
+    expect(existsSync(join(root, 'src/renderer/vendor/nested.ts'))).toBe(true);
+  });
+
+  it('refuses a destination inside a nested repository', () => {
+    const root = fixture();
+    writePath(root, 'src/renderer/vendor/.git/HEAD', 'ref: refs/heads/main\n');
+
+    const r = runMoveArgs(root, 'src/renderer/features/a/util.ts', 'src/renderer/vendor/lib');
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      'destination is inside nested repository src/renderer/vendor: src/renderer/vendor/lib/util.ts',
+    );
+    expect(existsSync(join(root, 'src/renderer/features/a/util.ts'))).toBe(true);
   });
 
   it('moves a TypeScript symlink without writing through to its external referent', () => {
@@ -890,240 +995,6 @@ describe('devkit move — directory and untracked sources', () => {
     );
   });
 });
-
-// tsconfig is JSONC, not JSON. These fixtures are raw text because JSON.stringify can never
-// emit the comment forms that broke the old regex stripper (sc-1713).
-const JSONC_TSCONFIG = `{
-  // devkit reads this through TypeScript's own config reader
-  "//": "notes at https://example.dev/tsconfig — the // in this value must survive",
-  "compilerOptions": {
-    /* block comment */
-    "paths": { "@/*": ["./src/renderer/*"] }, // trailing comment
-  },
-  "include": ["src"],
-}
-`;
-
-const NO_ALIAS_TSCONFIG = `{
-  "//": "devkit's own shape: a comment key holding https://, and no paths at all",
-  "compilerOptions": { "strict": true },
-  "include": ["src"]
-}
-`;
-
-const MOVE_ARGS = ['move', 'src/renderer/features/a/util.ts', 'src/renderer/lib/utils'];
-const runMove = (root, ...extra) =>
-  testSpawnSync(process.execPath, [CLI, ...MOVE_ARGS, ...extra], { cwd: root, encoding: 'utf8' });
-
-describe('devkit move — tsconfig reading', () => {
-  it('reads a JSONC tsconfig with "//" comment keys, block comments and trailing commas', () => {
-    const root = fixture(JSONC_TSCONFIG);
-    const r = runMove(root);
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).not.toMatch(/Bad control character|Unexpected token/);
-    // the alias root came FROM the JSONC — not merely "nothing threw"
-    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
-  });
-
-  it('resolves paths declared by an extended base config in a subdirectory', () => {
-    const root = fixture(JSON.stringify({ extends: './config/base.json', include: ['src'] }));
-    mkdirSync(join(root, 'config'), { recursive: true });
-    writeFileSync(
-      join(root, 'config/base.json'),
-      JSON.stringify({ compilerOptions: { paths: { '@/*': ['../src/renderer/*'] } } }),
-    );
-    const r = runMove(root);
-    expect(r.status, r.stderr).toBe(0);
-    // '../src/renderer/*' is relative to config/, not to cwd
-    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
-  });
-
-  it('--dry-run previews a repo whose tsconfig declares no alias, counting the rewrites', () => {
-    const root = fixture(NO_ALIAS_TSCONFIG);
-    const r = runMove(root, '--dry-run');
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toContain('[dry] mv src/renderer/features/a/util.ts');
-    // sibling + util's own helper import; the alias importers cannot resolve without paths
-    expect(r.stdout).toMatch(/\[dry\] would rewrite 2 specifier\(s\)/);
-    expect(existsSync(join(root, 'src/renderer/lib/utils/util.ts'))).toBe(false);
-  });
-
-  it('moves a repo with no alias, keeping relative importers relative', () => {
-    const root = fixture(NO_ALIAS_TSCONFIG);
-    const r = runMove(root);
-    expect(r.status, r.stderr).toBe(0);
-    expect(existsSync(join(root, 'src/renderer/lib/utils/util.ts'))).toBe(true);
-    expect(read(root, 'src/renderer/features/a/sibling.ts')).toContain("'../../lib/utils/util'");
-    expect(r.stderr).not.toMatch(/path alias found/);
-  });
-
-  it('a broken extends chain is diagnosed by name, not reported as a missing alias', () => {
-    const root = fixture(JSON.stringify({ extends: './config/missing.json', include: ['src'] }));
-    const r = runMove(root, '--dry-run');
-    expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/missing\.json/);
-    expect(r.stderr).not.toMatch(/pass --alias/);
-  });
-
-  it('names the offending file when an extends target exists but is malformed', () => {
-    const root = fixture(JSON.stringify({ extends: './config/broken.json', include: ['src'] }));
-    mkdirSync(join(root, 'config'), { recursive: true });
-    writeFileSync(join(root, 'config/broken.json'), '{ "compilerOptions": { oops }');
-    const r = runMove(root);
-    expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/broken\.json/);
-    expect(r.stderr).not.toMatch(/pass --alias/);
-  });
-
-  it('rejects --alias without a directory instead of failing inside path.resolve', () => {
-    const r = runMove(fixture(), '--alias=@/');
-    expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/--alias needs PREFIX=DIR/);
-    expect(r.stderr).not.toMatch(/must be of type string/);
-  });
-});
-
-const writeCfg = (root, rel, value) => {
-  mkdirSync(join(root, rel, '..'), { recursive: true });
-  writeFileSync(join(root, rel), JSON.stringify(value));
-};
-
-describe('devkit move — tsconfig edge cases', () => {
-  // --alias is the remedy the no-alias error names, so it has to work on the repos that hit it.
-  it('--alias moves and rewrites in a repo whose tsconfig declares no paths', () => {
-    const root = fixture(NO_ALIAS_TSCONFIG);
-    const r = runMove(root, '--alias=@/=src/renderer');
-    expect(r.status, r.stderr).toBe(0);
-    expect(existsSync(join(root, 'src/renderer/lib/utils/util.ts'))).toBe(true);
-    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
-  });
-
-  it('--alias makes --dry-run report a viable run in a repo with no paths', () => {
-    const root = fixture(NO_ALIAS_TSCONFIG);
-    const r = runMove(root, '--dry-run', '--alias=@/=src/renderer');
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toContain('[dry] mv src/renderer/features/a/util.ts');
-    expect(r.stderr).not.toMatch(/path alias found/);
-  });
-
-  it('reports a missing tsconfig by name rather than leaking a raw ENOENT', () => {
-    const root = fixture();
-    rmSync(join(root, 'tsconfig.json'));
-    const r = runMove(root);
-    expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/could not read tsconfig\.json/);
-    expect(r.stderr).not.toMatch(/ENOENT/);
-  });
-
-  it('reports a syntactically broken tsconfig without leaking a JSON.parse error', () => {
-    const root = fixture('{ "compilerOptions": { oops }');
-    const r = runMove(root);
-    expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/could not read tsconfig\.json/);
-    expect(r.stderr).not.toMatch(/Unexpected token|Bad control character/);
-  });
-
-  it('treats a paths key with an empty target list as no alias, not a crash', () => {
-    const root = fixture(JSON.stringify({ compilerOptions: { paths: { '@/*': [] } } }));
-    const r = runMove(root);
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).not.toMatch(/Cannot read properties of undefined/);
-    expect(read(root, 'src/renderer/features/a/sibling.ts')).toContain("'../../lib/utils/util'");
-  });
-
-  it('ignores exact-match paths keys, which name no directory to re-anchor under', () => {
-    const root = fixture(
-      JSON.stringify({ compilerOptions: { paths: { '@app': ['./src/renderer/app.ts'] } } }),
-    );
-    const r = runMove(root);
-    expect(r.status, r.stderr).toBe(0);
-    expect(read(root, 'src/renderer/features/a/sibling.ts')).toContain("'../../lib/utils/util'");
-  });
-
-  // --alias short-circuits tsconfig reading, but ts-morph still needs tsconfig to enumerate
-  // sources. That check has to happen BEFORE git mv, or the tree is left half-moved.
-  it('does not half-move the tree when --alias is given but tsconfig is missing', () => {
-    const root = fixture();
-    rmSync(join(root, 'tsconfig.json'));
-    const r = runMove(root, '--alias=@/=src/renderer');
-    expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/could not read tsconfig\.json/);
-    // nothing may be relocated when the run cannot finish rewriting importers
-    expect(existsSync(join(root, 'src/renderer/features/a/util.ts'))).toBe(true);
-    expect(existsSync(join(root, 'src/renderer/lib/utils/util.ts'))).toBe(false);
-    expect(r.stdout).not.toContain('mv ');
-  });
-
-  it('skips an empty target list and uses the next usable paths key', () => {
-    const root = fixture(
-      JSON.stringify({
-        compilerOptions: { paths: { '@/*': [], '~/*': ['./src/renderer/*'] } },
-        include: ['src'],
-      }),
-    );
-    writePath(
-      root,
-      'src/renderer/features/d/tilde.ts',
-      "import { x } from '~/features/a/util';\nexport const t = x;\n",
-    );
-    git(root, 'add', '-A');
-    const r = runMove(root);
-    expect(r.status, r.stderr).toBe(0);
-    // '~/' is the usable alias: an importer written with it stays '~/', relatives stay relative
-    expect(read(root, 'src/renderer/features/a/sibling.ts')).toContain("'../../lib/utils/util'");
-    expect(read(root, 'src/renderer/features/d/tilde.ts')).toContain("'~/lib/utils/util'");
-  });
-
-  it('resolves paths against baseUrl when baseUrl is declared', () => {
-    const root = fixture(
-      JSON.stringify({
-        compilerOptions: { baseUrl: './src', paths: { '@/*': ['./renderer/*'] } },
-        include: ['src'],
-      }),
-    );
-    const r = runMove(root);
-    expect(r.status, r.stderr).toBe(0);
-    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
-  });
-
-  it('follows an extends chain more than one hop deep', () => {
-    const root = fixture(JSON.stringify({ extends: './config/mid.json', include: ['src'] }));
-    writeCfg(root, 'config/mid.json', { extends: './deep/base.json' });
-    writeCfg(root, 'config/deep/base.json', {
-      compilerOptions: { paths: { '@/*': ['../../src/renderer/*'] } },
-    });
-    const r = runMove(root);
-    expect(r.status, r.stderr).toBe(0);
-    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
-  });
-
-  it('accepts an extends array, where the last entry wins', () => {
-    const root = fixture(
-      JSON.stringify({ extends: ['./config/a.json', './config/b.json'], include: ['src'] }),
-    );
-    writeCfg(root, 'config/a.json', { compilerOptions: { strict: true } });
-    writeCfg(root, 'config/b.json', {
-      compilerOptions: { paths: { '@/*': ['../src/renderer/*'] } },
-    });
-    const r = runMove(root);
-    expect(r.status, r.stderr).toBe(0);
-    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
-  });
-
-  // Editors on Windows routinely write a BOM; JSON.parse rejects one, ts.sys.readFile strips it.
-  it('parses a tsconfig written with a UTF-8 BOM', () => {
-    const root = fixture(
-      `﻿${JSON.stringify({
-        compilerOptions: { paths: { '@/*': ['./src/renderer/*'] } },
-        include: ['src'],
-      })}`,
-    );
-    const r = runMove(root);
-    expect(r.status, r.stderr).toBe(0);
-    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
-  });
-});
-
 describe('devkit move — outside the alias root', () => {
   // frink shape (sc-3016): `@/` → src/renderer, main-process code imports relatively. A move
   // inside src/main must never emit `@/../…` — that breaches the main/renderer import wall.
@@ -1673,17 +1544,6 @@ describe('devkit move — specifier style and shapes', () => {
   });
 });
 
-const fakeGit = (root: string, onMv: string) => {
-  const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
-  writePath(
-    root,
-    'bin/git',
-    `#!/bin/sh\nif [ "$1" = "mv" ]; then\n${onMv}\nfi\nexec "${realGit}" "$@"\n`,
-  );
-  chmodSync(join(root, 'bin/git'), 0o755);
-  return { ...process.env, PATH: `${join(root, 'bin')}:${process.env.PATH}` };
-};
-
 describe('devkit move — concurrent edits and the post-move self-check', () => {
   it('keeps an edit made to an importer during git mv, and still rewrites its import', () => {
     const root = fixture();
@@ -1762,116 +1622,5 @@ describe('devkit move — concurrent edits and the post-move self-check', () => 
     expect(r.stderr).toMatch(/specifier\(s\) no longer resolve/);
     expect(r.stderr).toContain("src/renderer/lib/utils/util.ts: '../../features/a/helper'");
     expect(r.stdout).not.toMatch(/✓ moved/);
-  });
-});
-
-describe('devkit move — solution-style tsconfig (project references)', () => {
-  const PATHS = { '@/*': ['./src/renderer/*'] };
-
-  it('rewrites importers that only a referenced project includes', () => {
-    const root = fixture(
-      JSON.stringify({ files: [], references: [{ path: './tsconfig.app.json' }] }),
-    );
-    writeCfg(root, 'tsconfig.app.json', {
-      compilerOptions: { composite: true, paths: PATHS },
-      include: ['src'],
-    });
-    git(root, 'add', '-A');
-
-    const r = runMove(root);
-    expect(r.status, r.stderr).toBe(0);
-    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
-    expect(read(root, 'src/renderer/features/a/sibling.ts')).toContain("'../../lib/utils/util'");
-  });
-
-  it('finishes rewriting when the move itself breaks a project reference', () => {
-    const root = fixture(
-      JSON.stringify({ files: [], references: [{ path: './src/renderer/features/a' }] }),
-    );
-    writeCfg(root, 'src/renderer/features/a/tsconfig.json', {
-      compilerOptions: { composite: true },
-      include: ['.'],
-    });
-    git(root, 'add', '-A');
-
-    const r = runMoveArgs(root, 'src/renderer/features/a', 'src/renderer/lib');
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).toMatch(/could not re-read tsconfig after the move/);
-    expect(existsSync(join(root, 'src/renderer/lib/a/util.ts'))).toBe(true);
-  });
-
-  it("rewrites a file created mid-move in a referenced project with that project's aliases", () => {
-    const root = fixture(
-      JSON.stringify({
-        compilerOptions: { paths: PATHS },
-        include: ['src/renderer/features/a', 'src/renderer/features/c'],
-        references: [{ path: './tsconfig.other.json' }],
-      }),
-    );
-    writeCfg(root, 'tsconfig.other.json', {
-      compilerOptions: { composite: true, paths: { '~/*': ['./src/renderer/*'] } },
-      include: ['src/renderer/features/b'],
-    });
-    git(root, 'add', '-A');
-    const late = join(root, 'src/renderer/features/b/late.ts');
-    const env = fakeGit(root, `  printf "import { x } from '~/features/a/util';\\n" > "${late}"`);
-
-    const r = testSpawnSync(process.execPath, [CLI, ...MOVE_ARGS], {
-      cwd: root,
-      encoding: 'utf8',
-      env,
-    });
-    expect(r.status, r.stderr).toBe(0);
-    expect(read(root, 'src/renderer/features/b/late.ts')).toBe(
-      "import { x } from '~/lib/utils/util';\n",
-    );
-  });
-
-  it('leaves a node_modules file alone even when tsconfig lists it, in the rescan too', () => {
-    const root = fixture(
-      JSON.stringify({
-        compilerOptions: { paths: PATHS },
-        include: ['src'],
-        files: ['node_modules/vendor/dep.ts'],
-      }),
-    );
-    // an alias import resolves from inside node_modules, unlike a relative one (TypeScript calls
-    // that an external library), so only the scope filter keeps this file out of the rewrite
-    const vendored = "import { x } from '@/features/a/util';\nexport const v = x;\n";
-    writePath(root, 'node_modules/vendor/dep.ts', vendored);
-    git(root, 'add', '-A', '-f');
-
-    const r = runMove(root);
-    expect(r.status, r.stderr).toBe(0);
-    expect(read(root, 'node_modules/vendor/dep.ts')).toBe(vendored);
-    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
-  });
-
-  it('rewrites each referenced project with its own aliases', () => {
-    const root = fixture(
-      JSON.stringify({
-        compilerOptions: { paths: PATHS },
-        include: ['src/renderer/features/a', 'src/renderer/features/c'],
-        references: [{ path: './tsconfig.other.json' }],
-      }),
-    );
-    writeCfg(root, 'tsconfig.other.json', {
-      compilerOptions: { composite: true, paths: { '~/*': ['./src/renderer/*'] } },
-      include: ['src/renderer/features/b'],
-    });
-    writePath(
-      root,
-      'src/renderer/features/b/use.ts',
-      "import { x } from '~/features/a/util';\nexport const z = x;\n",
-    );
-    git(root, 'add', '-A');
-
-    const r = runMove(root);
-    expect(r.status, r.stderr).toBe(0);
-    // the other project's '~/' import resolves only with its own paths, and keeps that prefix
-    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'~/lib/utils/util'");
-    expect(read(root, 'src/renderer/features/c/c.test.ts')).toContain(
-      "vi.mock('@/lib/utils/util')",
-    );
   });
 });

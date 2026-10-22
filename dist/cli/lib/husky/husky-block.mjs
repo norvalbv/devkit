@@ -10,12 +10,12 @@
  * brittle regex against shell prose.
  */
 import { GUARD_FRAGMENTS } from './ai-guard-fragments.mjs';
-import { BIN_DIRS, DK_DETERMINISTIC_GATE_HELPER, DK_GATE_BLOCK_HELPERS, REVIEW_FAILURE_FINALIZER, shipRehearsalHint, } from './gate-policy/block-helpers.mjs';
+import { BIN_DIRS, DK_DETERMINISTIC_GATE_HELPER, gateBlockPrelude, REVIEW_FAILURE_FINALIZER, shipRehearsalHint, } from './gate-policy/block-helpers.mjs';
 import { buildPreCommitExit, PRE_COMMIT_PASS_EXIT } from './gate-policy/commit-gate-log.mjs';
 import { FALLOW_STAGED, FALLOW_STAGED_BLOCK, indent } from './gate-policy/fallow-staged.mjs';
 import { formatFragment, overlayFormatters } from './format-fragment.mjs';
 import { markEnd, markStart } from './husky.mjs';
-import { DK_COMMIT_INDEX_CAPTURE, DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER, selectedFragment, } from './review-fragments.mjs';
+import { DK_COMMIT_INDEX_CAPTURE, selectedFragment } from './review-fragments.mjs';
 import { sentryShipPrewarmFragment } from './sentry-fragments.mjs';
 import { ESLINT_OVERLAY_FILE, LEGACY_ESLINT_OVERLAY_MARKER, } from './overlay/eslint-overlay-marker.mjs';
 import { shQuote } from '../ship/redact-secrets.mjs';
@@ -69,7 +69,7 @@ ${PATH_SETUP}
 // Emit the deterministic orchestrator only when it has something to run: a selected
 // deterministic guard / anti-slop component (the bin re-reads the selection from
 // .devkit/config.json at commit time), or a structure command joined via --structure.
-function wantsDeterministic(selection) {
+export function wantsDeterministic(selection) {
     if (selection.antiSlop || selection.structureCmd)
         return true;
     // decisions arms the orchestrator's decision-checks gate, which runs Checks linked to Targets.
@@ -79,13 +79,7 @@ function wantsDeterministic(selection) {
  *  index) → deterministic → preAi → AI guards → postGuards. */
 export function buildGuardBlock(selection, pkgRel = '', { binDir = 'package', preAi, postGuards, formatChain } = {}) {
     const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
-    const pieces = [
-        buildPreCommitExit(handoff),
-        ...DK_HOOK_HELPERS,
-        BIN_DIRS[binDir].open,
-        DK_REVIEW_BASELINE_HELPER,
-        DK_GATE_BLOCK_HELPERS,
-    ];
+    const pieces = [buildPreCommitExit(handoff), ...gateBlockPrelude(BIN_DIRS[binDir].open)];
     // First so a first-gate block still records the run's terminal (the trap covers every exit path).
     if (!pkgRel && (selection.biome || formatChain))
         pieces.push(formatFragment(BIN_DIRS[binDir].formatter, formatChain));
@@ -130,8 +124,9 @@ export function buildFullHook(selection, pkgRel = '', binDir = 'package') {
 // is the repo's own, so its absence is a visible skip line, never a silent one.
 // `--relative` makes `git diff` emit paths relative to the CURRENT dir, so this works whether
 // the hook runs at the repo root or cd'd into a monorepo package (eslint/biome + their configs
-// are then resolved package-locally).
-const overlayLintStep = (tool, label, exts, config, run, failHint = '') => `DK_STAGED=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(${exts})$' || true)
+// are then resolved package-locally). `-M100%` lists an edited rename as an add at its new path;
+// an exact move stays `R` and is skipped, so a pure `git mv` never blocks on debt it did not add.
+const overlayLintStep = (tool, label, exts, config, run, failHint = '') => `DK_STAGED=$(git diff --cached --name-only --relative -M100% --diff-filter=ACM | grep -E '\\.(${exts})$' || true)
 if [ -n "$DK_STAGED" ] && [ -f ${config} ]; then
     if [ -x node_modules/.bin/${tool} ]; then
         echo "${label}"

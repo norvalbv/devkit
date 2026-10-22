@@ -226,7 +226,11 @@ describe('ship reviewer asset refresh', () => {
       recursive: true,
     });
     mkdirSync(join(packageRoot, 'gate-engine/review'), { recursive: true });
-    for (const file of ['baseline-fallow-paths.mts', 'baseline-gate.mts']) {
+    for (const file of [
+      'baseline/base-resolve-hook.mts',
+      'baseline-fallow-paths.mts',
+      'baseline-gate.mts',
+    ]) {
       cpSync(
         fileURLToPath(new URL(`../../gate-engine/review/${file}`, import.meta.url)),
         join(packageRoot, 'gate-engine/review', file),

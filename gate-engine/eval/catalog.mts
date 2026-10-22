@@ -1,3 +1,4 @@
+import { matchesRepoGlob } from '../../skills/_devkit/review-roots.mjs';
 import { parseBaseline } from './adapters.mts';
 import { activeEvents, canonicalJson, latestRecordedEvent } from './history.mts';
 import type { RepositorySource } from './source.mts';
@@ -132,6 +133,11 @@ export function validateCatalog(source: RepositorySource, catalog: BenchmarkCata
       errors.push(`Suite ${suite.id}: missing benchmark runner ${suite.runner}`);
     if (suite.baseline && !files.includes(suite.baseline))
       errors.push(`Suite ${suite.id}: missing baseline ${suite.baseline}`);
+    // A zero-match entry hashes nothing, so edits to the code it meant never stale the suite.
+    for (const [group, globs] of Object.entries(suite.hashes ?? {}))
+      for (const glob of Array.isArray(globs) ? globs : [])
+        if (!files.some((path) => matchesRepoGlob(path, glob)))
+          errors.push(`Suite ${suite.id}: hashes.${group} entry matches no tracked file: ${glob}`);
   }
   const subjectIds = catalog.subjects.map((subject) => subject.id);
   const suiteIds = catalog.suites.map((suite) => suite.id);

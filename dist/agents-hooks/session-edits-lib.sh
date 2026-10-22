@@ -8,8 +8,8 @@
 # it and filter their tool output down to ledger files. The commit/ship gate chain stays
 # repo-wide — this scoping applies to in-flight chats only.
 #
-# Callers source this best-effort and FAIL-OPEN when it is absent (`sync-hooks --only` can
-# install a hook without this lib): `declare -F session_edits_file &>/dev/null || exit 0`.
+# Callers source this best-effort and FAIL-OPEN when it is absent:
+# `declare -F session_edits_file &>/dev/null || exit 0`.
 # Pure bash + awk, bash-3.2 compatible (no mapfile). Only js_eval reaches a JS runtime.
 
 # Echo the ledger path for the session in the hook payload ($1 = raw stdin JSON).
@@ -21,6 +21,20 @@ session_edits_file() {
   sid=$(echo "$1" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
   repo_key=$(pwd -P | cksum | cut -d' ' -f1)
   echo "${TMPDIR:-/tmp}/devkit-session-edits/${repo_key}-${sid:-unknown}"
+}
+
+# Echo the checkout to act on ($1 = raw stdin JSON, $2 = the project root). The payload cwd follows
+# the agent into a linked worktree; a cwd in the same checkout or an unrelated repository keeps $2.
+hook_workspace() {
+  local cwd cdup top common project_top project_common
+  cwd=$(printf '%s' "$1" | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+  if [ -n "$cwd" ] &&
+    { read -r cdup; read -r top; read -r common; } < <(git -C "$cwd" rev-parse --show-cdup --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null) &&
+    { read -r project_top; read -r project_common; } < <(git -C "$2" rev-parse --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null) &&
+    [ "$top" != "$project_top" ] && [ "$common" = "$project_common" ]; then
+    (cd "$cwd/$cdup" 2>/dev/null && pwd) && return
+  fi
+  echo "$2"
 }
 
 # Echo a CLEAN copy (mktemp path; caller rm's it) of the raw ledger at $1: deduped, blanks
@@ -78,8 +92,6 @@ filter_output_to_session_files() {
 # ---- Package-manager runner (sc-1054) ----------------------------------------------------------
 # The Stop hooks run the consumer's OWN npm-scripts, so they must run them with the consumer's own
 # package manager — a hard bun requirement silently skipped every npm/pnpm/yarn repo without bun.
-# Hooks synced by `sync-hooks --only` can meet an older copy of this lib that predates these
-# helpers; each hook defines bun-only fallbacks for that case.
 
 # Evaluate JS ($1) for a package.json probe. bun FIRST, node only when bun is absent: sc-1043 found a
 # bare node probe silently skipping a bun-only toolchain. Returns 1 when neither runtime exists.
@@ -96,7 +108,7 @@ js_eval() {
 # Echo the consumer's package manager (bun|pnpm|yarn|npm), or nothing when the resolved one is not
 # installed — callers fail open rather than run a manager the repo does not use. Order:
 # package.json#packageManager (corepack's own signal; a mismatch fails under corepack strict), then
-# the lockfile ladder cli/lib/ship/dependency-preflight.mts uses, then bun if present, else npm.
+# the lockfile ladder gate-engine/coverage/dependencies.mts uses, then bun if present, else npm.
 resolve_pm() {
   local pm
   pm=$(js_eval "const p=require('./package.json').packageManager;process.stdout.write(typeof p==='string'?p.split('@')[0]:'')" 2>/dev/null)

@@ -37,7 +37,11 @@
       "../search-code"
     ]
   },
+  "//review": "devkit's own ships pin the judges to Claude so they do not depend on codex quota; consumers without a pin keep the codex defaults in gate-engine/config.mts.",
   "review": {
+    "model": "claude-sonnet-5-5",
+    "escalationModel": "claude-opus-5-5",
+    "correctnessModel": "claude-haiku-5-5",
     "backendRoots": ["cli", "gate-engine"],
     "frontendRoots": [],
     "paths": {
@@ -73,6 +77,7 @@
           "lib": [
             "baseline-status",
             "doctor",
+            "follow-up",
             "generate",
             "guard",
             "help",

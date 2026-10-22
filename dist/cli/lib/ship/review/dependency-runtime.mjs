@@ -6,13 +6,13 @@ import { writeFileAtomic } from '../../atomic-write.mjs';
 import { aliasedChangeHint, reRootAliasedPath, resolveDependencyAliases, skippedDependencyEntry, } from './repository/dependency-alias.mjs';
 import { runDirectReviewCli } from './run-direct.mjs';
 import { fail } from './shared/common.mjs';
-import { canonicalReviewDirectory, canonicalReviewLeaf, reviewPathWithin, } from './runtime-paths.mjs';
+import { canonicalReviewDirectory, canonicalReviewLeaf, reviewPathsOverlap, reviewPathWithin, } from './runtime-paths.mjs';
 const MANIFEST_VERSION = 2;
 const NODE_MODULES = 'node_modules';
 function validateRoots(sourceRoot, destinationRoot) {
     const source = canonicalReviewDirectory(sourceRoot, 'dependency source root');
     const destination = canonicalReviewDirectory(destinationRoot, 'dependency destination root');
-    if (reviewPathWithin(source, destination) || reviewPathWithin(destination, source)) {
+    if (reviewPathsOverlap(source, destination)) {
         return fail('dependency source and destination roots must be separate, non-nested directories');
     }
     return [source, destination];

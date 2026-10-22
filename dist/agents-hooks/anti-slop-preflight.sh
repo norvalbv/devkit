@@ -18,6 +18,15 @@ command -v node &>/dev/null || { echo '{}'; exit 0; }
 # Absolute hook dir BEFORE any cd — a relative $0 would dangle after the chdir.
 HOOK_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
 project="${CLAUDE_PROJECT_DIR:-$HOOK_DIR/../..}"
+# A payload cwd inside a linked worktree of the project's repository is where the agent writes; the
+# same checkout, or an unrelated repository, keeps the project root.
+cwd=$(printf '%s' "$input" | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+if [ -n "$cwd" ] &&
+  { read -r cdup; read -r top; read -r common; } < <(git -C "$cwd" rev-parse --show-cdup --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null) &&
+  { read -r project_top; read -r project_common; } < <(git -C "$project" rev-parse --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null) &&
+  [ "$top" != "$project_top" ] && [ "$common" = "$project_common" ]; then
+  project=$(cd "$cwd/$cdup" && pwd) || { echo '{}'; exit 0; }
+fi
 
 # Node resolves file_path/path at any payload level, realpaths it, and finds the nearest anti-slop
 # install inside the project. Output: `<package dir>\t<package-relative path>` per checkable file.

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { resolveGuardConfig } from '../../../../config.mts';
 import { BenchAbort, materializeFixture } from '../../../../decisions/eval/bench.mts';
+import { REMEDY_CAUSES } from '../../../../judge/outage/wording.mts';
 import { execJudgeAsync } from '../../../../judge/run-judge.mts';
 import { mergeLensCaptures } from '../../../lens/split.mts';
 import { parseReviewVerdict, selectReviewers } from '../../../reviewers.mts';
@@ -14,6 +15,8 @@ import { BENCH_CHUNK_LOC, BENCH_LENS_GROUPS, executePlan, planFixture } from './
 import { subcause } from '../stats.mts';
 const MODEL = process.env.BENCH_MODEL ?? 'sonnet';
 const CASCADE = (process.env.BENCH_CASCADE ?? 'on') !== 'off';
+// Judge-unavailable causes from remedyCause(); a response-contract miss is not one of them.
+const OUTAGE_CAUSES = new Set(REMEDY_CAUSES);
 
 // ─── Spy exec ─────────────────────────────────────────────────────────────────────
 
@@ -221,7 +224,7 @@ export async function runRow(row, options = {}) {
       okFinal: false,
       subcause: measured.parts.some(
         (part) =>
-          part.res.status === 'inconclusive' && subcause(part.res.reason ?? '') === 'outage',
+          part.res.status === 'inconclusive' && OUTAGE_CAUSES.has(part.res.inconclusiveCause),
       )
         ? 'outage'
         : 'engine-error',
