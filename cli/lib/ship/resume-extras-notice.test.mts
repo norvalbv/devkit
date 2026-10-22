@@ -66,14 +66,26 @@ describe('ship_resume_extras_notice', () => {
     expect(run(['a.ts'], 'RESUME_EXTRAS_UNRECORDED=0; exit 1').stderr).toBe('');
   });
 
-  it.each([
-    ['ship-branch.sh', 'cleanup'],
-    ['reship.sh', 'rewrite_ref_cleanup'],
-  ])('%s: %s() calls the notice before anything can change $?', (script, fn) => {
-    const source = readFileSync(here(script), 'utf8');
-    const body = source.slice(source.indexOf(`\n${fn}() {\n`)).split('\n')[2];
+  it('passes a status the caller already captured', () => {
+    const handler =
+      'cleanup() { local rc=$?; true; ship_resume_extras_notice "$rc"; }; trap cleanup EXIT;';
 
-    expect(body.trim()).toMatch(/^ship_resume_extras_notice( #.*)?$/);
+    expect(run(['a.ts'], `${handler} exit 3`).stderr).toContain('NOT recorded');
+    expect(run(['a.ts'], `${handler} exit 0`).stderr).toBe('');
+  });
+
+  it.each([
+    ['ship-branch.sh', 'cleanup', ['local rc=$?', 'ship_resume_extras_notice "$rc"']],
+    [
+      'reship.sh',
+      'rewrite_ref_cleanup',
+      ['ship_resume_extras_notice # first: it reads the exit status'],
+    ],
+  ])('%s: %s() reads $? before anything can change it', (script, fn, opening) => {
+    const source = readFileSync(here(script), 'utf8');
+    const body = source.slice(source.indexOf(`\n${fn}() {\n`)).split('\n');
+
+    expect(body.slice(2, 2 + opening.length).map((line) => line.trim())).toEqual(opening);
   });
 
   it('reship.sh: its cleanup() trap is only installed after the notice is disarmed', () => {

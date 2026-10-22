@@ -210,12 +210,12 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
   const results = mine.filter((e) => e.type === 'ship_result');
   const result = results[results.length - 1];
   const blocked = result?.blocked_gate ?? '';
-  // 'unknown' is what the shell records when the run failed and none of its prose greps matched
-  // (sc-2520); an absent ship_result is a --dry-gates rehearsal, which emits none. Either way the
-  // blocking gate is not knowable, and saying "did NOT block this run" about a finding would state
-  // something this digest cannot know. A run that exited 0 attributes trivially: nothing blocked.
+  // 'unknown': the run failed and none of the shell's prose greps matched. 'interrupted':
+  // a signal stopped the chain. No ship_result at all: a --dry-gates rehearsal. Either way the
+  // blocking gate is not knowable, and "did NOT block this run" would state something this digest
+  // cannot know. A run that exited 0 attributes trivially: nothing blocked.
   const exitCode = result?.exit_code ?? null;
-  const unattributed = (blocked === '' || blocked === 'unknown') && exitCode !== 0;
+  const unattributed = ['', 'unknown', 'interrupted'].includes(blocked) && exitCode !== 0;
 
   // Findings and could-not-runs share one list because BOTH can be the blocker: under
   // GUARD_DETERMINISTIC_STRICT=1 an opted-out gate is labelled could-not-run and exits 1, so

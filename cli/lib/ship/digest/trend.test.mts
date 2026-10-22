@@ -293,6 +293,20 @@ describe('summariseTrend — streak boundaries', () => {
     expect(text).toContain('4 → 4 → 4 findings');
   });
 
+  it('skips the terminal row of a ship refused before its marker, while a killed attempt is open', () => {
+    const events = [
+      ...attempt('s1', [fail(4)]),
+      { type: 'ship_attempt', ship_id: 's2', ...where },
+      { ship_id: 's2', ...where, ...fail(9) },
+      // A preflight refusal writes ship_end and no ship_attempt.
+      { type: 'ship_end', ship_id: 's3', ...where, exit_code: 1 },
+      ...attempt('s4', [fail(4)]),
+      ...attempt('s5', [fail(4)]),
+    ];
+    const text = trendOf(events, 's5');
+    expect(text).toContain(`${CR}: 3 blocking rounds`);
+  });
+
   it('goes silent when a killed attempt with a new-id retry writes a late row inside that retry', () => {
     const events = [
       ...attempt('s1', [fail(4)]),

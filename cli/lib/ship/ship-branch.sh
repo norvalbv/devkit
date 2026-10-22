@@ -176,6 +176,9 @@ ROOT=$(git rev-parse --show-toplevel)
 # devkit's own modules are .mts in the source tree (Node strips types) and compiled .mjs in an
 # installed consumer (dist) — same fallback the reconcile writer uses.
 SHIP_INTENT="$SCRIPT_DIR/ship-intent.mts"; [ -f "$SHIP_INTENT" ] || SHIP_INTENT="$SCRIPT_DIR/ship-intent.mjs"
+SHIP_EVENT="$SCRIPT_DIR/ship-intent-event.mts"; [ -f "$SHIP_EVENT" ] || SHIP_EVENT="$SCRIPT_DIR/ship-intent-event.mjs"
+SHIP_END_CAUSE=   # the ship_end row's cause; set only right before the exit it explains
+SHIP_BLOCKED_GATE=   # commit_with_gate_capture's blocked_gate token for its last run
 . "$SCRIPT_DIR/resume-extras-notice.sh"
 . "$SCRIPT_DIR/prepare-gate-worktree.sh"
 # Project before the intent read and write: a legacy linked .devkit resolves the record in the home.
@@ -878,10 +881,11 @@ record_ship_intent() {
 }
 
 # A blocking preflight refused: record this attempt unless it already recorded, then exit with the
-# preflight's own status. record_ship_intent is a no-op under --dry-gates; a resume already CASes the
-# generation it read, and a fresh attempt CASes its pre-preflight snapshot.
+# preflight's own status, naming it as the ship_end cause. record_ship_intent is a no-op under
+# --dry-gates; a resume already CASes the generation it read, and a fresh attempt CASes its snapshot.
 ship_abort_resumable() {
   local rc=$1
+  SHIP_END_CAUSE=$2
   if [ "$DEVKIT_SHIP_INTENT_RECORDED" -ne 1 ]; then
     [ -z "$SHIP_INTENT_START_GENERATION" ] ||
       SHIP_INTENT_ARGS+=(--expect-generation "$SHIP_INTENT_START_GENERATION")
@@ -922,8 +926,16 @@ RECOVERY_RECEIPT_INTENT_BLOB=
 RECOVERY_GATE_ADDS_REF="refs/devkit/ship-gate-adds/$BR"
 GATE_ADDS_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-gate-adds.XXXXXX")
 BRANCH_CREATED= # only this invocation's branch may be auto-deleted on an empty/failed commit
+# The ship's one terminal row; a rehearsal writes none. Silent and best-effort: it never fails a ship.
+ship_end_record() {
+  [ "$DRY_GATES" -eq 0 ] && [ -z "${SHIP_END_RECORDED:-}" ] || return 0
+  SHIP_END_RECORDED=1
+  node "$SHIP_EVENT" end "$1" "$SHIP_END_CAUSE" >/dev/null 2>&1 || true
+}
 cleanup() {
-  ship_resume_extras_notice # first: it reads the exit status
+  local rc=$?
+  ship_resume_extras_notice "$rc"
+  ship_end_record "$rc"
   rm -f "$PATCH" "$APPLY_ERR" "$STAGED_STATE" "$GATE_ADDS_FILE"
   [ -z "$RECOVERY_INDEX" ] || rm -f "$RECOVERY_INDEX"
   [ -z "$RECOVERY_PATHS_ALL" ] || rm -f "$RECOVERY_PATHS_ALL"
@@ -998,14 +1010,14 @@ if ! gate_hook_source_preflight "$ROOT" "$BASE" shipping; then
     echo "ship: also blocked — $PREFLIGHT_HINT. Fix both before re-running:" >&2
     _ship_orphan_report_self "$PWD" "$BR"
   fi
-  ship_abort_resumable 1
+  ship_abort_resumable 1 hook_source
 fi
 # This integrity boundary is caller-root-only and must run before any worktree/branch creation.
 set +e
 node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
 DIST_INTEGRITY_STATUS=$?
 set -e
-[ "$DIST_INTEGRITY_STATUS" -eq 0 ] || ship_abort_resumable "$DIST_INTEGRITY_STATUS"
+[ "$DIST_INTEGRITY_STATUS" -eq 0 ] || ship_abort_resumable "$DIST_INTEGRITY_STATUS" dist_integrity
 
 if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   # Resume only when the existing branch proves it is the exact output this invocation would have
@@ -1529,7 +1541,7 @@ EOF
   # Record any proven landed commit above, then honor the signal before push or success (sc-1538).
   GATE_SIGNAL_DEFER_EXIT=
   [ "$REQUESTED_SIGNAL_STATUS" -eq 0 ] || exit "$REQUESTED_SIGNAL_STATUS"
-  [ "$COMMIT_STATUS" -eq 0 ] || exit "$COMMIT_STATUS"
+  [ "$COMMIT_STATUS" -eq 0 ] || { SHIP_END_CAUSE=$SHIP_BLOCKED_GATE; exit "$COMMIT_STATUS"; }
 fi
 
 if [ "$DRY_GATES" -eq 1 ]; then
@@ -1566,10 +1578,10 @@ if [ -n "$REMOTE_HOLDS_PRESERVED" ]; then
   echo "origin/$BR already holds gated commit ${RECOVERY_COMMIT:0:7}; skipping push" >&2
 elif [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   ship_push_with_retry "$WT" "$RECOVERY_COMMIT" "$BR" origin "$RECOVERY_COMMIT:refs/heads/$BR" ||
-    { echo "push failed — gated commit preserved on $BR; retry: devkit ship --resume $BR" >&2; exit 1; }
+    { echo "push failed — gated commit preserved on $BR; retry: devkit ship --resume $BR" >&2; SHIP_END_CAUSE=push_failed; exit 1; }
 else
   ship_push_with_retry "$WT" "$(git -C "$WT" rev-parse HEAD)" "$BR" -u origin "$BR" ||
-    { echo "push failed — gated commit preserved on $BR; retry: devkit ship --resume $BR" >&2; exit 1; }
+    { echo "push failed — gated commit preserved on $BR; retry: devkit ship --resume $BR" >&2; SHIP_END_CAUSE=push_failed; exit 1; }
 fi
 
 # Push succeeded → the branch is live on the remote and reconcilable NOW, whatever the PR step does.
@@ -1701,6 +1713,7 @@ if [ -n "$PR_CREATE_FAILED" ]; then
       echo "  ('$BASE_REF' is no longer on origin; choose a base that is.)" >&2
     fi
   fi
+  SHIP_END_CAUSE=pr_create_failed
   exit 1
 fi
 
@@ -1732,5 +1745,6 @@ git worktree remove --force "$WT" 2>/dev/null || true
 
 # --wait-ci runs LAST: the push, PR, manifest, intent release and worktree/branch cleanup above are
 # all durable, so a wait that is killed, times out or reports red cannot cost this ship.
+[ "$WAIT_CI_STRICT" -eq 1 ] || ship_end_record 0 # strict: the verdict is the exit, so the trap records it
 [ "$WAIT_CI" -eq 0 ] || ship_run_wait_ci "$PR_NUM" "$REPO" "$WAIT_CI_TIMEOUT" "$PR_URL" "${WAIT_CI_REQUIRED:-0}"
 exit "$WAIT_CI_STATUS"
