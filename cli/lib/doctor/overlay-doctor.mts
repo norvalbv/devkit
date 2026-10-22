@@ -31,6 +31,7 @@ import {
   overlayHooksPath,
   worktrees,
 } from '../husky/overlay/overlay-home.mts';
+import { copiedFrom, copiedOverlayRow } from '../husky/overlay/copied-overlay.mts';
 import { listed, printProjectionGaps } from '../husky/overlay/projection-report.mts';
 import { ESLINT_OVERLAY_FILE, isLegacyEslintOverlay } from '../install/overlay-lint-configs.mts';
 import {
@@ -246,7 +247,7 @@ function agentHalfChecks(cwd: string, sel: Partial<Selection>, surfaces: AgentPr
 }
 
 // sc-4157: a worktree-scoped hooksPath shadows the overlay, and a worktree missing any of the overlay's
-// gate inputs runs its gates without them: both unhealthy. A checkout with its own overlay projects nothing.
+// gate inputs, or holding a copy of it, runs its gates without them: all unhealthy, none rewritten.
 function printLinkedWorktrees(home: string, pkgRel: string, fix: boolean): boolean {
   let ok = true;
   const expected = overlayHooksPath(home);
@@ -259,7 +260,11 @@ function printLinkedWorktrees(home: string, pkgRel: string, fix: boolean): boole
         `  ⚠ ${path}: a worktree-scoped core.hooksPath (${pin}) shadows the overlay — commits there skip devkit's gates`,
       );
     }
-    if (!ownsOverlayConfig(path, pkgRel)) ok = printProjectionGaps(path, home, pkgRel, fix) && ok;
+    if (copiedFrom(path, pkgRel)) {
+      ok = false;
+      console.log(copiedOverlayRow(path, pkgRel));
+    } else if (!ownsOverlayConfig(path, pkgRel))
+      ok = printProjectionGaps(path, home, pkgRel, fix) && ok;
   }
   return ok;
 }
@@ -280,10 +285,12 @@ export function printLegacyEslintOverlays(home: string, pkgRel: string) {
       ({ path, bare }) => !bare && !sameDir(path, home) && hasLegacyEslintOverlay(path, pkgRel),
     )
     .map(({ path }) => path);
-  // A checkout with its own overlay is never projected into, so only its own upgrade rewrites it.
-  for (const own of stale.filter((path) => ownsOverlayConfig(path, pkgRel)))
+  // A checkout with its own overlay is never projected into, so only its own upgrade rewrites it; a
+  // copy's row is printed by printLinkedWorktrees.
+  const own = (path: string) => ownsOverlayConfig(path, pkgRel) && !copiedFrom(path, pkgRel);
+  for (const path of stale.filter(own))
     console.log(
-      `  ⚠ ${ESLINT_OVERLAY_FILE} in ${own} ${why} — delete it (hand edits are lost) and run \`devkit upgrade\` there`,
+      `  ⚠ ${ESLINT_OVERLAY_FILE} in ${path} ${why} — delete it (hand edits are lost) and run \`devkit upgrade\` there`,
     );
   const borrowed = stale.filter((path) => !ownsOverlayConfig(path, pkgRel));
   if (hasLegacyEslintOverlay(home, pkgRel))
