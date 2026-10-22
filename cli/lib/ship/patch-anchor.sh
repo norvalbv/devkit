@@ -442,6 +442,7 @@ ship_apply_text_arm() {
     vanished+=("$p")
   done < <(git -C "$root" diff --name-only -z --no-renames --diff-filter=DT \
     "$patch_base" "$base" -- "${GIT_PATHS[@]}" ${WHOLE_EXCLUDES[@]+"${WHOLE_EXCLUDES[@]}"} 2>/dev/null || true)
+  ship_take_gate_owned_baseline "$root" "$base" "$base_ref" "$mode" "$target" && return 0
 
   # Nothing this function can name: the trial stays silent and lets staging take the authoritative
   # verdict. Staging keeps its historical behaviour — git's own stderr, then the abort.
