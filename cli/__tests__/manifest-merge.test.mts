@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentAssetKind } from '../lib/install/agent-assets/agent-providers.mts';
 import { syncProviderNativeAssets } from '../lib/install/agent-asset-manifest/lifecycle.mts';
@@ -80,13 +80,13 @@ function conflictedCheckout(
   kind: Kind,
   verb: 'merge' | 'rebase',
   theirs: Record<string, string | null>,
+  ours: Record<string, string | null> = { middle: 'ours' },
 ): string {
   const root = tempRoot();
   git(root, 'init', '-q', '-b', 'main');
-  syncAssets(root, kind);
+  syncAssets(root, kind, ours.zeta === null ? { zeta: null } : {});
   git(root, 'add', '--', kind.manifest);
   git(root, 'commit', '-qm', 'base');
-  const ours = { middle: 'ours' };
   commitManifest(root, kind, 'ours', ours);
   commitManifest(root, kind, 'theirs', theirs);
   git(root, 'switch', '-q', 'ours');
@@ -170,4 +170,25 @@ describe('a merge-conflicted manifest', () => {
     expect(existsSync(join(root, '.claude/skills/zeta'))).toBe(false);
     expect(readFileSync(join(root, MANIFEST), 'utf8')).toBe(freshManifest(KINDS[0], merged));
   });
+
+  // Only the other branch recorded `zeta`; this checkout's `zeta` is the consumer's own file.
+  it.each([
+    ['still bundle it', { middle: 'merged' }],
+    ['drop it', { middle: 'merged', zeta: null }],
+  ])(
+    'preserves a consumer file only the other branch recorded, when the merged sources %s',
+    (_case, merged) => {
+      const root = conflictedCheckout(
+        KINDS[0],
+        'merge',
+        { middle: 'theirs' },
+        { middle: 'ours', zeta: null },
+      );
+      const consumer = join(root, '.claude/skills/zeta/SKILL.md');
+      mkdirSync(dirname(consumer), { recursive: true });
+      writeFileSync(consumer, '# my own zeta\n');
+      syncAssets(root, KINDS[0], merged);
+      expect(readFileSync(consumer, 'utf8')).toBe('# my own zeta\n');
+    },
+  );
 });

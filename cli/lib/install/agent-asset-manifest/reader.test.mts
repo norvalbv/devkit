@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { testSpawnSync } from '../../../__tests__/_helpers.mts';
 import { encodeSyncManifestV2, type SyncManifestV2 } from './codec.mts';
@@ -127,6 +128,27 @@ describe('readAgentAssetManifest', () => {
     expect(readAgentAssetManifest(path, 'skills')).toMatchObject({
       version: 2,
       manifest: { files: both, providers: { claude: { files: alpha }, codex: { files: both } } },
+    });
+  });
+
+  it('drops a one-sided record whose copy in this checkout diverges from it', () => {
+    const root = tempRoot();
+    const sha = createHash('sha256').update('# beta\n').digest('hex');
+    for (const [name, content] of [
+      ['beta', '# beta\n'],
+      ['gamma', '# my own gamma\n'],
+    ]) {
+      mkdirSync(join(root, '.claude/skills', name), { recursive: true });
+      writeFileSync(join(root, '.claude/skills', name, 'SKILL.md'), content);
+    }
+    const path = join(root, '.devkit', 'skills-manifest.json');
+    mkdirSync(dirname(path));
+    const ours = JSON.stringify({ files: { 'alpha/SKILL.md': A }, targets: ['claude'] });
+    const theirs = { 'beta/SKILL.md': sha, 'gamma/SKILL.md': B };
+    writeFileSync(path, conflict(ours, JSON.stringify({ files: theirs, targets: ['claude'] })));
+    expect(readAgentAssetManifest(path, 'skills')?.manifest.files).toEqual({
+      'alpha/SKILL.md': A,
+      'beta/SKILL.md': sha,
     });
   });
 

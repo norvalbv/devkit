@@ -1,6 +1,11 @@
+import { createHash } from 'node:crypto';
+import { lstatSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { firstDuplicateJsonKey } from '../../../../gate-engine/critique/json-duplicate-keys.mts';
+import { agentAssetDir, projectedAssetRel } from '../agent-assets/agent-assets.mts';
 import {
   type AgentAssetKind,
+  type AgentProvider,
   LEGACY_AGENT_PROVIDERS,
   SUPPORTED_AGENT_PROVIDERS,
 } from '../agent-assets/agent-providers.mts';
@@ -32,7 +37,7 @@ export function readAgentAssetManifest(
 
 /**
  * A manifest git left with conflict markers decodes as the union of both sides, so a regenerating
- * sync still owns every name either branch recorded. Null when the bytes carry no markers.
+ * sync still owns what either branch recorded and this checkout holds. Null without markers.
  */
 function decodeConflictedManifest(
   path: string,
@@ -49,7 +54,7 @@ function decodeConflictedManifest(
     const sides = conflictSides(text);
     if (sides === null) return null;
     const decode = (side: string) => decodeAgentAssetManifestBytes(Buffer.from(side), kind);
-    return unionManifests(decode(sides[0]), decode(sides[1]));
+    return unionManifests(dirname(dirname(path)), kind, decode(sides[0]), decode(sides[1]));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(
@@ -94,25 +99,62 @@ function conflictSides(text: string): [string, string] | null {
 
 /** Both sides' records, ours winning a same-key hash clash; regeneration rewrites every hash anyway. */
 function unionManifests(
+  root: string,
+  kind: AgentAssetKind,
   ours: DecodedSyncManifest,
   theirs: DecodedSyncManifest,
 ): DecodedSyncManifest {
   if (ours.version === 1 && theirs.version === 1) {
     const targets = [...new Set([...ours.manifest.targets, ...theirs.manifest.targets])];
-    const files = { ...theirs.manifest.files, ...ours.manifest.files };
+    const files = unionRecords(ours.manifest.files, theirs.manifest.files, (rel, sha) =>
+      targets.every((target) =>
+        vouched(root, kind, target, projectedAssetRel(target, kind, rel), sha),
+      ),
+    );
     return { version: 1, manifest: { ...ours.manifest, files, targets } };
   }
   if (ours.version === 2 && theirs.version === 2) {
     const providers: SyncManifestV2['providers'] = {};
     for (const provider of SUPPORTED_AGENT_PROVIDERS) {
-      const recorded = [theirs, ours].flatMap((side) => side.manifest.providers[provider] ?? []);
-      if (recorded.length)
-        providers[provider] = { files: Object.assign({}, ...recorded.map((r) => r.files)) };
+      const [mine, other] = [ours, theirs].map((side) => side.manifest.providers[provider]);
+      if (mine || other)
+        providers[provider] = {
+          files: unionRecords(mine?.files ?? {}, other?.files ?? {}, (rel, sha) =>
+            vouched(root, kind, provider, rel, sha),
+          ),
+        };
     }
     const files = { ...theirs.manifest.files, ...ours.manifest.files };
     return { version: 2, manifest: { ...ours.manifest, files, providers } };
   }
   throw new Error('its two sides use different manifest schema versions');
+}
+
+/** A record only one side has is kept only while `owns` vouches for this checkout's copy of it. */
+function unionRecords(
+  ours: Record<string, string>,
+  theirs: Record<string, string>,
+  owns: (rel: string, sha: string) => boolean,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries({ ...theirs, ...ours }).filter(
+      ([rel, sha]) => (Object.hasOwn(ours, rel) && Object.hasOwn(theirs, rel)) || owns(rel, sha),
+    ),
+  );
+}
+
+// The other branch's record cannot vouch for a same-named file the consumer wrote in this checkout.
+function vouched(
+  root: string,
+  kind: AgentAssetKind,
+  provider: AgentProvider,
+  outputRel: string,
+  sha: string,
+): boolean {
+  const path = join(root, agentAssetDir(provider, kind), outputRel);
+  const stat = lstatSync(path, { throwIfNoEntry: false });
+  if (stat === undefined) return true;
+  return stat.isFile() && createHash('sha256').update(readFileSync(path)).digest('hex') === sha;
 }
 
 /** Decode manifest bytes already read from somewhere other than the working tree (a git tree). */
