@@ -179,7 +179,8 @@ export function buildFullHook(selection: HookSelection, pkgRel = '', binDir: Bin
 // is the repo's own, so its absence is a visible skip line, never a silent one.
 // `--relative` makes `git diff` emit paths relative to the CURRENT dir, so this works whether
 // the hook runs at the repo root or cd'd into a monorepo package (eslint/biome + their configs
-// are then resolved package-locally).
+// are then resolved package-locally). `-M100%` lists an edited rename as an add at its new path;
+// an exact move stays `R` and is skipped, so a pure `git mv` never blocks on debt it did not add.
 const overlayLintStep = (
   tool: string,
   label: string,
@@ -188,7 +189,7 @@ const overlayLintStep = (
   run: string,
   failHint = '',
 ) =>
-  `DK_STAGED=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(${exts})$' || true)
+  `DK_STAGED=$(git diff --cached --name-only --relative -M100% --diff-filter=ACM | grep -E '\\.(${exts})$' || true)
 if [ -n "$DK_STAGED" ] && [ -f ${config} ]; then
     if [ -x node_modules/.bin/${tool} ]; then
         echo "${label}"
