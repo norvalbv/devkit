@@ -27,7 +27,7 @@ function runWithShim(shim: string, gateSource: string, timeoutSeconds = 30, labe
     shim,
     `export DEVKIT_RUN_MODE=ship SHIP_COMMIT_TIMEOUT=${timeoutSeconds}`,
     `if run_gates_with_capture "$root" "$root" '${label}' "$log" "$root/progress.json" -- "$@"; then rc=0; else rc=$?; fi`,
-    'printf "RUNNER_RC=%s\\n" "$rc"',
+    'printf "RUNNER_RC=%s REAPED=%s\\n" "$rc" "${RUN_GATES_REAPED-unset}"',
   ].join('\n');
   const result = testSpawnSync(
     'bash',
@@ -77,26 +77,44 @@ describe('run_gates_with_capture — child liveness', () => {
   });
 });
 
-describe('run_gates_with_capture — timeout attribution', () => {
-  it('names a reaped leftover process, not the ceiling, when the gate exits 0 early', () => {
-    const result = runWithShim(
-      ':',
-      [
-        'console.log("🛰️ Sentry gate (commit-msg judge)...");',
-        "const { spawn } = require('node:child_process');",
-        "spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' }).unref();",
-      ].join('\n'),
-      30,
-      'ship',
-    );
+// Prints a stage header, leaves a child holding the capture pipe, and exits 0.
+const LEAK_AND_EXIT_0 = [
+  'console.log("🛰️ Sentry gate (commit-msg judge)...");',
+  "const { spawn } = require('node:child_process');",
+  "spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' }).unref();",
+].join('\n');
 
-    expect(result.stdout, result.stderr).toContain('RUNNER_RC=124');
+describe('run_gates_with_capture — timeout attribution', () => {
+  it('reports a ship as passed when the gate exits 0 and leaves a process to reap', () => {
+    const result = runWithShim(':', LEAK_AND_EXIT_0, 30, 'ship');
+
+    expect(result.stdout, result.stderr).toContain('RUNNER_RC=0 REAPED=1');
     expect(result.stderr).toMatch(
-      /exited cleanly, .*reaped after \d+s \(exit 124\) — NOT the 30s ceiling/,
+      /✓ ship: the gate chain passed; a process it started outlived it and was reaped after \d+s\./,
     );
-    expect(result.stderr).toContain('Last stage started: 🛰️ Sentry gate (commit-msg judge)...');
-    expect(result.stderr).toContain('The commit may already have landed.');
-    expect(result.stderr).not.toMatch(/hit the 30s ceiling|export SHIP_COMMIT_TIMEOUT/);
+    expect(result.stderr).not.toMatch(/exit 124|ceiling|--resume/);
+  });
+
+  // The pass is rewritten before the log check, so an unpersisted log still fails the ship closed.
+  it('fails a reaped ship closed when its gate output could not be persisted', () => {
+    const failingTee = [
+      'real_tee=$(command -v tee); stub=$(mktemp -d "$root/tee-stub.XXXXXX")',
+      `printf '#!/bin/sh\\n"%s" "$@"\\nexit 1\\n' "$real_tee" > "$stub/tee"; chmod +x "$stub/tee"`,
+      'PATH="$stub:$PATH"',
+    ].join('\n');
+    const result = runWithShim(failingTee, LEAK_AND_EXIT_0, 30, 'ship');
+
+    expect(result.stdout, result.stderr).toContain('RUNNER_RC=1 REAPED=1');
+    expect(result.stderr).toContain('could not persist gate output');
+    expect(result.stderr).not.toContain('gate chain passed');
+  });
+
+  // A hook's own exit 124 is a failure, not the supervisor's reap status; it must never publish.
+  it('fails a ship whose gate itself exits 124 while leaving a process behind', () => {
+    const result = runWithShim(':', `${LEAK_AND_EXIT_0}\nprocess.exitCode = 124;`, 30, 'ship');
+
+    expect(result.stdout, result.stderr).toContain('RUNNER_RC=1 REAPED=0');
+    expect(result.stderr).not.toContain('gate chain passed');
   });
 
   it('keeps the ceiling banner when gate output imitates the reap notice', () => {
@@ -121,21 +139,21 @@ describe('run_gates_with_capture — timeout attribution', () => {
         'setInterval(() => {}, 1000);',
       ].join('\n'),
       1,
+      'ship',
     );
 
-    expect(result.stdout, result.stderr).toContain('RUNNER_RC=124');
+    expect(result.stdout, result.stderr).toContain('RUNNER_RC=124 REAPED=0');
     expect(result.stderr).toContain('hit the 1s ceiling (exit 124)');
   });
 
-  it('claims no landed commit for a reap outside ship', () => {
-    const result = runWithShim(
-      ':',
-      "require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' }).unref();",
-    );
+  it('keeps exit 124 for a reap outside ship, naming it as not the ceiling', () => {
+    const result = runWithShim(':', LEAK_AND_EXIT_0);
 
-    expect(result.stdout, result.stderr).toContain('RUNNER_RC=124');
-    expect(result.stderr).toContain('NOT the 30s ceiling');
-    expect(result.stderr).not.toContain('commit may already have landed');
+    expect(result.stdout, result.stderr).toContain('RUNNER_RC=124 REAPED=0');
+    expect(result.stderr).toMatch(
+      /exited cleanly, .*reaped after \d+s \(exit 124\) — NOT the 30s ceiling/,
+    );
+    expect(result.stderr).toContain('Last stage started: 🛰️ Sentry gate (commit-msg judge)...');
   });
 
   it('names the running stage header, not an earlier finding line, when the ceiling fires', () => {

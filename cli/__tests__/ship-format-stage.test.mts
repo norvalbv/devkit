@@ -10,7 +10,7 @@ import {
   dropWorktree,
   GIT_ENV,
   installHook,
-  LEAKING_HOOK,
+  COUNTING_HOOK,
   publishEnvFor,
   scriptPath,
   seedShipRepo,
@@ -54,7 +54,7 @@ describe('ship — the format stage is evidence, not inference', () => {
   // re-format, which would have invalidated the receipt it resumes on.
   it('runs no format step on a receipt-authorised resume — the preserved commit is published as-is', () => {
     const { dir, env, git, bare } = seedShipRepoLocalRemote();
-    installHook(dir, LEAKING_HOOK);
+    installHook(dir, COUNTING_HOOK);
     const { hookCount, publishEnv } = publishEnvFor(dir, env);
     // No note.txt cleanup: the preserved commit and $ROOT's copy must match for the scope check.
     const branch = 'feat/resume-no-fmt';
