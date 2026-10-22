@@ -1,7 +1,19 @@
 import { spawnSync } from 'node:child_process';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { aggregate, regressionFlips } from '../eval/bench.mts';
+import {
+  hashLocalModuleClosure,
+  localModuleClosureFiles,
+} from '../../review/eval/module-closure-hash.mts';
+import {
+  aggregate,
+  experimentHashes,
+  RESPONSE_ROOTS,
+  RUNNER_ROOTS,
+  regressionFlips,
+  responseFingerprint,
+} from '../eval/bench.mts';
 import { loadRows } from '../eval/cases.mts';
 
 // The prior-art bench is excluded from every tsconfig project (`**/eval/**`), so its scoring
@@ -29,6 +41,23 @@ const row = (overrides: Partial<Parameters<typeof aggregate>[0][number]> = {}) =
   genuineClean: null,
   outages: 0,
   ...overrides,
+});
+
+describe('experiment identity', () => {
+  const seam = path.join(import.meta.dirname, '../../judge/codex/result.mts');
+
+  it('runner hash covers the runner import closure, including the codex judge spawn seam', () => {
+    expect(experimentHashes(AGENT).runnerHash).toBe(hashLocalModuleClosure(RUNNER_ROOTS));
+    expect(localModuleClosureFiles(RUNNER_ROOTS)).toContain(seam);
+  });
+
+  it('response bank key covers the agent-call closure but not scoring code', () => {
+    expect(responseFingerprint(AGENT).split(':')[2]).toBe(hashLocalModuleClosure(RESPONSE_ROOTS));
+    const files = localModuleClosureFiles(RESPONSE_ROOTS);
+    expect(files).toContain(seam);
+    expect(files).not.toContain(path.join(import.meta.dirname, '../eval/matcher.mts'));
+    expect(files).not.toContain(path.join(import.meta.dirname, '../eval/bench.mts'));
+  });
 });
 
 describe('aggregate', () => {

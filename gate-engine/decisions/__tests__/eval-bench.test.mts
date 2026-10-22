@@ -7,6 +7,7 @@ import {
   BenchAbort,
   GATE_SOURCES,
   compare,
+  gateHash,
   lintCases,
   majorityVerdict,
   materializeFixture,
@@ -20,6 +21,10 @@ import {
   wilson,
 } from '../eval/bench.mts';
 import { openCheckpoint } from '../eval/checkpoint.mts';
+import {
+  hashLocalModuleClosure,
+  localModuleClosureFiles,
+} from '../../review/eval/module-closure-hash.mts';
 
 // ─── Pure metrics ─────────────────────────────────────────────────────────────────
 
@@ -27,6 +32,14 @@ import { openCheckpoint } from '../eval/checkpoint.mts';
 describe('gate hash sources', () => {
   it('hash every module whose prompt or parse feeds a verdict, including the depth pass', () => {
     expect(GATE_SOURCES).toEqual(['../detect', '../check-alignment', '../depth/depth-pass']);
+  });
+
+  it('hashes the import closure of those roots, which reaches the codex judge spawn seam', () => {
+    const roots = GATE_SOURCES.map((rel) => join(import.meta.dirname, '../eval', `${rel}.mts`));
+    expect(gateHash()).toBe(hashLocalModuleClosure(roots));
+    expect(localModuleClosureFiles(roots)).toContain(
+      join(import.meta.dirname, '../../judge/codex/result.mts'),
+    );
   });
 });
 

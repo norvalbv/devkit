@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -32,6 +32,20 @@ describe('completeness-eval local module closure hash', () => {
 
     write('leaf.mts', 'export const value = 2;\n');
     expect(hashLocalModuleClosure([root])).not.toBe(initial);
+  });
+
+  it('is independent of the checkout location, so a baseline compares across worktrees', () => {
+    const root = write('root.mts', "import './leaf.mts';\n");
+    write('leaf.mts', 'export const value = 1;\n');
+    const elsewhere = mkdtempSync(join(tmpdir(), 'module-closure-hash-copy-'));
+    try {
+      cpSync(dir, elsewhere, { recursive: true });
+      expect(hashLocalModuleClosure([join(elsewhere, 'root.mts')])).toBe(
+        hashLocalModuleClosure([root]),
+      );
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
   });
 
   it('follows literal dynamic imports', () => {

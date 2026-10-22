@@ -45,6 +45,11 @@ import {
   unwrapClaudeResult,
   WORKFLOW_TOOLS,
 } from '../eval/run-critic.mts';
+import { RUNNER_ROOTS, runnerHash } from '../eval/salvage.mts';
+import {
+  hashLocalModuleClosure,
+  localModuleClosureFiles,
+} from '../../review/eval/module-closure-hash.mts';
 import { REVIEWED_RESPONSE } from './response-fixture.mts';
 
 const critic = { body: 'AGENT BODY', model: 'opus', raw: '---\nmodel: opus\n---\nAGENT BODY' };
@@ -61,6 +66,13 @@ describe('salvage fingerprint', () => {
     );
     expect(salvageFingerprint(critic, '{"id":"other"}', 'runner-a')).not.toBe(base);
     expect(salvageFingerprint(critic, '{"id":"row"}', 'runner-b')).not.toBe(base);
+  });
+
+  it('runner hash covers the import closure of the runner, including the codex judge spawn seam', () => {
+    expect(runnerHash()).toBe(hashLocalModuleClosure(RUNNER_ROOTS));
+    expect(localModuleClosureFiles(RUNNER_ROOTS)).toContain(
+      path.join(import.meta.dirname, '../../judge/codex/result.mts'),
+    );
   });
 });
 

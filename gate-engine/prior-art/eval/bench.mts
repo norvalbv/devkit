@@ -23,6 +23,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { BenchAbort, cleanBenchEnv, majorityVerdict, wilson } from '../../decisions/eval/bench.mts';
+import { hashLocalModuleClosure } from '../../review/eval/module-closure-hash.mts';
 import { parsePriorArtResponse } from '../response-contract.mts';
 import { casesPath, loadRows, type Row } from './cases.mts';
 import { mapPool, projectResponse, runMatcher, scoreCase } from './matcher.mts';
@@ -51,32 +52,35 @@ const AGENT_CONCURRENCY = Math.max(
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex').slice(0, 16);
 
+/** Roots of the hashed runner code; run-agent's import closure includes the judge spawn seam. */
+export const RUNNER_ROOTS = ['bench.mts', 'cases.mts', 'run-agent.mts', 'matcher.mts'].map((name) =>
+  path.join(here, name),
+);
+/** Roots of the code that shapes the agent call, and so keys the paid response bank. */
+export const RESPONSE_ROOTS = [path.join(here, 'run-agent.mts')];
+
 export function experimentHashes(agent: AgentSource): {
   agentHash: string;
   runnerHash: string;
   corpusHash: string;
 } {
-  const runnerFiles = ['bench.mts', 'cases.mts', 'run-agent.mts', 'matcher.mts'].map((name) =>
-    readFileSync(path.join(here, name), 'utf8'),
-  );
   return {
     agentHash: sha256(agent.raw),
-    runnerHash: sha256(runnerFiles.join('\n')),
+    runnerHash: hashLocalModuleClosure(RUNNER_ROOTS),
     corpusHash: sha256(readFileSync(casesPath, 'utf8')),
   };
 }
 
 /**
  * Checkpoint-bank key. Banked responses depend only on what shapes the agent CALL — the md, the
- * corpus prompts, the directive-building runner, and the model — never on scoring/orchestration
+ * corpus prompts, the runner's import closure, and the model — never on scoring/orchestration
  * code, so matcher/bench/adapter edits keep the bank while any change to the call inputs drops it.
  */
 export function responseFingerprint(agent: AgentSource): string {
-  const runAgent = readFileSync(path.join(here, 'run-agent.mts'), 'utf8');
   return [
     sha256(agent.raw),
     sha256(readFileSync(casesPath, 'utf8')),
-    sha256(runAgent),
+    hashLocalModuleClosure(RESPONSE_ROOTS),
     agent.model,
   ].join(':');
 }
