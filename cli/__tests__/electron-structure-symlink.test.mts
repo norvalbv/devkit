@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -114,6 +122,36 @@ export default [{
     const step = overlayStagedStep();
     expect(step).toContain('devkit eslint overlay (staged)');
     const result = runHookFragment(step, { cwd: worktree });
+
+    expect(result.status, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(1);
+    expect(result.stdout).toContain('project-structure/folder-structure');
+    expect(result.stdout).toContain('wrong.ts');
+  });
+
+  it("the overlay hook's staged eslint step blocks an edited git mv into a wrong folder", () => {
+    const worktree = realpathSync(mkdtempSync(join(tmpdir(), 'overlay-eslint-rename-')));
+    roots.push(worktree);
+    mkdirSync(join(worktree, 'src'));
+    symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(worktree, 'node_modules'));
+    writeElectronConfig(worktree, "{ name: 'src', children: [{ name: 'allowed.ts' }] }");
+    writeFileSync(
+      join(worktree, 'eslint.config.devkit.mjs'),
+      eslintOverlayContent('eslint.config.mjs'),
+    );
+    // Enough lines that default detection pairs the edited move as `R`, which a plain ACM list drops.
+    writeFileSync(join(worktree, 'src', 'allowed.ts'), 'export const a = 1;\n'.repeat(20));
+    initializeGit(worktree);
+    stage(worktree, 'eslint.config.mjs', 'src/allowed.ts');
+    const git = (...args) => {
+      const result = spawnSync('git', args, { cwd: worktree, encoding: 'utf8' });
+      expect(result.status, result.stderr).toBe(0);
+    };
+    git('commit', '-qm', 'base');
+    git('mv', 'src/allowed.ts', 'src/wrong.ts');
+    appendFileSync(join(worktree, 'src', 'wrong.ts'), 'export const moved = 1;\n');
+    stage(worktree, 'src/wrong.ts');
+
+    const result = runHookFragment(overlayStagedStep(), { cwd: worktree });
 
     expect(result.status, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(1);
     expect(result.stdout).toContain('project-structure/folder-structure');

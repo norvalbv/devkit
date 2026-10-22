@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -16,7 +17,16 @@ import {
   eslintOverlayContent,
   legacyEslintOverlayContent,
 } from '../lib/install/overlay-lint-configs.mts';
-import { ALL_GUARDS, cleanupHomes, hasDash, homes, runHook } from './_husky-hook-harness.mts';
+import {
+  ALL_GUARDS,
+  cleanupHomes,
+  hasDash,
+  homes,
+  overlayStagedStep,
+  runHook,
+  runHookFragment,
+  writeStub,
+} from './_husky-hook-harness.mts';
 
 /** The calls an AI guard could have made: `guard-review record-gate` is a shell gate's own narration. */
 const aiCalls = (calls: string) => calls.replace(/^guard-review record-gate .*\n/gm, '');
@@ -1326,5 +1336,80 @@ describe.each(['package', 'standalone'])('staged fallow gate (%s hook)', (builde
     );
     expect(rehearsal.status).toBe(1);
     expect(rehearsal.calls).toContain('guard-review --gate');
+  });
+});
+
+// Twenty lines, so default detection pairs an edited move as `R`, which a plain ACM list drops.
+const LEGACY_SOURCE = Array.from({ length: 20 }, (_, i) => `export const v${i} = ${i};\n`).join('');
+
+// A repo with one committed source per path, eslint/biome overlay configs and argv-logging stubs in
+// `pkg` (the dir the hook runs from), so a rename can be staged against a real HEAD.
+function renameRepo(committed: string[], pkg = '') {
+  const home = mkdtempSync(join(tmpdir(), 'dk-overlay-rename-'));
+  homes.push(home);
+  const cwd = join(home, pkg);
+  mkdirSync(join(cwd, 'node_modules', '.bin'), { recursive: true });
+  writeFileSync(join(cwd, 'eslint.config.devkit.mjs'), 'export default [];\n');
+  writeFileSync(join(cwd, 'biome.devkit.jsonc'), '{}\n');
+  writeStub(join(cwd, 'node_modules', '.bin', 'eslint'), 'eslint', 'ESLINT_RC');
+  writeStub(join(cwd, 'node_modules', '.bin', 'biome'), 'biome', 'BIOME_RC');
+  writeFileSync(join(home, '.gitignore'), 'node_modules/\ncalls.log\n');
+  for (const path of committed) {
+    mkdirSync(join(home, path, '..'), { recursive: true });
+    writeFileSync(join(home, path), LEGACY_SOURCE);
+  }
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: home });
+  git('init', '-q');
+  git('add', '.');
+  git('-c', 'user.email=t@example.com', '-c', 'user.name=t', 'commit', '-qm', 'base');
+  return { home, cwd, git };
+}
+
+function runOverlayStep(home: string, cwd: string, env: NodeJS.ProcessEnv = {}) {
+  const r = runHookFragment(overlayStagedStep(), {
+    cwd,
+    env: { ...process.env, HOME: home, DEVKIT_RUN_MODE: '', ...env },
+  });
+  const log = join(home, 'calls.log');
+  return { ...r, calls: existsSync(log) ? readFileSync(log, 'utf8') : '' };
+}
+
+describe('overlay staged lint and renames (sc-4670)', () => {
+  it('an edited rename reaches eslint and biome at its new path, and a failure blocks', () => {
+    const { home, cwd, git } = renameRepo(['src/old.ts']);
+    git('mv', 'src/old.ts', 'src/new.ts');
+    appendFileSync(join(home, 'src', 'new.ts'), 'export const edited = 1;\n');
+    git('add', 'src/new.ts');
+
+    const passing = runOverlayStep(home, cwd);
+    expect(passing.status, passing.stderr).toBe(0);
+    expect(passing.calls).toContain('eslint -c eslint.config.devkit.mjs src/new.ts');
+    expect(passing.calls).toContain('biome check --config-path biome.devkit.jsonc src/new.ts');
+    expect(passing.calls).not.toContain('old.ts');
+
+    const failing = runOverlayStep(home, cwd, { ESLINT_RC: '1' });
+    expect(failing.status).toBe(1);
+    expect(`${failing.stdout}${failing.stderr}`).toContain('eslint-overlay');
+  });
+
+  // A consumer's diff.renames=false would otherwise report the move as delete + add and lint it.
+  it.each(['true', 'false'])('an exact move runs neither tool (diff.renames=%s)', (renames) => {
+    const { home, cwd, git } = renameRepo(['src/old.ts']);
+    git('config', 'diff.renames', renames);
+    git('mv', 'src/old.ts', 'src/moved.ts');
+
+    const r = runOverlayStep(home, cwd, { ESLINT_RC: '1', BIOME_RC: '1' });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.calls).toBe('');
+  });
+
+  it('a monorepo package lints a file moved into it from outside as an addition', () => {
+    const { home, cwd, git } = renameRepo(['lib/x.ts'], 'pkg');
+    mkdirSync(join(cwd, 'src'));
+    git('mv', 'lib/x.ts', 'pkg/src/x.ts');
+
+    const r = runOverlayStep(home, cwd);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.calls).toContain('eslint -c eslint.config.devkit.mjs src/x.ts');
   });
 });
