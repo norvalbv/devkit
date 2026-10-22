@@ -2,10 +2,9 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { copyFileSync, mkdirSync, mkdtempSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mts';
+import { commitIndexEnv, commitIndexTree } from '../../../../gate-engine/ratchets/commit-index.mts';
 
 export const MAX_GIT_OUTPUT = 128 * 1024 * 1024;
 const GIT_LOCK_WAIT_MS = 5_000;
@@ -215,7 +214,6 @@ export function withStableGitIndex<T>(
     process.on(signal, handler);
   }
 
-  let temp: string | null = null;
   try {
     for (const path of lockPaths) held.push(acquireGitLock(path));
     const currentHead = {
@@ -235,16 +233,13 @@ export function withStableGitIndex<T>(
         'anti-slop: Git base changed while rename evidence was being read; baseline unchanged; retry',
       );
     }
-    temp = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-index-lock-'));
-    const snapshotIndex = join(temp, 'index');
-    copyFileSync(gitPath('index'), snapshotIndex);
-    const currentTree = execFileSync('git', ['write-tree'], {
-      cwd: repo.root,
-      encoding: 'utf8',
-      env: { ...process.env, GIT_INDEX_FILE: snapshotIndex },
-      maxBuffer: MAX_GIT_OUTPUT,
-    }).trim();
-    if (currentTree !== expectedCandidateTree) {
+    const current = commitIndexTree(repo.root);
+    if (current.tree === null) {
+      throw new Error(
+        `anti-slop: could not hash the Git index under its lock: ${current.error}; baseline unchanged; retry`,
+      );
+    }
+    if (current.tree !== expectedCandidateTree) {
       throw new Error(
         'anti-slop: Git index changed while staged renames were being read; baseline unchanged; retry',
       );
@@ -252,15 +247,11 @@ export function withStableGitIndex<T>(
     return action();
   } finally {
     try {
-      if (temp) rmSync(temp, { recursive: true, force: true });
+      releaseHeld();
     } finally {
-      try {
-        releaseHeld();
-      } finally {
-        for (const [signal, handler] of signalHandlers) process.removeListener(signal, handler);
-        if (held.length === 0) process.removeListener('exit', exitHandler);
-        if (pendingSignal) process.kill(process.pid, pendingSignal);
-      }
+      for (const [signal, handler] of signalHandlers) process.removeListener(signal, handler);
+      if (held.length === 0) process.removeListener('exit', exitHandler);
+      if (pendingSignal) process.kill(process.pid, pendingSignal);
     }
   }
 }

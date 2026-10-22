@@ -133,7 +133,7 @@ function expectRejected(request = opts) {
   expect(result.stderr).toContain('use a fresh research root');
   expect(snapshot()).toEqual(before);
   expect(existsSync(`${wt}.lock`)).toBe(false);
-  expect(readdirSync(wt).filter((name) => name.startsWith('.scale-identity-'))).toEqual([]);
+  expect(readdirSync(wt).filter((name) => name.startsWith('devkit-tree-index-'))).toEqual([]);
 }
 
 describe('cached materialization identity', { timeout: CLI_TIMEOUT_MS }, () => {
@@ -196,7 +196,37 @@ describe('cached materialization identity', { timeout: CLI_TIMEOUT_MS }, () => {
     expect(result.stderr).toContain('reusing worktree');
     expect(snapshot()).toEqual(before);
     expect(existsSync(`${wt}.lock`)).toBe(false);
-    expect(readdirSync(wt).filter((name) => name.startsWith('.scale-identity-'))).toEqual([]);
+    expect(readdirSync(wt).filter((name) => name.startsWith('devkit-tree-index-'))).toEqual([]);
+  });
+  it('validates the cached worktree’s real index even under a commit-index carrier for it', () => {
+    const gitDir = git(wt, ['rev-parse', '--absolute-git-dir']).trim();
+    const alternate = join(gitDir, 'alt-index');
+    execFileSync('git', ['read-tree', 'HEAD'], {
+      cwd: wt,
+      env: { ...process.env, GIT_INDEX_FILE: alternate },
+    });
+    process.env.DEVKIT_COMMIT_INDEX_FILE = alternate;
+    process.env.DEVKIT_COMMIT_GIT_DIR = gitDir;
+    try {
+      const result = run(opts);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stderr).toContain('reusing worktree');
+    } finally {
+      delete process.env.DEVKIT_COMMIT_INDEX_FILE;
+      delete process.env.DEVKIT_COMMIT_GIT_DIR;
+    }
+  });
+  it('validates a cached worktree without ever copying its index into the shared tmpdir', () => {
+    const saved = process.env.TMPDIR;
+    process.env.TMPDIR = join(root, 'missing-tmp');
+    try {
+      const result = run(opts);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stderr).toContain('reusing worktree');
+    } finally {
+      if (saved === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = saved;
+    }
   });
   it('accepts a canonical alias of the requested repository and keeps the cached base pinned as the branch moves', () => {
     const alias = join(root, 'source-alias');
