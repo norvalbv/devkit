@@ -239,6 +239,15 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     expect(r.stdout).toContain('Follow the Remedy named above');
     expect(r.stdout).not.toContain('auth/quota'); // sc-3400: the cause is named per reviewer
     expect(r.stdout).not.toMatch(/check [`]?claude/i);
+    expect(r.stdout).not.toContain('guard-review blocked the commit');
+  });
+
+  // Exit 1 is a FAIL, a REVIEW ERROR or an integrity block; only the engine above can tell which.
+  it('guard-review exit 1 blocks without claiming which cause — the engine names it above', () => {
+    const r = runHook({ REVIEW_RC: '1' });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('guard-review blocked the commit');
+    expect(r.stdout).not.toContain('A reviewer FAILED');
     expect(r.stdout).not.toContain('escalation-confirmed');
   });
 
@@ -320,7 +329,7 @@ describe('parallel completeness prewarm (ship message file present)', () => {
   it('a fleet FAIL blocks as the fleet, never as the parallel completeness verdict', () => {
     const r = runHook({ REVIEW_RC: '1', COMP_RC: '1' }, undefined, { shipMsg: true });
     expect(r.status).toBe(1);
-    expect(r.stdout).toContain('escalation-confirmed');
+    expect(r.stdout).toContain('guard-review blocked the commit');
     // The completeness verdict must not BLOCK here — the fleet already owns this exit.
     expect(r.stdout).not.toContain('Confirmed completeness gap');
   });
@@ -333,7 +342,7 @@ describe('parallel completeness prewarm (ship message file present)', () => {
     expect(r.stdout).toContain('the completeness judge had ALREADY recorded a');
     // Below, not above: a tail-based read is the whole point.
     expect(r.stdout.indexOf('ALREADY recorded')).toBeGreaterThan(
-      r.stdout.indexOf('escalation-confirmed'),
+      r.stdout.indexOf('guard-review blocked the commit'),
     );
   });
 
@@ -344,7 +353,7 @@ describe('parallel completeness prewarm (ship message file present)', () => {
       shipMsg: true,
     });
     expect(r.status).toBe(1);
-    expect(r.stdout).toContain('escalation-confirmed');
+    expect(r.stdout).toContain('guard-review blocked the commit');
     expect(r.stdout).not.toContain('ALREADY recorded');
     // The judge exited on its own, so its outcome line is in the log; no signal is claimed.
     expect(r.stdout).not.toContain('completeness judge ended by a signal');
@@ -366,7 +375,7 @@ describe('parallel completeness prewarm (ship message file present)', () => {
       shell: '/bin/dash',
     });
     expect(r.status).toBe(1);
-    expect(r.stdout).toContain('escalation-confirmed');
+    expect(r.stdout).toContain('guard-review blocked the commit');
     expect(r.stdout).toContain('ALREADY recorded');
   });
 
@@ -400,7 +409,7 @@ describe('parallel completeness prewarm (ship message file present)', () => {
     expect(r.stdout).not.toContain('ALREADY recorded');
     // But the log must not end at "started": the signal is named, below the fleet's block.
     expect(r.stdout.indexOf('completeness judge ended by a signal (status 143)')).toBeGreaterThan(
-      r.stdout.indexOf('escalation-confirmed'),
+      r.stdout.indexOf('guard-review blocked the commit'),
     );
   });
 

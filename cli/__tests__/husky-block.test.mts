@@ -429,14 +429,14 @@ describe('exit 4 renders as an object-database fault, never as a verdict', () =>
     const { status, out } = runHook({ 'guard-review': 4 });
     expect(status).toBe(1);
     expect(out).toContain('unexpected exit 4');
-    expect(out).not.toContain('escalation-confirmed');
+    expect(out).not.toContain('guard-review blocked the commit');
     expect(out).not.toContain('auth/quota');
   });
 
   it('exit 1 and exit 3 DO still carry their verdict remedies — the contrast that matters', () => {
     // Non-vacuity guard: if these ever stopped printing, the two assertions above would pass for
     // the wrong reason and this suite would be measuring nothing.
-    expect(runHook({ 'guard-review': 1 }).out).toContain('escalation-confirmed');
+    expect(runHook({ 'guard-review': 1 }).out).toContain('guard-review blocked the commit');
     // sc-3400: exit 3 defers to the per-reviewer Remedy, which names the real cause — a flat
     // "auth/quota" here misdirected an engine error. The exit-4 lines above must still never say it.
     expect(runHook({ 'guard-review': 3 }).out).toContain('Follow the Remedy named above');

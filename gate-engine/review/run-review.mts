@@ -10,7 +10,8 @@
  * reviewers (correctness) run single-pass and block directly.
  *
  * Contract:
- *   exit 1 = at least one confirmed FAIL
+ *   exit 1 = a confirmed FAIL, a REVIEW ERROR, or an integrity block (tamper, mass deletion)
+ *   exit 4 = a verified object-database fault (odb-probe.mts)
  *   exit 2 = no FAIL, but at least one judge was inconclusive (outage / no VERDICT line) → the
  *            hook treats this as fail-open (non-strict runs only)
  *   exit 3 = strict runs only (GUARD_AI_STRICT, set by devkit ship): a judge stayed inconclusive
@@ -240,8 +241,8 @@ export async function runReviewGate(
     if (stagedTreeHash(cwd, 'review evidence bracket') !== preJudgeTree)
       throw new Error('staged tree changed while review evidence was being read — re-run the gate');
   } catch (e: unknown) {
-    // sc-1366: both branches read the staged diff, so both can die on an unreadable object. Review
-    // mode is the worse — exit 1 is rendered as "A reviewer FAILED (opus-confirmed)".
+    // Both branches read the staged diff, so both can die on an unreadable object; review mode
+    // blocks at exit 1, so its message must name the setup failure, not a reviewer.
     const g = 'guard-review';
     const m = `${g}: review setup failure — ${e instanceof Error ? e.message : String(e)}`;
     const fb = reviewMode ? { message: m } : { strict };
@@ -474,6 +475,9 @@ export async function runReviewGate(
   const errors = results.filter((r) => r.status === 'error');
   for (const r of errors) {
     console.error(`guard-review: ${r.name} REVIEW ERROR — ${r.reason}`);
+    console.error(
+      '   No verdict was reached on the code — follow the error text above, then re-run.',
+    );
     if (r.transcript) console.error(r.transcript.trim());
   }
   if (fails.length > 0 || errors.length > 0) return finish(1);
