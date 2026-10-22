@@ -6,7 +6,7 @@
 /** Title prefix on a follow-up devkit started; the queue that runs it reads it to prioritise. */
 export const AUTO_START_PREFIX = '[auto-start]';
 
-const FOLLOW_UP_TYPES = ['blocks-done', 'builds-on', 'discovery'] as const;
+export const FOLLOW_UP_TYPES = ['blocks-done', 'builds-on', 'discovery'] as const;
 export type FollowUpType = (typeof FOLLOW_UP_TYPES)[number];
 
 export interface FollowUpRecord {
@@ -32,6 +32,14 @@ export type StartDecision =
   | { action: 'assign'; story: StoryView; rename: boolean };
 
 const PR_URL = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/;
+const WHOLE_PR_URL = new RegExp(`^${PR_URL.source}$`);
+
+/** Any record label; readers take the first match, so free text must never carry one. */
+export const RECORD_LABEL = /\*\*(Project|Follow-up of|Follow-up type|Stack on):\*\*/;
+
+export function isPrUrl(value: string): boolean {
+  return WHOLE_PR_URL.test(value);
+}
 
 function lineValue(description: string, label: string): string | null {
   const match = description.match(new RegExp(`^\\*\\*${label}:\\*\\*[ \\t]*(.+)$`, 'm'));
@@ -55,6 +63,31 @@ export function parseRecord(description: string): FollowUpRecord | null {
   };
 }
 
+/**
+ * The lines `parseRecord` reads back. Stack on names the PR whose branch a blocks-done or builds-on
+ * item starts from.
+ */
+export function renderRecord(
+  project: string,
+  parent: number,
+  type: FollowUpType,
+  prUrl: string | null,
+): string {
+  const lines = [
+    `**Project:** ${project}`,
+    `**Follow-up of:** sc-${parent}${prUrl ? ` · ${prUrl}` : ''}`,
+    `**Follow-up type:** ${type}`,
+  ];
+  if (prUrl && type !== 'discovery') lines.push(`**Stack on:** ${prUrl}`);
+  return lines.join('\n');
+}
+
+/** A title compared for duplicates: case, spacing and the start marker do not make it new. */
+export function normalisedTitle(name: string): string {
+  const unmarked = name.startsWith(AUTO_START_PREFIX) ? name.slice(AUTO_START_PREFIX.length) : name;
+  return unmarked.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
 /** Depth is capped at one hop: a story that is itself a follow-up never starts follow-ups. */
 export function isDepthCapped(story: StoryView): boolean {
   return story.name.startsWith(AUTO_START_PREFIX) || parseRecord(story.description) !== null;
@@ -71,13 +104,14 @@ export function ineligibleReason(child: StoryView, parentId: number): string | n
 }
 
 /**
- * At most one follow-up per parent ever starts, so an assigned marked follow-up ends it even once
- * closed. A marked one left unassigned (an earlier assign failed) is resumed before any new pick.
+ * At most one follow-up per parent ever starts, so a marked follow-up that is assigned or closed
+ * ends it. An open, unassigned marked one (an earlier assign failed) is resumed before a new pick.
  */
 export function decideStart(parentId: number, children: readonly StoryView[]): StartDecision {
   const ofParent = children.filter((child) => parseRecord(child.description)?.parent === parentId);
   const started = ofParent.find(
-    (child) => child.name.startsWith(AUTO_START_PREFIX) && child.ownerIds.length > 0,
+    (child) =>
+      child.name.startsWith(AUTO_START_PREFIX) && (child.ownerIds.length > 0 || child.closed),
   );
   if (started) return { action: 'none', reason: `sc-${started.id} was already started` };
   const eligible = ofParent
