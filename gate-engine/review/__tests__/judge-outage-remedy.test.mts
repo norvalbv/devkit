@@ -157,8 +157,27 @@ describe('a MODEL the account does not serve', () => {
     expect(exec).toHaveBeenCalledTimes(5);
     const out = err.mock.calls.flat().join('\n');
     expect(out).toContain('judge model `gpt-5.6-sol` is not available on this account');
-    expect(out).toContain('plan does not serve it, so re-running cannot succeed');
+    // The fixture pins the claude family, so the remedy is claude's: no codex preflight list.
+    expect(out).toContain('may not exist or the account cannot use it');
+    expect(out).not.toContain('ship preflight');
     expect(out).not.toContain('retrying once');
+    expect(out).not.toContain('CLI auth/quota, then re-run devkit ship');
+  });
+
+  // claude's 404 refusal is retryable: the same 404 also flakes on a valid model.
+  it('a retryable claude refusal is spawned twice, then still gets the model remedy', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    const exec = mkExec(async (opts) => {
+      opts.onOutage?.({ kind: 'model-unavailable', permanent: false, model: 'claude-x' });
+      return null;
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    expect(exec).toHaveBeenCalledTimes(10);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('judge run failed (model-unavailable), retrying once');
+    expect(out).toContain('judge model `claude-x` is not available on this account');
     expect(out).not.toContain('CLI auth/quota, then re-run devkit ship');
   });
 
@@ -169,6 +188,6 @@ describe('a MODEL the account does not serve', () => {
     expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec: refused() })).toBe(3);
     const out = err.mock.calls.flat().join('\n');
     expect(out).toContain('SKIPPED (judge model is not available on this account)');
-    expect(out).toContain('plan does not serve it, so re-running cannot succeed');
+    expect(out).toContain('may not exist or the account cannot use it');
   });
 });

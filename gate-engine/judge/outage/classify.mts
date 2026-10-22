@@ -1,5 +1,6 @@
 /** Why a judge spawn produced no verdict — the ONE classifier every judge-consuming gate reads.
  *  Unknown stays `transient`; Node's message is NEVER scanned (it renders the judge's own diff). */
+import { claudeModelRefusal } from '../claude-result.mts';
 import { codexFailure } from '../codex/result.mts';
 
 /**
@@ -64,6 +65,9 @@ const RATE_LIMITED =
  *  the OpenAI API's not-found wording for a key without access. */
 const MODEL_UNAVAILABLE =
   /\b(?:model is not supported|model_not_found|does not exist or you do not have access)\b/i;
+
+/** The claude CLI's 404 sentence. Read only from its result envelope, never from stderr. */
+const CLAUDE_MODEL_REFUSAL = /\bmay not exist or you may not have access\b/i;
 
 /** Logged-out / credential wordings. `invalid api key` covers the key-auth path both CLIs support. */
 const UNAUTHENTICATED =
@@ -163,6 +167,12 @@ function firstSentence(text: string): string | undefined {
 export function classifyJudgeOutage(e: JudgeError): JudgeOutage {
   if (isJudgeTimeout(e)) return { kind: 'timeout', permanent: true };
   if (e.code === 'ENOENT') return { kind: 'absent', permanent: true };
+
+  // Not permanent: the same 404 also flakes on a valid model (anthropics/claude-code#103174), and
+  // one retry of a real refusal costs a second and no spend.
+  const refusal = claudeModelRefusal(e.stdout);
+  if (refusal !== null && CLAUDE_MODEL_REFUSAL.test(refusal))
+    return { kind: 'model-unavailable', permanent: false, detail: firstSentence(refusal) };
 
   const text = providerText(e);
   if (RATE_LIMITED.test(text)) {
