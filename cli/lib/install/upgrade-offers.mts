@@ -42,13 +42,15 @@ type GateSelection = string[] | symbol;
 interface GateOfferOptions {
   interactive?: boolean;
   select?: () => Promise<GateSelection>;
+  /** The init command a hint names: an overlay repo needs `devkit init --overlay`. */
+  initCmd?: string;
 }
 
 export async function offerNewGates(
   recordedDisabled: string[] | undefined,
   sel: Selection,
   dryRun: boolean,
-  options: GateOfferOptions = {},
+  { initCmd = 'devkit init', ...options }: GateOfferOptions = {},
 ): Promise<string[]> {
   const disabled = GUARD_IDS.filter(
     (guard) => recordedDisabled?.includes(guard) && !sel.guards.includes(guard),
@@ -75,7 +77,7 @@ export async function offerNewGates(
     for (const id of offered) {
       const kind = recommended.includes(id) ? 'recommended' : 'opt-in';
       console.log(
-        `  • devkit bundles ${id} (${kind}) — not in this repo's guards; enable with 'devkit init --guards …,${id}'`,
+        `  • devkit bundles ${id} (${kind}) — not in this repo's guards; enable with '${initCmd} --guards …,${id}'`,
       );
     }
     return disabled;
@@ -249,7 +251,10 @@ export async function offerOptionalComponents(
   recorded: Partial<Selection> | undefined,
   sel: Selection,
   dryRun: boolean,
-  { unavailable = [] }: { unavailable?: ComponentToggleId[] } = {},
+  {
+    unavailable = [],
+    initCmd = 'devkit init',
+  }: { unavailable?: ComponentToggleId[]; initCmd?: string } = {},
 ): Promise<string[]> {
   const allUnoffered = unofferedComponents(recorded);
   const unavailableIds = allUnoffered
@@ -276,7 +281,7 @@ export async function offerOptionalComponents(
     // absent so the repo still gets a real offer the next time someone upgrades interactively.
     for (const c of unoffered)
       console.log(
-        `  • devkit bundles ${describe(c)} (${c.hint}) — enable with 'devkit init ${c.flag}'`,
+        `  • devkit bundles ${describe(c)} (${c.hint}) — enable with '${initCmd} ${c.flag}'`,
       );
     return [...ids, ...unavailableIds];
   }

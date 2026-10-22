@@ -248,9 +248,14 @@ async function upgrade(args: string[], cwd: string): Promise<number> {
     // Overlay repos get the SAME one-time offer as package repos — and, critically, the same
     // `undecided` pass-through: applyOverlay writes its own components block, so without it an
     // overlay upgrade records a decline nobody made and the offer never fires again.
-    const disabledGuards = await offerNewGates(cfg.components?.disabledGuards, sel, dryRun);
+    const initCmd = 'devkit init --overlay';
+    const disabledGuards = await offerNewGates(cfg.components?.disabledGuards, sel, dryRun, {
+      initCmd,
+    });
     await offerLineGrowth(cwd, sel, dryRun, { canWrite: () => overlayOwnsLineGrowth(cwd) });
-    const undecidedOverlay = await offerOptionalComponents(cfg.components, sel, dryRun);
+    const undecidedOverlay = await offerOptionalComponents(cfg.components, sel, dryRun, {
+      initCmd,
+    });
     if (Object.hasOwn(cfg.components ?? {}, 'oxc')) {
       console.log(
         "  • retired components.oxc key will be removed; overlay's Oxc state is git-excluded (.devkit/oxc/, oxlint.devkit.json)",

@@ -217,6 +217,16 @@ describe('offerNewGates — interactive answers', () => {
     expect(disabled).not.toContain('comments');
     expect(new Set([...sel.guards, ...disabled])).toEqual(new Set(GUARD_IDS));
   });
+
+  it('a non-TTY gate hint names the init command the repo needs', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const sel = { ...defaultSelection(), guards: ['size'] };
+    await offerNewGates([], sel, false, { interactive: false, initCmd: 'devkit init --overlay' });
+    await offerNewGates([], sel, false, { interactive: false });
+    const out = log.mock.calls.join('\n');
+    expect(out).toMatch(/enable with 'devkit init --overlay --guards …,/);
+    expect(out).toMatch(/enable with 'devkit init --guards …,/);
+  });
 });
 
 describe('devkit upgrade — line-growth block back-fill', () => {
