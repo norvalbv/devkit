@@ -65,6 +65,7 @@ type GuardConfig = ReturnType<typeof resolveGuardConfig>;
 // An axis whose CURRENT Target declares a Scope — the unit the alignment cascade judges.
 interface ScopedTarget {
   slug: string;
+  date: string;
   ruling: string;
   vision: string;
   scopeGlobs: string[];
@@ -167,6 +168,7 @@ export function loadScopedTargets(dir?: string | null): ScopedTarget[] {
     if (!scope) continue;
     out.push({
       slug: f.slice(0, -3),
+      date: t.date,
       ruling: t.ruling,
       vision: t.fields['vision-fit'] ?? t.fields.context ?? '',
       scopeGlobs: scope
