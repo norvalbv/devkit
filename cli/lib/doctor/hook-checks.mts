@@ -21,6 +21,7 @@ import {
   UI_EVIDENCE_ID,
   wantsDeterministic,
 } from '../husky/husky-block.mts';
+import { HUSKY_HOOKS } from '../husky/overlay/commit-msg.mts';
 import { installHealAlias } from '../husky/overlay/heal-alias.mts';
 import { overlayHooksPath } from '../husky/overlay/overlay-home.mts';
 import { firstLine } from '../standalone.mts';
@@ -141,22 +142,7 @@ const OWNER = 'hooksPath owner';
 
 /** Git's hook names — the same set husky generates stubs for. Used to tell a real hook apart from
  * an unrelated file sitting in the hooks directory. */
-const GIT_HOOKS = new Set([
-  'applypatch-msg',
-  'pre-applypatch',
-  'post-applypatch',
-  'pre-commit',
-  'pre-merge-commit',
-  'prepare-commit-msg',
-  'commit-msg',
-  'post-commit',
-  'pre-rebase',
-  'post-checkout',
-  'post-merge',
-  'pre-push',
-  'pre-auto-gc',
-  'post-rewrite',
-]);
+const GIT_HOOKS = new Set(HUSKY_HOOKS);
 
 function gitSucceeds(gitRoot: string, args: string[]): boolean {
   try {

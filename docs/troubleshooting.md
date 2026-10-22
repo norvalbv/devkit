@@ -66,6 +66,17 @@ name the fix: install devkit, add a slash-less `.git/info/exclude` line, or run 
 An install from before this change wrote a relative path, and under it every linked worktree ran no
 hooks at all. `devkit doctor --fix` (or `devkit upgrade`) re-points it.
 
+## `git lfs install` says `Hook already exists` (overlay mode)
+
+The overlay owns `core.hooksPath`, and `.devkit/hooks` holds a pass-through for every git hook name, so
+the repo's own hooks run even when added after install. git-lfs installs into `core.hooksPath` and
+refuses to replace a hook it did not write; `git lfs track` drops that error silently, and a push then
+uploads no LFS objects. Install lfs's hooks into the repo's own hook directory instead, where devkit's
+pass-throughs run them: `git -c core.hooksPath=<dir> lfs install`, with `<dir>` the directory init
+printed as `other git hooks pass through to <dir>` (`.git/hooks`, `.husky`, or your custom hooks
+path). An lfs hook already sitting
+in `.devkit/hooks` keeps working: devkit never overwrites a file it did not write, and doctor lists it.
+
 ## My commit in a worktree ran a DIFFERENT checkout's hook
 
 Symptom: a commit made in a linked worktree is blocked by a gate that worktree's own

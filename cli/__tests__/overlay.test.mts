@@ -1455,6 +1455,7 @@ describe('overlay hook regeneration (syncOverlayHook + doctor --fix)', () => {
       missing: false,
       drift: true,
       commitMsg: { missing: false, drift: false }, // no message judge selected, no repo hook
+      siblings: { scriptDir: '.husky', stale: [], foreign: [], unreadable: [] },
     });
     expect(readHook(root)).not.toContain('devkit-gates: chain start');
 
@@ -1876,7 +1877,7 @@ describe('overlay commit-msg judges (sc-1794)', () => {
     expect(existsSync(cmsgPath(root))).toBe(true);
   });
 
-  it('deselecting review + sentry reverts to a pass-through, or removes the hook when the team has none', async () => {
+  it('deselecting review + sentry reverts to a pass-through, with or without a team hook', async () => {
     const withTeam = workRepo();
     withRepoCommitMsg(withTeam);
     await init(withTeam);
@@ -1888,7 +1889,8 @@ describe('overlay commit-msg judges (sc-1794)', () => {
     await init(bare);
     expect(existsSync(cmsgPath(bare))).toBe(true);
     await init(bare, defaultSelection());
-    expect(existsSync(cmsgPath(bare))).toBe(false);
+    expect(cmsg(bare)).not.toContain('guard-review');
+    expect(cmsg(bare)).toContain('.husky/commit-msg'); // a team hook added later still runs
   });
 
   it('a team commit-msg that already calls completeness never makes devkit drop its judges', async () => {
@@ -1939,5 +1941,7 @@ describe('overlay commit-msg judges (sc-1794)', () => {
     const root = workRepo();
     await init(root, judged(), { dryRun: true });
     expect(existsSync(cmsgPath(root))).toBe(false);
+    // the planning pass over every hook name must not write either
+    expect(existsSync(join(root, '.devkit', 'hooks'))).toBe(false);
   });
 });

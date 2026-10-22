@@ -86,10 +86,9 @@ function worktreeFixture(
     write(targetRoot, '.husky/pre-commit', '#!/bin/sh\necho team\n', true);
   }
   // What `syncOverlayHook` itself would generate here, or the generator-drift check trips first.
-  const native = options.nativeHookInSharedDir ? '.git/hooks/pre-commit' : '';
   installOverlay(
     targetRoot,
-    options.husky ? '.husky/pre-commit' : native,
+    options.husky ? '.husky/pre-commit' : '.git/hooks/pre-commit',
     options.origHooksPath ?? (options.husky ? '.husky/_' : ''),
   );
   return {
