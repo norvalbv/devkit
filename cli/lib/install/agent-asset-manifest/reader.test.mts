@@ -131,7 +131,11 @@ describe('readAgentAssetManifest', () => {
     });
   });
 
-  it('drops a one-sided record whose copy in this checkout diverges from it', () => {
+  // v2's logical `files` must drop the name with its provider record, or doctor reports false drift.
+  it.each([
+    ['v1', (files: Record<string, string>) => JSON.stringify({ files, targets: ['claude'] })],
+    ['v2', (files: Record<string, string>) => v2(files)],
+  ])('drops a %s one-sided record whose copy in this checkout diverges from it', (_v, encode) => {
     const root = tempRoot();
     const sha = createHash('sha256').update('# beta\n').digest('hex');
     for (const [name, content] of [
@@ -143,9 +147,8 @@ describe('readAgentAssetManifest', () => {
     }
     const path = join(root, '.devkit', 'skills-manifest.json');
     mkdirSync(dirname(path));
-    const ours = JSON.stringify({ files: { 'alpha/SKILL.md': A }, targets: ['claude'] });
     const theirs = { 'beta/SKILL.md': sha, 'gamma/SKILL.md': B };
-    writeFileSync(path, conflict(ours, JSON.stringify({ files: theirs, targets: ['claude'] })));
+    writeFileSync(path, conflict(encode({ 'alpha/SKILL.md': A }), encode(theirs)));
     expect(readAgentAssetManifest(path, 'skills')?.manifest.files).toEqual({
       'alpha/SKILL.md': A,
       'beta/SKILL.md': sha,

@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync } from 'node:fs';
+import { lstatSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { firstDuplicateJsonKey } from '../../../../gate-engine/critique/json-duplicate-keys.mts';
 import { agentAssetDir, projectedAssetRel } from '../agent-assets/agent-assets.mts';
@@ -9,6 +8,7 @@ import {
   LEGACY_AGENT_PROVIDERS,
   SUPPORTED_AGENT_PROVIDERS,
 } from '../agent-assets/agent-providers.mts';
+import { sha256 } from '../../fs-helpers.mts';
 import { readBoundedRegularFile } from '../strict-bounded-file-read.mts';
 import { type DecodedSyncManifest, decodeSyncManifest, type SyncManifestV2 } from './codec.mts';
 
@@ -124,7 +124,11 @@ function unionManifests(
           ),
         };
     }
-    const files = { ...theirs.manifest.files, ...ours.manifest.files };
+    const files = unionRecords(ours.manifest.files, theirs.manifest.files, (rel) =>
+      SUPPORTED_AGENT_PROVIDERS.some(
+        (provider) => providers[provider]?.files[projectedAssetRel(provider, kind, rel)],
+      ),
+    );
     return { version: 2, manifest: { ...ours.manifest, files, providers } };
   }
   throw new Error('its two sides use different manifest schema versions');
@@ -154,7 +158,7 @@ function vouched(
   const path = join(root, agentAssetDir(provider, kind), outputRel);
   const stat = lstatSync(path, { throwIfNoEntry: false });
   if (stat === undefined) return true;
-  return stat.isFile() && createHash('sha256').update(readFileSync(path)).digest('hex') === sha;
+  return stat.isFile() && sha256(path) === sha;
 }
 
 /** Decode manifest bytes already read from somewhere other than the working tree (a git tree). */
