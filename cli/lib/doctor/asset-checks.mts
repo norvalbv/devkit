@@ -338,12 +338,14 @@ export function checkRegistrations(
     );
   }
   const { ok, missing, advisories } = result;
+  // `; ` because an advisory carries a raw hook command, which can contain commas.
+  const advice = advisories.join('; ');
   if (ok && advisories.length)
     return check(
       'hook registrations',
       'DRIFT',
-      `retired hook in a committed file: ${advisories.join(', ')}`,
-      'remove the fallow-gate.sh hook from that file (overlay never edits a committed file)',
+      `fallow-gate.sh hooks devkit will not remove: ${advice}`,
+      'delete them from the named files by hand: devkit never edits a committed file or removes an unrecognised spelling',
       false,
       true,
     );
@@ -351,7 +353,7 @@ export function checkRegistrations(
   return check(
     'hook registrations',
     'DRIFT',
-    `${missing.length} provider registration issue(s): ${missing.join(', ')}`,
+    `${missing.length} provider registration issue(s): ${missing.join(', ')}${advice ? `; also: ${advice}` : ''}`,
     'run `devkit init` to re-register',
     true,
   );
