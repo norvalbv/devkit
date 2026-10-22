@@ -364,6 +364,11 @@ const ROWS: Row[] = [
       'mergeVerdict.consumerSurface.0',
     ],
     ['malformed JSON', '{', 'guard.config.json is not valid JSON'],
+    [
+      'a mergeVerdict block declared twice',
+      `{"mergeVerdict": {"limits": {"fix": {"maxSourceLines": 1}}}, ${config({}).slice(1)}`,
+      'guard.config.json declares "mergeVerdict" twice',
+    ],
   ].map(([name, text, prefix]): Row => ({
     name: `config-invalid: ${name}`,
     change: change([p('a.test.mts')]),
