@@ -420,12 +420,14 @@ describe('anti-slop check FAIL output (wiring)', () => {
     expect(antiSlop(['check', '--', 'src/dest.ts'], cwd)).toBe(1);
     expect(err.join('\n')).toMatch(hint);
     expect(err.join('\n')).toContain('`devkit anti-slop adopt-relocations`');
+    expect(err.join('\n')).not.toContain('no longer exists');
 
     // The commit-time and CI forms see the same unfinished move; CI must name the frozen base.
     git(cwd, ['add', 'src/dest.ts']);
     err = [];
     expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
     expect(err.join('\n')).toMatch(hint);
+    expect(err.join('\n')).not.toContain('no longer exists');
     err = [];
     expect(antiSlop(['check', '--base', 'HEAD'], cwd)).toBe(1);
     expect(err.join('\n')).toContain(

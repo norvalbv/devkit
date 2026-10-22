@@ -94,8 +94,8 @@ gate would reject against HEAD, so a new finding is fixed, not adopted. Prune re
 new error-severity findings exist.
 
 In an OVERLAY install the baseline is per-clone and git-ignored, so no committed tree carries one to
-compare against: --base is unavailable there, adopt-renames re-keys staged renames only, and
-adopt-activation adopts a devkit release's newly activated rules without re-snapshotting other debt.`,
+compare against: check and adopt-relocations refuse --base, adopt-renames [--base <ref>] re-keys a
+staged or committed rename and refuses to merge into existing debt, and adopt-activation adopts a devkit release's newly activated rules without re-snapshotting other debt.`,
 };
 
 /**
@@ -305,7 +305,7 @@ function check(
     if (errors.length > 0) {
       failLine(`anti-slop: FAIL — ${newErrorCount} new error finding(s); baseline unchanged`);
       recordErrorLocations(errors);
-      for (const line of antiSlopFailRemedy(errors, baseline, overlay, baseRef))
+      for (const line of antiSlopFailRemedy(errors, baseline, overlay, baseRef, cwd))
         console.error(line);
       // Reported on the FAIL path too: a committer reading a block needs the same standing about
       // what this gate does not enforce — no committed base means no shrink-only ratchet.
@@ -436,7 +436,7 @@ export default function run(args: string[], cwd: string): number {
   // The manifest STAMP, not the repository marker: `.devkit/config.json` is absent from every review
   // projection, so a marker read drops the capability from the snapshot exactly where it exists.
   const overlay = isOverlayOxcInstall(cwd);
-  if (overlay && baseRef !== undefined) {
+  if (overlay && baseRef !== undefined && operation !== 'adopt-renames') {
     console.error(OVERLAY_BASE_REFUSAL);
     return 2;
   }

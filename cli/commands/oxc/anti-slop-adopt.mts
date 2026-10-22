@@ -94,6 +94,13 @@ export function adoptRenames(
     }
     const affected = baseline.entries.filter((entry) => renames.has(entry.file));
     const next = migrateBaselineRenames(baseline, renames);
+    // Git maps no two paths to one, so fewer entries means re-keyed debt summed into existing debt.
+    if (overlay && next.entries.length !== baseline.entries.length) {
+      console.error(
+        'anti-slop: renamed debt would add to debt already baselined at its new path; baseline unchanged — run `devkit anti-slop prune` to drop the stale old-path entries',
+      );
+      return 2;
+    }
     if (JSON.stringify(next) === JSON.stringify(baseline)) {
       console.log('anti-slop: adopted 0 finding(s) across 0 staged rename(s); baseline unchanged');
       return 0;

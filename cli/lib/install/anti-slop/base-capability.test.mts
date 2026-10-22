@@ -1627,11 +1627,10 @@ describe('anti-slop relocation across existing files', () => {
     git(root, ['mv', 'src/file.ts', 'src/renamed.ts']);
 
     expect(antiSlop(['check', '--staged'], root)).toBe(1);
-    expect(err.join('\n')).toContain('persist renamed debt with `devkit anti-slop adopt-renames`');
+    const remedy = `adopt-renames --base ${git(root, ['rev-parse', 'HEAD'])}\``;
+    expect(err.join('\n')).toContain(`persist renamed debt with \`devkit anti-slop ${remedy}`);
     expect(err.join('\n')).not.toContain('stage the baseline');
     expect(out.join('\n')).toContain('anti-slop: overlay');
-    expect(antiSlop(['adopt-renames', '--base', 'HEAD'], root)).toBe(2);
-    expect(err.join('\n')).toContain('--base is unavailable in an overlay install');
     expect(antiSlop(['adopt-renames'], root)).toBe(0);
     expect(out.join('\n')).not.toContain(`stage ${ANTI_SLOP_BASELINE_REL}`);
     expect(debtAt(root, 'src/file.ts')).toBe(0);
