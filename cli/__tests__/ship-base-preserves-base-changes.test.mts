@@ -19,6 +19,7 @@ import {
   dropWorktree,
   GIT_ENV,
   localBranchExists,
+  recorded,
   remoteBranchExists,
   scriptPath,
   seedShipRepoLocalRemote,
@@ -58,6 +59,15 @@ function advanceBase(bare: string, mutate: (clone: string) => void, message = 'b
     env: { ...process.env, ...GIT_ENV },
     encoding: 'utf8',
   }).trim();
+}
+
+function resume(dir: string, env: NodeJS.ProcessEnv, branch: string, extras: string[] = []) {
+  const args = [scriptPath, '--resume', branch, ...(extras.length ? ['--', ...extras] : [])];
+  return spawnSync('/bin/bash', args, {
+    cwd: dir,
+    encoding: 'utf8',
+    env: { ...env, SHIP_DRY_RUN: '1' },
+  });
 }
 
 function ship(dir: string, env: NodeJS.ProcessEnv, branch: string, paths: string[], extra = {}) {
@@ -132,6 +142,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     expect(r.stderr).toContain('GUARD_SHIP_REPLACE_OK=1');
     expect(r.stderr).toContain(PREFLIGHT_BLOCK);
     expect(localBranchExists(git, 'feat/bin')).toBe(false);
+    expect(recorded(dir, 'feat/bin')).toMatchObject({ paths: ['b.dat'], body: 'b', base: 'base' });
   });
 
   it('ships the caller’s bytes wholesale on a both-sides binary under GUARD_SHIP_REPLACE_OK', () => {
@@ -306,7 +317,70 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     expect(existsSync(mark)).toBe(false); // the gate chain never ran
     expect(localBranchExists(git, 'feat/clash')).toBe(false);
     expect(remoteBranchExists(bare, 'feat/clash')).toBe(false);
+    expect(recorded(dir, 'feat/clash')).toMatchObject({
+      mode: 'ship',
+      title: 'ship it',
+      paths: ['f.txt'],
+      body: 'b',
+      base: 'base',
+    });
     if (existsSync(mark)) rmSync(mark);
+  });
+
+  /** The caller and origin/base both changed l5 of f.txt since the fork point. */
+  function seedSameRegionClash() {
+    const fx = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
+    advanceBase(fx.bare, (c) =>
+      writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l5', 'l5-BASE')),
+    );
+    writeFileSync(join(fx.dir, 'f.txt'), TEN_LINES.replace('l5', 'l5-CALLER'));
+    return fx;
+  }
+
+  it('a same-region block is resumable: once the caller edits another hunk, --resume ships', () => {
+    const { dir, env, git } = seedSameRegionClash();
+    expect(ship(dir, env, 'feat/resume', ['f.txt']).status).toBe(1);
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
+
+    const r = resume(dir, env, 'feat/resume');
+    dropWorktree(git, r.stderr);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('Resuming recorded invocation');
+    const shipped = git(['show', 'feat/resume:f.txt']);
+    expect(shipped).toContain('l1-CALLER');
+    expect(shipped).toContain('l5-BASE');
+  });
+
+  it('--resume ships after the caller follows the printed remedy and merges origin/base', () => {
+    const { dir, env, git } = seedSameRegionClash();
+    git(['commit', '-qam', 'caller edits l5'], { stdio: 'ignore' });
+    const blocked = ship(dir, env, 'feat/merged', ['f.txt']);
+    expect(blocked.stderr).toContain('Merge or rebase origin/base into this checkout');
+    git(['fetch', '-q', 'origin', 'base'], { stdio: 'ignore' });
+    spawnSync('git', ['merge', '-q', 'FETCH_HEAD'], { cwd: dir, env, encoding: 'utf8' });
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l5', 'l5-BOTH'));
+    git(['commit', '-qam', 'resolve'], { stdio: 'ignore' });
+
+    const r = resume(dir, env, 'feat/merged');
+    dropWorktree(git, r.stderr);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toContain(PREFLIGHT_BLOCK);
+    expect(git(['show', 'feat/merged:f.txt'])).toContain('l5-BOTH');
+  });
+
+  it('a --resume blocked again by the same-region conflict keeps its extra path', () => {
+    const { dir, env } = seedSameRegionClash();
+    expect(ship(dir, env, 'feat/again', ['f.txt']).status).toBe(1);
+    writeFileSync(join(dir, 'g.txt'), 'g\n');
+
+    const r = resume(dir, env, 'feat/again', ['g.txt']);
+
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toContain('changed the same region of');
+    expect(r.stderr).not.toContain('NOT recorded');
+    expect(recorded(dir, 'feat/again')).toMatchObject({ paths: ['f.txt', 'g.txt'], body: 'b' });
   });
 
   // sc-2770: a generated file both sides regenerated must be pointed at its generator, never at a

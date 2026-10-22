@@ -1,5 +1,6 @@
 /** A blocked hook-source preflight still records, so `--resume` replays it.
- *  dist-integrity-resume.test.mts owns the dist-integrity case. */
+ *  dist-integrity-resume.test.mts owns the dist-integrity case, and
+ *  ship-base-preserves-base-changes.test.mts the base-conflict one. */
 import type { ExecFileSyncOptions } from 'node:child_process';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,6 +15,7 @@ import {
   dropWorktree,
   fixHook,
   NOTHING_RE,
+  recorded,
   reshipScript,
   scriptPath,
   seedReshipRepo,
@@ -30,12 +32,6 @@ type Seeded = {
   env: NodeJS.ProcessEnv;
   git: (a: string[], o?: ExecFileSyncOptions) => string;
 };
-
-function recorded(dir: string, branch: string) {
-  const r = readIntent(dir, branch);
-  if (!('intent' in r)) throw new Error(`no intent recorded: ${r.reason}`);
-  return { ...r.intent, body: Buffer.from(r.intent.bodyB64, 'base64').toString() };
-}
 
 const run = (script: string, s: Seeded, args: string[], env: NodeJS.ProcessEnv = {}, input = '') =>
   spawnSync('/bin/bash', [script, ...args], {
@@ -401,7 +397,11 @@ describe('preflight ordering guard', () => {
     expect(helper, 'ship_abort_resumable() must exist').toBeGreaterThan(-1);
     const found = calls(src);
     expect(found.map((c) => c.name)).toEqual(
-      expect.arrayContaining(['gate_hook_source_preflight', 'DIST_INTEGRITY']),
+      expect.arrayContaining([
+        'ship_base_conflict_preflight',
+        'gate_hook_source_preflight',
+        'DIST_INTEGRITY',
+      ]),
     );
     for (const c of found) {
       expect(c.i, `${c.name} at line ${c.i + 1} runs before the record helper`).toBeGreaterThan(
