@@ -321,6 +321,120 @@ describe('overlay installed from a linked worktree keeps the native hooks', () =
   });
 });
 
+const consoleOutput = () => vi.mocked(console.log).mock.calls.flat().join('\n');
+
+function bareRemote(): string {
+  const remote = mkTmp('overlay-remote-');
+  git(remote, 'init', '-q', '--bare');
+  return remote;
+}
+
+const push = (cwd: string, remote: string) =>
+  testExecFileSync('git', ['push', '-q', remote, 'HEAD:refs/heads/pushed'], {
+    cwd,
+    encoding: 'utf8',
+    env: hookEnv(),
+  });
+
+describe('overlay wraps every git hook name, so the native hooks are decided at run time', () => {
+  it('native hooks added after init run, with no doctor step, from a linked worktree', async () => {
+    const root = nativeHooksRepo();
+    const hooks = join(root, '.git', 'hooks');
+    rmSync(join(hooks, 'pre-commit'));
+    rmSync(join(hooks, 'pre-push'));
+    const guards = SELECTION.guards.filter((g) => g !== 'review');
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: { ...SELECTION, guards },
+      overlay: true,
+      devkitRef: 'v0.9.0',
+    });
+    for (const h of ['pre-commit', 'commit-msg', 'pre-push'])
+      writeFileSync(join(hooks, h), `#!/bin/sh\necho ${h} >> "$DK_TEST_MARKER"\n`, { mode: 0o755 });
+    writeFileSync(
+      join(hooks, 'pre-push'),
+      '#!/bin/sh\necho pre-push >> "$DK_TEST_MARKER"\nexit 1\n',
+      {
+        mode: 0o755,
+      },
+    );
+    const wt = addWorktree(root);
+
+    commit(wt, 'late hooks');
+    expect(() => push(wt, bareRemote())).toThrow();
+
+    expect(markerLines()).toEqual(['pre-commit', 'commit-msg', 'pre-push']);
+  });
+
+  it('a native hook deleted after init leaves a no-op wrapper: push succeeds, doctor stays clean', async () => {
+    const root = nativeHooksRepo();
+    await initOverlay(root);
+    rmSync(join(root, '.git', 'hooks', 'pre-push'));
+
+    push(root, bareRemote());
+
+    expect(existsSync(join(root, '.devkit', 'hooks', 'pre-push'))).toBe(true);
+    expect(await doctorRun([], root)).toBe(0);
+  });
+
+  it('a hook-named file devkit did not write is kept byte-for-byte and named, never failing doctor', async () => {
+    const root = nativeHooksRepo();
+    const dir = join(root, '.devkit', 'hooks');
+    mkdirSync(dir, { recursive: true });
+    const lfs = '#!/bin/sh\ncommand -v git-lfs >/dev/null 2>&1 || exit 2\ngit lfs pre-push "$@"\n';
+    writeFileSync(join(dir, 'pre-push'), lfs, { mode: 0o755 });
+    writeFileSync(join(dir, 'notes.txt'), 'mine\n');
+
+    await initOverlay(root);
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    expect(await doctorRun([], root)).toBe(0);
+
+    expect(readFileSync(join(dir, 'pre-push'), 'utf8')).toBe(lfs);
+    expect(readFileSync(join(dir, 'notes.txt'), 'utf8')).toBe('mine\n');
+    expect(consoleOutput()).toContain(
+      ".devkit/hooks/pre-push is not devkit's, so devkit leaves it",
+    );
+  });
+
+  it('a missing or non-executable wrapper is doctor drift that --fix heals once, then leaves alone', async () => {
+    const root = nativeHooksRepo();
+    await initOverlay(root);
+    const dir = join(root, '.devkit', 'hooks');
+    rmSync(join(dir, 'post-merge'));
+    chmodSync(join(dir, 'post-checkout'), 0o644);
+
+    expect(await doctorRun([], root)).toBe(1);
+    expect(consoleOutput()).toMatch(
+      /2 pass-through wrapper\(s\) missing or stale \(post-checkout, post-merge\) — a repo hook of those names would not run; run `devkit doctor --fix`/,
+    );
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    const healed = lstatSync(join(dir, 'post-merge'));
+    expect(lstatSync(join(dir, 'post-checkout')).mode & 0o777).toBe(0o755);
+
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    expect(lstatSync(join(dir, 'post-merge')).ino).toBe(healed.ino);
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    'an unreadable wrapper fails doctor, even with --fix, until its read permission is restored',
+    async () => {
+      const root = nativeHooksRepo();
+      await initOverlay(root);
+      const hook = join(root, '.devkit', 'hooks', 'post-merge');
+      chmodSync(hook, 0o000);
+      const before = lstatSync(hook).ino;
+
+      expect(await doctorRun(['--fix'], root)).toBe(1);
+      expect(consoleOutput()).toContain('.devkit/hooks/post-merge cannot be read');
+      expect(lstatSync(hook).ino).toBe(before);
+
+      chmodSync(hook, 0o644);
+      expect(await doctorRun(['--fix'], root)).toBe(0);
+      expect(lstatSync(hook).mode & 0o777).toBe(0o755);
+    },
+  );
+});
+
 describe('overlay hooks in linked worktrees (sc-4157)', () => {
   it('a commit in a fresh linked worktree runs the overlay chain and links the overlay in', async () => {
     const root = workRepo();
