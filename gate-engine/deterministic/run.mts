@@ -398,6 +398,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
         return;
       }
       const reasonFile = fileFor(i);
+      console.log(`▶ deterministic: ${gate.label}`);
       const rc = runArgv(cwd, gate.argv, exec, reasonFile);
       const failRc = (suffix = '') => fail(gate, suffix, undefined, readGateReason(reasonFile));
       // failOpen2 belongs to the GATE (exit 2 = opt-out), strict to the RUN: so an `--extra`'s
