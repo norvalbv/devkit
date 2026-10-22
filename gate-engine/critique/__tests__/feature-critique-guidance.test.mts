@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -16,6 +17,15 @@ const ROOT = join(import.meta.dirname, '..', '..', '..');
 const agent = readFileSync(join(ROOT, 'agents', 'feature-critique.md'), 'utf8');
 const skill = readFileSync(join(ROOT, 'skills', 'feature-critique', 'SKILL.md'), 'utf8');
 const brainstorming = readFileSync(join(ROOT, 'skills', 'brainstorming', 'SKILL.md'), 'utf8');
+const EDGE_CASES_ARTIFACT_MARKERS = {
+  EDGE_CASES_ID: /\bEDGE_CASES_ID\b/u,
+  flowId: /\bflowId\b/u,
+  '.cursor/.edge-cases': /\.cursor\/\.edge-cases/u,
+};
+const bannedMarkers = (text: string) =>
+  Object.entries(EDGE_CASES_ARTIFACT_MARKERS)
+    .filter(([, pattern]) => pattern.test(text))
+    .map(([marker]) => marker);
 
 describe('feature-critique guidance', () => {
   it('preserves the substantive critique lenses and evidence rules', () => {
@@ -96,6 +106,29 @@ describe('feature-critique guidance', () => {
     expect(agent).toContain('Do not write a separate artifact');
   });
 
+  it('leaves no tracked agent or skill reading the removed edge-cases artifact', () => {
+    const tracked = execFileSync(
+      'git',
+      ['-C', ROOT, 'ls-files', '-z', '--', ':(glob)agents/**/*.md', ':(glob)skills/**/*.md'],
+      {
+        encoding: 'utf8',
+      },
+    )
+      .split('\0')
+      .filter(Boolean);
+    expect(tracked).toContain('agents/feature-completeness-reviewer.md');
+    expect(tracked).toContain('skills/feature-critique/SKILL.md');
+    const hits = tracked.flatMap((file) =>
+      bannedMarkers(readFileSync(join(ROOT, file), 'utf8')).map((marker) => `${file}: ${marker}`),
+    );
+    expect(hits).toEqual([]);
+  });
+
+  it('bans the artifact markers as whole words, not inside unrelated identifiers', () => {
+    expect(bannedMarkers('verify `artifact.flowId === id`')).toEqual(['flowId']);
+    expect(bannedMarkers('a GitHub `workflowId` or `flowIdentity`')).toEqual([]);
+  });
+
   it('runs once on the final plan, permits one blocker recheck, and stops looping', () => {
     for (const text of [skill, brainstorming]) {
       expect(text).toContain('decision-complete');
@@ -108,9 +141,10 @@ describe('feature-critique guidance', () => {
   });
 
   it('ships the same text to every synced agent surface', () => {
-    for (const surface of ['.claude', '.cursor'])
-      expect(readFileSync(join(ROOT, surface, 'agents', 'feature-critique.md'), 'utf8')).toBe(
-        agent,
-      );
+    for (const name of ['feature-critique.md', 'feature-completeness-reviewer.md']) {
+      const source = readFileSync(join(ROOT, 'agents', name), 'utf8');
+      for (const surface of ['.claude', '.cursor'])
+        expect(readFileSync(join(ROOT, surface, 'agents', name), 'utf8')).toBe(source);
+    }
   });
 });
