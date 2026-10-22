@@ -41,7 +41,11 @@ export const PACKAGED_REVIEW_RUNTIME_ENTRYPOINT = 'gate-engine/review/baseline-g
 
 /** Entrypoint plus every package-local module it imports, without source/build extensions. */
 export const PACKAGED_REVIEW_RUNTIME_MODULE_STEMS: readonly string[] = Object.freeze(
-  ['gate-engine/review/baseline-fallow-paths', PACKAGED_REVIEW_RUNTIME_ENTRYPOINT].sort(),
+  [
+    'gate-engine/review/baseline/base-resolve-hook',
+    'gate-engine/review/baseline-fallow-paths',
+    PACKAGED_REVIEW_RUNTIME_ENTRYPOINT,
+  ].sort(),
 );
 
 function reviewerAssetPaths(reviewer: Reviewer): string[] {
