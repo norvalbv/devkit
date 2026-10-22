@@ -1,11 +1,14 @@
 /** How devkit invokes the consumer's vitest — binary, interrupt forwarding, consumer-owned flags.
  * Shared by coverage/produce.mts and cli/lib/baseline-status/produce.mts. */
-import { spawn } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** Forwarded to the vitest child so a Ctrl-C'd run leaves no run directory and no stale report. */
 const INTERRUPT_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
+
+/** A detached group no longer receives the terminal's own signals, so group mode forwards these. */
+const GROUP_SIGNALS = ['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGTERM'] as const;
 
 /** 128 + SIGINT/SIGTERM: vitest traps both and exits with these instead of dying on the signal. */
 const TRAPPED_SIGNAL_EXIT_CODES = new Set([130, 143]);
@@ -23,6 +26,25 @@ export interface VitestRun {
   interrupted: boolean;
 }
 
+/** Signal vitest, or its whole process group when it was spawned detached. */
+function signalVitest(child: ChildProcess, signal: NodeJS.Signals, grouped: boolean): void {
+  if (!grouped || child.pid === undefined) {
+    child.kill(signal);
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    // ESRCH: the group is gone. EPERM: macOS reports it while still reaping the group.
+  }
+}
+
+interface RunOptions {
+  /** Run vitest as its own process group and signal the group: its fork workers outlive a
+   * signal sent only to the main process. */
+  group?: boolean;
+}
+
 /**
  * Run vitest to completion and report how it ended. `interrupted` exists so a caller never mistakes
  * a Ctrl-C for a failure worth acting on — the code alone cannot tell them apart once a test failed.
@@ -32,18 +54,20 @@ export async function runVitestDetailed(
   args: string[],
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
+  { group = false }: RunOptions = {},
 ): Promise<VitestRun> {
-  const child = spawn(bin, args, { cwd, env, stdio: 'inherit' });
+  const grouped = group && process.platform !== 'win32';
+  const child = spawn(bin, args, { cwd, env, stdio: 'inherit', detached: grouped });
   let interrupted = false;
   // Forwarded so a Ctrl-C leaves no run dir or stale report; removed in `finally`, since a leaked
   // listener stops the host answering SIGTERM (sc-2228).
-  const forwarders = INTERRUPT_SIGNALS.map(
+  const forwarders = (grouped ? GROUP_SIGNALS : INTERRUPT_SIGNALS).map(
     (signal) =>
       [
         signal,
         () => {
           interrupted = true;
-          child.kill(signal);
+          signalVitest(child, signal, grouped);
         },
       ] as const,
   );

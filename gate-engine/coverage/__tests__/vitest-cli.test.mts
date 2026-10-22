@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import testReportRun from '../../../cli/commands/baseline/test-report-run.mts';
 import coverageRun from '../../../cli/commands/coverage/run.mts';
-import { withoutSeparators } from '../vitest-cli.mts';
+import { runVitestDetailed, withoutSeparators } from '../vitest-cli.mts';
 
 describe('withoutSeparators', () => {
   it.each([
@@ -75,5 +75,26 @@ require('node:fs').writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(pro
   it('still refuses a reserved flag that follows the separator', async () => {
     expect(await testReportRun(['--', '--reporter=json'], root)).toBe(1);
     expect(existsSync(argvFile)).toBe(false);
+  });
+});
+
+describe('runVitestDetailed in group mode', () => {
+  const SIGNALS = ['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGTERM'] as const;
+  const counts = () => SIGNALS.map((signal) => process.listenerCount(signal));
+
+  // A leaked SIGHUP or SIGQUIT forwarder would stop the host dying on a hangup or Ctrl-\.
+  it('removes every forwarder it installed and keeps the exit code', async () => {
+    const before = counts();
+    const run = await runVitestDetailed(
+      process.execPath,
+      ['-e', 'process.exit(3)'],
+      tmpdir(),
+      process.env,
+      {
+        group: true,
+      },
+    );
+    expect(run).toEqual({ code: 3, interrupted: false });
+    expect(counts()).toEqual(before);
   });
 });
