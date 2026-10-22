@@ -48,7 +48,8 @@
     "guard-size": "./dist/gate-engine/ratchets/size-disable.mjs",
     "guard-coverage": "./dist/gate-engine/coverage/run.mjs",
     "guard-structure": "./dist/gate-engine/structure/run.mjs",
-    "guard-sentry": "./dist/gate-engine/sentry/check-sentry.mjs"
+    "guard-sentry": "./dist/gate-engine/sentry/check-sentry.mjs",
+    "devkit-oxfmt": "./dist/cli/commands/oxc/oxfmt-bin.mjs"
   },
   "files": [
     "dist"

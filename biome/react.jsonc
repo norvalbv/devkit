@@ -27,6 +27,8 @@
   // this preset at the repo root; the override keeps the React rules off the backend.
   "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
   "extends": ["./base.jsonc"],
+  // Off: devkit formats with Oxfmt; this preset only adds React lint rules.
+  "formatter": { "enabled": false },
   "overrides": [
     {
       "includes": ["**/*.{tsx,jsx}"],

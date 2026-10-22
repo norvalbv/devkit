@@ -64,22 +64,27 @@ function runStep(repo: string, { biome = false, env = {}, shell = 'sh' } = {}) {
 }
 
 describe('overlay format step — render', () => {
-  it('probes the repo Oxfmt config with biome:false, and biome first when it is selected', () => {
-    expect(formatStep(false)).toContain(
-      '"node_modules/.bin/oxfmt" --no-error-on-unmatched-pattern',
-    );
-    expect(formatStep(false)).not.toContain('biome.jsonc');
-    const both = formatStep(true);
-    expect(both.indexOf('[ -f biome.json ]')).toBeGreaterThan(-1);
-    expect(both.indexOf('[ -f biome.json ]')).toBeLessThan(both.indexOf('[ -f .oxfmtrc.json ]'));
+  it("runs the repo's own Oxfmt whatever the selection, and never a Biome arm", () => {
+    for (const biome of [false, true]) {
+      expect(formatStep(biome)).toContain(
+        '"node_modules/.bin/oxfmt" --no-error-on-unmatched-pattern',
+      );
+      expect(formatStep(biome)).not.toContain('biome.json');
+    }
   });
 
-  it('leaves package and standalone blocks without an Oxfmt arm', () => {
-    expect(buildGuardBlock({ biome: true, guards: [] })).not.toContain('oxfmt');
+  it("package and standalone run devkit's pinned Oxfmt from devkit's bin dir, not the repo's", () => {
+    const pkg = buildGuardBlock({ biome: true, guards: [] });
+    const standalone = buildGuardBlock({ biome: true, guards: [] }, '', {
+      binDir: 'global-optional',
+    });
+    for (const block of [pkg, standalone]) {
+      expect(block).toContain(
+        '"$__dk_package_bin_dir/devkit-oxfmt" --no-error-on-unmatched-pattern',
+      );
+      expect(block).not.toContain('node_modules/.bin/oxfmt');
+    }
     expect(buildGuardBlock({ biome: false, guards: [] })).not.toContain('biome-format');
-    expect(
-      buildGuardBlock({ biome: true, guards: [] }, '', { binDir: 'global-optional' }),
-    ).not.toContain('oxfmt');
   });
 });
 
@@ -100,16 +105,14 @@ describe('overlay format step — real git and the real oxfmt binary', () => {
     expect(git('show', ':a.ts')).toBe('const a = { b: 1 };\n');
   });
 
-  // Catches a chain that stops at the selected biome arm instead of falling through to Oxfmt.
-  it('falls through to the repo Oxfmt when biome is selected but has no config here', () => {
+  it('formats with the repo Oxfmt when biome is still selected', () => {
     const { repo, git } = repoWith({ '.oxfmtrc.json': '{}\n', 'a.ts': UNFORMATTED });
     const r = runStep(repo, { biome: true });
     expect(r.stdout).toContain('🎨 oxfmt formatted and re-staged');
     expect(git('show', ':a.ts')).toBe('const a = { b: 1 };\n');
   });
 
-  // Preserves overlay's existing behaviour: a selected biome with its config keeps formatting.
-  it('runs biome, never oxfmt, when biome is selected and both configs exist', () => {
+  it('never runs biome, even when it is selected and its config and bin exist', () => {
     const { repo, git } = repoWith({
       'biome.json': '{}\n',
       '.oxfmtrc.json': '{}\n',
@@ -118,8 +121,8 @@ describe('overlay format step — real git and the real oxfmt binary', () => {
     writeFileSync(join(repo, 'node_modules', '.bin', 'biome'), '#!/bin/sh\nexit 0\n');
     chmodSync(join(repo, 'node_modules', '.bin', 'biome'), 0o755);
     const r = runStep(repo, { biome: true });
-    expect(r.stdout).toContain('🎨 biome formatted and re-staged');
-    expect(git('show', ':a.ts')).toBe(UNFORMATTED);
+    expect(r.stdout).toContain('🎨 oxfmt formatted and re-staged');
+    expect(git('show', ':a.ts')).toBe('const a = { b: 1 };\n');
   });
 
   it('runs the same way in review mode, so devkit review sees the step', () => {

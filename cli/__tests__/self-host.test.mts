@@ -167,17 +167,16 @@ ${FORMAT_TOOL_SETUP}
 
   // sc-2524: a consumer hook runs biome only where a biome CONFIG exists; self-host pins Oxfmt, so
   // neither the biome invocation nor the config probe survives into devkit's own hook.
-  it('gates the consumer biome step on a biome config, and pins Oxfmt in self-host', () => {
+  it("gates the consumer step on an Oxfmt config via devkit-oxfmt, and pins devkit's own Oxfmt in self-host", () => {
     const hook = buildFullHook({ biome: true, guards: [] });
-    expect(hook).toContain('if [ ! -f biome.json ] && [ ! -f biome.jsonc ]; then');
-    expect(hook).toContain('"$__dk_package_bin_dir/biome" format --write');
+    expect(hook).toContain('if [ ! -f .oxfmtrc.json ] && [ ! -f .oxfmtrc.jsonc ]');
+    expect(hook).toContain('"$__dk_package_bin_dir/devkit-oxfmt" --no-error-on-unmatched-pattern');
     expect(hook).not.toContain('node_modules/.bin/oxfmt');
     const selfHost = buildSelfHostHook(HOOK_SEL, '', ROOT);
     expect(selfHost).toContain('node_modules/.bin/oxfmt --threads 1 --write');
-    // The self-host FILTER legitimately names biome.jsonc (devkit formats its own preset files);
-    // what must not survive is a biome INVOCATION or the consumer's config probe.
-    expect(selfHost).not.toContain('format --write');
-    expect(selfHost).not.toContain('-f biome.json');
+    // Self-host replaces the consumer setup outright: neither its bin nor its config probe survives.
+    expect(selfHost).not.toContain('devkit-oxfmt');
+    expect(selfHost).not.toContain('-f .oxfmtrc.json');
   });
 });
 

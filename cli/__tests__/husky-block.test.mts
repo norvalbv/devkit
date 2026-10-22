@@ -91,9 +91,11 @@ describe('buildGuardBlock', () => {
     expect(block).toContain('# >>> devkit-guards >>>');
     expect(block).toContain('# <<< devkit-guards <<<');
     expect(block).toContain('# devkit:biome-format');
-    // sc-2524: biome runs only where a biome CONFIG proves the repo actually formats with it.
-    expect(block).toContain('if [ ! -f biome.json ] && [ ! -f biome.jsonc ]; then');
-    expect(block).toContain('"$__dk_package_bin_dir/biome" format --write');
+    // The formatter runs only where its CONFIG exists; configless it formats to its own defaults.
+    expect(block).toContain('if [ ! -f .oxfmtrc.json ] && [ ! -f .oxfmtrc.jsonc ]');
+    expect(block).toContain(
+      '"$__dk_package_bin_dir/devkit-oxfmt" --no-error-on-unmatched-pattern --write',
+    );
     expect(block).toContain('__dk_package_bin_dir="$(bun pm bin)"');
     // Deterministic guards (size/fanout/dup/clone) run through the ONE orchestrator, not per-guard.
     expect(block).toContain('"$__dk_package_bin_dir/guard-deterministic" --hook');

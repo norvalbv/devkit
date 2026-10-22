@@ -21,7 +21,7 @@ import {
 } from './gate-policy/block-helpers.mts';
 import { buildPreCommitExit, PRE_COMMIT_PASS_EXIT } from './gate-policy/commit-gate-log.mts';
 import { FALLOW_STAGED, FALLOW_STAGED_BLOCK, indent } from './gate-policy/fallow-staged.mts';
-import { formatFragment, overlayFormatters, type StepFormatter } from './format-fragment.mts';
+import { formatFragment, OXFMT_STEP, type StepFormatter } from './format-fragment.mts';
 import { markEnd, markStart } from './husky.mts';
 import { DK_COMMIT_INDEX_CAPTURE, selectedFragment } from './review-fragments.mts';
 import { sentryShipPrewarmFragment } from './sentry-fragments.mts';
@@ -275,7 +275,7 @@ export function buildOverlayHook(
     binDir: 'global',
     preAi: overlayStagedGates(fallow),
     postGuards: overlayReviewBaseline(fallow),
-    formatChain: overlayFormatters(selection),
+    formatChain: [OXFMT_STEP],
   });
   return `${HOOK_PREAMBLE}
 # devkit OVERLAY (LOCAL, git-ignored). Runs devkit's gates + lint overlay on this commit, then

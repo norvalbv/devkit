@@ -1,11 +1,11 @@
 #!/bin/bash
-# Stop hook QA — when the agent stops, run biome + structure-lint + typecheck and block the
+# Stop hook QA — when the agent stops, run oxfmt + structure-lint + typecheck and block the
 # stop (exit 2 + stderr) on any failure, re-invoking the agent to fix it. SESSION-SCOPED:
 # only errors in files this session edited are reported (see session-edits-lib.sh) — a
 # parallel session's breakage never blocks this one. The commit gate stays repo-wide.
 #
-# Portable (W-3): runs the consumer's OWN npm-scripts (biome via local binary + config; `lint:structure`
-# + `ts:check` via package.json scripts). Each step DEGRADE-SKIPS when its tool/script is
+# Portable (W-3): devkit's pinned oxfmt where the repo has a config, then the consumer's own
+# `lint:structure` + `ts:check` package.json scripts. Each step DEGRADE-SKIPS when its tool/script is
 # absent — a repo without an eslint structure preset, or without a typecheck script, simply
 # runs fewer checks rather than erroring. No frink-specific paths.
 
@@ -38,26 +38,21 @@ has_script() { js_eval "process.exit(((require('./package.json').scripts||{})['$
 
 truncate() { if [ ${#1} -gt 1500 ]; then echo "${1:0:1500}... (truncated)"; else echo "$1"; fi; }
 
-# 1. Biome check (no --write) — only when the repo actually FORMATS with biome, i.e. the local
-# binary AND a biome config are both present. The binary alone is not the signal: biome is a common
-# transitive dependency, and configless it checks against its own defaults (tabs, double quotes), so
-# a repo that formats with prettier/oxfmt/dprint would fail this gate on every file — including ones
-# the session never touched — while its real format gate passes. Scoped to the session's own edited
-# files (biome-supported extensions only), not the whole repo.
-if [ -x "./node_modules/.bin/biome" ] && { [ -f "biome.json" ] || [ -f "biome.jsonc" ]; }; then
-  biome_files=()
+# 1. Oxfmt check (no --write) of the session's own edited files, only where an Oxfmt config exists.
+# Only exit 1 is a finding: 2 is a parse error or unmatched path, and 126/127 a bin that cannot start.
+if { [ -f ".oxfmtrc.json" ] || [ -f ".oxfmtrc.jsonc" ] || [ -f "oxfmt.config.ts" ] || [ -f "oxfmt.config.mts" ]; } && fmt_bin=$(oxfmt_bin 2>/dev/null); then
+  fmt_files=()
   while IFS= read -r f; do
-    [[ "$f" =~ \.(ts|tsx|js|jsx|json|jsonc)$ ]] && biome_files+=("$f")
+    [[ "$f" =~ \.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$ ]] && fmt_files+=("$f")
   done < "$LEDGER"
-  if [ ${#biome_files[@]} -gt 0 ]; then
-    lint_output=$("./node_modules/.bin/biome" check --no-errors-on-unmatched "${biome_files[@]}" 2>&1)
-    # Only exit 1 is a finding; 126/127 means the bin's `node` shebang could not run, so stand down.
+  if [ ${#fmt_files[@]} -gt 0 ]; then
+    lint_output=$("$fmt_bin" --no-error-on-unmatched-pattern --check "${fmt_files[@]}" 2>&1)
     if [ $? -eq 1 ]; then
-      echo "Biome lint/format errors detected in files you edited. Please fix these issues:" >&2
+      echo "Formatting issues detected in files you edited. Please fix these issues:" >&2
       echo "" >&2
       truncate "$lint_output" >&2
       echo "" >&2
-      echo "Run './node_modules/.bin/biome check --write <file>' to auto-fix." >&2
+      echo "Run '$fmt_bin --write <file>' to auto-fix." >&2
       exit 2
     fi
   fi
@@ -96,7 +91,7 @@ if has_script "ts:check"; then
       echo "" >&2
       truncate "$typecheck_output" >&2
       echo "" >&2
-      echo "These are type errors that Biome doesn't catch but will break at build time." >&2
+      echo "These are type errors that lint doesn't catch but will break at build time." >&2
       echo "(Scoped to your session's edits — '$PM run ts:check' shows the repo-wide view.)" >&2
       exit 2
     fi

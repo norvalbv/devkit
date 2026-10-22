@@ -444,15 +444,14 @@ describe('format re-stage step (real git)', () => {
     execFileSync('git', ['config', 'user.email', 'a@b.c'], { cwd: repo });
     execFileSync('git', ['config', 'user.name', 'a'], { cwd: repo });
     writeFileSync(join(repo, '.gitignore'), 'dist\n');
-    // The step runs biome only where a biome CONFIG exists, so the default fixture is a repo that
-    // genuinely formats with biome.
-    writeFileSync(join(repo, 'biome.jsonc'), '{}\n');
-    execFileSync('git', ['add', '.gitignore', 'biome.jsonc'], { cwd: repo });
+    // The step formats only where an Oxfmt CONFIG exists, as devkit init always writes one.
+    writeFileSync(join(repo, '.oxfmtrc.json'), '{}\n');
+    execFileSync('git', ['add', '.gitignore', '.oxfmtrc.json'], { cwd: repo });
     execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: repo });
     return repo;
   }
 
-  function runInRepo(repo, { biome = '#!/bin/sh\nexit 0\n' } = {}) {
+  function runInRepo(repo, { formatter = '#!/bin/sh\nexit 0\n' } = {}) {
     const home = mkdtempSync(join(tmpdir(), 'dk-hook-git-home-'));
     homes.push(home);
     const bin = join(home, '.bun', 'bin');
@@ -461,9 +460,9 @@ describe('format re-stage step (real git)', () => {
     mkdirSync(packageBin, { recursive: true });
     writeFileSync(join(bin, 'bun'), '#!/bin/sh\nprintf \'%s\\n\' "$PWD/node_modules/.bin"\n');
     chmodSync(join(bin, 'bun'), 0o755);
-    if (biome !== null) {
-      writeFileSync(join(packageBin, 'biome'), biome);
-      chmodSync(join(packageBin, 'biome'), 0o755);
+    if (formatter !== null) {
+      writeFileSync(join(packageBin, 'devkit-oxfmt'), formatter);
+      chmodSync(join(packageBin, 'devkit-oxfmt'), 0o755);
     }
     const hookPath = join(home, 'pre-commit');
     writeFileSync(hookPath, buildFullHook({ biome: true, guards: [] }));
@@ -512,15 +511,15 @@ describe('format re-stage step (real git)', () => {
 
     // The opt-out the config gate restores: a repo that never asked devkit to rewrite its bytes
     // must not have them rewritten, and must be told the step stood down rather than staying silent.
-    it('formats nothing and says so when the repo has no biome config', () => {
+    it('formats nothing and says so when the repo has no oxfmt config', () => {
       const repo = initRepo();
-      rmSync(join(repo, 'biome.jsonc'));
-      execFileSync('git', ['rm', '-q', '--cached', 'biome.jsonc'], { cwd: repo });
+      rmSync(join(repo, '.oxfmtrc.json'));
+      execFileSync('git', ['rm', '-q', '--cached', '.oxfmtrc.json'], { cwd: repo });
       stageFile(repo, 'a.mts');
-      const r = runInRepo(repo, { biome: ARGV_STUB });
+      const r = runInRepo(repo, { formatter: ARGV_STUB });
       expect(r.status, r.stdout).toBe(0);
-      expect(r.stdout).toContain('🎨 No biome config here');
-      expect(existsSync(join(repo, 'argv.log'))).toBe(false); // biome was never invoked
+      expect(r.stdout).toContain('🎨 No oxfmt config here');
+      expect(existsSync(join(repo, 'argv.log'))).toBe(false); // the formatter was never invoked
     });
 
     it('reports that nothing matched when no staged path is formattable', () => {
@@ -528,7 +527,7 @@ describe('format re-stage step (real git)', () => {
       stageFile(repo, 'notes.txt', 'hello\n');
       const r = runInRepo(repo);
       expect(r.status).toBe(0);
-      expect(r.stdout).toContain('🎨 biome: no staged formattable path');
+      expect(r.stdout).toContain('🎨 oxfmt: no staged formattable path');
     });
 
     it('names the paths it skipped when every eligible one carries unstaged edits', () => {
@@ -553,7 +552,7 @@ describe('format re-stage step (real git)', () => {
       const r = runInRepo(repo);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('dirty.mts');
-      expect(r.stdout).toContain('🎨 biome formatted and re-staged 1 staged file(s).');
+      expect(r.stdout).toContain('🎨 oxfmt formatted and re-staged 1 staged file(s).');
     });
 
     // `echo | xargs` splits on whitespace: the formatter gets two paths that do not exist and
@@ -561,7 +560,7 @@ describe('format re-stage step (real git)', () => {
     it('passes a staged path containing a space as ONE argument, and still re-stages it', () => {
       const repo = initRepo();
       stageFile(repo, 'my file.mts');
-      const r = runInRepo(repo, { biome: ARGV_STUB });
+      const r = runInRepo(repo, { formatter: ARGV_STUB });
       expect(r.status, r.stdout).toBe(0);
       expect(argvOf(repo)).toContain('ARG[my file.mts]');
       expect(argvOf(repo)).not.toContain('ARG[my]');
@@ -573,9 +572,9 @@ describe('format re-stage step (real git)', () => {
     it('formats a staged path with non-ASCII characters, which git quotes by default', () => {
       const repo = initRepo();
       stageFile(repo, 'café.mts');
-      const r = runInRepo(repo, { biome: ARGV_STUB });
+      const r = runInRepo(repo, { formatter: ARGV_STUB });
       expect(r.status, r.stdout).toBe(0);
-      expect(r.stdout).toContain('🎨 biome formatted and re-staged 1 staged file(s).');
+      expect(r.stdout).toContain('🎨 oxfmt formatted and re-staged 1 staged file(s).');
       expect(argvOf(repo)).toContain('ARG[café.mts]');
     });
 
@@ -585,15 +584,15 @@ describe('format re-stage step (real git)', () => {
       stageFile(repo, 'b.cts');
       const r = runInRepo(repo);
       expect(r.status).toBe(0);
-      expect(r.stdout).toContain('🎨 biome formatted and re-staged 2 staged file(s).');
+      expect(r.stdout).toContain('🎨 oxfmt formatted and re-staged 2 staged file(s).');
     });
 
-    it('reports a missing biome with the install remedy and lets the commit continue', () => {
+    it('reports a missing formatter with the install remedy and lets the commit continue', () => {
       const repo = initRepo();
       stageFile(repo, 'a.mts');
-      const r = runInRepo(repo, { biome: null });
+      const r = runInRepo(repo, { formatter: null });
       expect(r.status).toBe(0); // best-effort: a formatter outage is never a commit outage
-      expect(r.stdout).toContain('biome is missing or cannot start at');
+      expect(r.stdout).toContain('oxfmt is missing or cannot start at');
       expect(r.stdout).toContain("Install this repo's dependencies");
       expect(r.stdout).not.toContain('doctor --fix');
       expect(r.stdout).toContain('left UNFORMATTED');
@@ -604,11 +603,11 @@ describe('format re-stage step (real git)', () => {
     it("reports a failing Oxfmt without blocking the commit, and does not misattribute xargs' code", () => {
       const repo = initRepo();
       stageFile(repo, 'a.mts');
-      const r = runInRepo(repo, { biome: '#!/bin/sh\nexit 3\n' });
+      const r = runInRepo(repo, { formatter: '#!/bin/sh\nexit 3\n' });
       expect(r.status).toBe(0);
-      expect(r.stdout).toContain('🎨 biome failed over 1 staged file(s)');
+      expect(r.stdout).toContain('🎨 oxfmt failed over 1 staged file(s)');
       expect(r.stdout).toContain('may be UNFORMATTED');
-      expect(r.stdout).not.toContain('biome exited 3');
+      expect(r.stdout).not.toContain('oxfmt exited 3');
     });
   });
 });

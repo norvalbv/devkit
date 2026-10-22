@@ -13,11 +13,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, posix } from 'node:path';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mts';
 import { defaultSelection } from '../../components.mts';
-import { OVERLAY_ENTRY_REL, OXFMT_CONFIGS, OXLINT_CONFIGS } from '../../install/oxc/lifecycle.mts';
 import { patchPackageJson } from '../../install/package-json.mts';
 import { parseJsonc } from './jsonc.mts';
 import {
@@ -32,13 +31,6 @@ const PRESET_DIR = 'biome';
 export const AGENT_HOOKS = ['agents-hooks/format-after-edit.sh', 'agents-hooks/lint-check.sh'];
 // Formatters other than the consumer's; one appearing on a non-comment line of an agent hook is drift.
 const OTHER_FORMATTERS = ['biome', 'oxfmt', 'prettier', 'dprint', 'rome', 'deno fmt'];
-
-/** Paths Oxc's lifecycle writes itself, so their presence is never evidence of a consumer choice. */
-export const DEVKIT_WRITTEN_CONFIGS: readonly string[] = [
-  ...OXFMT_CONFIGS,
-  ...OXLINT_CONFIGS,
-  OVERLAY_ENTRY_REL,
-];
 
 /** The two scripts as a written package.json holds them; any non-string reads as drift. */
 export interface WrittenScripts {
@@ -113,10 +105,6 @@ function logicalLines(lines: string[]): string[] {
 export function checkFormatterIdentity(input: FormatterIdentityInput): string[] {
   const { formatter: f } = input;
   const out: string[] = [];
-  for (const p of f.configProbes.filter((p) => DEVKIT_WRITTEN_CONFIGS.includes(posix.normalize(p))))
-    out.push(
-      `CONSUMER_FORMATTER gates on ${p}, which devkit init writes itself (sc-1964) — not a consumer choice`,
-    );
   if (input.writtenDevDependency !== f.package.range)
     out.push(
       `${SCRIPTS_REL} installs ${f.package.name}@${JSON.stringify(input.writtenDevDependency)}, not CONSUMER_FORMATTER's ${f.package.range}`,

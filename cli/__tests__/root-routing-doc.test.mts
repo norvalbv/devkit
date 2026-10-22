@@ -25,7 +25,6 @@ import {
   referencedRepoPathCandidates,
   resolvesCaseExact,
 } from '../../gate-engine/markdown/referenced-paths.mts';
-import { CONSUMER_FORMATTER } from '../lib/husky/format-fragment.mts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -190,7 +189,7 @@ describe('CLAUDE.md routes and AGENTS.md carries the working rules', () => {
 
   it("AGENTS.md's 'no root biome config' claim still holds", () => {
     expect(read('AGENTS.md')).toContain('no root config');
-    expect(CONSUMER_FORMATTER.configProbes.filter((f) => existsSync(join(ROOT, f)))).toEqual([]);
+    expect(['biome.json', 'biome.jsonc'].filter((f) => existsSync(join(ROOT, f)))).toEqual([]);
   });
 
   it('CLAUDE.md fits inside the judge segment cap, uncut', () => {
