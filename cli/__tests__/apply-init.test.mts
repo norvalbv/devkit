@@ -1055,8 +1055,7 @@ describe('self-host mode (devkit dogfooding itself)', () => {
     const hook = readFileSync(join(root, '.husky', 'pre-commit'), 'utf8');
     expect(hook).toContain('node gate-engine/deterministic/run.mts');
     expect(hook).toContain('node gate-engine/review/cli.mts --gate');
-    expect(hook).toContain('--extra "lint=bun run lint"');
-    expect(hook).not.toContain('--extra "anti-slop=');
+    expect(hook).not.toContain('--extra');
     expect(hook).not.toContain('$__dk_package_bin_dir/guard-');
 
     expect(config(root)).toMatchObject({

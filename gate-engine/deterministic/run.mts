@@ -60,7 +60,8 @@ import {
 } from './reason.mts';
 import {
   bypassedSuffixes,
-  configExtraGates,
+  extraGatesFor,
+  GUARD_PREFIX_RE,
   reportCachedBypasses,
   type ExtraGate,
   structureBypassed,
@@ -74,9 +75,6 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // module so the same literals resolve in both — string-literal paths are NOT rewritten by tsc emit.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 
-// Telemetry: strip the `guard-` bin prefix to get the bare gate name (module-level per biome's
-// useTopLevelRegex). Outcome suffixes are recorded apart from the label, never parsed back off it.
-const GUARD_PREFIX_RE = /^guard-/;
 // The suffix a STRICT run appends to a gate that opted out. Distinct from `(unexpected:2)`, which
 // stays reserved for a gate whose exit 2 was never an opt-out (an `--extra` command's fatal config
 // error): both are could-not-run for telemetry, but only this one is an opt-out we chose to reject.
@@ -252,13 +250,13 @@ export function prefixCacheScope(scope?: string, effectiveIds?: string[]): strin
   const structureBase = structureBypassed()
     ? `${coverageBase ?? 'devkit-guards'}:structure-bypassed`
     : coverageBase;
-  // Same hazard once more, for the self-host `--extra` gates. Sorted and joined so two runs that
+  // Same hazard once more, for devkit's own command gates. Sorted and joined so two runs that
   // bypass the same set share a key regardless of the order the flags were exported in.
   const extraBypassed = bypassedSuffixes();
   const extraBase = extraBypassed.length
     ? `${structureBase ?? 'devkit-guards'}:${extraBypassed.join('+')}-bypassed`
     : structureBase;
-  // The self-host release-only dist extra judges the tree against the PR base and exempts only a
+  // devkit's release-only-dist command gate judges the tree against the PR base and exempts only a
   // release branch, so a tree's PASS under one base or branch must not authorize another.
   const prBase = process.env.DEVKIT_SHIP_PR_BASE_SHA;
   return prBase
@@ -309,7 +307,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     effectiveMs?: number,
   ) => finishGateTiming('deterministic', startedAt, code, cacheState, effectiveMs);
   const { exec = execFileSync } = opts;
-  const extra = [...(opts.extra ?? []), ...configExtraGates(cwd)];
+  const extra = extraGatesFor(opts.extra ?? [], cwd);
   // `--only` is an execution narrowing request, never an authority grant. Validate it before cache
   // lookup, then intersect it with review's positive allowlist so a crafted hook cannot re-enable a
   // guard excluded by local review policy.

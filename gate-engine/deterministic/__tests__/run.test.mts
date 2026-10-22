@@ -573,6 +573,42 @@ describe('runDeterministic — --structure / --extra / --only', () => {
     expect(err.mock.calls.flat().join('\n')).toContain('deterministic gates failed: knip');
   });
 
+  // A row under the bare label would let a reader pair the failure with the config's command.
+  it('a label declared by both --extra and extraGates runs neither and blocks once', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size']);
+    const sink = join(d, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    writeFileSync(
+      join(d, 'guard.config.json'),
+      JSON.stringify({ extraGates: { lint: 'bun run lint', types: 'tsc --noEmit' } }),
+    );
+    const exec = mkExec({});
+    const extra = [{ label: 'lint', cmd: 'oxlint' }];
+    expect(runDeterministic(d, { exec, extra })).toBe(1);
+    const ran = exec.mock.calls.map(([bin, argv]) => [bin, ...argv].join(' ')).slice(1);
+    expect(ran).toEqual(['tsc --noEmit']);
+    expect(err.mock.calls.flat().join('\n')).toContain(
+      "gate 'lint' is declared by both the hook's --extra and guard.config.json extraGates",
+    );
+    const rows = readFileSync(sink, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((e) => e.type === 'gate_result');
+    expect(rows.map((e) => e.gate)).toEqual(['lint(duplicate)']);
+  });
+
+  // Telemetry strips `guard-`, so `--extra "guard-lint=…"` records a row under the config's `lint`.
+  it('a guard- prefixed --extra label still clashes with the config label it records as', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size']);
+    writeFileSync(join(d, 'guard.config.json'), JSON.stringify({ extraGates: { lint: 'eslint' } }));
+    const exec = mkExec({});
+    expect(runDeterministic(d, { exec, extra: [{ label: 'guard-lint', cmd: 'oxlint' }] })).toBe(1);
+    expect(exec.mock.calls.map(([bin]) => bin)).toEqual(['node']);
+  });
+
   // An extra reads a `commit -a` / `commit -- <path>` index through this documented carrier.
   it('an extraGates command inherits DEVKIT_COMMIT_INDEX_FILE', () => {
     process.env.DEVKIT_COMMIT_INDEX_FILE = '/repo/.git/next-index-1.lock';
@@ -902,7 +938,7 @@ describe('prefixCacheScope', () => {
     expect(prefixCacheScope('custom')).toBe('custom');
   });
 
-  // Same anti-laundering property, for the self-host `--extra` gates (sc-2198). These live outside
+  // Same anti-laundering property, for devkit's own command gates. These live outside
   // the DETERMINISTIC registry, so nothing else would have salted them.
   it.each(['GUARD_HOOK_PARITY_OK', 'GUARD_DECISIONS_INTEGRITY_OK'])(
     '%s salts the scope away from a clean run',
