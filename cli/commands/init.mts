@@ -996,8 +996,6 @@ async function run(args: string[], cwd: string): Promise<number> {
       detectedMode,
       structureAvailable: STRUCTURE_STACKS.has(detectedStack),
       installed,
-      existingReview: (readJson(join(cwd, '.devkit', 'config.json')) as DevkitConfig | null)
-        ?.review,
     });
     if (!result) return 0; // cancelled — nothing written
     ({ mode, stack, remove, review } = result);

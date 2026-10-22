@@ -19,7 +19,6 @@ Usage:
   --review               Enable \`devkit review\` with an explicit local gate profile.
   --no-review            Disable \`devkit review\` for this installation.
   --review-guards <a,b>  With --review: guard allowlist (default: installed guard selection).
-  --review-decisions-dir <path>  With --review: local decision store (default: docs/decisions).
   --no-claude/--no-cursor  Sync skills/agents/hooks to ONE agent surface only (default both).
   --baselines-only       Re-derive ONLY the structure + import-wall baselines (rare; after a
                          structure-RULE change). Package-mode structure stacks only.

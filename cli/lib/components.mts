@@ -40,13 +40,10 @@ export function disabledGuardsFor(selected: string[], disabled: string[] = []): 
 /** Guards that can execute in a pre-commit review (excludes commit-msg-only Sentry capture). */
 export const REVIEWABLE_GUARD_IDS = GUARD_IDS.filter((guard) => guard !== 'sentry');
 
-export const DEFAULT_REVIEW_DECISIONS_DIR = 'docs/decisions';
-
-/** Local execution policy for `devkit review`; decision content stays in `decisionsDir`. */
+/** Local execution policy for `devkit review`; decision records stay where guard.config.json says. */
 export interface ReviewProfile {
   enabled: boolean;
   guards: string[];
-  decisionsDir: string;
 }
 
 interface NormalizeReviewProfileOptions {
@@ -64,10 +61,6 @@ export function normalizeReviewProfile(
   return {
     enabled: available && (partial?.enabled ?? enabledDefault),
     guards: installed.filter((g) => requested.includes(g)),
-    decisionsDir:
-      typeof partial?.decisionsDir === 'string' && partial.decisionsDir.trim()
-        ? partial.decisionsDir.trim()
-        : DEFAULT_REVIEW_DECISIONS_DIR,
   };
 }
 

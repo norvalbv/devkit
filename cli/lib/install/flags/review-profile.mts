@@ -1,14 +1,8 @@
-import {
-  DEFAULT_REVIEW_DECISIONS_DIR,
-  REVIEWABLE_GUARD_IDS,
-  type ReviewProfile,
-  type Selection,
-} from '../../components.mts';
+import { REVIEWABLE_GUARD_IDS, type ReviewProfile, type Selection } from '../../components.mts';
 
 export interface ReviewFlagValues {
   review: boolean | null;
   reviewGuards: string[] | null;
-  reviewDecisionsDir: string | null;
 }
 
 export interface ReviewGuardIssues {
@@ -31,11 +25,7 @@ export function reviewGuardIssues(requested: string[], installed: string[]): Rev
 
 /** Parse the review-profile slice independently so init orchestration stays below its size ceiling. */
 export function parseReviewFlags(args: string[]): ReviewFlagValues {
-  const flags: ReviewFlagValues = {
-    review: null,
-    reviewGuards: null,
-    reviewDecisionsDir: null,
-  };
+  const flags: ReviewFlagValues = { review: null, reviewGuards: null };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--review') flags.review = true;
     else if (args[i] === '--no-review') flags.review = false;
@@ -44,7 +34,6 @@ export function parseReviewFlags(args: string[]): ReviewFlagValues {
         .split(',')
         .map((guard) => guard.trim())
         .filter(Boolean);
-    else if (args[i] === '--review-decisions-dir') flags.reviewDecisionsDir = args[++i] ?? '';
   }
   return flags;
 }
@@ -53,14 +42,9 @@ export function reviewPlanFromFlags(
   flags: ReviewFlagValues,
   selection: Selection,
 ): { profile?: Partial<ReviewProfile>; error?: string } {
-  if (flags.review === null && flags.reviewGuards === null && flags.reviewDecisionsDir === null)
-    return {};
-  const modifiers = [
-    flags.reviewGuards !== null ? '--review-guards' : '',
-    flags.reviewDecisionsDir !== null ? '--review-decisions-dir' : '',
-  ].filter(Boolean);
-  if (flags.review !== true && modifiers.length > 0) {
-    return { error: `devkit init: ${modifiers.join(' and ')} require --review.` };
+  if (flags.review === null && flags.reviewGuards === null) return {};
+  if (flags.review !== true && flags.reviewGuards !== null) {
+    return { error: 'devkit init: --review-guards require --review.' };
   }
   if (flags.review !== false && !selection.husky) {
     return {
@@ -81,7 +65,6 @@ export function reviewPlanFromFlags(
     profile: {
       enabled: flags.review ?? true,
       guards: flags.reviewGuards ?? selection.guards,
-      decisionsDir: flags.reviewDecisionsDir || DEFAULT_REVIEW_DECISIONS_DIR,
     },
   };
 }
