@@ -22,7 +22,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CLI, testSpawnSync, waitForPath } from '../../../cli/__tests__/_helpers.mts';
-import { CLEAR_MARKER_NAME, readClearMarker, UNHANDLED_REPORTER } from '../failures.mts';
+import { CLEAR_MARKER_NAME, readClearMarker } from '../clear-marker/store.mts';
+import { UNHANDLED_REPORTER } from '../failures.mts';
 import {
   buildInjectedArgs,
   COVERAGE_DIR,

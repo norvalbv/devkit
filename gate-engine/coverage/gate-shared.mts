@@ -5,7 +5,8 @@ import { sourceMatchers } from '../config.mts';
 import { appendReviewNotice } from '../deterministic/reason.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { canonicalPath } from './dependencies.mts';
-import { displayPath, formatClearMarker, readClearMarker } from './failures.mts';
+import { readClearMarker } from './clear-marker/store.mts';
+import { displayPath, formatClearMarker } from './failures.mts';
 import { COVERAGE_DIR, COVERAGE_FILE } from './produce.mts';
 import type { Classify, Provenance } from './provenance.mts';
 

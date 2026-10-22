@@ -33,7 +33,8 @@ import {
   missingIndexMessage,
   staleIndexMessage,
 } from '../../../gate-engine/co-occurrence/index-refresh.mts';
-import { isCodexModel, parseModelSpec } from '../../../gate-engine/judge/codex/result.mts';
+import { isCodexModel } from '../../../gate-engine/judge/codex/result.mts';
+import { parseModelSpec } from '../../../gate-engine/judge/codex/model-spec.mts';
 import {
   claudeFamilyEnvLine,
   claudeFamilyKeyLine,

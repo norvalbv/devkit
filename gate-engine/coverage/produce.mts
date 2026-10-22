@@ -37,6 +37,7 @@ import {
 } from 'node:fs';
 import { basename, join } from 'node:path';
 import { emitGateEvent } from '../judge/gate-events.mts';
+import { readClearMarker, removeClearMarker, writeClearMarker } from './clear-marker/store.mts';
 import {
   formatDiagnosis,
   formatRerunNotice,
@@ -45,15 +46,12 @@ import {
   markerCause,
   passEnv,
   raisedTimeoutMs,
-  readClearMarker,
   readDiagnosis,
-  removeClearMarker,
   RESULTS_NAME,
   RETRY_CONDITION,
   type RunDiagnosis,
   stagedFiles,
   UNHANDLED_REPORTER,
-  writeClearMarker,
 } from './failures.mts';
 import {
   ownsReporter,

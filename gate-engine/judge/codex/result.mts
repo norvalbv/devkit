@@ -15,6 +15,7 @@
 
 import { join } from 'node:path';
 import { type JudgeUsage, withResultArgs } from '../claude-result.mts';
+import { parseModelSpec } from './model-spec.mts';
 import type { CodexWorkspace } from './workspace.mts';
 
 // ── the `codex exec --json` event contract ──────────────────────────────────────────────────────
@@ -158,41 +159,6 @@ export function parseClaudeArgv(args: string[]): ClaudeArgvParts {
   return { model, prompt, systemPrompt, readOnly, allowedTools };
 }
 
-/**
- * Translate a claude judge argv into the equivalent `codex exec` argv. Hermetic on purpose:
- * `--ignore-user-config` (auth still works, but the owner's MCP servers / notify hooks / desktop
- * integrations must not load into a judge), `--ignore-rules` (nor user execpolicy), `--ephemeral`
- * (the codex twin of `--no-session-persistence`), `--skip-git-repo-check` (bench scratch dirs are
- * not always repos). Evidence still arrives on stdin — codex appends it as a `<stdin>` block.
- */
-/** Reasoning efforts codex accepts for `model_reasoning_effort` (codex-rs config). */
-const REASONING_EFFORTS: ReadonlySet<string> = new Set(['low', 'medium', 'high', 'xhigh']);
-
-/** A judge model spec split into the codex model id and its optional reasoning effort. */
-export interface ModelSpec {
-  model: string;
-  effort: string | null;
-}
-
-/**
- * `gpt-5.6-terra@high` → `{ model: 'gpt-5.6-terra', effort: 'high' }`; a bare id carries no
- * effort. Judges run `--ignore-user-config`, so a configured effort never applies — the suffix is
- * the ONLY way a spec reaches `-c model_reasoning_effort`. An unknown effort throws rather than
- * spawning at the wrong effort: the spec is config-owned (guard.config.json / GUARD_* envs), and a
- * silently-dropped suffix would make the judge look like the benched condition while not being it.
- */
-export function parseModelSpec(spec: string): ModelSpec {
-  const at = spec.lastIndexOf('@');
-  if (at < 0) return { model: spec, effort: null };
-  const model = spec.slice(0, at);
-  const effort = spec.slice(at + 1);
-  if (model === '' || model.includes('@') || !REASONING_EFFORTS.has(effort))
-    throw new Error(
-      `codex judge: unknown reasoning effort ${JSON.stringify(effort)} in model spec ${JSON.stringify(spec)} — expected <model>@${[...REASONING_EFFORTS].join('|')}`,
-    );
-  return { model, effort };
-}
-
 /** The workspace confinement for this judge, or null when it runs read-only or unconfined. */
 const confinedWorkspace = (parts: ClaudeArgvParts, workspace?: CodexWorkspace) =>
   parts.readOnly ? null : (workspace ?? null);
@@ -205,6 +171,13 @@ function repoRootNotice(repoRoot: string): string {
   return `The repository under review is ${repoRoot}. Run every command from there (cd into it first); paths in this task are relative to it. Its working tree is read-only to you except .claude/. ${NO_TEST_RUNS}\n\n`;
 }
 
+/**
+ * Translate a claude judge argv into the equivalent `codex exec` argv. Hermetic on purpose:
+ * `--ignore-user-config` (auth still works, but the owner's MCP servers / notify hooks / desktop
+ * integrations must not load into a judge), `--ignore-rules` (nor user execpolicy), `--ephemeral`
+ * (the codex twin of `--no-session-persistence`), `--skip-git-repo-check` (bench scratch dirs are
+ * not always repos). Evidence still arrives on stdin — codex appends it as a `<stdin>` block.
+ */
 export function codexExecArgs(
   parts: ClaudeArgvParts,
   mcpArgv: string[] = [],
