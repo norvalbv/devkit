@@ -246,7 +246,7 @@ describe.skipIf(!CAN_SHIM)('knip-check.sh — package-manager resolution (sc-105
     expect(r.stderr).toContain(`PM=${pm} run knip`);
   });
 
-  it('bun.lock wins over a stale package-lock.json (same ladder as dependency-preflight)', () => {
+  it('bun.lock wins over a stale package-lock.json (same ladder as dependencyInstallRemedy)', () => {
     const r = run(knipRepo({}, { 'bun.lock': '', 'package-lock.json': '{}' }), {
       path: shimPath({ pms: { npm: fakePm('npm'), bun: fakeBun() } }),
     });
