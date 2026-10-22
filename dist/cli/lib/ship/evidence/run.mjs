@@ -13,18 +13,30 @@ import { inconclusive, notRun, outcomeFromRegression } from './outcome.mjs';
 import { publishEvidenceBlock, readPull } from './pr-body.mjs';
 import { buildRedCommit, classifyChange, prBase, treeOf } from './red-ref.mjs';
 const REPORT = '.devkit-evidence-report.json';
+/** `setup 6s, red 212s`: each phase runs until the next one starts, the last until `now`. */
+export function phaseTimes(marks, now) {
+    return marks
+        .map(({ name, at }, index) => {
+        const end = marks[index + 1]?.at ?? now;
+        return `${name} ${Math.round((end - at) / 1000)}s`;
+    })
+        .join(', ');
+}
 /** The capture's own SIGTERM path stops the test tree and removes both clones at the deadline. */
 async function captureWithin(prepared, seconds) {
-    let timedOut = false;
+    // Monotonic, like the timer itself, so a wall-clock step cannot skew a phase or make it negative.
+    const marks = [{ name: 'setup', at: performance.now() }];
+    let stalled = null;
     const timer = setTimeout(() => {
-        timedOut = true;
+        stalled = `${phaseTimes(marks, performance.now())} unfinished`;
         process.kill(process.pid, 'SIGTERM');
     }, seconds * 1000);
     try {
-        return (await captureRegressionEvidence(prepared)).evidence;
+        const { evidence } = await captureRegressionEvidence(prepared, (name) => marks.push({ name, at: performance.now() }));
+        return { evidence, timing: phaseTimes(marks, performance.now()) };
     }
     catch (error) {
-        throw timedOut ? new Error(`the tests did not finish within ${seconds}s`) : error;
+        throw stalled ? new Error(`the tests did not finish within ${seconds}s (${stalled})`) : error;
     }
     finally {
         clearTimeout(timer);
@@ -53,8 +65,9 @@ async function produce(cwd, head, baseRefOid, config) {
     const argv = expandCommand(config.command, change.tests, REPORT);
     console.error(`evidence: running ${change.tests.length} test file(s) on red and green (at most ${config.timeoutSeconds}s)`);
     const prepared = prepareRegressionRepository(['--red', red, '--green', head, '--vitest-report', REPORT, '--', ...argv], cwd);
-    const evidence = await captureWithin(prepared, config.timeoutSeconds);
-    return { outcome: outcomeFromRegression(evidence, head, base), evidence };
+    const { evidence, timing } = await captureWithin(prepared, config.timeoutSeconds);
+    const outcome = outcomeFromRegression(evidence, head, base);
+    return { outcome: { ...outcome, detail: `${outcome.detail} (${timing})` }, evidence };
 }
 /** Loaded only once a block is being written, so a ship that writes none never pays for it. */
 async function shipVerdict(input) {
@@ -126,14 +139,7 @@ async function main(argv) {
     const { values } = parseArgs({ args: rest, options, strict: true });
     if (command === 'body') {
         const caller = readFileSync(0, 'utf8');
-        let current = '';
-        try {
-            if (values.pr)
-                current = readPull(required(values, 'repo'), values.pr).body;
-        }
-        catch (error) {
-            console.error(`evidence: the current PR body was not read, so its block is not carried: ${errorMessage(error)}`);
-        }
+        const current = values.pr ? readPull(required(values, 'repo'), values.pr).body : '';
         process.stdout.write(carryEvidenceBlock(caller, current));
         return;
     }

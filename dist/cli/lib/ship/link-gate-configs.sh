@@ -107,10 +107,10 @@ gate_projection_source_is_ignored() {
 
 # link_untracked_gate_configs <worktree> <root> [purpose]
 link_untracked_gate_configs() {
-  local wt=$1 root=$2 purpose=${3:-ship} emitter resolved rel line index_rel='' candidate_manifest=''
-  local main_root='' candidate_root=$root source='' from=''
+  local wt=$1 root=$2 purpose=${3:-ship} emitter rel line index_rel='' candidate_manifest='' prefix=''
+  local main_root='' candidate_root=$root source='' from='' emitted=0 verb=linked
   local projection_manifest=${DEVKIT_REVIEW_PROJECTION_MANIFEST:-} projection_tool=''
-  local linked=() linked_sources=() candidates=() branch_local=()
+  local linked=() linked_sources=() candidates=() root_only=() from_main=()
   case "$purpose" in
     ship | review | review-baseline) ;;
     *)
@@ -122,47 +122,7 @@ link_untracked_gate_configs() {
   # consumer (the reconcile-manifest-write.mts dual-ext idiom).
   emitter=$(gate_config_path_emitter)
   if is_review_projection_purpose "$purpose"; then
-    candidate_manifest=$(mktemp "${DEVKIT_REVIEW_TEMP_ROOT:-${TMPDIR:-/tmp}}/devkit-review-gate-candidates.XXXXXX") || return 1
-    if node "$emitter" "$root" --null > "$candidate_manifest" 2>/dev/null; then
-      while IFS= read -r -d '' line; do
-        [ -n "$line" ] && candidates+=("$line")
-      done < "$candidate_manifest"
-      rm -f "$candidate_manifest"
-      candidate_manifest=
-    else
-      rm -f "$candidate_manifest"
-      echo "devkit review: could not resolve gate config paths; fix guard.config.json and retry." >&2
-      return 1
-    fi
-  else
-    main_root=$(gate_main_worktree "$root")
-    # A linked worktree may lack the untracked guard.config.json that defines indexPath,
-    # allowlistPath, and decisionsDir. Resolve that config first so the main-worktree fallback also
-    # discovers its config-driven candidates; each candidate still resolves root-first below.
-    if source=$(gate_link_source "$root" "$main_root" guard.config.json); then
-      candidate_root=$(dirname "$source")
-    fi
-    # An unparseable guard.config.json still emits the fixed entries first: they link, and the
-    # worktree gate fails loud on the same bad config. No output at all means the registry itself
-    # did not load, so every gate would run on defaults.
-    resolved=$(node "$emitter" "$candidate_root" 2>/dev/null) ||
-      echo "⚠️  ship: could not resolve config gate paths (guard.config.json unreadable?) — linking known defaults only" >&2
-    [ -n "$resolved" ] || {
-      echo "✗ ship: the gate-input registry emitted nothing ($emitter did not run) — refusing to gate on defaults" >&2
-      return 1
-    }
-    # share: branch entries resolve from this checkout alone (a linked overlay worktree is projected
-    # first): another checkout's copy holds another branch's lint rules and ratchet ceilings.
-    [ "$candidate_root" = "$root" ] ||
-      resolved+=$'\n'$(node "$emitter" "$root" --each-file 2>/dev/null || true)
-    while IFS= read -r line; do [ -n "$line" ] && candidates+=("$line"); done <<< "$resolved"
-    while IFS= read -r line; do [ -n "$line" ] && branch_local+=("$line"); done < <(
-      node "$emitter" "$candidate_root" --branch 2>/dev/null
-    )
-    IFS= read -r -d '' index_rel < <(node "$emitter" "$candidate_root" indexPath --null 2>/dev/null) || index_rel=
-  fi
-  if is_review_projection_purpose "$purpose"; then
-    IFS= read -r -d '' index_rel < <(node "$emitter" "$root" indexPath --null 2>/dev/null) || index_rel=
+    verb=copied
     [ -n "$projection_manifest" ] || {
       echo "devkit review: private gate projection manifest path is unavailable" >&2
       return 1
@@ -176,36 +136,83 @@ link_untracked_gate_configs() {
       echo "devkit review: private gate projection helper is unavailable" >&2
       return 1
     }
+  fi
+  # A review target may be a package dir inside its checkout: its main-worktree counterpart keeps that
+  # subdir. Ship's root is always a top level, so the prefix is empty there.
+  prefix=$(git -C "$root" rev-parse --show-prefix 2>/dev/null) || prefix=
+  main_root=$(gate_main_worktree "$root")
+  [ -z "$prefix" ] || main_root=$main_root/${prefix%/}
+  # A linked worktree may lack the untracked guard.config.json that defines indexPath,
+  # allowlistPath, and decisionsDir. Resolve that config first so the main-worktree fallback also
+  # discovers its config-driven candidates; each candidate still resolves root-first below.
+  if source=$(gate_link_source "$root" "$main_root" guard.config.json); then
+    candidate_root=$(dirname "$source")
+  fi
+  candidate_manifest=$(mktemp "${DEVKIT_REVIEW_TEMP_ROOT:-${TMPDIR:-/tmp}}/devkit-gate-candidates.XXXXXX") || return 1
+  node "$emitter" "$candidate_root" --null > "$candidate_manifest" 2>/dev/null || emitted=$?
+  # share: branch entries resolve from this checkout alone (a linked overlay worktree is projected
+  # first): another checkout's copy holds another branch's lint rules and ratchet ceilings.
+  [ "$candidate_root" = "$root" ] ||
+    node "$emitter" "$root" --each-file --null >> "$candidate_manifest" 2>/dev/null || true
+  while IFS= read -r -d '' line; do
+    [ -n "$line" ] && candidates+=("$line")
+  done < "$candidate_manifest"
+  rm -f "$candidate_manifest"
+  if is_review_projection_purpose "$purpose" && [ "$emitted" -ne 0 ]; then
+    echo "devkit review: could not resolve gate config paths; fix guard.config.json and retry." >&2
+    return 1
+  fi
+  # An unparseable guard.config.json still emits the fixed entries first: they link, and the
+  # worktree gate fails loud on the same bad config. No output at all means the registry itself
+  # did not load, so every gate would run on defaults.
+  [ "$emitted" -eq 0 ] ||
+    echo "⚠️  ship: could not resolve config gate paths (guard.config.json unreadable?) — linking known defaults only" >&2
+  [ "${#candidates[@]}" -gt 0 ] || {
+    echo "✗ $purpose: the gate-input registry emitted nothing ($emitter did not run) — refusing to gate on defaults" >&2
+    return 1
+  }
+  while IFS= read -r -d '' line; do [ -n "$line" ] && root_only+=("$line"); done < <(
+    node "$emitter" "$candidate_root" --branch --null 2>/dev/null
+  )
+  # Review's setup authority already froze these from the target, present or absent.
+  if is_review_projection_purpose "$purpose"; then
+    while IFS= read -r -d '' line; do [ -n "$line" ] && root_only+=("$line"); done < <(
+      node "$projection_tool" setup-owned 2>/dev/null
+    )
+  fi
+  IFS= read -r -d '' index_rel < <(node "$emitter" "$candidate_root" indexPath --null 2>/dev/null) || index_rel=
 
-    for rel in "${candidates[@]}"; do
-      [ -e "$root/$rel" ] && [ ! -e "$wt/$rel" ] && [ ! -L "$wt/$rel" ] || continue
-      linked+=("$rel")
-      linked_sources+=("$root/$rel")
-    done
+  for rel in "${candidates[@]}"; do
+    # Present in the repo but absent from the committed worktree = the gate would fail open. The
+    # -L guard also skips a pre-existing symlink so `ln` never aborts on it. Empty local projection
+    # dirs are unusable, so a populated main-worktree copy wins; files keep root-first precedence.
+    # A per-file entry can arrive twice: from the config root's list and from this checkout's.
+    gate_projection_listed "$rel" ${linked[@]+"${linked[@]}"} && continue
+    from=$main_root
+    gate_projection_listed "$rel" ${root_only[@]+"${root_only[@]}"} && from=$root
+    source=$(gate_link_source "$root" "$from" "$rel" prefer-populated) || continue
+    if [ -n "$index_rel" ] && [ "$rel" = "$index_rel" ] && [ "$source" = "$root/$rel" ] &&
+      [ "$from" != "$root" ] && gate_index_has_no_usable_chunks "$source" "$from/$rel"; then
+      source=$from/$rel
+      echo "↳ $purpose: $rel in this checkout has no usable chunks — $verb the main checkout's populated index instead" >&2
+    fi
+    [ ! -e "$wt/$rel" ] && [ ! -L "$wt/$rel" ] || continue
+    linked+=("$rel")
+    linked_sources+=("$source")
+    if is_review_projection_purpose "$purpose"; then
+      if [ "$main_root" != "$root" ] && [ "$source" = "$main_root/$rel" ]; then from_main+=("$rel"); fi
+    else
+      mkdir -p "$wt/$(dirname "$rel")"
+      ln -s "$source" "$wt/$rel"
+    fi
+  done
+  if is_review_projection_purpose "$purpose"; then
     {
       if [ "${#linked[@]}" -gt 0 ]; then
         for rel in "${linked[@]}"; do printf '%s\0' "$rel"; done
       fi
-    } | node "$projection_tool" materialize "$root" "$wt" "$projection_manifest" "$index_rel" || return 1
-  else
-    for rel in "${candidates[@]}"; do
-      # Present in the repo but absent from the committed worktree = the gate would fail open. The
-      # -L guard also skips a pre-existing symlink so `ln` never aborts on it. Empty local projection
-      # dirs are unusable, so a populated main-worktree copy wins; files keep root-first precedence.
-      from=$main_root
-      gate_projection_listed "$rel" ${branch_local[@]+"${branch_local[@]}"} && from=$root
-      source=$(gate_link_source "$root" "$from" "$rel" prefer-populated) || continue
-      if [ -n "$index_rel" ] && [ "$rel" = "$index_rel" ] && [ "$source" = "$root/$rel" ] &&
-        [ "$from" != "$root" ] && gate_index_has_no_usable_chunks "$source" "$from/$rel"; then
-        source=$from/$rel
-        echo "↳ ship: $rel in this checkout has no usable chunks — linked the main checkout's populated index instead" >&2
-      fi
-      [ ! -e "$wt/$rel" ] && [ ! -L "$wt/$rel" ] || continue
-      linked+=("$rel")
-      linked_sources+=("$source")
-      mkdir -p "$wt/$(dirname "$rel")"
-      ln -s "$source" "$wt/$rel"
-    done
+    } | node "$projection_tool" materialize "$root" "$wt" "$projection_manifest" "$index_rel" \
+      ${from_main[@]+"${from_main[@]}"} || return 1
   fi
 
   # Guard the empty array BEFORE expanding it (stock-macOS bash 3.2 aborts on "${arr[@]}" when empty
@@ -224,12 +231,18 @@ link_untracked_gate_configs() {
     else
       echo "   linked into the gate worktree so gates match a normal commit (not defaults):"
     fi
-    local linked_index=0
+    local linked_index=0 is_cache
     for rel in "${linked[@]}"; do
+      is_cache=
+      gate_projection_is_local_cache "$rel" "$decisions_rel" ${local_caches[@]+"${local_caches[@]}"} && is_cache=1
       # `check-ignore -q` inside the `if` → its exit-1 "not ignored" is errexit-safe.
       if gate_projection_source_is_ignored "$root" "${linked_sources[$linked_index]}" "$rel"; then
-        echo "   - $rel (gitignored cache — normal)"
-      elif gate_projection_is_local_cache "$rel" "$decisions_rel" ${local_caches[@]+"${local_caches[@]}"}; then
+        if [ -n "$is_cache" ]; then
+          echo "   - $rel (gitignored cache — normal)"
+        else
+          echo "   - $rel (ignored by git — local input, linked in)"
+        fi
+      elif [ -n "$is_cache" ]; then
         echo "   - $rel (local cache — linked in, intentionally not committed)"
       else
         echo "   - $rel (untracked — commit it so gates are consistent for everyone)"

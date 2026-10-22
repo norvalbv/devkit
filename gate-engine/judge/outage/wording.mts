@@ -54,7 +54,14 @@ export function unavailableMessage(
 }
 
 /** The outage causes whose remedies differ; every other classified kind shares the generic one. */
-export type RemedyCause = 'timeout' | 'rate-limited' | 'absent' | 'model-unavailable' | 'outage';
+export const REMEDY_CAUSES = [
+  'timeout',
+  'rate-limited',
+  'absent',
+  'model-unavailable',
+  'outage',
+] as const;
+export type RemedyCause = (typeof REMEDY_CAUSES)[number];
 
 /** ONE outage→cause mapper for every fail-closed gate (sc-2769), so no gate keeps a private copy. */
 export function remedyCause(outage?: JudgeOutage): RemedyCause {

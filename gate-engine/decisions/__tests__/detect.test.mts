@@ -690,6 +690,32 @@ describe('--gate (integration, real git repo)', () => {
         expect(result.status).toBe(1);
       });
 
+      it('shows the newest Target first when older scoped rulings fill the cap', () => {
+        const dir = recordedLog();
+        for (const slug of ['a', 'b', 'c', 'd', 'e', 'f'])
+          writeFileSync(
+            join(dir, `${slug}-older.md`),
+            target(`Older ${slug}. ${'o'.repeat(2480)}`),
+          );
+        const newest = `Adopt dependency b for the existing direction. ${'n'.repeat(600)}`;
+        writeFileSync(join(dir, 'zz-new.md'), target(newest, 'package.json', '2026-02-01'));
+        stageDepChange();
+        const result = gateStubbed(judgeRecordedTarget);
+        expect(capturedArgs()).toContain('Adopt dependency b for the existing direction');
+        expect(result.status).toBe(0);
+        expect(result.stderr).toContain('judge cleared as ROUTINE');
+      });
+
+      it('shows a just-recorded ruling longer than 4KB instead of omitting it', () => {
+        const dir = recordedLog();
+        const long = `Adopt dependency b for the existing direction. ${'r'.repeat(5000)}`;
+        writeFileSync(join(dir, 'policy.md'), target(long));
+        stageDepChange();
+        const result = gateStubbed(judgeRecordedTarget);
+        expect(capturedArgs()).not.toContain('OMITTED');
+        expect(result.status).toBe(0);
+      });
+
       it.each(['', '1'])(
         'retains the decision block when recorded Targets are unreadable (strict=%s)',
         (strict) => {

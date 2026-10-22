@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { failLine, writeGateReason } from '../../../../gate-engine/deterministic/reason.mjs';
 import { AntiSlopCapabilityError } from './base-capability.mjs';
 import { baselineFromGroups, baselineIncreases, compareBaseline, migrateBaselineRenames, removedBaselineMigrationReceipts, } from './baseline.mjs';
+import { formatGroupSites } from './diagnostics.mjs';
 import { activatedRuleIdsBetween, committedBaselineProbe, withBaseAntiSlopSnapshot, } from './git-snapshot.mjs';
 import { readManagedAntiSlopActivationEvidence } from './managed-state.mjs';
 import { ACCEPT_VIA_OVERRIDE } from './report/remedy.mjs';
@@ -59,13 +60,13 @@ function splitRelocatedGrowth(increases, base, candidate, envelope, candidateGro
 export function printNewAntiSlopFindings(groups) {
     for (const group of groups) {
         const tag = group.severity === 'error' ? 'ERROR' : 'WARN';
-        console.log(`${tag} ${group.ruleId} ${group.file}:${group.line}:${group.column} (+${group.additionalCount})`);
+        console.log(`${tag} ${group.ruleId} ${formatGroupSites(group, group.additionalCount, 'new')}`);
         console.log(`      ${group.diagnostic}`);
     }
 }
 /** Record each new error's rule and location, so the aggregated verdict names what to fix. */
 export function recordErrorLocations(groups) {
-    writeGateReason(groups.map((group) => `ERROR ${group.ruleId} ${group.file}:${group.line}:${group.column} (+${group.additionalCount})`));
+    writeGateReason(groups.map((group) => `ERROR ${group.ruleId} ${formatGroupSites(group, group.additionalCount, 'new')}`));
 }
 /**
  * Baseline debt still keyed at a path Git renamed. Without a committed baseline only debt that
@@ -85,8 +86,11 @@ function staleRenameFailure(candidate, envelope, candidateGroups, baseRef) {
     for (const entry of staleRenames) {
         console.error(`BASELINE-RENAME ${entry.ruleId} ${entry.file} -> ${entry.nextFile} (${entry.count} adopted finding(s))`);
     }
-    const remedy = baseRef
-        ? `devkit anti-slop adopt-renames --base ${baseRef}`
+    // Without a committed baseline (overlay, bootstrap), name the base commit: in a ship worktree the
+    // rename is committed in the author's checkout, where a staged-only adopt finds nothing.
+    const remedyBase = baseRef ?? (envelope.base ? null : envelope.baseOid);
+    const remedy = remedyBase
+        ? `devkit anti-slop adopt-renames --base ${remedyBase}`
         : 'devkit anti-slop adopt-renames';
     failLine(`anti-slop: FAIL — persist renamed debt with \`${remedy}\`${envelope.base ? ', then stage the baseline' : ''}`);
     return true;

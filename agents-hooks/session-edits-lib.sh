@@ -108,7 +108,7 @@ js_eval() {
 # Echo the consumer's package manager (bun|pnpm|yarn|npm), or nothing when the resolved one is not
 # installed — callers fail open rather than run a manager the repo does not use. Order:
 # package.json#packageManager (corepack's own signal; a mismatch fails under corepack strict), then
-# the lockfile ladder cli/lib/ship/dependency-preflight.mts uses, then bun if present, else npm.
+# the lockfile ladder gate-engine/coverage/dependencies.mts uses, then bun if present, else npm.
 resolve_pm() {
   local pm
   pm=$(js_eval "const p=require('./package.json').packageManager;process.stdout.write(typeof p==='string'?p.split('@')[0]:'')" 2>/dev/null)

@@ -89,7 +89,7 @@ if [ "$RESUME" -eq 1 ]; then
     'ship --resume <branch> [--body-file <f>] [--] <extra-path...>'
 else
   ship_assert_positional_args "$BR" "$TITLE" \
-    'ship <branch> "<title>" [--base <b>] [--body "<text>"] [--body-file <f>] [--draft] [--link <d>]... [--] <path...>'
+    'ship <branch> "<title>" [--base <b>] [--body "<text>"] [--body-file <f>] [--draft] [--no-stack] [--link <d>]... [--] <path...>'
 fi
 
 # Arg grammar: branch + title are the first two positionals (above). The rest is a mix of
@@ -106,8 +106,10 @@ BODY_FILE_PREREAD_SET=0  # --resume banner's one --body-file read: 1 = bytes kep
 BASE_FLAG=""       # --base <branch>? else base off this checkout's HEAD/current branch
 FROM_BRANCH=0      # derive a frozen committed path set from origin/<base>..HEAD
 DRAFT=0            # --draft opens the PR as a draft; default stays ready-for-review
+NO_STACK=0         # --no-stack skips registering the PR in its base PR's GitHub stack
 RESUME_READY=0     # --ready seen under --resume, before the record reveals ship-vs-reship mode
 WAIT_CI=0          # --wait-ci polls the PR's checks after everything else is durable
+WAIT_CI_STRICT=0   # --wait-ci-strict: exit 5 unless the verdict is passed
 WAIT_CI_TIMEOUT=900
 WAIT_CI_TIMEOUT_SET=0
 while [ "$#" -gt 0 ]; do
@@ -120,7 +122,7 @@ while [ "$#" -gt 0 ]; do
     --link)
       [ "$RESUME" -eq 0 ] || { echo "--resume replays the recorded invocation — to change --link, run the full devkit ship command (it re-records)" >&2; exit 1; }
       LINK_EXTRA+=("${2:?--link requires a directory}"); shift 2 ;;
-    --body) BODY_FLAG="${2:?--body requires text}"; BODY_SET=1; shift 2 ;;
+    --body) BODY_FLAG="${2?--body requires text}"; BODY_SET=1; shift 2 ;;
     --body-file) BODY_FILE_FLAG="${2:?--body-file requires a path}"; BODY_FILE_SET=1; shift 2 ;;
     --dry-gates)
       [ "$RESUME" -eq 0 ] || { echo "--dry-gates cannot be combined with --resume" >&2; exit 1; }
@@ -135,6 +137,9 @@ while [ "$#" -gt 0 ]; do
       # Allowed under --resume: the restore below only turns draft ON, so a retry can upgrade a
       # recorded non-draft. No --no-draft: once the PR exists, `gh pr ready` owns that direction.
       DRAFT=1; shift ;;
+    --no-stack)
+      # Allowed under --resume like --draft: the restore below only turns the opt-out ON.
+      NO_STACK=1; shift ;;
     --ready)
       # Under --resume the MODE is not known yet: a recorded reship arrives here first and execs into
       # reship.sh below, which does accept --ready. Rejecting at parse time would kill that hand-off
@@ -148,6 +153,7 @@ while [ "$#" -gt 0 ]; do
       # No --resume guard, unlike --base/--link: neither changes WHAT ships. Neither is recorded, so
       # a resume that wants the wait re-passes the flags (decision record).
       if [ "$1" = --wait-ci ]; then WAIT_CI=1; else WAIT_CI_REQUIRED=1; fi; shift ;;
+    --wait-ci-strict) WAIT_CI_STRICT=1; shift ;;
     --wait-ci-timeout)
       WAIT_CI_TIMEOUT="${2:?--wait-ci-timeout requires seconds}"; WAIT_CI_TIMEOUT_SET=1; shift 2 ;;
     --resume) echo "--resume must come FIRST: devkit ship --resume <branch> [--] <extra-path...>" >&2; exit 1 ;;
@@ -190,8 +196,8 @@ if [ "$RESUME" -eq 1 ]; then
   while IFS= read -r -d '' si_field; do SI_FIELDS+=("$si_field"); done < "$SI_OUT"
   rm -f "$SI_OUT"
   # emitFields order: mode sourceMode title base updatePrBody draft createdAt generation sourceAttemptId
-  # nlinks links... body paths... — positional, in lockstep with reship.sh's reader.
-  [ "${#SI_FIELDS[@]}" -ge 12 ] || { echo "recorded invocation is malformed — run the full devkit ship command" >&2; exit 1; }
+  # noStack nlinks links... body paths... — positional, in lockstep with reship.sh's reader.
+  [ "${#SI_FIELDS[@]}" -ge 13 ] || { echo "recorded invocation is malformed — run the full devkit ship command" >&2; exit 1; }
   SI_MODE=${SI_FIELDS[0]}
   if [ "$SI_MODE" = "reship" ]; then
     # The blocked attempt was a `--pr` re-push; hand over so the agent needn't remember which form
@@ -218,10 +224,11 @@ if [ "$RESUME" -eq 1 ]; then
   RESUME_CREATED=${SI_FIELDS[6]}
   RESUME_GENERATION=${SI_FIELDS[7]}
   RESUME_SOURCE_ATTEMPT_ID=${SI_FIELDS[8]}
-  SI_NLINKS=${SI_FIELDS[9]}
+  [ "${SI_FIELDS[9]}" != "1" ] || NO_STACK=1
+  SI_NLINKS=${SI_FIELDS[10]}
   case "$SI_NLINKS" in *[!0-9]*|'') echo "recorded invocation is malformed (nlinks '$SI_NLINKS')" >&2; exit 1 ;; esac
-  si_i=10
-  si_body_at=$((10 + SI_NLINKS))
+  si_i=11
+  si_body_at=$((11 + SI_NLINKS))
   [ "${#SI_FIELDS[@]}" -gt $((si_body_at + 1)) ] || { echo "recorded invocation is malformed (missing body/paths)" >&2; exit 1; }
   while [ "$si_i" -lt "$si_body_at" ]; do LINK_EXTRA+=("${SI_FIELDS[$si_i]}"); si_i=$((si_i + 1)); done
   RESUME_BODY=${SI_FIELDS[$si_body_at]}
@@ -827,6 +834,7 @@ if [ "$DRY_GATES" -eq 0 ]; then
   # Any boolean added here must ALSO join the allowlist in ship-intent-args.mts:16-22, or its
   # `--flag` is treated as value-taking and silently eats the next argv entry.
   [ "$DRAFT" -eq 0 ] || SHIP_INTENT_ARGS+=(--draft)
+  [ "$NO_STACK" -eq 0 ] || SHIP_INTENT_ARGS+=(--no-stack)
   # The body file's path rides the record so a later resume can warn when it drifts (sc-2527); a
   # resume that replayed the recorded body keeps the recorded path, and --body clears it.
   [ "$BODY_FILE_SET" -eq 0 ] || SHIP_INTENT_ARGS+=(--body-file-path "$BODY_FILE_FLAG")
@@ -1064,7 +1072,7 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
     # already match, or an operator who changed BOTH would be pointed at the wrong half.
     RECOVERY_BODY=$(git log -1 --format=%b "$RECOVERY_COMMIT" 2>/dev/null || true)
     RECOVERY_SUBJECT=$(git log -1 --format=%s "$RECOVERY_COMMIT" 2>/dev/null || true)
-    if [ -z "$BODY" ] && [ -n "$RECOVERY_BODY" ] && [ "$RECOVERY_SUBJECT" = "$TITLE" ]; then
+    if [ "$BODY_SET" -eq 0 ] && [ "$BODY_FILE_SET" -eq 0 ] && [ -z "$BODY" ] && [ -n "$RECOVERY_BODY" ] && [ "$RECOVERY_SUBJECT" = "$TITLE" ]; then
       RECOVERY_REASON="this run supplied no PR body, but its commit has one"
       RECOVERY_HINTS+=("re-supply it with --body \"<text>\" — this run's stdin was empty, and an empty stdin is a valid empty body")
     fi
@@ -1558,7 +1566,7 @@ if [ -n "${SHIP_DRY_RUN:-}" ]; then
   echo "DRY: committed locally on $BR, skipped push + PR." >&2
   git -C "$WT" show --stat --oneline HEAD >&2
   [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" dry-run-opened-no-pr
-  exit 0
+  exit "$WAIT_CI_STATUS"
 fi
 
 # sc-1508: hand the pre-push hook the EXACT commit this ship built, so it can skip its
@@ -1728,11 +1736,15 @@ git update-ref -d "$RECOVERY_RECEIPT_REF" "${RECOVERY_COMMIT:-${SHIP_COMMIT:-}}"
 # concurrent actor could legitimately advance, whereas this blob is devkit-private, rewritten whole
 # on every ship to this branch, and worthless once the commit it describes is published.
 git update-ref -d "$RECOVERY_GATE_ADDS_REF" 2>/dev/null || true
+# Joins the PR to its base PR's GitHub stack; best-effort, so it runs only once nothing is at stake.
+STACK_LINK="$SCRIPT_DIR/stack/link.mts"; [ -f "$STACK_LINK" ] || STACK_LINK="$SCRIPT_DIR/stack/link.mjs"
+[ "$NO_STACK" -eq 1 ] || [ -z "$PR_NUM" ] || node "$STACK_LINK" "$REPO" "$PR_NUM" || true
 # After every ref is settled, so a ship killed during the bounded test runs loses no recovery state.
 [ -z "$PR_NUM" ] || publish_evidence_block "$WT" "$PR_NUM" "$REPO" "${RECOVERY_COMMIT:-$SHIP_COMMIT}"
 git worktree remove --force "$WT" 2>/dev/null || true
 
 # --wait-ci runs LAST: the push, PR, manifest, intent release and worktree/branch cleanup above are
 # all durable, so a wait that is killed, times out or reports red cannot cost this ship.
-ship_end_record 0
+[ "$WAIT_CI_STRICT" -eq 1 ] || ship_end_record 0 # strict: the verdict is the exit, so the trap records it
 [ "$WAIT_CI" -eq 0 ] || ship_run_wait_ci "$PR_NUM" "$REPO" "$WAIT_CI_TIMEOUT" "$PR_URL" "${WAIT_CI_REQUIRED:-0}"
+exit "$WAIT_CI_STATUS"

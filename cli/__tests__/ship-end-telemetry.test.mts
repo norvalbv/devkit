@@ -175,6 +175,25 @@ describe('ship-branch.sh — ship_end', () => {
     ]);
   });
 
+  it.each([
+    ['red', 'fail', 5, 'ci_not_green'],
+    ['green', 'pass', 0, null],
+  ])(
+    'a --wait-ci-strict ship whose CI is %s ends with the exit the verdict chose',
+    (_, bucket, rc, cause) => {
+      const { dir, env } = seedShipRepoLocalRemote();
+      const checks = `[{"bucket":"${bucket}","name":"gate","state":"X","link":"","workflow":"gate"}]`;
+      const gh = `case "$2" in checks) printf '%s' '${checks}' ;; *) echo https://github.com/acme/app/pull/42 ;; esac`;
+      const fast = { ...env, DEVKIT_WAIT_CI_INTERVAL_MS: '5', DEVKIT_WAIT_CI_SETTLE_MS: '1' };
+      const { r, sink } = ship(dir, fast, 'feat/end-strict', gh, {
+        args: ['--wait-ci', '--wait-ci-strict', '--'],
+      });
+
+      expect(r.status, r.stderr).toBe(rc);
+      expect(rows(sink, 'ship_end')).toEqual([expect.objectContaining({ exit_code: rc, cause })]);
+    },
+  );
+
   it('a signal after the gates landed the commit, then its resume, each end once', () => {
     const { dir, env } = seedShipRepoLocalRemote();
     const bin = ghStub(PR_URL);

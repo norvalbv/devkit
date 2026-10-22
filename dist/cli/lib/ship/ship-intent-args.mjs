@@ -15,6 +15,7 @@ export function parseArgs(argv) {
         // real argument (`--draft --resumed` would swallow `--resumed`).
         if (a === '--update-pr-body' ||
             a === '--draft' ||
+            a === '--no-stack' ||
             a === '--resumed' ||
             a === '--merge-paths' ||
             a === '--keep-body-file')

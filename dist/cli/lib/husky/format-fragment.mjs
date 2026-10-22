@@ -59,17 +59,18 @@ export function renderToolChain(fs, binDir) {
 }
 export function renderAgentHookLines(f) {
     const gate = `{ ${f.configProbes.map((p) => `[ -f "${p}" ]`).join(' || ')}; }`;
-    const bin = `[ -x "./node_modules/.bin/${f.tool}" ]`;
+    const path = `./node_modules/.bin/${f.tool}`;
+    const bin = `[ -x "${path}" ]`;
     return {
         'agents-hooks/format-after-edit.sh': [
             `if [[ "$file_path" =~ \\.(ts|tsx|js|jsx|json|jsonc)$ ]] && ${gate}; then`,
-            `  if command -v bun &>/dev/null && [ -f "package.json" ] && ${bin}; then`,
-            `    bun run ${f.tool} ${f.agentArgs.afterEdit} "$file_path" 2>/dev/null || true`,
+            `  if [ -f "package.json" ] && ${bin}; then`,
+            `    "${path}" ${f.agentArgs.afterEdit} "$file_path" >/dev/null 2>&1 || true`,
         ],
         'agents-hooks/lint-check.sh': [
             `if ${bin} && ${gate}; then`,
-            `    lint_output=$(bun run ${f.tool} ${f.agentArgs.lintCheck} "\${biome_files[@]}" 2>&1)`,
-            `      echo "Run 'bun run ${f.tool} ${f.agentArgs.afterEdit} <file>' to auto-fix." >&2`,
+            `    lint_output=$("${path}" ${f.agentArgs.lintCheck} "\${biome_files[@]}" 2>&1)`,
+            `      echo "Run '${path} ${f.agentArgs.afterEdit} <file>' to auto-fix." >&2`,
         ],
     };
 }
@@ -85,7 +86,7 @@ export const FORMAT_EXTENSION_FILTER = "grep -E '\\.(tsx?|jsx?|mts|cts|mjs|css|j
 // FMT_RC is XARGS's status, not the formatter's (xargs collapses 1-125 into one code of its own),
 // so the report points at the tool's diagnostics rather than claiming the number is its exit code.
 export const FORMAT_FAILURE_REPORT = `        if [ "$FMT_RC" -eq 127 ]; then
-            echo "🎨 $FMT_TOOL is not installed at $FMT_BIN — $FMT_N staged file(s) left UNFORMATTED. Run \\\`devkit doctor --fix\\\`; this commit continues."
+            echo "🎨 $FMT_TOOL is missing or cannot start at $FMT_BIN — $FMT_N staged file(s) left UNFORMATTED. Install this repo's dependencies; this commit continues."
         elif [ "$FMT_RC" -ne 0 ]; then
             echo "🎨 $FMT_TOOL failed over $FMT_N staged file(s) (xargs exit $FMT_RC) — some may be UNFORMATTED; its diagnostics are above. This commit continues."
         fi`;

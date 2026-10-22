@@ -260,5 +260,16 @@ and a `summary` explaining what blocked completion and how to recover.
 - **Do not re-litigate settled axes.** Rulings passed in as Settled Axes (or found in the decision
   log) are given context. If the problem's frame contradicts one, surface that as the finding —
   the resolution belongs to the caller's conversation, not this response.
+- **Read before you run; delete what you create.** Settle questions with read-only probes:
+  `git show <rev>:path` or `git grep <rev>` instead of archiving trees, `npm view` instead of an
+  install, the configured search tool instead of copying its index. Never copy a consumer's index
+  or caches, and never install into the repo or globally. When an experiment truly needs disk, make
+  one directory with bare `mktemp -d`, install only inside it, and keep it under 200 MB (check with
+  `du -sh`; stop rather than exceed). Before returning, remove it in one command naming the
+  absolute path mktemp printed — never a shell variable or glob, which some harnesses refuse. OS
+  temp cleanup is best-effort and some sandboxes defeat it, so if removal fails, put the path and
+  its size in `summary`. This holds even when the request invites experiments: a question only an
+  over-budget experiment could settle is `NO_EVIDENCE`, with the experiment named in
+  `suggestedNextStep.detail`.
 - **Return only the closed JSON contract**, delivered as Phase 4 says. Its first character is `{`
   and its last character is `}`. No lead-in, fence, or trailing commentary.

@@ -10,7 +10,8 @@
  * reviewers (correctness) run single-pass and block directly.
  *
  * Contract:
- *   exit 1 = at least one confirmed FAIL
+ *   exit 1 = a confirmed FAIL, a REVIEW ERROR, or an integrity block (tamper, mass deletion)
+ *   exit 4 = a verified object-database fault (odb-probe.mts)
  *   exit 2 = no FAIL, but at least one judge was inconclusive (outage / no VERDICT line) → the
  *            hook treats this as fail-open (non-strict runs only)
  *   exit 3 = strict runs only (GUARD_AI_STRICT, set by devkit ship): a judge stayed inconclusive
@@ -57,7 +58,13 @@ import { gitCached, headHash, stagedFiles, stagedTreeHash } from './evidence/sta
 import { reviewerTargetSalts } from './evidence/targets-block.mts';
 import { emitMergedLensResults } from './lens/merge-results.mts';
 import { reportInconclusive } from './valve/inconclusive.mts';
-import { narrowSelection, narrowTasks, printRemedy, type RecheckTarget } from './valve/recheck.mts';
+import {
+  narrowSelection,
+  narrowTasks,
+  printRemedy,
+  type RecheckTarget,
+  reportLensPartAdvisories,
+} from './valve/recheck.mts';
 import {
   mapLimit,
   planReviewWork,
@@ -240,8 +247,8 @@ export async function runReviewGate(
     if (stagedTreeHash(cwd, 'review evidence bracket') !== preJudgeTree)
       throw new Error('staged tree changed while review evidence was being read — re-run the gate');
   } catch (e: unknown) {
-    // sc-1366: both branches read the staged diff, so both can die on an unreadable object. Review
-    // mode is the worse — exit 1 is rendered as "A reviewer FAILED (opus-confirmed)".
+    // Both branches read the staged diff, so both can die on an unreadable object; review mode
+    // blocks at exit 1, so its message must name the setup failure, not a reviewer.
     const g = 'guard-review';
     const m = `${g}: review setup failure — ${e instanceof Error ? e.message : String(e)}`;
     const fb = reviewMode ? { message: m } : { strict };
@@ -450,7 +457,9 @@ export async function runReviewGate(
   );
   if (progressFile) clearProgress(progressFile); // ran to completion → nothing unfinished to report
 
-  if (!only?.lens) emitMergedLensResults(splitParts, firstModel); // never a recheck's partial vector
+  // Never a recheck's partial vector: its live parts report their own advisories instead.
+  if (only?.lens) reportLensPartAdvisories(splitParts);
+  else emitMergedLensResults(splitParts, firstModel);
   const fails = results.filter((r) => r.status === 'fail');
   const findingsPrinted = new Set<string>();
   let hinted = false;
@@ -474,6 +483,9 @@ export async function runReviewGate(
   const errors = results.filter((r) => r.status === 'error');
   for (const r of errors) {
     console.error(`guard-review: ${r.name} REVIEW ERROR — ${r.reason}`);
+    console.error(
+      '   No verdict was reached on the code — follow the error text above, then re-run.',
+    );
     if (r.transcript) console.error(r.transcript.trim());
   }
   if (fails.length > 0 || errors.length > 0) return finish(1);

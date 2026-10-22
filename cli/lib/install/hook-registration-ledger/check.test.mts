@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { checkRegistrations } from '../../doctor/asset-checks.mts';
 import { installHookRegistrations } from '../install-hooks.mts';
 import { checkHookRegistrations } from './check.mts';
 
@@ -125,5 +126,136 @@ describe('checkHookRegistrations — the Claude settings file the scope does not
     expect(checkHookRegistrations(root, [], { targets: ['claude'] }).ok).toBe(true);
     expect(() => installHookRegistrations(root, [], { targets: ['claude'] })).not.toThrow();
     expect(readFileSync(join(root, '.claude', 'settings.local.json'), 'utf8')).toBe(body);
+  });
+});
+
+// fallow 3.34's walk-up handlers (crates/cli/src/setup_hooks.rs), which the exact allowlist misses.
+const WALK_UP = (dir: string, tail: string) =>
+  `d="$(pwd)"; until [ -f "$d/.${dir}/hooks/fallow-gate.sh" ] || [ -e "$d/.git" ] || [ "$d" = / ]; do d="$(dirname "$d")"; done; if [ -f "$d/.${dir}/hooks/fallow-gate.sh" ]; then cd "$d" && exec ./.${dir}/hooks/fallow-gate.sh; fi; ${tail}`;
+const CLAUDE_WALK_UP = WALK_UP('claude', 'exec "$CLAUDE_PROJECT_DIR"/.claude/hooks/fallow-gate.sh');
+const CODEX_WALK_UP = WALK_UP('codex', 'exit 0');
+
+const advice = (provider: string, rel: string, where: string, command: string) =>
+  `${provider}:unrecognised-fallow-gate ${rel} ${where}: ${command}`;
+
+describe('checkHookRegistrations — fallow-gate.sh spellings the allowlist does not recognise', () => {
+  it.each([
+    'X=1 bash .claude/hooks/fallow-gate.sh',
+    'bash $CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh',
+    'bash .claude/hooks/fallow-gate.sh && ./mine.sh',
+    // The bare path at the start of the command, and a whitespace-padded one: both fail isRetired.
+    '.claude/hooks/fallow-gate.sh && ./mine.sh',
+    ' bash .claude/hooks/fallow-gate.sh',
+    CLAUDE_WALK_UP,
+  ])('advises on, and init never strips: %s', (command) => {
+    const root = gitRepo();
+    const rel = writeSettings(root, 'settings.json', command);
+
+    expect(checkHookRegistrations(root, [], { targets: ['claude'] })).toMatchObject({
+      ok: true,
+      advisories: [advice('claude', rel, 'PreToolUse[Bash]', command)],
+    });
+    installHookRegistrations(root, [], { targets: ['claude'] });
+
+    expect(JSON.parse(readFileSync(join(root, rel), 'utf8')).hooks.PreToolUse[0].hooks).toEqual([
+      { type: 'command', command },
+    ]);
+  });
+
+  it('advises on the settings file the scope does not own', () => {
+    const root = gitRepo();
+    const rel = writeSettings(root, 'settings.json', CLAUDE_WALK_UP);
+
+    expect(checkHookRegistrations(root, [], overlay).advisories).toEqual([
+      advice('claude', rel, 'PreToolUse[Bash]', CLAUDE_WALK_UP),
+    ]);
+  });
+
+  it('advises on a Codex and a Cursor handler', () => {
+    const root = gitRepo();
+    mkdirSync(join(root, '.codex'));
+    mkdirSync(join(root, '.cursor'));
+    const codexHooks = [
+      { matcher: '^Bash$', hooks: [{ type: 'command', command: CODEX_WALK_UP }] },
+    ];
+    writeFileSync(
+      join(root, '.codex', 'hooks.json'),
+      JSON.stringify({ hooks: { PreToolUse: codexHooks } }),
+    );
+    const cursor = 'bash .cursor/hooks/fallow-gate.sh && ./mine.sh';
+    writeFileSync(
+      join(root, '.cursor', 'hooks.json'),
+      JSON.stringify({ version: 1, hooks: { beforeShellExecution: [{ command: cursor }] } }),
+    );
+
+    expect(checkHookRegistrations(root, [], { targets: ['codex', 'cursor'] })).toMatchObject({
+      ok: true,
+      advisories: [
+        advice('codex', join('.codex', 'hooks.json'), 'PreToolUse[^Bash$]', CODEX_WALK_UP),
+        advice('cursor', join('.cursor', 'hooks.json'), 'beforeShellExecution', cursor),
+      ],
+    });
+  });
+
+  it('still finds the handler beside malformed entries in a hand-edited file', () => {
+    const root = gitRepo();
+    const command = 'bash .claude/hooks/fallow-gate.sh && ./mine.sh';
+    const handlers = [null, 7, { type: 'command', command }];
+    const PreToolUse = [{ matcher: 'Bash' }, 'junk', { matcher: 'Bash', hooks: handlers }];
+    writeFileSync(
+      join(root, '.claude', 'settings.json'),
+      JSON.stringify({ hooks: { Stop: 'junk', PreToolUse } }),
+    );
+
+    expect(checkHookRegistrations(root, [], { targets: ['claude'] }).advisories).toEqual([
+      advice('claude', join('.claude', 'settings.json'), 'PreToolUse[Bash]', command),
+    ]);
+  });
+
+  it.each([
+    'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-staged-gate.sh"',
+    CONSUMER_OWNED,
+    'bash .claude/hooks/fallow-gate.sh.bak',
+    'echo mine',
+  ])('stays silent on a handler that is not fallow-gate.sh: %s', (command) => {
+    const root = gitRepo();
+    writeSettings(root, 'settings.json', command);
+
+    expect(checkHookRegistrations(root, [], { targets: ['claude'] }).advisories).toEqual([]);
+  });
+
+  it('reports a recognised spelling as retired, not as an advisory', () => {
+    const root = gitRepo();
+    writeSettings(root, 'settings.json', RETIRED);
+
+    expect(checkHookRegistrations(root, [], { targets: ['claude'] })).toMatchObject({
+      missing: ['claude:retired-registration'],
+      advisories: [],
+    });
+  });
+});
+
+describe('checkRegistrations — rendering advisories', () => {
+  it('an advisory alone is a non-fixing row that names the handler', () => {
+    const root = gitRepo();
+    writeSettings(root, 'settings.json', CLAUDE_WALK_UP);
+
+    expect(checkRegistrations(root, [], ['claude'])).toMatchObject({
+      status: 'DRIFT',
+      advisory: true,
+      fixable: false,
+      detail: expect.stringContaining('claude:unrecognised-fallow-gate .claude/settings.json'),
+      remediation: expect.stringContaining('by hand'),
+    });
+  });
+
+  it('keeps advisories visible beside a fixable registration issue', () => {
+    const root = gitRepo();
+    writeSettings(root, 'settings.json', RETIRED, CLAUDE_WALK_UP);
+
+    const result = checkRegistrations(root, [], ['claude']);
+    expect(result).toMatchObject({ status: 'DRIFT', fixable: true });
+    expect(result.detail).toContain('claude:retired-registration');
+    expect(result.detail).toContain(`; also: claude:unrecognised-fallow-gate`);
   });
 });

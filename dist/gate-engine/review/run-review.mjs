@@ -10,7 +10,8 @@
  * reviewers (correctness) run single-pass and block directly.
  *
  * Contract:
- *   exit 1 = at least one confirmed FAIL
+ *   exit 1 = a confirmed FAIL, a REVIEW ERROR, or an integrity block (tamper, mass deletion)
+ *   exit 4 = a verified object-database fault (odb-probe.mts)
  *   exit 2 = no FAIL, but at least one judge was inconclusive (outage / no VERDICT line) → the
  *            hook treats this as fail-open (non-strict runs only)
  *   exit 3 = strict runs only (GUARD_AI_STRICT, set by devkit ship): a judge stayed inconclusive
@@ -50,7 +51,7 @@ import { gitCached, headHash, stagedFiles, stagedTreeHash } from './evidence/sta
 import { reviewerTargetSalts } from './evidence/targets-block.mjs';
 import { emitMergedLensResults } from './lens/merge-results.mjs';
 import { reportInconclusive } from './valve/inconclusive.mjs';
-import { narrowSelection, narrowTasks, printRemedy } from './valve/recheck.mjs';
+import { narrowSelection, narrowTasks, printRemedy, reportLensPartAdvisories, } from './valve/recheck.mjs';
 import { mapLimit, planReviewWork, resolveChunkCap, resolveLensGroups, taskLabel, } from './lens/split.mjs';
 import { clearProgress, writeProgress } from './progress.mjs';
 import { retryableReason, runDeferredRecoveries, settleReviewOutcome, } from './recovery/settle.mjs';
@@ -97,15 +98,16 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             let postHead = null;
             for (let attempt = 0; attempt < 3; attempt += 1) {
                 const h1 = headHash(cwd);
-                const t = stagedTreeHash(cwd);
-                if (h1 !== null && t !== null && headHash(cwd) === h1 && stagedTreeHash(cwd) === t) {
+                const use = 'post-judge tamper check';
+                const t = stagedTreeHash(cwd, use);
+                if (h1 !== null && t !== null && headHash(cwd) === h1 && stagedTreeHash(cwd, use) === t) {
                     postTree = t;
                     postHead = h1;
                     break;
                 }
             }
             if (preJudgeTree === null || postTree === null) {
-                console.error('guard-review: staged tree is UNVERIFIABLE (git write-tree failed — unmerged paths?) — blocking: write-capable judges may run in this gate and their effect on the commit cannot be ruled out. Resolve the index and re-run.');
+                console.error('guard-review: staged tree is UNVERIFIABLE (could not hash the staged tree — reason above) — blocking: write-capable judges may run in this gate and their effect on the commit cannot be ruled out. Resolve the index and re-run.');
                 return timing.finish(1);
             }
             if (postHead === null || postTree !== preJudgeTree || postHead !== preJudgeHead) {
@@ -139,7 +141,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         preJudgeTree = null;
         for (let attempt = 0; attempt < 3; attempt += 1) {
             const before = headHash(cwd);
-            const tree = stagedTreeHash(cwd);
+            const tree = stagedTreeHash(cwd, 'pre-judge tamper baseline');
             if (before !== null && tree !== null && headHash(cwd) === before) {
                 preJudgeTree = tree;
                 preJudgeHead = before;
@@ -193,12 +195,12 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         // A double swap timed inside this bracket is an actor with full repo write access racing
         // sub-millisecond windows — outside this gate's trust boundary (such an actor can edit .git
         // directly); hashing cannot close it and locking the index would break every parallel tool.
-        if (stagedTreeHash(cwd) !== preJudgeTree)
+        if (stagedTreeHash(cwd, 'review evidence bracket') !== preJudgeTree)
             throw new Error('staged tree changed while review evidence was being read — re-run the gate');
     }
     catch (e) {
-        // sc-1366: both branches read the staged diff, so both can die on an unreadable object. Review
-        // mode is the worse — exit 1 is rendered as "A reviewer FAILED (opus-confirmed)".
+        // Both branches read the staged diff, so both can die on an unreadable object; review mode
+        // blocks at exit 1, so its message must name the setup failure, not a reviewer.
         const g = 'guard-review';
         const m = `${g}: review setup failure — ${e instanceof Error ? e.message : String(e)}`;
         const fb = reviewMode ? { message: m } : { strict };
@@ -354,8 +356,11 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     })), gateStart);
     if (progressFile)
         clearProgress(progressFile); // ran to completion → nothing unfinished to report
-    if (!only?.lens)
-        emitMergedLensResults(splitParts, firstModel); // never a recheck's partial vector
+    // Never a recheck's partial vector: its live parts report their own advisories instead.
+    if (only?.lens)
+        reportLensPartAdvisories(splitParts);
+    else
+        emitMergedLensResults(splitParts, firstModel);
     const fails = results.filter((r) => r.status === 'fail');
     const findingsPrinted = new Set();
     let hinted = false;
@@ -380,6 +385,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     const errors = results.filter((r) => r.status === 'error');
     for (const r of errors) {
         console.error(`guard-review: ${r.name} REVIEW ERROR — ${r.reason}`);
+        console.error('   No verdict was reached on the code — follow the error text above, then re-run.');
         if (r.transcript)
             console.error(r.transcript.trim());
     }

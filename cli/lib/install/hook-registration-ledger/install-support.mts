@@ -4,7 +4,11 @@ import { writeFileAtomic } from '../../atomic-write.mts';
 import { readJson } from '../../fs-helpers.mts';
 import { isTracked } from '../../git-tracked.mts';
 import { isSafeAgentAssetPath } from '../agent-asset-manifest/lifecycle.mts';
-import { type AgentProvider, LEGACY_AGENT_PROVIDERS } from '../agent-assets/agent-providers.mts';
+import {
+  type AgentProvider,
+  LEGACY_AGENT_PROVIDERS,
+  SUPPORTED_AGENT_PROVIDERS,
+} from '../agent-assets/agent-providers.mts';
 import { dataRecord } from './plain-data.mts';
 import {
   encodeHookRegistrationLedger,
@@ -61,12 +65,68 @@ const RETIRED_SCRIPT = new Map<AgentProvider, RegExp>([
 const isRetired = (provider: AgentProvider, command: string) =>
   RETIRED_SCRIPT.get(provider)?.test(command) ?? false;
 
+// Any spelling that names the provider's fallow-gate.sh. Doctor only reports these, never strips them.
+const FALLOW_GATE_PATH = new Map<AgentProvider, RegExp>(
+  SUPPORTED_AGENT_PROVIDERS.map((provider) => [
+    provider,
+    new RegExp(String.raw`(?:^|[\s"'/=])\.${provider}/hooks/fallow-gate\.sh(?![\w.-])`),
+  ]),
+);
+
 /** One handler a ledger row proves devkit wrote: its command AND where the row says it sits. */
 export interface OwnedHandler {
   event: string;
   matcher: string | null;
   command: string;
 }
+
+/** One entry of a provider hook list: a Cursor handler, or a Claude/Codex matcher group. */
+interface HookEntry {
+  command?: unknown;
+  matcher?: unknown;
+  hooks?: unknown;
+}
+
+const commandOf = (entry: HookEntry | null) => String(entry?.command ?? '');
+
+// Mirrors lifecycle.mts matcherGroup: null means the group carries no `matcher` key.
+const matcherOf = (group: HookEntry) =>
+  Object.hasOwn(group, 'matcher') ? String(group.matcher) : null;
+
+function entryHandlers(event: string, entry: HookEntry | null, flat: boolean): OwnedHandler[] {
+  if (flat) return [{ event, matcher: null, command: commandOf(entry) }];
+  if (!entry || !Array.isArray(entry.hooks)) return [];
+  const matcher = matcherOf(entry);
+  return entry.hooks.map((handler) => ({
+    event,
+    matcher,
+    command: commandOf(dataRecord(handler)),
+  }));
+}
+
+/** A provider hook document, as `dataRecord` returns it: only `hooks` is read. */
+interface HookDocument {
+  hooks?: unknown;
+}
+
+/** Every handler in a provider hook document, read-only. Cursor keeps a flat list per event. */
+function handlersOf(document: HookDocument | null, provider: AgentProvider) {
+  return Object.entries(dataRecord(document?.hooks) ?? {}).flatMap(([event, list]) =>
+    (Array.isArray(list) ? list : []).flatMap((entry) =>
+      entryHandlers(event, dataRecord(entry), provider === 'cursor'),
+    ),
+  );
+}
+
+/** Handlers naming fallow's agent gate in a spelling `isRetired` will not delete. */
+export const unrecognisedFallowGates = (document: HookDocument | null, provider: AgentProvider) =>
+  handlersOf(document, provider).filter(
+    ({ command }) =>
+      (FALLOW_GATE_PATH.get(provider)?.test(command) ?? false) && !isRetired(provider, command),
+  );
+
+export const handlerLocation = (rel: string, { event, matcher }: OwnedHandler) =>
+  `${rel} ${event}${matcher ? `[${matcher}]` : ''}`;
 
 /** A handler the reconcile took out of a provider document, and why. */
 export interface DroppedHandler extends OwnedHandler {
@@ -153,8 +213,9 @@ export function stripReclaimedCommands(
 
 /** One line per removed handler, so a settings diff never reads as consumer data loss. */
 export function reportDropped(rel: string, dropped: readonly DroppedHandler[], dryRun: boolean) {
-  for (const { event, matcher, command, reason } of dropped) {
-    const where = `${rel} ${event}${matcher ? `[${matcher}]` : ''}`;
+  for (const handler of dropped) {
+    const { command, reason } = handler;
+    const where = handlerLocation(rel, handler);
     console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${where}: ${command} (${reason})`);
   }
 }
@@ -165,17 +226,34 @@ export const asDropped = (
 ): DroppedHandler[] =>
   entries.map(({ native, ownerId }) => ({ ...native, reason: `${verb}: ${ownerId}` }));
 
-/** A retired command in the Claude settings file the scope does NOT own; Claude Code runs both. */
-export function retiredElsewhere(root: string, provider: AgentProvider, scope: HookInstallScope) {
+const OTHER_SCOPE = { shared: 'overlay', overlay: 'shared' } as const;
+
+/** The Claude settings file the scope does NOT own; Claude Code runs both. */
+export function otherClaudeSettings(
+  root: string,
+  provider: AgentProvider,
+  scope: HookInstallScope,
+) {
   if (provider !== 'claude') return null;
-  const rel = hookRegistrationDestination(provider, scope === 'shared' ? 'overlay' : 'shared');
-  if (!existsSync(join(root, rel)) || !isSafeAgentAssetPath(root, rel, true)) return null;
-  let document: unknown;
+  const rel = hookRegistrationDestination(provider, OTHER_SCOPE[scope]);
+  // A missing file reads as `{}`, so only a symlinked or non-file path needs refusing here.
+  if (!isSafeAgentAssetPath(root, rel, true)) return null;
   try {
-    document = providerDocument(root, provider, rel);
+    return { rel, document: providerDocument(root, provider, rel) };
   } catch {
     return null; // Not the scope's file: its parse errors are the user's, never a devkit failure.
   }
+}
+
+/** A retired command in the Claude settings file the scope does NOT own. */
+export function retiredElsewhere(
+  root: string,
+  provider: AgentProvider,
+  scope: HookInstallScope,
+  other = otherClaudeSettings(root, provider, scope),
+) {
+  if (!other) return null;
+  const { rel, document } = other;
   const stripped = stripReclaimedCommands(document, provider);
   if (!stripped.changed) return null;
   // Overlay must stay git-invisible, so a committed settings.json is reported, never edited.

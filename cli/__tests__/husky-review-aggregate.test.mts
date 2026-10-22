@@ -47,6 +47,8 @@ describe.each(BUILDERS)('%s hook, review mode', (builder) => {
   it('a reviewer finding is deferred past the ui-evidence reminder', () => {
     const r = runHook(review({ REVIEW_RC: '1' }), WITH_UI_EVIDENCE, { builder });
     expect(r.calls).toContain('guard-ui-evidence');
+    expect(r.stdout).toContain('guard-review blocked the commit');
+    expect(r.stdout).not.toContain('A reviewer FAILED');
     expect(r.status).toBe(1);
   });
 

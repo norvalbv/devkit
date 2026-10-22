@@ -188,9 +188,9 @@ export function attachItems(res, state, disposition, opts = {}) {
         .filter((it) => wireItemSchema.safeParse(it).success)
         .sort((a, b) => Number(a.status === 'pass') - Number(b.status === 'pass'));
     res.itemCount = ordered.length;
-    // lens → rationale for whatever fired the valve this run, so a 'waived' item can carry its own
-    // reason inline — the decoy-minting signal a consumer would otherwise need a waivers[] join for.
-    const rationaleByLens = new Map((res.waivers ?? []).map((w) => [w.lens, w.rationale]));
+    // lens → waiver for whatever fired the valve this run, so a 'waived' item carries its own reason
+    // and kind inline — the decoy-minting signal a consumer would otherwise need a waivers[] join for.
+    const waiverByLens = new Map((res.waivers ?? []).map((w) => [w.lens, w]));
     const capped = ordered.slice(0, ITEM_CAP).map((it) => {
         const lens = String(it.name ?? it.path ?? '(finding)').slice(0, LENS_CHARS);
         // checkItem clears issues on a pass, so this only ever carries text for a non-pass.
@@ -198,14 +198,17 @@ export function attachItems(res, state, disposition, opts = {}) {
             .slice(0, issuesPerLensCap())
             .map((issue) => String(issue).slice(0, ISSUE_CHARS));
         const lensDisposition = disposition.get(lens);
-        const rationale = rationaleByLens.get(lens);
+        const waiver = waiverByLens.get(lens);
         return {
             lens,
             status: String(it.status),
             ...(lensDisposition ? { disposition: lensDisposition } : {}),
             ...(issues.length > 0 ? { issues } : {}),
-            ...(lensDisposition === 'waived' && rationale
-                ? { rationale: rationale.slice(0, WAIVER_RATIONALE_CHARS) }
+            ...(lensDisposition === 'waived' && waiver?.rationale
+                ? {
+                    rationale: waiver.rationale.slice(0, WAIVER_RATIONALE_CHARS),
+                    kind: waiver.kind,
+                }
                 : {}),
         };
     });

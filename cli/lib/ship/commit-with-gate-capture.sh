@@ -34,9 +34,9 @@
 # must always read as that reviewer's rejection, never as a timeout.
 #
 # Portability: hang protection is unconditional and needs no coreutils — node plus /bin/ps, both of
-# which ship already requires. Exit codes the caller can now see: 124 (the ceiling, or a leaked group
-# that outlived a CLEAN leader), 129/130/131/143 (a signal forwarded to the gate), 137 (the supervisor
-# itself was SIGKILLed — NOT a ceiling).
+# which ship already requires. Exit codes the caller can now see: 124 (the ceiling; a leaked group
+# that outlived a CLEAN leader reads 0 and sets RUN_GATES_REAPED), 129/130/131/143 (a signal forwarded
+# to the gate), 137 (the supervisor itself was SIGKILLed — NOT a ceiling).
 #
 # A shell word a reader can paste: bare when nothing in it is special to a shell, else single-quoted.
 _ship_sh_word() {
@@ -331,7 +331,8 @@ SHIP_HOOK_WRAPPER
   # (the per-gate/per-reviewer events carry the precise cause). Chain order is deterministic →
   # decisions → review, and each hook step is `|| exit`, so exactly one gate blocks; grep in that
   # order attributes it.
-  local blocked_json timed_out shell_gate
+  local blocked_json timed_out shell_gate reaped_json=false
+  [ "${RUN_GATES_REAPED:-0}" != 1 ] || reaped_json=true
   if [ -n "$blocked_override" ]; then blocked_json=$blocked_override; timed_out=false
   elif [ "$hook_setup_failed" -eq 1 ]; then blocked_json='"hook_setup"'; timed_out=false
   elif [ "$rc" -eq 0 ]; then blocked_json=null; timed_out=false
@@ -364,9 +365,9 @@ SHIP_HOOK_WRAPPER
   # The caller names this token as its terminal cause, but only where it exits on this status.
   SHIP_BLOCKED_GATE=${blocked_json//\"/}
   if [ "$ship_dry_gates" -eq 0 ]; then
-    printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s"%s,"exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
+    printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s"%s,"exit_code":%d,"timed_out":%s,"reaped":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
       "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
-      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$(devkit_parent_session_json)" "$rc" "$timed_out" "$blocked_json" \
+      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$(devkit_parent_session_json)" "$rc" "$timed_out" "$reaped_json" "$blocked_json" \
       "$(( $(date +%s) - dur_start ))" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
   fi

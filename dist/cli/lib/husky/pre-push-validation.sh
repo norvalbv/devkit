@@ -214,12 +214,10 @@ collect_failing_files() {
   rm -f -- "$log" 2>/dev/null || return 1
   [ "$GATE_PHASE" = test ] || return 1
 
-  # A linked node_modules shares one cache between checkouts, whose entries are indistinguishable.
-  [ -L "$ROOT/node_modules" ] && return 1
-
   reader="$SCRIPT_DIR/pre-push/failing-test-files.mts"
   [ -f "$reader" ] || reader="$SCRIPT_DIR/pre-push/failing-test-files.mjs"
-  for results in "$ROOT"/node_modules/.vite/vitest/*/results.json; do
+  # vitest.config.mjs's cacheDir: per checkout, so a node_modules shared with other checkouts is moot.
+  for results in "$ROOT"/.devkit/vitest-cache/vitest/*/results.json; do
     [ -f "$results" ] || continue
     # UPDATES_FILE was written before the suite started, so a cache older than it is a previous run's.
     files="$files$(node "$reader" "$results" "$UPDATES_FILE" "$ROOT" 2>/dev/null)

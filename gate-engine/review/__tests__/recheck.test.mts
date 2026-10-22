@@ -96,13 +96,13 @@ function writeLensArtifacts(repo: string, failing: string | null = null): void {
 const lensOf = (call: { args: string[] }): string | undefined =>
   FOUR_WAY_LENS_GROUPS.map(lensGroupId).find((id) => call.args[1].includes(`--lens ${id}`));
 
-function lensExec(repo: string, failing: string | null = null) {
+function lensExec(repo: string, failing: string | null = null, pass = 'checked\nVERDICT: PASS') {
   return mkExec(async ({ label, args }) => {
     writeArtifact(repo, label);
     writeLensArtifacts(repo, failing);
     return label === `review:${CORRECTNESS}` && failing && args[1].includes(`--lens ${failing}`)
       ? 'found one\nVERDICT: FAIL — wedged'
-      : 'checked\nVERDICT: PASS';
+      : pass;
   });
 }
 
@@ -259,6 +259,28 @@ describe('runReviewGate({ only }) — the recheck lane', () => {
     expect(evs.filter((e) => e.type === 'review_result' && e.reviewer === CORRECTNESS)).toEqual([]);
   });
 
+  it("prints the target part's PASS advisories under its lens label, still with no review_result", async () => {
+    const repo = consumerRepo({ backend: true });
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'recheck-advisory';
+    const advised = 'ADVISORY: `src/a.ts:1` — the retry swallows the parse error\nVERDICT: PASS';
+    const only = { reviewer: CORRECTNESS, lens: TARGET_LENS };
+    expect(await runReviewGate(repo, { exec: lensExec(repo, null, advised), only })).toBe(0);
+
+    const label = `${CORRECTNESS} [${TARGET_LENS}]`;
+    expect(stderr()).toContain(`${label} — advisory (non-blocking): \`src/a.ts:1\` — the retry`);
+    const evs = events(sink);
+    expect(evs).toContainEqual(
+      expect.objectContaining({
+        type: 'advisory_result',
+        gate: `review:${CORRECTNESS}`, // the digest's reviewer key, not the lens label
+        detail: expect.stringContaining('the retry swallows the parse error'),
+      }),
+    );
+    expect(evs.filter((e) => e.type === 'review_result' && e.reviewer === CORRECTNESS)).toEqual([]);
+  });
+
   it('its PASS seeds the exact part key a full gate computes — the next full run judges only the other lenses', async () => {
     const repo = consumerRepo({ backend: true });
     const only = { reviewer: CORRECTNESS, lens: TARGET_LENS };
@@ -284,6 +306,21 @@ describe('runReviewGate({ only }) — the recheck lane', () => {
     const only = { reviewer: CORRECTNESS, lens: TARGET_LENS };
     expect(await runReviewGate(repo, { exec: again, only })).toBe(0);
     expect(again).not.toHaveBeenCalled();
+  });
+
+  it('a cached target lens replays its advisory once — the live-part report never repeats it', async () => {
+    const repo = consumerRepo({ backend: true });
+    const advised = 'ADVISORY: `src/a.ts:1` — the retry swallows the parse error\nVERDICT: PASS';
+    expect(await runReviewGate(repo, { exec: lensExec(repo, null, advised) })).toBe(0);
+    vi.mocked(console.error).mockClear();
+    const only = { reviewer: CORRECTNESS, lens: TARGET_LENS };
+    expect(await runReviewGate(repo, { exec: lensExec(repo), only })).toBe(0);
+    // A re-seeded part carries no transcript, so only the cache replay prints the advisory.
+    expect(
+      stderr()
+        .split('\n')
+        .filter((l) => l.includes('the retry swallows')),
+    ).toHaveLength(1);
   });
 
   it('a whole-reviewer recheck of an unsplit reviewer seeds the same key the full gate hits', async () => {

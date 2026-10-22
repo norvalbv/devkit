@@ -328,7 +328,7 @@ export function superviseGateCommand(timeoutMs, command, inspectProcesses = read
         // `naturalExitCode(childStatus)` is byte-for-byte what settle() would have resolved had the group
         // drained on its own, so the reap is invisible to the caller's attribution (a ship keeps blaming
         // the reviewer, not a timeout). A leader that exited CLEAN while leaking a live tree is the one
-        // case we override: it verified nothing conclusive, so it takes the expiry status.
+        // case we override: it takes the expiry status plus the reap notice, and the caller decides.
         const reportedChildStatus = () => normalizeReservedStatuses ? naturalExitCode(childStatus) : childStatus;
         const lingerStatus = () => (childStatus === 0 ? 124 : reportedChildStatus());
         const checkForCompletion = () => {
@@ -354,8 +354,8 @@ export function superviseGateCommand(timeoutMs, command, inspectProcesses = read
                 lingerTimer = setTimeout(() => {
                     lingerTimer = undefined;
                     // Async, so a failed write can never stop the reap; the banner then reads as a ceiling.
-                    if (childStatus === 0 && reapNoticeFile)
-                        writeFile(reapNoticeFile, '', () => undefined);
+                    if (lingerStatus() === 124 && reapNoticeFile)
+                        writeFile(reapNoticeFile, '', () => { });
                     beginForcedCleanup(lingerStatus());
                 }, LINGER_GRACE_MS);
             }

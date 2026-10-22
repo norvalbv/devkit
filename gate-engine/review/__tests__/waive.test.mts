@@ -1,8 +1,13 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fingerprint, loadOverrides, reconcile } from '../overrides.mts';
+import {
+  WAIVE_KIND_PLACEHOLDER,
+  WAIVE_RATIONALE_PLACEHOLDER,
+  WAIVER_KINDS,
+} from '../valve/shell-word.mts';
 import { parseWaiveTarget, resolveWaiveAuthor, runWaive } from '../valve/waive.mts';
 
 const dirs: string[] = [];
@@ -39,6 +44,9 @@ const AUTHOR = 'Ada Lovelace';
 // instead, so assertions never depend on the executing machine's real git config.
 const fixedAuthor = () => AUTHOR;
 const RATIONALE = 'writer holds the shard lock the fixture omits — not a real race';
+// Every waive needs a kind; the kind-specific tests below call runWaive directly.
+const waive = (args: string[], cwd: string, author?: (cwd: string) => string) =>
+  runWaive([...args, '--kind', 'false-positive'], cwd, author);
 
 describe('parseWaiveTarget', () => {
   it('splits reviewer:lens on the FIRST colon (a conventions lens is itself path:line)', () => {
@@ -87,9 +95,9 @@ describe('runWaive', () => {
     const cwd = repo();
     const fp = fingerprint('correctness-reviewer', 'concurrency-races', 'D');
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(
-      runWaive(['correctness-reviewer:concurrency-races', fp, RATIONALE], cwd, fixedAuthor),
-    ).toBe(0);
+    expect(waive(['correctness-reviewer:concurrency-races', fp, RATIONALE], cwd, fixedAuthor)).toBe(
+      0,
+    );
     const stored = loadOverrides(cwd)[fp];
     expect(stored).toMatchObject({
       rationale: RATIONALE,
@@ -106,7 +114,7 @@ describe('runWaive', () => {
     const cwd = repo();
     const fp = fingerprint('correctness-reviewer', 'concurrency-races', 'D');
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    runWaive(['correctness-reviewer:concurrency-races', fp, RATIONALE], cwd, fixedAuthor);
+    waive(['correctness-reviewer:concurrency-races', fp, RATIONALE], cwd, fixedAuthor);
     const r = reconcile(cwd, 'correctness-reviewer', ['concurrency-races'], 'D', '2026-01-01');
     expect(r.blocking).toEqual([]);
     expect(r.suppressed[0]).toMatchObject({
@@ -121,7 +129,7 @@ describe('runWaive', () => {
     const cwd = repo();
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const fpCorrectness = fingerprint('correctness-reviewer', 'shared-lens', 'DIFF');
-    runWaive(['correctness-reviewer:shared-lens', fpCorrectness, RATIONALE], cwd, fixedAuthor);
+    waive(['correctness-reviewer:shared-lens', fpCorrectness, RATIONALE], cwd, fixedAuthor);
     // conventions-reviewer's fingerprint for the identical lens+diff text is a DIFFERENT fp (the
     // reviewer name feeds the hash) — reconciling it must see no suppression at all.
     const rConventions = reconcile(cwd, 'conventions-reviewer', ['shared-lens'], 'DIFF', 'NOW');
@@ -132,22 +140,22 @@ describe('runWaive', () => {
   it('refuses (exit 2) when target/itemId/rationale are missing', () => {
     const cwd = repo();
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(runWaive(['correctness-reviewer:x'], cwd)).toBe(2);
-    expect(runWaive([], cwd)).toBe(2);
+    expect(waive(['correctness-reviewer:x'], cwd)).toBe(2);
+    expect(waive([], cwd)).toBe(2);
     expect(err.mock.calls.flat().join('\n')).toContain('Usage:');
   });
 
   it('refuses an unknown reviewer name', () => {
     const cwd = repo();
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(runWaive(['not-a-real-reviewer', 'a1b2c3d4e5f6', RATIONALE], cwd)).toBe(2);
+    expect(waive(['not-a-real-reviewer', 'a1b2c3d4e5f6', RATIONALE], cwd)).toBe(2);
     expect(err.mock.calls.flat().join('\n')).toContain('unknown reviewer');
   });
 
   it('refuses a cascade reviewer (no model pin — opus-confirmed, not eligible for override)', () => {
     const cwd = repo();
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(runWaive(['api-security-reviewer', 'a1b2c3d4e5f6', RATIONALE], cwd)).toBe(2);
+    expect(waive(['api-security-reviewer', 'a1b2c3d4e5f6', RATIONALE], cwd)).toBe(2);
     const out = err.mock.calls.flat().join('\n');
     expect(out).toContain('cascade reviewer');
     expect(out).toContain('Fix the confirmed finding');
@@ -162,14 +170,14 @@ describe('runWaive', () => {
   it('refuses an itemId that is not a 12-hex fingerprint', () => {
     const cwd = repo();
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(runWaive(['correctness-reviewer', 'not-a-fingerprint', RATIONALE], cwd)).toBe(2);
+    expect(waive(['correctness-reviewer', 'not-a-fingerprint', RATIONALE], cwd)).toBe(2);
     expect(err.mock.calls.flat().join('\n')).toContain('12-hex fingerprint');
   });
 
   it('refuses a too-short rationale', () => {
     const cwd = repo();
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(runWaive(['correctness-reviewer', 'a1b2c3d4e5f6', 'nope'], cwd)).toBe(2);
+    expect(waive(['correctness-reviewer', 'a1b2c3d4e5f6', 'nope'], cwd)).toBe(2);
     expect(err.mock.calls.flat().join('\n')).toContain('specific reason');
   });
 
@@ -177,7 +185,7 @@ describe('runWaive', () => {
     const cwd = repo();
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(
-      runWaive(
+      waive(
         ['correctness-reviewer', 'a1b2c3d4e5f6', 'why', 'this', 'is', 'not', 'a', 'real', 'defect'],
         cwd,
       ),
@@ -190,12 +198,12 @@ describe('runWaive', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const fpA = fingerprint('correctness-reviewer', 'a', 'D');
     const fpB = fingerprint('conventions-reviewer', 'app.ts:1', 'D');
-    runWaive(
+    waive(
       ['correctness-reviewer:a', fpA, 'first waiver, holds a lock the fixture omits'],
       cwd,
       fixedAuthor,
     );
-    runWaive(
+    waive(
       ['conventions-reviewer:app.ts:1', fpB, 'second waiver, a different reviewer entirely'],
       cwd,
       fixedAuthor,
@@ -218,7 +226,7 @@ describe('runWaive', () => {
       vi.spyOn(console, 'error').mockImplementation(() => {});
       const log = vi.spyOn(console, 'log').mockImplementation(() => {});
       const fp = fingerprint('correctness-reviewer', 'concurrency-races', 'D');
-      runWaive(['correctness-reviewer:concurrency-races', fp, RATIONALE], cwd, fixedAuthor);
+      waive(['correctness-reviewer:concurrency-races', fp, RATIONALE], cwd, fixedAuthor);
       expect(runWaive(['--list'], cwd)).toBe(0);
       const out = log.mock.calls.flat().join('\n');
       expect(out).toContain(fp);
@@ -233,7 +241,7 @@ describe('waiver_created telemetry', () => {
     const cwd = repo();
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const fp = fingerprint('correctness-reviewer', 'concurrency-races', 'D');
-    runWaive(['correctness-reviewer:concurrency-races', fp, RATIONALE], cwd, fixedAuthor);
+    waive(['correctness-reviewer:concurrency-races', fp, RATIONALE], cwd, fixedAuthor);
     const events = waiverEvents();
     expect(events).toMatchObject([
       {
@@ -254,10 +262,10 @@ describe('waiver_created telemetry', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const fp = fingerprint('correctness-reviewer', 'concurrency-races', 'D');
     const args = ['correctness-reviewer:concurrency-races', fp, RATIONALE];
-    runWaive(args, cwd, fixedAuthor);
-    runWaive(args, cwd, fixedAuthor);
+    waive(args, cwd, fixedAuthor);
+    waive(args, cwd, fixedAuthor);
     expect(waiverEvents()).toHaveLength(1);
-    runWaive(
+    waive(
       [args[0], fp, 'sharper second rationale: the lock is held by the caller'],
       cwd,
       fixedAuthor,
@@ -270,7 +278,7 @@ describe('waiver_created telemetry', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const fp = fingerprint('correctness-reviewer', 'concurrency-races', 'D');
     const long = `the lock is held by the caller ${'x'.repeat(2000)}`;
-    runWaive(['correctness-reviewer:concurrency-races', fp, long], cwd, fixedAuthor);
+    waive(['correctness-reviewer:concurrency-races', fp, long], cwd, fixedAuthor);
     const { WAIVER_RATIONALE_EVENT_CAP } = await import('../overrides.mts');
     expect(waiverEvents()[0].rationale).toBe(long.slice(0, WAIVER_RATIONALE_EVENT_CAP));
     expect(loadOverrides(cwd)[fp].rationale).toBe(long);
@@ -287,11 +295,7 @@ describe('waiver_created telemetry', () => {
       '$ node -e "console.log(captureSymbols(\'`${`${a}`}`\'))"\n' +
       "[ 'a' ]\n\t\x1b[32m✓\x1b[0m nested interpolation captured\r\n";
     expect(
-      runWaive(
-        ['correctness-reviewer:error-and-edge-classification', fp, output],
-        cwd,
-        fixedAuthor,
-      ),
+      waive(['correctness-reviewer:error-and-edge-classification', fp, output], cwd, fixedAuthor),
     ).toBe(0);
     const raw = readFileSync(join(cwd, '.devkit', 'correctness-overrides.json'), 'utf8');
     expect([...raw].filter((c) => c < ' ' && c !== '\n')).toEqual([]);
@@ -315,9 +319,7 @@ describe('waiver_created telemetry', () => {
   it('a refused waive (cascade reviewer) emits nothing', () => {
     const cwd = repo();
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(runWaive(['api-security-reviewer', 'a1b2c3d4e5f6', RATIONALE], cwd, fixedAuthor)).toBe(
-      2,
-    );
+    expect(waive(['api-security-reviewer', 'a1b2c3d4e5f6', RATIONALE], cwd, fixedAuthor)).toBe(2);
     expect(waiverEvents()).toHaveLength(0);
   });
 
@@ -334,6 +336,7 @@ describe('waiver_created telemetry', () => {
         fingerprint: fp,
         rationale: 'reader re-validates the row before use',
         by: 'env',
+        kind: null,
       },
     ]);
   });
@@ -346,7 +349,7 @@ describe('waive base provenance (sc-2480)', () => {
   it('records the base it was HANDED, never one derived from its own worktree', () => {
     const cwd = repo();
     expect(
-      runWaive(['correctness-reviewer:races', FP, '--base', BASE, RATIONALE], cwd, fixedAuthor),
+      waive(['correctness-reviewer:races', FP, '--base', BASE, RATIONALE], cwd, fixedAuthor),
     ).toBe(0);
     expect(loadOverrides(cwd)[FP].baseSha).toBe(BASE);
     expect(waiverEvents()[0].base_sha).toBe(BASE);
@@ -354,7 +357,7 @@ describe('waive base provenance (sc-2480)', () => {
 
   it('records NO base when none was supplied — an unprovable base is worse than none', () => {
     const cwd = repo();
-    expect(runWaive(['correctness-reviewer:races', FP, RATIONALE], cwd, fixedAuthor)).toBe(0);
+    expect(waive(['correctness-reviewer:races', FP, RATIONALE], cwd, fixedAuthor)).toBe(0);
     expect(loadOverrides(cwd)[FP].baseSha).toBeUndefined();
     expect(waiverEvents()[0].base_sha).toBeNull();
   });
@@ -363,14 +366,14 @@ describe('waive base provenance (sc-2480)', () => {
     const cwd = repo();
     vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(
-      runWaive(['correctness-reviewer:races', FP, '--base', 'main', RATIONALE], cwd, fixedAuthor),
+      waive(['correctness-reviewer:races', FP, '--base', 'main', RATIONALE], cwd, fixedAuthor),
     ).toBe(2);
     expect(loadOverrides(cwd)[FP]).toBeUndefined();
   });
 
   it('keeps the rationale intact when --base precedes it', () => {
     const cwd = repo();
-    runWaive(['correctness-reviewer:races', FP, '--base', BASE, RATIONALE], cwd, fixedAuthor);
+    waive(['correctness-reviewer:races', FP, '--base', BASE, RATIONALE], cwd, fixedAuthor);
     expect(loadOverrides(cwd)[FP].rationale).toBe(RATIONALE);
   });
 });
@@ -382,7 +385,7 @@ describe('waive --base parsing shapes (sc-2480)', () => {
   it('accepts --base before the positional arguments', () => {
     const cwd = repo();
     expect(
-      runWaive(['--base', BASE, 'correctness-reviewer:races', FP, RATIONALE], cwd, fixedAuthor),
+      waive(['--base', BASE, 'correctness-reviewer:races', FP, RATIONALE], cwd, fixedAuthor),
     ).toBe(0);
     expect(loadOverrides(cwd)[FP].baseSha).toBe(BASE);
     expect(loadOverrides(cwd)[FP].rationale).toBe(RATIONALE);
@@ -392,7 +395,7 @@ describe('waive --base parsing shapes (sc-2480)', () => {
   it('accepts the 12-hex short sha the block note actually prints', () => {
     const cwd = repo();
     expect(
-      runWaive(
+      waive(
         ['correctness-reviewer:races', FP, '--base', BASE.slice(0, 12), RATIONALE],
         cwd,
         fixedAuthor,
@@ -405,7 +408,7 @@ describe('waive --base parsing shapes (sc-2480)', () => {
   it('leaves a rationale that merely mentions --base untouched', () => {
     const cwd = repo();
     const mentions = 'the --base flag is irrelevant; the shard lock makes this safe';
-    expect(runWaive(['correctness-reviewer:races', FP, mentions], cwd, fixedAuthor)).toBe(0);
+    expect(waive(['correctness-reviewer:races', FP, mentions], cwd, fixedAuthor)).toBe(0);
     expect(loadOverrides(cwd)[FP].rationale).toBe(mentions);
     expect(loadOverrides(cwd)[FP].baseSha).toBeUndefined();
   });
@@ -413,9 +416,9 @@ describe('waive --base parsing shapes (sc-2480)', () => {
   it('refuses a trailing --base with no value rather than swallowing the rationale', () => {
     const cwd = repo();
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(
-      runWaive(['correctness-reviewer:races', FP, RATIONALE, '--base'], cwd, fixedAuthor),
-    ).toBe(2);
+    expect(waive(['correctness-reviewer:races', FP, RATIONALE, '--base'], cwd, fixedAuthor)).toBe(
+      2,
+    );
     expect(loadOverrides(cwd)[FP]).toBeUndefined();
   });
 });
@@ -427,9 +430,9 @@ describe('waive re-records changed provenance (reviewer finding)', () => {
 
   it('emits an event when the SAME rationale is re-waived against a different base', () => {
     const cwd = repo();
-    runWaive(['correctness-reviewer:races', FP, '--base', A, RATIONALE], cwd, fixedAuthor);
+    waive(['correctness-reviewer:races', FP, '--base', A, RATIONALE], cwd, fixedAuthor);
     expect(
-      runWaive(['correctness-reviewer:races', FP, '--base', B, RATIONALE], cwd, fixedAuthor),
+      waive(['correctness-reviewer:races', FP, '--base', B, RATIONALE], cwd, fixedAuthor),
     ).toBe(0);
     expect(loadOverrides(cwd)[FP].baseSha).toBe(B);
     const events = waiverEvents();
@@ -439,8 +442,83 @@ describe('waive re-records changed provenance (reviewer finding)', () => {
 
   it('stays idempotent when nothing at all changed', () => {
     const cwd = repo();
-    runWaive(['correctness-reviewer:races', FP, '--base', A, RATIONALE], cwd, fixedAuthor);
-    runWaive(['correctness-reviewer:races', FP, '--base', A, RATIONALE], cwd, fixedAuthor);
+    waive(['correctness-reviewer:races', FP, '--base', A, RATIONALE], cwd, fixedAuthor);
+    waive(['correctness-reviewer:races', FP, '--base', A, RATIONALE], cwd, fixedAuthor);
     expect(waiverEvents()).toHaveLength(1);
+  });
+});
+
+describe('waive --kind', () => {
+  const FP = 'a1b2c3d4e5f6';
+  const TARGET = 'correctness-reviewer:races';
+  const errors = () => vi.spyOn(console, 'error').mockImplementation(() => {});
+
+  it('refuses a waive with no --kind and lists the four kinds with their meanings', () => {
+    const cwd = repo();
+    const err = errors();
+    expect(runWaive([TARGET, FP, RATIONALE], cwd, fixedAuthor)).toBe(2);
+    const out = err.mock.calls.flat().join('\n');
+    for (const [kind, meaning] of Object.entries(WAIVER_KINDS))
+      expect(out).toContain(`--kind ${kind}: ${meaning}`);
+    expect(loadOverrides(cwd)[FP]).toBeUndefined();
+    expect(waiverEvents()).toHaveLength(0);
+  });
+
+  it.each(['bogus', WAIVE_KIND_PLACEHOLDER, 'constructor'])('refuses the kind %s', (kind) => {
+    const cwd = repo();
+    const err = errors();
+    expect(runWaive([TARGET, FP, '--kind', kind, RATIONALE], cwd, fixedAuthor)).toBe(2);
+    expect(err.mock.calls.flat().join('\n')).toContain(`(got "${kind}")`);
+    expect(loadOverrides(cwd)[FP]).toBeUndefined();
+  });
+
+  // An edited placeholder plus an appended `--kind` must not let one silently win.
+  it('refuses two --kind flags rather than recording one and storing the other in the rationale', () => {
+    const cwd = repo();
+    errors();
+    const args = [TARGET, FP, '--kind', 'deferred', RATIONALE, '--kind', 'accepted'];
+    expect(runWaive(args, cwd, fixedAuthor)).toBe(2);
+    expect(loadOverrides(cwd)[FP]).toBeUndefined();
+  });
+
+  it('names both edits at once when the rationale and kind are both unedited', () => {
+    const err = errors();
+    const args = [TARGET, FP, '--kind', WAIVE_KIND_PLACEHOLDER, WAIVE_RATIONALE_PLACEHOLDER];
+    expect(runWaive(args, repo(), fixedAuthor)).toBe(2);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('specific reason');
+    expect(out).toContain('--kind must be one of');
+  });
+
+  it.each(Object.keys(WAIVER_KINDS))('records %s on the store entry and one event', (kind) => {
+    const cwd = repo();
+    errors();
+    expect(runWaive(['--kind', kind, TARGET, FP, RATIONALE], cwd, fixedAuthor)).toBe(0);
+    expect(loadOverrides(cwd)[FP].kind).toBe(kind);
+    expect(waiverEvents()).toMatchObject([{ fingerprint: FP, kind }]);
+  });
+
+  it('a kind-only change is a new decision; an identical rerun is not', () => {
+    const cwd = repo();
+    errors();
+    runWaive([TARGET, FP, '--kind', 'false-positive', RATIONALE], cwd, fixedAuthor);
+    runWaive([TARGET, FP, '--kind', 'deferred', RATIONALE], cwd, fixedAuthor);
+    runWaive([TARGET, FP, '--kind', 'deferred', RATIONALE], cwd, fixedAuthor);
+    expect(loadOverrides(cwd)[FP].kind).toBe('deferred');
+    expect(waiverEvents().map((e) => e.kind)).toEqual(['false-positive', 'deferred']);
+  });
+
+  it('--list prints the kind, and "unclassified" for an entry written before the field', () => {
+    const cwd = repo();
+    errors();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    runWaive([TARGET, FP, '--kind', 'pre-existing', RATIONALE], cwd, fixedAuthor);
+    const older = 'b1b2c3d4e5f6';
+    const store = { ...loadOverrides(cwd), [older]: { rationale: RATIONALE, by: 'file' } };
+    writeFileSync(join(cwd, '.devkit', 'correctness-overrides.json'), JSON.stringify(store));
+    expect(runWaive(['--list'], cwd)).toBe(0);
+    const out = log.mock.calls.flat().join('\n');
+    expect(out).toMatch(new RegExp(`\\[${FP}\\].* · kind pre-existing`));
+    expect(out).toMatch(new RegExp(`\\[${older}\\].* · unclassified`));
   });
 });

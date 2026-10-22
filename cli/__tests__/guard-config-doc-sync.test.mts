@@ -44,6 +44,47 @@ describe('the //review guidance string', () => {
   });
 });
 
+type ReviewBlock = { backendRoots: string[]; frontendRoots: string[]; trustBoundaries: string };
+
+const reviewBlock = (rel: string): ReviewBlock =>
+  JSON.parse(readFileSync(join(ROOT, rel), 'utf8')).review;
+
+/** `a + b = role; c = role` → { a: role, b: role, c: role }; clauses without ` = ` are guidance. */
+function boundaryRoles(trustBoundaries: string): Map<string, string> {
+  const roles = new Map<string, string>();
+  for (const clause of trustBoundaries.split(';')) {
+    const [lhs, ...rhs] = clause.split(' = ');
+    if (!rhs.length) continue;
+    for (const root of lhs.split('+')) roles.set(root.trim(), rhs.join(' = ').trim());
+  }
+  return roles;
+}
+
+// Reviewer judges read trustBoundaries verbatim, so a wrong role or a clause naming an undeclared
+// root misdirects every security review in a freshly initialised electron consumer.
+describe('the electron trustBoundaries prose', () => {
+  it.each(['templates/electron/guard.config.json', 'guard.config.example.json'])(
+    '%s describes src/main as the privileged process that holds no secrets',
+    (rel) => {
+      const role = boundaryRoles(reviewBlock(rel).trustBoundaries).get('src/main') ?? '';
+      expect(role).not.toContain('untrusted client');
+      expect(role).toContain('privileged');
+      expect(role).toContain('no credentials');
+    },
+  );
+
+  it.each(['templates/electron/guard.config.json', 'guard.config.example.json'])(
+    '%s only assigns roles to roots its review block declares',
+    (rel) => {
+      const review = reviewBlock(rel);
+      const declared = new Set([...review.backendRoots, ...review.frontendRoots]);
+      expect(
+        [...boundaryRoles(review.trustBoundaries).keys()].filter((r) => !declared.has(r)),
+      ).toEqual([]);
+    },
+  );
+});
+
 // Review mode widens an empty frontendRoots to scanRoots, so a brief that re-reads the raw config
 // and exits early skips `generate` and the gate voids its PASS as "checklist artifact missing".
 describe('the frontend reviewer briefs', () => {
@@ -56,6 +97,24 @@ describe('the frontend reviewer briefs', () => {
     const brief = readFileSync(join(ROOT, 'agents', `${name}.md`), 'utf8');
     expect(brief).not.toContain('exit early');
     expect(brief).not.toContain('unset/empty');
+    expect(brief).toContain('Never skip `generate`');
+  });
+});
+
+// The gate's backend scope is wider than the raw config: review mode falls back to scanRoots, and a
+// commit that edits backendRoots also keeps the HEAD config's roots. A judge must take the gate's list.
+describe('the backend reviewer briefs', () => {
+  const names = REVIEWERS.filter((r) => r.domain === 'backend').map((r) => r.name);
+
+  it('covers every shipped backend brief, so a renamed domain cannot empty the table', () => {
+    expect(names).toEqual(['api-security-reviewer', 'backend-performance-reviewer']);
+  });
+
+  it.each(names)('%s takes scope from the gate instead of guard.config.json', (name) => {
+    const brief = readFileSync(join(ROOT, 'agents', `${name}.md`), 'utf8');
+    expect(brief).not.toContain('Defaults to `["src"]`');
+    expect(brief).not.toContain('exit early');
+    expect(brief).toContain('Do not re-derive scope');
     expect(brief).toContain('Never skip `generate`');
   });
 });

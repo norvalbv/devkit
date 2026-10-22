@@ -1,6 +1,5 @@
 /** The `ship_ci` telemetry row `wait.mts` appends after its verdict line. */
-import { appendFileSync } from 'node:fs';
-import { parentSessionId } from '../../../../gate-engine/judge/run-context.mjs';
+import { appendShipRow } from '../telemetry/row.mjs';
 /**
  * The queryable half of the verdict, beside ship_pr on the same JSONL stream. Best-effort: telemetry
  * must never be the thing that fails a ship (ship-branch.sh writes its own rows under `|| true`).
@@ -27,12 +26,5 @@ export function recordCiEvent(result, pr, env = process.env) {
         new_failures: result.attribution?.fresh ?? null,
         ts: new Date().toISOString(),
     };
-    const parent = parentSessionId(env);
-    const stamped = parent ? { ...row, parent_session_id: parent } : row;
-    try {
-        appendFileSync(file, `${JSON.stringify(stamped)}\n`);
-    }
-    catch {
-        // A telemetry miss costs a queryable row, never the ship.
-    }
+    appendShipRow(file, row, env);
 }
