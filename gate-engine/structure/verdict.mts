@@ -1,6 +1,7 @@
 // guard-structure's verdict trichotomy (0 clean, 1 violations, 2 could-not-run) and how per-leg
 // verdicts fold into one gate result.
 import { resolveGuardConfig } from '../config.mts';
+import { loadSourceParser, type SourceParser } from './source-parser.mts';
 
 // Outcome of the folder-structure gate: 0 lint ran and was clean, 1 violations, 2 could not run.
 export interface StructureGateResult {
@@ -43,7 +44,11 @@ export function combineStructureResults(results: StructureGateResult[]): Structu
 
 /** Nothing compiles structure.walls yet (sc-3148), so a declared wall rides every gate run — preset
  * leg, grammar leg or neither — as could-not-run, and can never fold into a clean 0. */
-export function withUncompiledWalls(cwd: string, result: StructureGateResult): StructureGateResult {
+export function withUncompiledWalls(
+  cwd: string,
+  result: StructureGateResult,
+  loadParser: () => SourceParser = loadSourceParser,
+): StructureGateResult {
   let count: number;
   try {
     count = resolveGuardConfig(cwd).structure?.walls?.length ?? 0;
@@ -55,6 +60,11 @@ export function withUncompiledWalls(cwd: string, result: StructureGateResult): S
     ]);
   }
   if (!count) return result;
-  const gap = couldNotRun(`structure.walls declares ${count} import wall(s) that are NOT enforced`);
-  return combineStructureResults([result, gap]);
+  const gaps = [
+    couldNotRun(`structure.walls declares ${count} import wall(s) that are NOT enforced`),
+  ];
+  // A parser that cannot load would leave the walls blind even once they compile, so name it too.
+  const source = loadParser();
+  if ('reason' in source) gaps.push(couldNotRun(source.reason));
+  return combineStructureResults([result, ...gaps]);
 }
