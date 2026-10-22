@@ -24,8 +24,8 @@
  *                    2026-07-27, when lens/scope capture began) — for those, reconstruction is
  *                    failReason-only, not diffSha256-plus-failReason as it is for the rest.
  *   - waived-decoy — a `commit_review_lenses` row with disposition='waived' (the correctness
- *                    override valve, overrides.mts), with its rationale and kind from the sink;
- *                    a deferred, pre-existing or accepted kind is a real defect and never mints.
+ *                    override valve, overrides.mts), its kind and rationale read from usage.db,
+ *                    else the sink. Only a false-positive kind mints; an unknown kind never does.
  *
  * Repo scoping: `commit_ships.repo` spans every project ever shipped from on this machine, most
  * of them unrelated private checkouts. Defaults to a `devkit`-only allowlist (see
@@ -79,13 +79,17 @@ import {
   hasDiffEvidence,
   histogramKey,
   indexWaiverLine,
+  isDecoyWaiver,
   isRealDefectWaiver,
   isSameDiff,
+  LENS_WAIVER_COLUMNS_SQL,
+  lensRowsSql,
   lookupWaiver,
   mergeCandidates,
   newWaiverIndex,
   pickFailReason,
   resolveDiffPayload,
+  resolveWaiverFacts,
   selectFailLensRows,
   setHard,
   telemetryUrl,
@@ -213,10 +217,7 @@ async function main() {
       dbPath,
       'SELECT ship_id, reviewer, diff_sha256 FROM commit_review_scope;',
     );
-    lensRows = sqliteJson(
-      dbPath,
-      'SELECT ship_id, reviewer, lens, status, disposition, issues_json FROM commit_review_lenses;',
-    );
+    lensRows = sqliteJson(dbPath, lensRowsSql(sqliteJson(dbPath, LENS_WAIVER_COLUMNS_SQL)));
   } catch (e) {
     console.error(`mine-telemetry: query failed (${e.message?.split('\n')[0]}) — exiting`);
     process.exit(0);
@@ -353,17 +354,19 @@ async function main() {
 
   // ---- waived-decoy -----------------------------------------------------------------------------
   const waiverIndex = await readWaiverIndex(resolveSink());
-  const realDefectUrls = [];
+  const droppedDecoyUrls = [];
   for (const l of waivedLenses) {
     const ship = shipsById.get(l.ship_id);
     if (!ship) {
       bumpDrop('waived-decoy:ship-missing');
       continue;
     }
-    const waiver = lookupWaiver(waiverIndex, l.ship_id, l.reviewer, l.lens);
-    if (isRealDefectWaiver(waiver)) {
-      bumpDrop('waived-decoy:real-defect-kind');
-      realDefectUrls.push(telemetryUrl('waived-decoy', l.ship_id, l.reviewer, l.lens));
+    const waiver = resolveWaiverFacts(l, lookupWaiver(waiverIndex, l.ship_id, l.reviewer, l.lens));
+    if (!isDecoyWaiver(waiver)) {
+      bumpDrop(
+        isRealDefectWaiver(waiver) ? 'waived-decoy:real-defect-kind' : 'waived-decoy:unknown-kind',
+      );
+      droppedDecoyUrls.push(telemetryUrl('waived-decoy', l.ship_id, l.reviewer, l.lens));
       continue;
     }
     const diffSha256 = scopeByShipReviewer.get(`${l.ship_id}::${l.reviewer}`) ?? null;
@@ -394,8 +397,8 @@ async function main() {
   // url and never removes. The allowlist must be enforced on every write, not just on what a given
   // run discovers fresh.
   const existing = readCandidatesFile(OUT);
-  // A decoy minted before its waiver's kind was known must not outlive the drop.
-  for (const url of realDefectUrls) existing.delete(url);
+  // A decoy minted under an older rule must not outlive the drop.
+  for (const url of droppedDecoyUrls) existing.delete(url);
   let prunedByRepo = 0;
   for (const [url, row] of existing) {
     if (!repoAllowlist.has(row?.repo)) {
