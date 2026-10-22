@@ -101,6 +101,15 @@ describe('commentCheck', () => {
     expect(commentCheck(['src/plain.ts'], root).items).toEqual([]);
   });
 
+  it('pairs a plain mv in from a sibling package when previewed from the package', () => {
+    const root = fixture();
+    mkdirSync(path.join(root, 'pkg/src'), { recursive: true });
+    write(root, 'pkg/guard.config.json', '{"scanRoots":["src"],"sourceExtensions":["ts"]}\n');
+    renameSync(path.join(root, 'src/old.ts'), path.join(root, 'pkg/src/moved.ts'));
+    write(root, 'pkg/src/moved.ts', `${THREE_LINES}export const old = 2;\n`);
+    expect(commentCheck(['src/moved.ts'], path.join(root, 'pkg')).items).toEqual([]);
+  });
+
   it('reports a forbidden reference with its own remedy', () => {
     const root = fixture({ comments: { forbiddenRefs: ['\\bsc-\\d+\\b'] } });
     write(
