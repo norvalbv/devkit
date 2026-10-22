@@ -161,7 +161,10 @@ async function main() {
 
   // sc-4157: through a linked worktree's overlay links these would half-change the home's overlay.
   const cwd = OVERLAY_HOME_COMMANDS.has(cmd)
-    ? (await import('./lib/husky/overlay/overlay-home.mts')).overlayCommandCwd(process.cwd())
+    ? (await import('./lib/husky/overlay/copied-overlay.mts')).overlayCommandCwd(
+        process.cwd(),
+        cmd === 'clean',
+      )
     : process.cwd();
   const code = await mod.default(cmdArgs, cwd);
   process.exit(code ?? 0);

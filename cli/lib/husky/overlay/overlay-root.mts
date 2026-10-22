@@ -3,7 +3,7 @@
  * `--project` prints nothing: it projects that overlay into a borrowing `<root>`, exit 1 on a gap. */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { shipOverlayRoot } from './overlay-home.mts';
+import { shipOverlayRoot } from './copied-overlay.mts';
 import { projectBorrowedOverlay } from './projection-report.mts';
 
 const [root = process.cwd(), mode] = process.argv.slice(2);
