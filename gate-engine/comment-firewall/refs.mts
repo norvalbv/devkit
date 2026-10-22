@@ -1,5 +1,5 @@
 /** Changed comment lines that cite a reference the repo's comment policy forbids. */
-import type { CommentToken } from './detect.mts';
+import type { CommentToken } from './scan.mts';
 import type { ChangeRun, PatchHunk } from './patch.mts';
 import type { RefFinding } from './types.mts';
 
