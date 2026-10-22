@@ -87,10 +87,11 @@ describe('skill checklist script (spawned source)', () => {
     expect(state.items.length).toBeGreaterThan(0);
   });
 
-  // The frontend briefs tell the judge a "No staged frontend files" exit has already recorded its
-  // skip, so a script that exits without the artifact would void that PASS.
+  // The reviewer briefs tell the judge a "No staged … files" exit has already recorded its skip,
+  // so a script that exits without the artifact would void that PASS.
   it.each([
     ['api-security', '.api-security-review.json', 'README.md'],
+    ['backend-performance', '.backend-performance-review.json', 'README.md'],
     ['frontend-security', '.frontend-security-review.json', 'README.md'],
     ['frontend-performance', '.frontend-performance-review.json', 'README.md'],
     // accessibility reviews prose, so only its `.pen` filter can empty the list
