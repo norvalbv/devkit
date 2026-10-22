@@ -115,7 +115,7 @@ function runtimeFiles(root) {
         }
     };
     visit(root);
-    return files;
+    return files.sort(); // flat order: the walk yields `a/x` before `a-y`, registered paths do not
 }
 function packageShipAssetPaths(sourceRoot) {
     for (const assetPath of packageRuntimePaths(sourceRoot)) {

@@ -217,9 +217,8 @@ export function boundedPayload(objects, env, detail) {
 /**
  * Exit code reserved for a verified object-database fault.
  *
- * It needs NO branch in the generated hook, which is the point: husky-block.mts renders exit 1 as
- * "A reviewer FAILED (opus-confirmed)" and exit 3 as "judge unavailable — check `claude` CLI
- * auth/quota"; anything else falls through to a neutral "unexpected exit N — blocking the commit".
+ * It needs NO branch in the generated hook, which is the point: exit 1 and exit 3 carry their own
+ * hook lines; anything else falls through to a neutral "unexpected exit N — blocking the commit".
  * So simply not BEING 1 or 3 removes the false verdict, while the banner above that line carries
  * the oid, the path and the remedy — on every already-installed consumer hook, with no
  * regeneration and no stale-hook window.

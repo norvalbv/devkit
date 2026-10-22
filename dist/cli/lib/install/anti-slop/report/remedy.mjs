@@ -1,5 +1,7 @@
 /** What a blocked anti-slop run tells its author to do next (sc-3469). Hints never go in a rule
  * message: the diagnostic is part of the baseline fingerprint (see oxc-toolchain-migration). */
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { ANTI_SLOP_BASELINE_REL } from '../constants.mjs';
 import { classifyRelocations, formatSources, relocationKey, relocationRemedy, } from '../relocations.mjs';
 /** Acceptance route with a committed baseline. No one-run bypass: CI's `check --base` would still
@@ -32,7 +34,7 @@ export function antiSlopRemedyLines(ruleIds, overlay) {
 }
 /** Names the move route when new findings repeat debt baselined under another file. A check
  * without Git evidence cannot tell a move from new code, so the line states both outcomes. */
-export function relocationHint(errors, baseline, overlay, baseRef) {
+export function relocationHint(errors, baseline, overlay, baseRef, cwd) {
     const baselinedCredit = new Map();
     const ordered = [...baseline.entries].sort((a, b) => a.file.localeCompare(b.file) || a.fingerprint.localeCompare(b.fingerprint));
     for (const { file, fingerprint, count, ...identity } of ordered) {
@@ -46,14 +48,20 @@ export function relocationHint(errors, baseline, overlay, baseRef) {
         return [];
     const sources = relocated.flatMap((group) => group.from.map((credit) => credit.source));
     const stage = overlay ? '' : `, then stage ${ANTI_SLOP_BASELINE_REL}`;
+    const renamedAway = cwd !== undefined && sources.every((source) => !existsSync(join(cwd, source)));
     return [
         `anti-slop: ${matched} of these finding(s) are identical (rule and source line) to debt already baselined in ${formatSources(sources)}. If you moved this code from there, do not rewrite it: delete it there, git add both files, run \`${relocationRemedy(baseRef)}\`${stage}. New or copied code is not a move: fix it as below`,
+        ...(renamedAway
+            ? [
+                `anti-slop: ${formatSources(sources)} no longer exists; if it was renamed to this file, run \`devkit anti-slop adopt-renames\` for a staged rename or \`devkit anti-slop adopt-renames --base <a commit before the rename>\` for a committed one${stage}`,
+            ]
+            : []),
     ];
 }
 /** Everything a new-finding FAIL prints after its verdict line: the move route, then the hints. */
-export function antiSlopFailRemedy(errors, baseline, overlay, baseRef) {
+export function antiSlopFailRemedy(errors, baseline, overlay, baseRef, cwd) {
     return [
-        ...relocationHint(errors, baseline, overlay, baseRef),
+        ...relocationHint(errors, baseline, overlay, baseRef, cwd),
         ...antiSlopRemedyLines(errors.map((group) => group.ruleId), overlay),
     ];
 }

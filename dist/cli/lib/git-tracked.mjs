@@ -89,7 +89,7 @@ function assertSourceIdentity(source, expected) {
     if (!hasIdentity(source, expected) || !parentIsLexical || !sourceIsLexical)
         throw new Error('source changed during move; retry');
 }
-function hasFilesystemLeaf(directory) {
+export function hasFilesystemLeaf(directory) {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
         if (!entry.isDirectory() || entry.isSymbolicLink())
             return true;
