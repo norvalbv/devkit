@@ -7,9 +7,9 @@ import {
   type HookRegistrationOptions,
   handlerLocation,
   ledgerOf,
-  otherClaudeSettings,
+  otherScopeFile,
+  otherScopePass,
   providerDocument,
-  retiredElsewhere,
   stripReclaimedCommands,
   unrecognisedFallowGates,
 } from './install-support.mts';
@@ -48,13 +48,14 @@ export function checkHookRegistrations(
     const legacy = reconcileLegacyHookCommands(ledger?.entries ?? [], provider, rel);
     if (stripReclaimedCommands(document, provider).changed)
       missing.push(`${provider}:retired-registration`);
-    const other = otherClaudeSettings(root, provider, scope);
-    const elsewhere = retiredElsewhere(root, provider, scope, other);
-    if (elsewhere)
-      (elsewhere.repairable ? missing : advisories).push(
-        `${provider}:retired-registration:${elsewhere.rel}`,
-      );
-    for (const file of [{ rel, document }, other]) {
+    const elsewhere = otherScopePass(root, provider, scope, ledger?.entries ?? []);
+    if (elsewhere) {
+      const into = elsewhere.repairable ? missing : advisories;
+      if (elsewhere.retiredFound) into.push(`${provider}:retired-registration:${elsewhere.rel}`);
+      if (elsewhere.switched) into.push(`${provider}:scope-switch:${elsewhere.rel}`);
+      else if (elsewhere.stranded) advisories.push(`${provider}:scope-switch:${elsewhere.rel}`);
+    }
+    for (const file of [{ rel, document }, otherScopeFile(root, provider, scope)]) {
       if (!file) continue;
       for (const handler of unrecognisedFallowGates(dataRecord(file.document), provider))
         advisories.push(

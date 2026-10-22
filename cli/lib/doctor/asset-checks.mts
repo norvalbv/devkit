@@ -344,8 +344,8 @@ export function checkRegistrations(
     return check(
       'hook registrations',
       'DRIFT',
-      `fallow-gate.sh hooks devkit will not remove: ${advice}`,
-      'delete them from the named files by hand: devkit never edits a committed file or removes an unrecognised spelling',
+      `hooks devkit will not remove: ${advice}`,
+      'delete them from the named files by hand: devkit never edits a committed file, an edited copy of its own hook, or an unrecognised fallow-gate.sh spelling',
       false,
       true,
     );
