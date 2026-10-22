@@ -17,6 +17,7 @@ export function ownershipFor(cwd, names, plan, previous, dryRun) {
         const kept = previous?.path === path ? previous : { path, createdDigest: null };
         const stale = () => plan.replaces !== undefined &&
             kept.createdDigest === digest(plan.replaces) &&
+            existsSync(join(cwd, path)) &&
             digest(readFileSync(join(cwd, path))) === kept.createdDigest;
         if (!stale())
             return kept;

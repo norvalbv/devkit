@@ -265,7 +265,10 @@ function syncOxcCapabilityUnlocked(cwd: string, dryRun: boolean, plan: SyncPlan)
           previous?.configs.oxfmt,
           dryRun,
         );
-    const refreshed = hadOxfmt && oxfmt.createdDigest !== previous?.configs.oxfmt.createdDigest;
+    const refreshed =
+      oxfmt.createdDigest !== null &&
+      hadOxfmt &&
+      oxfmt.createdDigest !== previous?.configs.oxfmt.createdDigest;
     if (!dryRun && (!hadOxfmt || refreshed))
       created.push([
         oxfmt.path,

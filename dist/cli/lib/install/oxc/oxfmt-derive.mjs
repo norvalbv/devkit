@@ -105,7 +105,7 @@ function migrateBiome(flat) {
             ? Migrated.safeParse(JSON.parse(readFileSync(out, 'utf8')))
             : null;
         if (failed || !migrated?.success)
-            throw new Error(`oxfmt --migrate=biome failed: ${failed}`);
+            throw new Error(`oxfmt --migrate=biome failed: ${failed ?? 'no readable .oxfmtrc.json written'}`);
         writeFileSync(out, `${JSON.stringify(restoreBiomeDefaults(migrated.data, flat))}\n`);
         // Formatted by the config it now holds, so the consumer's first format pass leaves it unchanged.
         const unformatted = oxfmt(binPath, ['--write', '.oxfmtrc.json'], dir);
