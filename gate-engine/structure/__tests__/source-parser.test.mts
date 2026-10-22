@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { ESLint, type Linter } from 'eslint';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadSourceParser } from '../source-parser.mts';
-import { clean, violations, withUncompiledWalls } from '../verdict.mts';
+import { clean, violations, withStructureConfigGaps } from '../verdict.mts';
 
 const roots: string[] = [];
 function consumer(files: Record<string, string>) {
@@ -84,7 +84,7 @@ describe('loadSourceParser', () => {
   });
 });
 
-describe('withUncompiledWalls and the source parser', () => {
+describe('withStructureConfigGaps and the source parser', () => {
   const wallsConfig = JSON.stringify({
     scanRoots: ['src'],
     structure: { trees: [], walls: [{ pattern: 'src/**', allowImportsFrom: ['src/**'] }] },
@@ -93,7 +93,7 @@ describe('withUncompiledWalls and the source parser', () => {
 
   it('names an unloadable parser beside the unenforced walls (could-not-run)', () => {
     const root = consumer({ 'guard.config.json': wallsConfig });
-    const result = withUncompiledWalls(root, clean(), unavailable);
+    const result = withStructureConfigGaps(root, clean(), unavailable);
     expect(result.code).toBe(2);
     expect(result.text).toContain('structure.walls declares 1 import wall(s)');
     expect(result.text).toContain('TypeScript source parser unavailable');
@@ -101,7 +101,7 @@ describe('withUncompiledWalls and the source parser', () => {
 
   it('keeps a found violation blocking while naming both gaps', () => {
     const root = consumer({ 'guard.config.json': wallsConfig });
-    const result = withUncompiledWalls(root, violations(1, 'src/bad-name.ts'), unavailable);
+    const result = withStructureConfigGaps(root, violations(1, 'src/bad-name.ts'), unavailable);
     expect(result.code).toBe(1);
     expect(result.text).toContain('src/bad-name.ts');
     expect(result.text).toContain('TypeScript source parser unavailable');
@@ -110,7 +110,7 @@ describe('withUncompiledWalls and the source parser', () => {
   it('never loads the parser when no walls are declared', () => {
     const root = consumer({ 'guard.config.json': JSON.stringify({ structure: { walls: [] } }) });
     let loads = 0;
-    const result = withUncompiledWalls(root, clean(), () => {
+    const result = withStructureConfigGaps(root, clean(), () => {
       loads += 1;
       return { reason: 'unused' };
     });
