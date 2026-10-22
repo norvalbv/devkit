@@ -12,7 +12,8 @@ import {
   remoteBranchExists,
   scriptPath,
   seedShipRepoLocalRemote,
-  REAPED_15S_BANNER,
+  installPostCommitHang,
+  POST_COMMIT_CEILING_BANNER,
 } from './_ship-branch-fixture.mts';
 
 function commit(git, paths: string[], message: string): void {
@@ -582,7 +583,7 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
     commit(git, ['note.txt'], 'committed source snapshot');
     installHook(
       dir,
-      `echo run >> "$TEST_HOOK_COUNT"\nprintf 'gate-formatted\\n' > note.txt\ngit add -f -- note.txt\nsleep 30 &`,
+      `echo run >> "$TEST_HOOK_COUNT"\nprintf 'gate-formatted\\n' > note.txt\ngit add -f -- note.txt`,
     );
     const { hookCount, publishEnv } = publishEnvFor(dir, env);
     const argv = [
@@ -594,6 +595,8 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
       '--from-branch',
     ];
 
+    installPostCommitHang(dir);
+
     const first = spawnSync('/bin/bash', argv, {
       cwd: dir,
       input: '',
@@ -602,7 +605,7 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
     });
 
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(REAPED_15S_BANNER);
+    expect(first.stderr).toMatch(POST_COMMIT_CEILING_BANNER);
     const preserved = git(['rev-parse', 'feat/from-branch-formatter']).trim();
     expect(git(['show', `${preserved}:note.txt`])).toBe('gate-formatted\n');
     expect(git(['show', 'HEAD:note.txt'])).toBe('committed source bytes\n');

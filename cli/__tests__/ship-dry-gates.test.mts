@@ -111,6 +111,23 @@ printf 'DRY_GATES_HOOK_OK\n'
     expect(localBranchExists(git, 'feat/dry-gates-blocked')).toBe(false);
   });
 
+  // The rehearsal must predict the real ship, which publishes a clean chain whose hook leaked.
+  it('passes a clean hook that leaves a process behind, as the real ship does', () => {
+    const { dir, env, git } = seedShipRepo({ hookBody: 'sleep 30 &' });
+    writeFileSync(join(dir, 'note.txt'), 'leaky\n');
+
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/dry-gates-reaped', 'ship it', '--dry-gates', '--', 'note.txt'],
+      { cwd: dir, input: '', encoding: 'utf8', env: { ...env, SHIP_COMMIT_TIMEOUT: '120' } },
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/✓ ship: the gate chain passed; .* reaped after \d+s\./);
+    expect(r.stderr).not.toMatch(/exit 124/);
+    expect(localBranchExists(git, 'feat/dry-gates-reaped')).toBe(false);
+  });
+
   it('removes a locked detached worktree without ever creating a branch', () => {
     const { dir, env, git } = seedShipRepo({
       hookBody: `

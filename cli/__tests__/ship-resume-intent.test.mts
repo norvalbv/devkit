@@ -181,7 +181,7 @@ describe('ship --resume: record on block, replay on retry', () => {
   it('a timed-out gate chain prints no gate brief, because no gate returned a verdict', () => {
     const { dir, env, git } = seedResumableRepo();
     writeFileSync(join(dir, 'note.txt'), 'hello\n');
-    installHook(dir, 'sleep 30 &');
+    installHook(dir, 'sleep 30'); // hangs past the ceiling, so no verdict exists
 
     const blocked = runShip(dir, env, ['feat/timeout-brief', 'x', '--', 'note.txt'], {
       input: 'b\n',
