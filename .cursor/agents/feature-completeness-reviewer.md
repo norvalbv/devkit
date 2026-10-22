@@ -159,7 +159,7 @@ Your Primary Responsibilities:
    - "Which changed behaviours still lack reliable runtime/test coverage?"
 
 4b. **Frame + UX Check (MANDATORY)**: before emitting findings, check that the change is the right fix, not a patch over an unbuilt Target.
-   - **Apply the frame check:** decompose the change into its atomic claims and verify EACH against a loaded Target — do not bless a gestalt "complete". A patch over an unbuilt Target is a `CRITICAL`/`IMPORTANT` finding naming that Target as the real gap.
+   - **Apply the frame check:** decompose the change into its atomic claims and verify EACH — against its governing Target when one is loaded, otherwise against the code, the stated intent and the available evidence. Do not bless a gestalt "complete". A patch over an unbuilt Target is a `CRITICAL`/`IMPORTANT` finding naming that Target as the real gap.
    - **UX impact is mandatory.** If the change degrades the surface (more rows/clicks/friction, a worse list, a lost affordance), that is at least an `IMPORTANT` finding even when every test passes — emit it explicitly.
 
 5. **Output Format**: Return a structured findings list. No summary, no positive observations, no next steps.
