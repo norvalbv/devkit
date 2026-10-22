@@ -546,7 +546,7 @@ const lensesOf = (raw: string) =>
   parseConventionFindings(raw).map(({ offendingQuote: _quote, ruleQuote: _rule, ...lens }) => lens);
 
 describe('wrapConventionsPrompt / parseConventionFindings', () => {
-  it('never mentions a checklist script or git diff — there is no Bash to run either with', () => {
+  it('never mentions a checklist script or git diff, and claims no tools a codex judge lacks', () => {
     const p = wrapConventionsPrompt(
       'Check the rules.',
       ['a.ts'],
@@ -554,7 +554,11 @@ describe('wrapConventionsPrompt / parseConventionFindings', () => {
     );
     expect(p).not.toContain('checklist.mjs');
     expect(p).not.toContain('git diff');
-    expect(p).toContain('NO Bash');
+    // A codex judge has a shell and reads through it; a claude judge has Read but no shell.
+    expect(p).not.toContain('NO Bash');
+    expect(p).not.toContain('Read/Grep/Glob');
+    expect(p).not.toContain('use Read');
+    expect(p).toContain('Investigate by reading files; do not modify files or run tests');
     expect(p).toContain('Check the rules.');
     expect(p).toContain('GOVERNING CLAUDE.md FILES: none');
     expect(p).toContain('VERDICT: PASS | FAIL');
