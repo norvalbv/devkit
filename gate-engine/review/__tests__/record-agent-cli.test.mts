@@ -231,6 +231,15 @@ describe('record-agent usage flags', () => {
     expect(ev).not.toHaveProperty('cache_read');
     expect(ev).not.toHaveProperty('cache_creation'); // 1.5: token counters are integers
   });
+
+  it('keeps an explicit zero, which is a real free run rather than a malformed value', () => {
+    const r = runCli(
+      ['record-agent', 'prior-art', '--cost-usd', '0', '--cache-creation', '0'],
+      'verdict',
+    );
+    expect(r.status).toBe(0);
+    expect(events()[0]).toMatchObject({ cost_usd: 0, cache_creation: 0 });
+  });
 });
 
 describe('record-agent request capture and receipt', () => {
