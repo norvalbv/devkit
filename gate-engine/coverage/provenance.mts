@@ -18,6 +18,8 @@ import {
 import { join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
+import { headTreeish } from '../ratchets/git-index.mts';
+import { headHash } from '../review/evidence/staged-git.mts';
 
 export const MANIFEST_NAME = 'coverage-manifest.json';
 /** A path that existed at HEAD but not in the working tree when the run started. */
@@ -106,14 +108,22 @@ export function checkoutRoots(cwd: string, top: string): string[] {
   return spelled === top || sub.startsWith('..') ? [top] : [top, spelled];
 }
 
+/** HEAD's sha, or git's empty tree on an unborn branch; throws when HEAD is unreadable. symbolic-ref
+ * follows HEAD into its branch, so a corrupt branch ref fails it too and never reads as unborn. */
+export function baseTreeish(top: string): string {
+  const head = headHash(top);
+  if (head === null) throw new Error('HEAD is unreadable');
+  return head.startsWith('unborn:') ? headTreeish(top) : head;
+}
+
 /** HEAD plus a blob id per path that differs from it, taken at run START; null when git cannot answer.
  * `--stdin-paths` applies `git add`'s clean filters, so ids compare directly with tree entries. */
 export function snapshotSource(cwd: string, args: string[] = []): SourceSnapshot | null {
   try {
     const top = git(cwd, ['rev-parse', '--show-toplevel']).trim();
-    const head = git(top, ['rev-parse', 'HEAD']).trim();
+    const head = baseTreeish(top);
     const changed = new Set([
-      ...nulList(git(top, ['diff', '--name-only', '--no-renames', '-z', 'HEAD'])),
+      ...nulList(git(top, ['diff', '--name-only', '--no-renames', '-z', head])),
       ...nulList(git(top, ['ls-files', '-o', '--exclude-standard', '-z'])),
     ]);
     const dirty: Record<string, string> = {};
@@ -364,7 +374,7 @@ export function checkProvenance(
     // The index as it stands when the gate runs, formatter output included: no exemption, no race.
     const now = git(top, ['write-tree']).trim();
     const briefed = nulList(
-      git(top, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', 'HEAD', now]),
+      git(top, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', baseTreeish(top), now]),
     );
     const committed = blobsIn(top, now, briefed);
     const atHead = blobsIn(

@@ -24,6 +24,7 @@ import { COVERAGE_DIR, COVERAGE_FILE } from './produce.mts';
 import {
   type ArtifactRead,
   type Classify,
+  baseTreeish,
   checkProvenance,
   git,
   keysByPath,
@@ -168,7 +169,7 @@ export function runDiffCoverage(
   try {
     added = addedProductionLines(top, (p) => classify(p, false) === 'production', [
       '--cached',
-      'HEAD',
+      baseTreeish(top),
     ]);
   } catch {
     failLine(

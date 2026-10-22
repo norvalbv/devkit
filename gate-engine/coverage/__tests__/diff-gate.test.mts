@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } fro
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { isScopedRun, snapshotSource } from '../provenance.mts';
+import { baseTreeish, isScopedRun, snapshotSource } from '../provenance.mts';
 import {
   cleanupRepos,
   gate,
@@ -290,6 +290,104 @@ describe('whole-repo mode refuses a scoped artifact', () => {
     const { args: _args, ...older } = JSON.parse(readFileSync(manifest, 'utf8'));
     writeFileSync(manifest, JSON.stringify(older));
     expect(gate(root).code).toBe(0);
+  });
+});
+
+describe("a repository's first commit (no HEAD) is judged against the empty tree", () => {
+  /** An unborn repo whose a.mts is A4, measured with lines 4-5 uncovered: 3/5 added lines. */
+  function unbornHalfCovered(addedLines: number, objectFormat: 'sha1' | 'sha256' = 'sha1') {
+    const { root } = repo('', { scope: 'diff', addedLines }, { commit: false, objectFormat });
+    write(root, 'src/a.mts', A4);
+    stage(root);
+    measure(root, undefined, cov(root, { 'src/a.mts': HALF }));
+    return root;
+  }
+
+  it('records the empty tree as the base and judges every staged line as added', () => {
+    const root = unbornHalfCovered(60);
+    const emptyTree = execFileSync('git', ['hash-object', '-t', 'tree', '--stdin'], {
+      cwd: root,
+      encoding: 'utf8',
+      input: '',
+    }).trim();
+    const manifest = JSON.parse(
+      readFileSync(join(root, 'coverage', 'coverage-manifest.json'), 'utf8'),
+    );
+    expect(manifest.head).toBe(emptyTree);
+    const { code, out } = gate(root);
+    expect(code).toBe(0);
+    expect(out).toContain('3/5 added executable lines covered (60.0%, min 60%)');
+    expect(gate(unbornHalfCovered(61)).code).toBe(1);
+  });
+
+  it('a SHA-256 repository gets its own empty tree, never the SHA-1 one', () => {
+    const root = unbornHalfCovered(60, 'sha256');
+    const manifest = JSON.parse(
+      readFileSync(join(root, 'coverage', 'coverage-manifest.json'), 'utf8'),
+    );
+    expect(manifest.head).toHaveLength(64);
+    const { code, out } = gate(root);
+    expect(code).toBe(0);
+    expect(out).toContain('3/5 added executable lines covered');
+  });
+
+  it('a first commit with no production source needs no artifact', () => {
+    const { root } = repo('', { scope: 'diff', addedLines: 100 }, { commit: false });
+    git(root, 'rm', '-q', '--cached', 'src/a.mts');
+    const { code, out } = gate(root);
+    expect(code).toBe(0);
+    expect(out).toContain('no artifact needed');
+  });
+
+  it('a staged source file the run never measured blocks as not measured', () => {
+    const { root } = repo('', { scope: 'diff', addedLines: 0 }, { commit: false });
+    write(root, 'src/b.mts', 'export const b = 2;\n');
+    stage(root);
+    measure(root, undefined, cov(root, { 'src/a.mts': { 1: 1 } }));
+    const { code, out } = gate(root);
+    expect(code).toBe(1);
+    expect(out).toContain('Not measured');
+    expect(out).toContain('src/b.mts');
+  });
+
+  it('a source edit after the run blocks as stale', () => {
+    const root = unbornHalfCovered(0);
+    write(root, 'src/a.mts', `${A4}export const f = 6;\n`);
+    stage(root);
+    const { code, out } = gate(root);
+    expect(code).toBe(1);
+    expect(out).toContain('predates');
+  });
+
+  it('a manifest taken before the first commit reads stale once that commit lands', () => {
+    const root = unbornHalfCovered(0);
+    git(root, 'commit', '-q', '-m', 'first');
+    write(root, 'src/a.mts', `${A4}export const f = 6;\n`);
+    stage(root);
+    const { code, out } = gate(root);
+    expect(code).toBe(1);
+    expect(out).toContain('predates');
+  });
+
+  it('an unreadable HEAD is not mistaken for an unborn one', () => {
+    const root = halfCovered(0);
+    write(root, '.git/refs/heads/main', 'not-a-sha\n');
+    expect(() => baseTreeish(root)).toThrow('HEAD is unreadable');
+    const { code, out } = gate(root);
+    expect(code).toBe(1);
+    expect(out).toContain('git could not read the staged diff');
+  });
+
+  it('whole-repo mode refuses a scoped run and passes an unscoped one', () => {
+    const unborn = (args: string[]) => {
+      const { root } = repo('', {}, { commit: false });
+      measure(root, snapshotSource(root, args), cov(root, { 'src/a.mts': { 1: 1 } }));
+      return root;
+    };
+    const { code, out } = gate(unborn(['src/a.test.mts']));
+    expect(code).toBe(1);
+    expect(out).toContain('scoped run');
+    expect(gate(unborn([])).code).toBe(0);
   });
 });
 

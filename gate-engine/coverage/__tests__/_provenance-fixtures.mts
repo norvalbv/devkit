@@ -34,10 +34,18 @@ export const COV = JSON.stringify({
 /** The guard.config.json `coverage` object a fixture repo enforces. */
 export type Thresholds = Exclude<CoverageConfig, false>;
 
-export function repo(pkg = '', coverage: Thresholds = {}) {
+/** `commit: false` stages the layout but leaves HEAD unborn, as before a repository's first commit. */
+export function repo(
+  pkg = '',
+  coverage: Thresholds = {},
+  {
+    commit = true,
+    objectFormat = 'sha1',
+  }: { commit?: boolean; objectFormat?: 'sha1' | 'sha256' } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), 'coverage-provenance-'));
   roots.push(root);
-  git(root, 'init', '-q', '-b', 'main');
+  git(root, 'init', '-q', '-b', 'main', `--object-format=${objectFormat}`);
   git(root, 'config', 'user.email', 't@t.t');
   git(root, 'config', 'user.name', 't');
   const at = (rel: string) => (pkg ? `${pkg}/${rel}` : rel);
@@ -47,7 +55,7 @@ export function repo(pkg = '', coverage: Thresholds = {}) {
   write(root, at('src/a.test.mts'), 'test("a", () => {});\n');
   write(root, at('README.md'), '# r\n');
   git(root, 'add', '-A');
-  git(root, 'commit', '-q', '-m', 'init');
+  if (commit) git(root, 'commit', '-q', '-m', 'init');
   return { root, cwd: pkg ? join(root, pkg) : root };
 }
 
