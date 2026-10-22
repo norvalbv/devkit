@@ -285,6 +285,19 @@ describe('render', () => {
     expect(unknown).not.toContain('did NOT block');
     expect(unknown).toContain('review:correctness');
 
+    // A signal stopped the chain: which gate would have blocked is just as unknowable.
+    const interrupted = render(
+      summarise(
+        [
+          reviewFail('correctness', 'a real block'),
+          ev({ type: 'ship_result', blocked_gate: 'interrupted', exit_code: 143 }),
+        ],
+        SHIP,
+      ),
+    );
+    expect(interrupted).not.toContain('did NOT block');
+    expect(interrupted).toContain('review:correctness');
+
     const noResult = render(summarise([reviewFail('correctness', 'dry-gates rehearsal')], SHIP));
     expect(noResult).not.toContain('did NOT block');
     expect(noResult).toContain('review:correctness');
