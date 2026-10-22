@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -203,6 +203,19 @@ describe('ownershipFor — a consumer edit made while the starter is derived is 
 
     expect(ownershipFor(root, NAMES, plan, previous, false)).toEqual(previous);
     expect(readFileSync(join(root, '.oxfmtrc.json'), 'utf8')).toBe(edited);
+  });
+
+  it('a {} the consumer deletes during the derivation is neither recreated nor a crash', () => {
+    const root = repo({ '.oxfmtrc.json': LEGACY_OXFMT_STARTER });
+    const previous = { path: '.oxfmtrc.json', createdDigest: digest(LEGACY_OXFMT_STARTER) };
+    const starter = () => {
+      rmSync(join(root, '.oxfmtrc.json'));
+      return 'derived\n';
+    };
+    const plan = { starterPath: '.oxfmtrc.json', starter, replaces: LEGACY_OXFMT_STARTER };
+
+    expect(ownershipFor(root, NAMES, plan, previous, false)).toEqual(previous);
+    expect(existsSync(join(root, '.oxfmtrc.json'))).toBe(false);
   });
 
   it('a config the consumer creates during the derivation is adopted, not overwritten', () => {
