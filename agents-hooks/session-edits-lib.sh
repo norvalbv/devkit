@@ -133,6 +133,16 @@ resolve_pm() {
   command -v "$pm" &>/dev/null && echo "$pm"
 }
 
+# The Oxfmt an agent hook runs: devkit's pinned one (package install, then a global devkit), else
+# the repo's own (overlay). Prints nothing and fails when none is installed; the caller then skips.
+oxfmt_bin() {
+  local b
+  for b in ./node_modules/.bin/devkit-oxfmt ./node_modules/.bin/oxfmt "$(command -v devkit-oxfmt)"; do
+    [ -n "$b" ] && [ -x "$b" ] && { printf '%s\n' "$b"; return 0; }
+  done
+  return 1
+}
+
 # Run npm-script $2 with manager $1. A Stop hook is non-interactive, so a corepack shim must never
 # stop to ask before downloading the pinned manager.
 pm_run() {

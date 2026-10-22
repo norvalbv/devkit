@@ -32,30 +32,33 @@ import { patchPackageJson } from '../lib/install/package-json.mts';
 
 const REPO = join(import.meta.dirname, '..', '..');
 const TREE = spawnSync('git', ['write-tree'], { cwd: REPO, encoding: 'utf8' }).stdout.trim();
-const OXFMT: ConsumerFormatter = {
+// Another tool, for the tests that switch the descriptor and expect the hooks and step to follow.
+const BIOME: ConsumerFormatter = {
   ...CONSUMER_FORMATTER,
-  tool: 'oxfmt',
-  configProbes: ['oxfmt.json'],
+  tool: 'biome',
+  bin: 'biome',
+  configProbes: ['biome.json'],
 };
 
 describe('rendered from CONSUMER_FORMATTER', () => {
-  it('the step is rendered, and its bytes are the ones sc-2524 shipped (toSelfHost still matches)', () => {
+  it('the step is rendered, and its bytes are pinned (toSelfHost still matches)', () => {
     expect(FORMAT_TOOL_SETUP).toBe(renderToolSetup(CONSUMER_FORMATTER));
-    expect(FORMAT_TOOL_SETUP).toBe(`    if [ ! -f biome.json ] && [ ! -f biome.jsonc ]; then
-        echo "🎨 No biome config here (biome.json / biome.jsonc) — staged files left as authored."
+    expect(FORMAT_TOOL_SETUP)
+      .toBe(`    if [ ! -f .oxfmtrc.json ] && [ ! -f .oxfmtrc.jsonc ] && [ ! -f oxfmt.config.ts ] && [ ! -f oxfmt.config.mts ]; then
+        echo "🎨 No oxfmt config here (.oxfmtrc.json / .oxfmtrc.jsonc / oxfmt.config.ts / oxfmt.config.mts) — staged files left as authored."
         return 0
     fi
-    FMT_TOOL=biome; FMT_BIN="$__dk_package_bin_dir/biome"
-    __dk_fmt_run() { xargs -0 "$__dk_package_bin_dir/biome" format --write; }`);
+    FMT_TOOL=oxfmt; FMT_BIN="$__dk_package_bin_dir/devkit-oxfmt"
+    __dk_fmt_run() { xargs -0 "$__dk_package_bin_dir/devkit-oxfmt" --no-error-on-unmatched-pattern --write; }`);
     expect(buildFullHook({ ...defaultSelection(), biome: true })).toContain(FORMAT_TOOL_SETUP);
   });
 
   it('sc-2524 regression: changing the formatter changes the probe, banner AND binary together', () => {
-    const setup = renderToolSetup(OXFMT);
-    expect(setup).toContain('[ ! -f oxfmt.json ]');
-    expect(setup).toContain('FMT_TOOL=oxfmt');
-    expect(setup).toContain('"$__dk_package_bin_dir/oxfmt"');
-    expect(setup).not.toMatch(/biome/);
+    const setup = renderToolSetup(BIOME);
+    expect(setup).toContain('[ ! -f biome.json ]');
+    expect(setup).toContain('FMT_TOOL=biome');
+    expect(setup).toContain('"$__dk_package_bin_dir/biome"');
+    expect(setup).not.toMatch(/oxfmt/);
   });
 
   it('package.json wiring writes exactly the descriptor scripts', () => {
@@ -86,46 +89,32 @@ describe('the gate — exact comparisons', () => {
         expect(readFileSync(join(REPO, path), 'utf8').split('\n'), path).toContain(line);
   });
 
-  it('an invocation with an extra flag is not the rendered line (`check --unsafe` fails)', () => {
+  it('an invocation with an extra flag is not the rendered line', () => {
     const bad = withHook('agents-hooks/format-after-edit.sh', (t) =>
-      t.replace(
-        '"./node_modules/.bin/biome" check --write "$file_path"',
-        '"./node_modules/.bin/biome" check --write --unsafe "$file_path"',
-      ),
+      t.replace('--no-error-on-unmatched-pattern --write "$file_path"', '--write "$file_path"'),
     );
-    const out = checkFormatterIdentity(bad).join('\n');
-    expect(out).toMatch(
-      /no longer carries `"\.\/node_modules\/\.bin\/biome" check --write "\$file_path"/,
-    );
-    expect(out).toMatch(
-      /runs biome in a line the descriptor does not render: `"\.\/node_modules\/\.bin\/biome" check --write --unsafe/,
+    expect(checkFormatterIdentity(bad).join('\n')).toContain(
+      'format-after-edit.sh no longer carries `[ -n "$fmt_bin" ] && "$fmt_bin" --no-error-on-unmatched-pattern --write "$file_path"',
     );
   });
 
   it('a BARE, `command`-wrapped or backslash-continued invocation is not a rendered line', () => {
-    for (const extra of [
-      'biome check --unsafe .',
-      'command biome check .',
-      'bun run \\\n  biome check --unsafe .',
-    ]) {
+    for (const extra of ['oxfmt --write .', 'command oxfmt .', 'bun run \\\n  oxfmt --write .']) {
       const bad = withHook('agents-hooks/lint-check.sh', (t) => `${t}\n${extra}\n`);
       expect(checkFormatterIdentity(bad).join('\n'), extra).toMatch(
-        /runs biome in a line the descriptor does not render/,
+        /runs oxfmt in a line the descriptor does not render/,
       );
     }
   });
 
-  it('`biome_files` and `biome.json` do not count as running biome outside the rendered lines', () => {
+  it('`oxfmt_bin`, `fmt_files` and `.oxfmtrc.json` do not count as running oxfmt outside the rendered lines', () => {
     expect(checkFormatterIdentity(current)).toEqual([]);
   });
 
   it('an ADDED formatter invocation fails even while the rendered lines stay', () => {
-    const bad = withHook(
-      'agents-hooks/lint-check.sh',
-      (t) => `${t}\nbunx biome check --unsafe .\n`,
-    );
+    const bad = withHook('agents-hooks/lint-check.sh', (t) => `${t}\nbunx oxfmt --write .\n`);
     expect(checkFormatterIdentity(bad).join('\n')).toMatch(
-      /runs biome in a line the descriptor does not render/,
+      /runs oxfmt in a line the descriptor does not render/,
     );
   });
 
@@ -153,24 +142,24 @@ describe('the gate — exact comparisons', () => {
 
   it('hook arguments come from the descriptor, so another tool renders its own flags', () => {
     const lines = renderAgentHookLines({
-      ...OXFMT,
-      agentArgs: { afterEdit: '--write', lintCheck: '--check' },
+      ...BIOME,
+      agentArgs: { afterEdit: 'check --write', lintCheck: 'check' },
     });
     expect(lines['agents-hooks/format-after-edit.sh']).toContain(
-      '    "./node_modules/.bin/oxfmt" --write "$file_path" >/dev/null 2>&1 || true',
+      '  [ -n "$fmt_bin" ] && "$fmt_bin" check --write "$file_path" >/dev/null 2>&1 || true',
     );
     expect(lines['agents-hooks/lint-check.sh'].join('\n')).toContain(
-      '"./node_modules/.bin/oxfmt" --check "${biome_files[@]}"',
+      '"$fmt_bin" check "${fmt_files[@]}"',
     );
-    expect(Object.values(lines).flat().join('\n')).not.toMatch(/oxfmt check/);
+    expect(Object.values(lines).flat().join('\n')).not.toMatch(/no-error-on-unmatched/);
   });
 
   it('an agent hook that drops its config gate fails, naming the hook and the line', () => {
     const bad = withHook('agents-hooks/lint-check.sh', (t) =>
-      t.replace('|| [ -f "biome.jsonc" ]', ''),
+      t.replace(' || [ -f ".oxfmtrc.jsonc" ]', ''),
     );
-    expect(checkFormatterIdentity(bad).join('\n')).toMatch(
-      /agents-hooks\/lint-check\.sh no longer carries `if \[ -x "\.\/node_modules\/\.bin\/biome" \] && \{ \[ -f "biome\.json" \] \|\| \[ -f "biome\.jsonc" \]; \}; then`/,
+    expect(checkFormatterIdentity(bad).join('\n')).toContain(
+      'agents-hooks/lint-check.sh no longer carries `if { [ -f ".oxfmtrc.json" ] || [ -f ".oxfmtrc.jsonc" ]',
     );
   });
 
@@ -195,28 +184,22 @@ describe('the gate — exact comparisons', () => {
   });
 
   it('switching the descriptor to another tool fails on the un-migrated hooks and presets', () => {
-    const out = checkFormatterIdentity({ ...current, formatter: OXFMT }).join('\n');
-    expect(out).toMatch(
-      /no longer carries `"\.\/node_modules\/\.bin\/oxfmt" check --write "\$file_path"/,
-    );
-    expect(out).toMatch(/names biome outside a comment/);
+    const out = checkFormatterIdentity({ ...current, formatter: BIOME }).join('\n');
+    expect(out).toContain('format-after-edit.sh no longer carries `if [[ "$file_path"');
+    expect(out).toContain('lint-check.sh no longer carries `if { [ -f "biome.json" ]; }');
+  });
+
+  it('a Biome preset that leaves its formatter on fails while devkit formats with Oxfmt', () => {
+    const out = checkFormatterIdentity({
+      ...current,
+      presets: [
+        { path: 'biome/base.jsonc', formatterEnabled: true },
+        // Omission counts as ON (Biome's default); only an explicit false is off.
+        { path: 'biome/react.jsonc', formatterEnabled: undefined },
+      ],
+    }).join('\n');
     expect(out).toMatch(/biome\/base\.jsonc leaves the biome formatter on/);
-    // Omission counts as ON (Biome's default); only an explicit false is off.
     expect(out).toMatch(/biome\/react\.jsonc leaves the biome formatter on/);
-  });
-
-  it('gating on a config devkit writes itself fails (the circular .oxfmtrc.json case)', () => {
-    const bad = { ...current, formatter: { ...OXFMT, configProbes: ['.oxfmtrc.json'] } };
-    expect(checkFormatterIdentity(bad).join('\n')).toMatch(
-      /gates on \.oxfmtrc\.json, which devkit init writes/,
-    );
-  });
-
-  it('a `./`-prefixed devkit-written config is still devkit-written', () => {
-    const bad = { ...current, formatter: { ...OXFMT, configProbes: ['./.oxfmtrc.json'] } };
-    expect(checkFormatterIdentity(bad).join('\n')).toMatch(
-      /gates on \.\/\.oxfmtrc\.json, which devkit init writes/,
-    );
   });
 
   it('the installed formatter package must be the descriptor one (scripts alone are not enough)', () => {

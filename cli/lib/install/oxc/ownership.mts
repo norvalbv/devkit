@@ -41,8 +41,7 @@ export function ownershipFor(
     const stale = () =>
       plan.replaces !== undefined &&
       kept.createdDigest === digest(plan.replaces) &&
-      existsSync(join(cwd, path)) &&
-      digest(readFileSync(join(cwd, path))) === kept.createdDigest;
+      digestOrNull(join(cwd, path)) === kept.createdDigest;
     if (!stale()) return kept;
     const text = plan.starter();
     // Deriving a starter takes long enough for the consumer to edit the file meanwhile: re-check.
@@ -60,6 +59,15 @@ export function ownershipFor(
   const appeared = candidates(cwd, names);
   if (appeared.length > 0) return { path: appeared[0], createdDigest: null };
   return write(cwd, plan.starterPath, text, dryRun);
+}
+
+/** A file's digest, or null once it is gone: a consumer may delete it between any two reads. */
+function digestOrNull(path: string): string | null {
+  try {
+    return digest(readFileSync(path));
+  } catch {
+    return null;
+  }
 }
 
 function write(cwd: string, path: string, text: string, dryRun: boolean): ConfigOwnership {

@@ -20,8 +20,9 @@
   "files": {
     "ignoreUnknown": true
   },
+  // Off: devkit formats with Oxfmt, from an .oxfmtrc.json derived from these settings; Biome lints.
   "formatter": {
-    "enabled": true,
+    "enabled": false,
     "formatWithErrors": false,
     "indentStyle": "space",
     "indentWidth": 2,
@@ -82,7 +83,7 @@
       // (double) — declared explicitly so a consumer extending base gets identical
       // CSS output even if a future biome default drifts. Output-equivalent to the
       // frink reference config (which relies on inheritance + the default).
-      "enabled": true,
+      "enabled": false,
       "indentStyle": "space",
       "indentWidth": 2,
       "lineWidth": 100,

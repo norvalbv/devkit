@@ -180,6 +180,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Frontend security agent | agent | shipped | evidence-only | reviewer-frontend-security |
 | Prior-art agent | agent | experimental | evidence-only | prior-art |
 | devkit CLI | bin | shipped | none | — |
+| Pinned Oxfmt runner for consumer hooks | bin | shipped | none | — |
 | Clone gate | bin | shipped | evidence-only | co-occurrence |
 | Changed-comment paragraph budget gate | bin | shipped | none | — |
 | Coverage gate | bin | shipped | none | — |
