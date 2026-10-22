@@ -31,9 +31,9 @@ describe('ship — the format stage is evidence, not inference', () => {
       hookBody: `__dk_package_bin_dir="$PWD/.shipbin"\n${fragment}\nexit 0`,
     });
     mkdirSync(join(dir, '.shipbin'), { recursive: true });
-    writeFileSync(join(dir, 'biome.jsonc'), '{}\n');
-    writeFileSync(join(dir, '.shipbin', 'biome'), '#!/bin/sh\nexit 0\n');
-    chmodSync(join(dir, '.shipbin', 'biome'), 0o755);
+    writeFileSync(join(dir, '.oxfmtrc.json'), '{}\n');
+    writeFileSync(join(dir, '.shipbin', 'devkit-oxfmt'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(dir, '.shipbin', 'devkit-oxfmt'), 0o755);
     execFileSync('git', ['add', '-A'], { cwd: dir });
     execFileSync('git', ['commit', '-qm', 'stub'], { cwd: dir });
 
@@ -47,7 +47,7 @@ describe('ship — the format stage is evidence, not inference', () => {
     dropWorktree(git, r.stderr);
     expect(r.status, r.stderr).toBe(0);
     const log = readFileSync(join(dir, '.devkit/last-ship-gates-feat-fmt-log.log'), 'utf8');
-    expect(log).toContain('🎨 biome formatted and re-staged 1 staged file(s).');
+    expect(log).toContain('🎨 oxfmt formatted and re-staged 1 staged file(s).');
   });
 
   // The arm that must NOT: sc-2524 read this absence as a bug and asked for a resume-time

@@ -110,6 +110,15 @@
       "canonical": "package.json#bin:devkit"
     },
     {
+      "id": "bin-devkit-oxfmt",
+      "label": "Pinned Oxfmt runner for consumer hooks",
+      "kind": "bin",
+      "lifecycle": "shipped",
+      "evidence": "none",
+      "suiteIds": [],
+      "canonical": "package.json#bin:devkit-oxfmt"
+    },
+    {
       "id": "bin-guard-clone",
       "label": "Clone gate",
       "kind": "bin",

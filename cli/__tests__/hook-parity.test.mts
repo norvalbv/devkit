@@ -86,7 +86,6 @@ describe('one gate-body renderer for every install mode', () => {
     expect(overlay.filter((c) => !lintSlot(c) && !fmtSlot(c))).toEqual(
       pkg.filter((c) => !fmtSlot(c)),
     );
-    expect(hook.includes('"node_modules/.bin/biome" format --write')).toBe(!pkgRel);
     expect(hook.includes('"node_modules/.bin/oxfmt" --no-error-on-unmatched-pattern --write')).toBe(
       !pkgRel,
     );

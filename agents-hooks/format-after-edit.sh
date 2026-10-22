@@ -31,7 +31,7 @@ WORKSPACE=$(pwd)
 
 # Only act on files INSIDE this workspace. An agent may edit a sibling checkout (e.g. another repo it
 # is working on in the same session) whose files live outside the workspace and have their own
-# toolchain — running THIS repo's biome/eslint on them errors (eslint resolves its config from the
+# toolchain — running THIS repo's formatter/eslint on them errors (eslint resolves its config from the
 # edited file's own tree, not cwd) and spams the conversation. That repo runs its own hooks.
 if [ -n "$CLAUDE_PROJECT_DIR" ] && [[ "$file_path" != "$WORKSPACE"/* ]]; then
   echo '{}'
@@ -52,15 +52,11 @@ if declare -F session_edits_file &>/dev/null; then
   fi
 fi
 
-# Biome format/lint auto-fix on the edited file (silent, best-effort). Gated on a biome CONFIG,
-# not merely the binary: biome is a common transitive dependency, and with no config it formats to
-# its own defaults (tabs, double quotes). In a repo that formats with something else — prettier,
-# oxfmt, dprint — that silently rewrites every edited file into a style the repo's real format gate
-# then rejects, turning one small edit into a whole-file diff.
-if [[ "$file_path" =~ \.(ts|tsx|js|jsx|json|jsonc)$ ]] && { [ -f "biome.json" ] || [ -f "biome.jsonc" ]; }; then
-  if [ -f "package.json" ] && [ -x "./node_modules/.bin/biome" ]; then
-    "./node_modules/.bin/biome" check --write "$file_path" >/dev/null 2>&1 || true
-  fi
+# Oxfmt auto-fix on the edited file (silent, best-effort), only where an Oxfmt config exists:
+# configless it formats to its own defaults, which the repo's real format gate then rejects.
+if [[ "$file_path" =~ \.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$ ]] && { [ -f ".oxfmtrc.json" ] || [ -f ".oxfmtrc.jsonc" ] || [ -f "oxfmt.config.ts" ] || [ -f "oxfmt.config.mts" ]; }; then
+  fmt_bin=$(oxfmt_bin 2>/dev/null)
+  [ -n "$fmt_bin" ] && "$fmt_bin" --no-error-on-unmatched-pattern --write "$file_path" >/dev/null 2>&1 || true
 fi
 
 # ESLint structure/size check — scoped to the consumer's configured scanRoots. Resolve them by

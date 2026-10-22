@@ -52,7 +52,7 @@ fi
 const GLOBAL_MISSING = (bin: string) =>
   `${bin} is missing from devkit's install — reinstall devkit`;
 
-// A global devkit's bin dir holds only devkit's bins; the consumer's formatter is in its own.
+// Overlay formats with the repo's own Oxfmt, from the repo's own bin dir.
 const CONSUMER_BIN = 'node_modules/.bin';
 export const BIN_DIRS = {
   // Package mode: the version pinned in the consumer's own dependencies.
@@ -60,7 +60,7 @@ export const BIN_DIRS = {
     open: '__dk_package_bin_dir="$(bun pm bin)"',
     close: '',
     missing: (bin: string) => `pinned ${bin} is missing — run bun install`,
-    // `bun pm bin` is the consumer's own bin dir, so its formatter sits beside devkit's bins.
+    // `bun pm bin` is the consumer's own bin dir, where devkit's `devkit-oxfmt` is linked.
     formatter: '$__dk_package_bin_dir',
   },
   // Overlay: nothing is committed, so the global CLI is the only runtime and every commit needs it.
@@ -82,7 +82,8 @@ if __dk_package_bin_dir=$(command -v guard-deterministic); then
 __dk_package_bin_dir=\${__dk_package_bin_dir%/*}`,
     close: 'fi',
     missing: GLOBAL_MISSING,
-    formatter: CONSUMER_BIN,
+    // The global devkit's own bin dir: its `devkit-oxfmt` runs the pinned Oxfmt, no repo install.
+    formatter: '$__dk_package_bin_dir',
   },
 };
 export type BinDir = keyof typeof BIN_DIRS;
