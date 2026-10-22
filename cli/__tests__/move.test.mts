@@ -874,7 +874,7 @@ describe('devkit move — directory and untracked sources', () => {
     expect(existsSync(join(root, 'src/renderer/features/a/util.ts'))).toBe(true);
   });
 
-  it('keeps a nested repository opaque to the outer AST rewrite', () => {
+  it('refuses before moving when a moved nested repository would keep a dangling alias', () => {
     const root = fixture();
     writePath(root, 'src/renderer/features/package/outer.ts', 'export const outer = 1;\n');
     writePath(
@@ -883,29 +883,109 @@ describe('devkit move — directory and untracked sources', () => {
       "import { outer } from '@/features/package/outer';\nexport const inner = outer;\n",
     );
     writePath(root, 'src/renderer/features/package/nested/.git/HEAD', 'ref: refs/heads/main\n');
-    const nestedBefore = read(root, 'src/renderer/features/package/nested/inner.ts');
+
+    const r = runMoveArgs(root, 'src/renderer/features/package', 'src/renderer/lib');
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      "src/renderer/features/package/nested/inner.ts: '@/features/package/outer' → '@/lib/package/outer' (nested repository src/renderer/features/package/nested)",
+    );
+    expect(r.stdout).not.toContain('mv ');
+    expect(existsSync(join(root, 'src/renderer/features/package/nested/inner.ts'))).toBe(true);
+  });
+
+  it('still moves a directory holding a nested repository whose imports stay inside it', () => {
+    const root = fixture();
+    writePath(
+      root,
+      'src/renderer/features/package/nested/inner.ts',
+      "import { o } from './other';\nexport const inner = o;\n",
+    );
+    writePath(root, 'src/renderer/features/package/nested/other.ts', 'export const o = 1;\n');
+    writePath(root, 'src/renderer/features/package/nested/.git/HEAD', 'ref: refs/heads/main\n');
+    const innerBefore = read(root, 'src/renderer/features/package/nested/inner.ts');
 
     const r = runMoveArgs(root, 'src/renderer/features/package', 'src/renderer/lib');
 
     expect(r.status, r.stderr).toBe(0);
-    expect(read(root, 'src/renderer/lib/package/nested/inner.ts')).toBe(nestedBefore);
+    expect(r.stderr).not.toContain('nested repositor');
+    expect(read(root, 'src/renderer/lib/package/nested/inner.ts')).toBe(innerBefore);
     expect(existsSync(join(root, 'src/renderer/lib/package/nested/.git/HEAD'))).toBe(true);
   });
 
-  it('keeps an unrelated nested repository opaque to the outer AST rewrite', () => {
-    const root = fixture();
+  const nestedImporter = (root) => {
     writePath(
       root,
       'src/renderer/vendor/nested.ts',
       "import { x } from '@/features/a/util';\nexport const nested = x;\n",
     );
     writePath(root, 'src/renderer/vendor/.git/HEAD', 'ref: refs/heads/main\n');
+  };
+  const NESTED_LINE =
+    "src/renderer/vendor/nested.ts: '@/features/a/util' → '@/lib/utils/util' (nested repository src/renderer/vendor)";
+
+  it('refuses before moving when an unrelated nested repository imports a moved file', () => {
+    const root = fixture();
+    nestedImporter(root);
+
+    for (const extra of [[], ['--dry-run']]) {
+      const r = runMoveArgs(
+        root,
+        'src/renderer/features/a/util.ts',
+        'src/renderer/lib/utils',
+        ...extra,
+      );
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain(NESTED_LINE);
+      expect(r.stderr).toContain('--allow-nested-dangling');
+      expect(r.stdout).not.toContain('mv ');
+    }
+    expect(existsSync(join(root, 'src/renderer/features/a/util.ts'))).toBe(true);
+  });
+
+  it('moves anyway under --allow-nested-dangling and leaves the nested repository untouched', () => {
+    const root = fixture();
+    nestedImporter(root);
     const nestedBefore = read(root, 'src/renderer/vendor/nested.ts');
 
-    const r = runMoveArgs(root, 'src/renderer/features/a/util.ts', 'src/renderer/lib/utils');
+    const r = runMoveArgs(
+      root,
+      'src/renderer/features/a/util.ts',
+      'src/renderer/lib/utils',
+      '--allow-nested-dangling',
+    );
 
     expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain(`⚠ 1 specifier(s) in nested repositories`);
+    expect(r.stderr).toContain(NESTED_LINE);
     expect(read(root, 'src/renderer/vendor/nested.ts')).toBe(nestedBefore);
+    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
+  });
+
+  it('refuses a source inside a nested repository', () => {
+    const root = fixture();
+    nestedImporter(root);
+
+    const r = runMoveArgs(root, 'src/renderer/vendor/nested.ts', 'src/renderer/lib');
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      'source is inside nested repository src/renderer/vendor: src/renderer/vendor/nested.ts',
+    );
+    expect(existsSync(join(root, 'src/renderer/vendor/nested.ts'))).toBe(true);
+  });
+
+  it('refuses a destination inside a nested repository', () => {
+    const root = fixture();
+    writePath(root, 'src/renderer/vendor/.git/HEAD', 'ref: refs/heads/main\n');
+
+    const r = runMoveArgs(root, 'src/renderer/features/a/util.ts', 'src/renderer/vendor/lib');
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      'destination is inside nested repository src/renderer/vendor: src/renderer/vendor/lib/util.ts',
+    );
+    expect(existsSync(join(root, 'src/renderer/features/a/util.ts'))).toBe(true);
   });
 
   it('moves a TypeScript symlink without writing through to its external referent', () => {

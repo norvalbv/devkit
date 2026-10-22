@@ -168,7 +168,7 @@ function viewHost(
   };
 }
 
-function resolveWith(
+export function resolveWith(
   spec: string,
   file: string,
   options: ts.CompilerOptions,
