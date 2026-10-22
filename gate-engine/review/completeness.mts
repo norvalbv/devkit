@@ -64,8 +64,8 @@ import {
   execJudgeAsync,
   type RemedyCause,
   remedyCause,
-  strictRemedy,
 } from '../judge/run-judge.mts';
+import { printStrictRemedy } from '../judge/outage/remedy-once.mts';
 import type { VerdictMeta } from '../judge/verdict-store.mts';
 import { loadCache, savePasses } from './cache.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
@@ -445,12 +445,11 @@ export async function runCompleteness(
     if (envFlag('AI_STRICT')) {
       // Name the CAUSE: a cap kill is not auth/quota (sc-1227), and a usage lock is its mirror —
       // CLI fine, account locked, generic remedy says re-run for a wait it never mentions.
-      const cause = remedyCause(outage);
-      const named = SKIP_WORDING[cause];
+      const named = SKIP_WORDING[remedyCause(outage)];
       console.error(
-        `guard-review: completeness SKIPPED (${named}) — strict ship mode fails closed.\n` +
-          `   Remedy: ${strictRemedy(cause, judgeBinForModel(model), outage?.resetsAt)} (an earned PASS is cached).`,
+        `guard-review: completeness SKIPPED (${named}) — strict ship mode fails closed.`,
       );
+      printStrictRemedy(outage, judgeBinForModel(model), 'an earned PASS is cached');
       return finish(3);
     }
     return finish(2); // fail-open on a normal commit

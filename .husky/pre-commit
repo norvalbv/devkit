@@ -346,8 +346,13 @@ echo "🔍 Reviewer gate (headless domain judges)..."
 # subshell, which would make $! a wrapper whose death leaves the judge orphaned and running. See
 # review-fragments.mts.
 comp_pid=""
+dk_remedy_dir=""
+unset DEVKIT_REMEDY_DIR
 if [ "${DEVKIT_RUN_MODE:-}" != "review" ] && [ "${DEVKIT_RUN_MODE:-}" != "dry-gates" ] && [ -n "${DEVKIT_COMMIT_MSG_FILE:-}" ] && [ -f "${DEVKIT_COMMIT_MSG_FILE:-}" ]; then
     echo "🧩 Completeness judge started in parallel (ship message known)..."
+    # One dir both judges share, so the second to print a judge-outage Remedy points up instead.
+    dk_remedy_dir=$(mktemp -d 2>/dev/null) || dk_remedy_dir=""
+    [ -z "$dk_remedy_dir" ] || export DEVKIT_REMEDY_DIR="$dk_remedy_dir"
     env -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_CONFIG -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT -u GIT_OBJECT_DIRECTORY -u GIT_DIR -u GIT_WORK_TREE -u GIT_IMPLICIT_WORK_TREE -u GIT_GRAFT_FILE -u GIT_INDEX_FILE -u GIT_NO_REPLACE_OBJECTS -u GIT_REPLACE_REF_BASE -u GIT_PREFIX -u GIT_SHALLOW_FILE -u GIT_COMMON_DIR -u GIT_GLOB_PATHSPECS -u GIT_NOGLOB_PATHSPECS -u GIT_LITERAL_PATHSPECS -u GIT_ICASE_PATHSPECS node gate-engine/review/cli.mts completeness --gate "$DEVKIT_COMMIT_MSG_FILE" & comp_pid=$!
 fi
 rrc=0
@@ -394,6 +399,8 @@ if [ -n "$comp_pid" ]; then
         wait "$comp_pid" 2>/dev/null || comp_observed_rc=$?
     fi
 fi
+[ -z "$dk_remedy_dir" ] || rm -rf -- "$dk_remedy_dir" 2>/dev/null || true
+unset DEVKIT_REMEDY_DIR
 if [ "$rrc" -eq 1 ]; then
     echo "   guard-review blocked the commit — each reason and its remedy are printed above; fix any reviewer findings, then re-run."
     __dk_comp_observed

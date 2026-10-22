@@ -312,6 +312,44 @@ describe('parallel completeness prewarm (ship message file present)', () => {
     },
   );
 
+  it('both judges share one per-run Remedy dir, removed before the verdict arms', () => {
+    const r = runHook({ DEVKIT_REMEDY_DIR: '/inherited' }, undefined, { shipMsg: true });
+    expect(r.status).toBe(0);
+    const dirs = readFileSync(join(r.home, 'remedy-dirs.log'), 'utf8').trim().split('\n');
+    expect(dirs).toHaveLength(2);
+    expect(dirs[0]).toBe(dirs[1]);
+    expect(dirs[0]).not.toBe('/inherited');
+    expect(existsSync(dirs[0])).toBe(false);
+  });
+
+  it('a failing mktemp leaves both judges without a dir and the verdict unchanged', () => {
+    // A bad TMPDIR is not enough: macOS mktemp falls back to its own temp dir.
+    const stubs = mkdtempSync(join(tmpdir(), 'dk-no-mktemp-'));
+    homes.push(stubs);
+    writeFileSync(join(stubs, 'mktemp'), '#!/bin/sh\nexit 1\n');
+    chmodSync(join(stubs, 'mktemp'), 0o755);
+    const r = runHook({ PATH: `${stubs}:/usr/bin:/bin` }, undefined, { shipMsg: true });
+    expect(r.status).toBe(0);
+    expect(readFileSync(join(r.home, 'remedy-dirs.log'), 'utf8').trim().split('\n')).toEqual([
+      'none',
+      'none',
+    ]);
+  });
+
+  it.runIf(hasDash)('dash (Debian/Ubuntu /bin/sh): both judges still share one Remedy dir', () => {
+    const r = runHook({}, undefined, { shipMsg: true, shell: '/bin/dash' });
+    expect(r.status).toBe(0);
+    const dirs = readFileSync(join(r.home, 'remedy-dirs.log'), 'utf8').trim().split('\n');
+    expect(dirs).toHaveLength(2);
+    expect(dirs[0]).toBe(dirs[1]);
+    expect(dirs[0]).not.toBe('none');
+  });
+
+  it('without the ship message the fleet gets no Remedy dir, even an inherited one', () => {
+    const r = runHook({ DEVKIT_REMEDY_DIR: '/inherited' });
+    expect(readFileSync(join(r.home, 'remedy-dirs.log'), 'utf8').trim()).toBe('none');
+  });
+
   it('a confident completeness FAIL (exit 1) blocks the commit at pre-commit', () => {
     const r = runHook({ COMP_RC: '1' }, undefined, { shipMsg: true });
     expect(r.status).toBe(1);
