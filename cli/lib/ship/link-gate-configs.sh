@@ -231,12 +231,18 @@ link_untracked_gate_configs() {
     else
       echo "   linked into the gate worktree so gates match a normal commit (not defaults):"
     fi
-    local linked_index=0
+    local linked_index=0 is_cache
     for rel in "${linked[@]}"; do
+      is_cache=
+      gate_projection_is_local_cache "$rel" "$decisions_rel" ${local_caches[@]+"${local_caches[@]}"} && is_cache=1
       # `check-ignore -q` inside the `if` → its exit-1 "not ignored" is errexit-safe.
       if gate_projection_source_is_ignored "$root" "${linked_sources[$linked_index]}" "$rel"; then
-        echo "   - $rel (gitignored cache — normal)"
-      elif gate_projection_is_local_cache "$rel" "$decisions_rel" ${local_caches[@]+"${local_caches[@]}"}; then
+        if [ -n "$is_cache" ]; then
+          echo "   - $rel (gitignored cache — normal)"
+        else
+          echo "   - $rel (ignored by git — local input, linked in)"
+        fi
+      elif [ -n "$is_cache" ]; then
         echo "   - $rel (local cache — linked in, intentionally not committed)"
       else
         echo "   - $rel (untracked — commit it so gates are consistent for everyone)"

@@ -403,6 +403,25 @@ describe('gate config projections', () => {
 
       expect(noticeLine(result.stderr, '.fallow')).toContain('gitignored cache — normal');
     });
+
+    for (const purpose of ['ship', 'review']) {
+      it(`${purpose}: gitignored config and decisions records are not called caches`, () => {
+        const { root, worktree } = fixture();
+        seed(root, { decisionsDir: '.decisions' });
+        // guard.config.json is excluded the way an overlay install excludes it.
+        writeFileSync(join(root, '.git/info/exclude'), 'guard.config.json\n');
+        writeFileSync(join(root, '.gitignore'), '.decisions/\n.fallow/\n');
+
+        const result = project(root, worktree, purpose);
+
+        expect(result.status, result.stderr).toBe(0);
+        for (const rel of ['guard.config.json', '.decisions']) {
+          expect(noticeLine(result.stderr, rel)).toContain('ignored by git');
+          expect(noticeLine(result.stderr, rel)).not.toContain('cache');
+        }
+        expect(noticeLine(result.stderr, '.fallow')).toContain('gitignored cache — normal');
+      });
+    }
   });
 
   it('leaves a gate-config symlink already present in the review snapshot untouched', () => {
