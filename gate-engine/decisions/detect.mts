@@ -414,7 +414,7 @@ async function runGate() {
             skipHeader: '## RECORDED TARGETS — NONE',
             skipNote: 'No scoped Target matches. Judge the diff without assuming prior approval.',
           },
-          4096,
+          8192,
         ),
       )
       .catch(
