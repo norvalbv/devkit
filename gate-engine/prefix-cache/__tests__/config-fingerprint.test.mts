@@ -56,6 +56,16 @@ describe('gateConfigFingerprint — invalidating inputs', () => {
     expect(gateConfigFingerprint(d)).not.toBe(before);
   });
 
+  it('a malformed structure.walls changes the fingerprint, though it resolves to no walls', () => {
+    const d = repo({ scanRoots: ['src'], structure: { trees: [] } });
+    const before = gateConfigFingerprint(d);
+    for (const walls of ['cli/**', null]) {
+      const config = { scanRoots: ['src'], structure: { trees: [], walls } };
+      writeFileSync(join(d, 'guard.config.json'), JSON.stringify(config));
+      expect(gateConfigFingerprint(d)).not.toBe(before);
+    }
+  });
+
   it('a ratchet .json AND a structure .mjs baseline each change the fingerprint', () => {
     const d = repo({ scanRoots: ['src'] });
     writeRatchetBaseline(d, 'fanout.json', '{"src/x":13}');
