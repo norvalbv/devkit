@@ -95,9 +95,8 @@ export async function runCascade(sel, opts) {
         res = await enforceChecklistContract(sel, res, cwd, opts.recovery !== undefined, async (reason) => {
             if (opts.recovery === 'defer')
                 return { ...res, status: 'inconclusive', reason, retryable: reason };
-            // Exhausted recovery: review blocks at exit 1, ship stays inconclusive at exit 3. 'error'
-            // on ship would render as an escalation-confirmed reviewer FAIL — a verdict claim about a
-            // diff no judge ever finished reading. `assetRoot` is set only by review mode.
+            // Exhausted recovery: review blocks at exit 1 (REVIEW ERROR); ship stays inconclusive at
+            // exit 3, its strict retry/fail-closed contract. `assetRoot` is set only by review mode.
             if (opts.recovery === 'final') {
                 const exhausted = `reviewer checklist contract failed after one retry — ${reason}`;
                 const terminal = opts.assetRoot

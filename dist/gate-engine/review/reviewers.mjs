@@ -179,14 +179,11 @@ export function resolveSentryModel(cfg) {
 export function resolveEscalationModel(cfg) {
     return envModel('GUARD_REVIEW_ESCALATION_MODEL') ?? cfg.review.escalationModel;
 }
-/**
- * Comma-joined --allowedTools value for one reviewer: the read-only base, PLUS its own checklist
- * script (the one non-git Bash prefix a judge gets — scoped to that exact script path: a CLAUDE
- * judge cannot write files, stage, or commit; a codex judge is workspace-write but confined to a
- * scratch cwd plus `.claude/`, with run-review's staged-tree tamper check as backstop), PLUS the
- * consumer's semantic search tool for commit-guard, plus every named agent's strict MCP baseline.
- */
+/** Comma-joined --allowedTools for one reviewer: the read-only base, its exact-path checklist
+ *  script, the consumer's search tool where wired, and named-agent MCP tools. */
 export function allowedToolsFor(reviewer, cfg, assetRoot = '.claude') {
+    // A claude judge cannot write, stage, or commit. A codex judge's shell is confined to a scratch cwd
+    // plus `.claude/`: tamper detection catches staged-tree writes; only instruction holds execution.
     // A skill-less reviewer has no checklist script; its evidence is pre-rendered onto stdin/prompt.
     if (!hasChecklist(reviewer))
         return withNamedAgentMcpTools(JUDGE_READ_TOOLS);
@@ -260,22 +257,20 @@ export function wrapPrompt(agentBody, reviewer, files, assetRoot, checklistRecov
         'FAIL only for a finding that must block THIS commit. A non-blocking finding to resolve ' +
         'before merge goes on its own line before the verdict: ADVISORY: <file:line> — <finding>');
 }
-/**
- * Checklist-free counterpart to `wrapPrompt` for a reviewer without Bash: pre-capped evidence rides
- * on stdin, while Read/Grep/Glob resolve a capped current file or rule without changing verdict or
- * stable override-fingerprint contracts.
- */
+/** Checklist-free counterpart to `wrapPrompt`: pre-capped evidence rides on stdin, and the judge reads
+ *  a capped file or rule itself without changing verdict or override-fingerprint contracts. */
 export function wrapConventionsPrompt(agentBody, files, claudeMdBlock, { commitMsgBlock = '', lineCountBlock = '', alsoStagedBlock = '' } = {}) {
     return ('You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
         `Review ONLY the STAGED changes. Staged files in scope: ${files.join(', ')}.\n` +
         (alsoStagedBlock ? `${alsoStagedBlock}\n` : '') +
-        'You have NO Bash, but Read/Grep/Glob are available. The diff evidence on stdin is capped: ' +
+        'Investigate by reading files; do not modify files or run tests, builds or package scripts. ' +
+        'The diff evidence on stdin is capped: ' +
         'an OMITTED/TRUNCATED marker means some staged context was not included. Before returning PASS ' +
-        'when such a marker appears, use Read to inspect every available in-scope staged file not shown ' +
-        'in full. A path unavailable to Read may be deleted or renamed; its absence is not itself a ' +
+        'when such a marker appears, read every available in-scope staged file not shown ' +
+        'in full. A path you cannot read may be deleted or renamed; its absence is not itself a ' +
         'rule violation and must not produce a semantic FAIL.\n' +
         'The governing CLAUDE.md rules for these files are loaded below. If a governing-rules block is ' +
-        'marked OMITTED/TRUNCATED, use Read to inspect every named rule file before returning PASS. ' +
+        'marked OMITTED/TRUNCATED, read every named rule file before returning PASS. ' +
         'Never treat incomplete evidence alone as a violation.\n' +
         `${claudeMdBlock}\n` +
         (lineCountBlock ? `${lineCountBlock}\n` : '') + // sc-2181: the counts, so none is derived

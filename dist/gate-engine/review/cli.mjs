@@ -98,6 +98,52 @@ function sha256(bytes) {
 }
 /** The dispositions a root agent may report. Anything else is dropped, so the field stays groupable. */
 const DISPOSITIONS = new Set(['followed', 'overridden', 'unverified']);
+/** The value after `--<name>` in `rest`, or undefined when the flag or its value is absent. */
+function readFlag(rest, name) {
+    const i = rest.indexOf(`--${name}`);
+    return i !== -1 && i + 1 < rest.length ? rest[i + 1] : undefined;
+}
+/** The response and optional request as recorded text plus the receipt hashing their raw bytes. */
+function captureAgentRun(stdin, requestFile) {
+    const exactOutput = exactText(stdin);
+    const output = exactOutput ?? stdin.toString('utf8');
+    const request = requestFile === undefined ? null : readBytes(requestFile);
+    if (requestFile !== undefined && !request)
+        console.error(`guard-review: cannot read --request-file "${requestFile}"; recording without it`);
+    // Minted HERE, never runId(): a ship/review id is shared, and feedback must cite one run.
+    const receipt = {
+        invocation_id: randomUUID(),
+        output_sha256: sha256(stdin),
+    };
+    if (exactOutput === null)
+        receipt.output_status = 'not_utf8';
+    const input = request ? exactText(request) : null;
+    if (request)
+        receipt.request_sha256 = sha256(request);
+    if (requestFile !== undefined && input === null)
+        receipt.request_status = request ? 'not_utf8' : 'unreadable';
+    return { receipt, input, output, exactOutput };
+}
+// Spend flags keyed like execJudge's judge_exec usage, so the row prices identically. A malformed
+// or negative value OMITS the key: an emitted 0 reads downstream as a free agent.
+function spendFlags(rest) {
+    const spend = {};
+    for (const name of [
+        'input-tokens',
+        'output-tokens',
+        'cache-creation',
+        'cache-read',
+        'cost-usd',
+    ]) {
+        // Number(), not parseFloat: '1200oops' must read as malformed, never as a fabricated 1200.
+        // Token counters are integers; only cost-usd is legitimately fractional.
+        const raw = (readFlag(rest, name) ?? '').trim();
+        const n = raw === '' ? Number.NaN : Number(raw);
+        if (Number.isFinite(n) && n >= 0 && (name === 'cost-usd' || Number.isInteger(n)))
+            spend[name.replace(/-/g, '_')] = n;
+    }
+    return spend;
+}
 /**
  * `guard-review record-agent <label>` — record ONE agent run the assistant dispatched itself.
  *
@@ -112,10 +158,6 @@ const DISPOSITIONS = new Set(['followed', 'overridden', 'unverified']);
  * is an assistant mid-conversation rather than a gate.
  */
 function recordAgent(label, rest) {
-    const flag = (name) => {
-        const i = rest.indexOf(`--${name}`);
-        return i !== -1 && i + 1 < rest.length ? rest[i + 1] : undefined;
-    };
     // One correlation id PER INVOCATION. Without it runId() falls back to `commit-<write-tree>`, and
     // two prior-art runs made before anything is staged — the normal case, since this fires during
     // brainstorming — would share an id and merge downstream into a single synthesized commit row.
@@ -124,57 +166,24 @@ function recordAgent(label, rest) {
     // A tty or closed pipe reads as empty — still emit the event. That the agent RAN is the fact the
     // dashboard needs most, and a run recorded without its transcript beats a run recorded nowhere.
     const stdin = readBytes(0) ?? Buffer.alloc(0);
-    const exactOutput = exactText(stdin);
-    const output = exactOutput ?? stdin.toString('utf8');
-    const requestFile = flag('request-file');
-    const request = requestFile === undefined ? null : readBytes(requestFile);
-    if (requestFile !== undefined && !request)
-        console.error(`guard-review: cannot read --request-file "${requestFile}"; recording without it`);
-    const duration = Number.parseInt(flag('duration-ms') ?? '', 10);
-    const disposition = flag('disposition');
-    const reason = flag('reason');
+    const { receipt, input, output, exactOutput } = captureAgentRun(stdin, readFlag(rest, 'request-file'));
+    const duration = Number.parseInt(readFlag(rest, 'duration-ms') ?? '', 10);
+    const disposition = readFlag(rest, 'disposition');
+    const reason = readFlag(rest, 'reason');
     if (disposition !== undefined && !DISPOSITIONS.has(disposition))
         console.error(`guard-review: ignoring unknown --disposition "${disposition}" ` +
             `(expected ${[...DISPOSITIONS].join(' | ')})`);
-    // Minted HERE, never runId(): a ship/review id is shared, and feedback must cite one run.
-    const receipt = {
-        invocation_id: randomUUID(),
-        output_sha256: sha256(stdin),
-    };
-    if (exactOutput === null)
-        receipt.output_status = 'not_utf8';
-    const input = request ? exactText(request) : null;
-    if (request)
-        receipt.request_sha256 = sha256(request);
-    if (requestFile !== undefined && input === null)
-        receipt.request_status = request ? 'not_utf8' : 'unreadable';
     const extra = { ...receipt };
     if (disposition !== undefined && DISPOSITIONS.has(disposition))
         extra.disposition = disposition;
     if (reason)
         extra.disposition_reason = reason;
-    // Spend flags, mirroring the judge_exec usage keys execJudge emits so a Task-dispatched agent's
-    // row prices identically in the warehouse. A malformed or negative value OMITS the key — an
-    // emitted 0 would read downstream as a genuinely free agent and deflate every cost total.
-    for (const name of [
-        'input-tokens',
-        'output-tokens',
-        'cache-creation',
-        'cache-read',
-        'cost-usd',
-    ]) {
-        // Number(), not parseFloat: '1200oops' must read as malformed, never as a fabricated 1200.
-        // Token counters are integers; only cost-usd is legitimately fractional.
-        const raw = (flag(name) ?? '').trim();
-        const n = raw === '' ? Number.NaN : Number(raw);
-        if (Number.isFinite(n) && n >= 0 && (name === 'cost-usd' || Number.isInteger(n)))
-            extra[name.replace(/-/g, '_')] = n;
-    }
+    Object.assign(extra, spendFlags(rest));
     // The DISPATCHED agent's own session; the root session rides the envelope as parent_session_id.
-    const sessionId = flag('session-id');
+    const sessionId = readFlag(rest, 'session-id');
     if (sessionId)
         extra.session_id = sessionId;
-    const billing = flag('billing');
+    const billing = readFlag(rest, 'billing');
     if (billing)
         extra.billing = billing;
     // The local leg's counts are self-reported, so a wrong 0 would otherwise read as an honest one.
@@ -189,7 +198,7 @@ function recordAgent(label, rest) {
         input: input ?? undefined,
         // A lossy response copy would not match output_sha256, so store no transcript at all.
         transcript: exactOutput !== null,
-        model: flag('model') ?? null,
+        model: readFlag(rest, 'model') ?? null,
         ...(Number.isFinite(duration) && duration >= 0 ? { durationMs: duration } : {}),
         extra,
     });

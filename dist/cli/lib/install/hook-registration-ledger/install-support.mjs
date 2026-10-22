@@ -4,7 +4,7 @@ import { writeFileAtomic } from '../../atomic-write.mjs';
 import { readJson } from '../../fs-helpers.mjs';
 import { isTracked } from '../../git-tracked.mjs';
 import { isSafeAgentAssetPath } from '../agent-asset-manifest/lifecycle.mjs';
-import { LEGACY_AGENT_PROVIDERS } from '../agent-assets/agent-providers.mjs';
+import { LEGACY_AGENT_PROVIDERS, SUPPORTED_AGENT_PROVIDERS, } from '../agent-assets/agent-providers.mjs';
 import { dataRecord } from './plain-data.mjs';
 import { encodeHookRegistrationLedger, HOOK_REGISTRATION_LEDGER_REL, hookRegistrationDestination, } from './codec.mjs';
 import { checkProjectedHookRegistrations, projectHookRegistrations, writeHookRegistrationLedger, } from './lifecycle.mjs';
@@ -27,6 +27,33 @@ const RETIRED_SCRIPT = new Map([
     ['cursor', retiredFallowGate('cursor')],
 ]);
 const isRetired = (provider, command) => RETIRED_SCRIPT.get(provider)?.test(command) ?? false;
+// Any spelling that names the provider's fallow-gate.sh. Doctor only reports these, never strips them.
+const FALLOW_GATE_PATH = new Map(SUPPORTED_AGENT_PROVIDERS.map((provider) => [
+    provider,
+    new RegExp(String.raw `(?:^|[\s"'/=])\.${provider}/hooks/fallow-gate\.sh(?![\w.-])`),
+]));
+const commandOf = (entry) => String(entry?.command ?? '');
+// Mirrors lifecycle.mts matcherGroup: null means the group carries no `matcher` key.
+const matcherOf = (group) => Object.hasOwn(group, 'matcher') ? String(group.matcher) : null;
+function entryHandlers(event, entry, flat) {
+    if (flat)
+        return [{ event, matcher: null, command: commandOf(entry) }];
+    if (!entry || !Array.isArray(entry.hooks))
+        return [];
+    const matcher = matcherOf(entry);
+    return entry.hooks.map((handler) => ({
+        event,
+        matcher,
+        command: commandOf(dataRecord(handler)),
+    }));
+}
+/** Every handler in a provider hook document, read-only. Cursor keeps a flat list per event. */
+function handlersOf(document, provider) {
+    return Object.entries(dataRecord(document?.hooks) ?? {}).flatMap(([event, list]) => (Array.isArray(list) ? list : []).flatMap((entry) => entryHandlers(event, dataRecord(entry), provider === 'cursor')));
+}
+/** Handlers naming fallow's agent gate in a spelling `isRetired` will not delete. */
+export const unrecognisedFallowGates = (document, provider) => handlersOf(document, provider).filter(({ command }) => (FALLOW_GATE_PATH.get(provider)?.test(command) ?? false) && !isRetired(provider, command));
+export const handlerLocation = (rel, { event, matcher }) => `${rel} ${event}${matcher ? `[${matcher}]` : ''}`;
 function reclaimReason(provider, owned, event, command, sitsHere) {
     if (isRetired(provider, command))
         return 'retired';
@@ -106,26 +133,34 @@ export function stripReclaimedCommands(document, provider, owned = []) {
 }
 /** One line per removed handler, so a settings diff never reads as consumer data loss. */
 export function reportDropped(rel, dropped, dryRun) {
-    for (const { event, matcher, command, reason } of dropped) {
-        const where = `${rel} ${event}${matcher ? `[${matcher}]` : ''}`;
+    for (const handler of dropped) {
+        const { command, reason } = handler;
+        const where = handlerLocation(rel, handler);
         console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${where}: ${command} (${reason})`);
     }
 }
 export const asDropped = (entries, verb) => entries.map(({ native, ownerId }) => ({ ...native, reason: `${verb}: ${ownerId}` }));
-/** A retired command in the Claude settings file the scope does NOT own; Claude Code runs both. */
-export function retiredElsewhere(root, provider, scope) {
+const OTHER_SCOPE = { shared: 'overlay', overlay: 'shared' };
+/** The Claude settings file the scope does NOT own; Claude Code runs both. */
+export function otherClaudeSettings(root, provider, scope) {
     if (provider !== 'claude')
         return null;
-    const rel = hookRegistrationDestination(provider, scope === 'shared' ? 'overlay' : 'shared');
-    if (!existsSync(join(root, rel)) || !isSafeAgentAssetPath(root, rel, true))
+    const rel = hookRegistrationDestination(provider, OTHER_SCOPE[scope]);
+    // A missing file reads as `{}`, so only a symlinked or non-file path needs refusing here.
+    if (!isSafeAgentAssetPath(root, rel, true))
         return null;
-    let document;
     try {
-        document = providerDocument(root, provider, rel);
+        return { rel, document: providerDocument(root, provider, rel) };
     }
     catch {
         return null; // Not the scope's file: its parse errors are the user's, never a devkit failure.
     }
+}
+/** A retired command in the Claude settings file the scope does NOT own. */
+export function retiredElsewhere(root, provider, scope, other = otherClaudeSettings(root, provider, scope)) {
+    if (!other)
+        return null;
+    const { rel, document } = other;
     const stripped = stripReclaimedCommands(document, provider);
     if (!stripped.changed)
         return null;
