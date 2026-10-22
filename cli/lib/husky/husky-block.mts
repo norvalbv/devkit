@@ -241,6 +241,8 @@ fi`;
 /** Under the global husky shim (cli/lib/overlay-global-hook.mts) an overlay hook stops before its
  * chain: husky's _/h runs the repo's own hook itself, so chaining would run it twice. */
 export const GATES_ONLY_STOP = '[ -n "${DEVKIT_VIA_HUSKY_INIT:-}" ] && exit 0';
+/** Every pass-through carries this line; the overlay sync uses it to tell devkit's wrappers apart. */
+export const PASSTHROUGH_MARKER = '# devkit overlay pass-through';
 
 // Review is diagnostic: its merge-base baselines exit on a finding, so they stay AFTER the guards
 // and a lint finding never hides the reviewer's report.
@@ -328,7 +330,7 @@ export function chainWord(target: string): string {
  */
 export function buildPassthroughHook(chainScript: string, gitRuns = false): string {
   return `${HOOK_PREAMBLE}
-# devkit overlay pass-through — git now runs this dir, so we forward to the repo's own hook
+${PASSTHROUGH_MARKER} — git now runs this dir, so we forward to the repo's own hook
 # unchanged (devkit adds nothing to it).
 ${GATES_ONLY_STOP}
 ${chainExec(chainScript, gitRuns)}

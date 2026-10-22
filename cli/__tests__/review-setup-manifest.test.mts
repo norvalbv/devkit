@@ -261,7 +261,7 @@ describe('review setup manifest', () => {
     rmSync(join(root, '.git/hooks/pre-commit'));
     writeFileSync(
       join(root, '.devkit/hooks/pre-commit'),
-      buildOverlayPreCommit(selection, '', '', { root, gitRuns: true }),
+      buildOverlayPreCommit(selection, '.git/hooks/pre-commit', '', { root, gitRuns: true }),
       {
         mode: 0o755,
       },

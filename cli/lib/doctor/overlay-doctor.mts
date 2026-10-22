@@ -23,6 +23,7 @@ import {
 import { selectedHookAssets } from '../install/hook-registration-ledger/selection.mts';
 import { checkOxcCapability, syncOxcCapability } from '../install/oxc/lifecycle.mts';
 import { commitMsgGuards } from '../husky/commit-msg-block.mts';
+import { describeForeignHook, describeUnreadableHook } from '../husky/overlay/commit-msg.mts';
 import {
   hasOwnOverlay,
   LOCAL_HOOKS,
@@ -111,6 +112,7 @@ export async function runOverlayDoctor(
   const worktreesOk = printLinkedWorktrees(home, pkgRel, fix);
   printLegacyEslintOverlays(home, pkgRel);
   const judgesWired = printCommitMsgRow(cfg, fix, sync.commitMsg);
+  printSiblingHooksRow(fix, sync.siblings);
   if (judgesWired && !pathOk && !globalHookInstalled())
     console.log(
       `    commit-msg judges run only via \`git ${HEAL_ALIAS_NAME}\` / \`devkit ship\` while husky owns core.hooksPath`,
@@ -229,7 +231,10 @@ export async function runOverlayDoctor(
     );
   }
   // A stale hook is unhealthy (exit 1) so CI/agents notice; --fix having just regenerated it heals this run.
-  const hookCurrent = fix || (!sync.drift && !sync.commitMsg.drift);
+  // An unreadable wrapper stays unhealthy under --fix: only restoring its read permission clears it.
+  const hookCurrent =
+    (fix || (!sync.drift && !sync.commitMsg.drift && !sync.siblings.stale.length)) &&
+    !sync.siblings.unreadable.length;
   return hookOk && pathOk && worktreesOk && agentsOk && hookCurrent ? 0 : 1;
 }
 
@@ -327,4 +332,25 @@ function printCommitMsgRow(
   }
   console.log(`  ✓ .devkit/hooks/commit-msg: ${what} ${state.drift ? 'regenerated' : 'wired'}`);
   return wanted.length > 0;
+}
+
+// A missing or stale pass-through means a repo hook of that name would not run: unhealthy, healed by
+// --fix. A file devkit did not write is only named: --fix must not touch it, so it cannot fail exit.
+function printSiblingHooksRow(
+  fix: boolean,
+  {
+    scriptDir,
+    stale,
+    foreign,
+    unreadable,
+  }: { scriptDir: string; stale: string[]; foreign: string[]; unreadable: string[] },
+) {
+  if (stale.length)
+    console.log(
+      fix
+        ? `  ✓ .devkit/hooks pass-through wrappers refreshed (${stale.join(', ')})`
+        : `  ⚠ .devkit/hooks: ${stale.length} pass-through wrapper(s) missing or stale (${stale.join(', ')}) — a repo hook of those names would not run; run \`devkit doctor --fix\``,
+    );
+  for (const h of foreign) console.log(`  · ${describeForeignHook(h, scriptDir)}`);
+  for (const h of unreadable) console.log(`  ⚠ ${describeUnreadableHook(h)}`);
 }
