@@ -298,10 +298,15 @@ export function reportAdvisories(
   ref?: string | null,
 ): void {
   if (!advisories?.length) return;
-  for (const a of advisories)
-    console.error(`guard-review: ${name} — advisory (non-blocking): ${a}`);
-  if (ref) console.error(`guard-review: ${name} — full reasoning: guard-review transcript ${ref}`);
+  printAdvisories(name, advisories, ref);
   emitAdvisoryResult(`review:${name}`, 'finding', advisories.join(' | '));
+}
+
+/** The screen half of reportAdvisories, for a caller that emits one row across several labels. */
+export function printAdvisories(label: string, advisories: string[], ref?: string | null): void {
+  for (const a of advisories)
+    console.error(`guard-review: ${label} — advisory (non-blocking): ${a}`);
+  if (ref) console.error(`guard-review: ${label} — full reasoning: guard-review transcript ${ref}`);
 }
 
 /** A cached PASS line (`tail` = its provenance), marked and reported when it replays MCP-degraded. */
