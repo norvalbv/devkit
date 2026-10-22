@@ -43,6 +43,7 @@ describe('selection helpers', () => {
       structure: true,
     });
     expect(s.guards).toEqual([
+      'whitespace',
       'size',
       'fanout',
       'dup',

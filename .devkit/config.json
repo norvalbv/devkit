@@ -27,6 +27,7 @@
       "cursor"
     ],
     "guards": [
+      "whitespace",
       "size",
       "fanout",
       "dup",
@@ -41,6 +42,7 @@
   "review": {
     "enabled": true,
     "guards": [
+      "whitespace",
       "size",
       "fanout",
       "dup",

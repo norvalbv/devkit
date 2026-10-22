@@ -111,6 +111,11 @@ which ships **no structure preset**. Set it explicitly: `devkit init --stack rea
   `freeze` to launder it). See the **ratchet** / **baseline** entries in the glossary, and the
   `structure-governance` skill.
 - **size** — you added an `eslint-disable max-lines`; the count may only shrink. Refactor instead.
+- **whitespace** — `git diff --cached --check` found trailing whitespace, a blank line at EOF or a
+  conflict marker on a staged line; the message names `file:line`. Remove it. If the whitespace is
+  intentional (a `.patch` file, markdown hard breaks, CRLF), exempt the path in `.gitattributes`
+  (`-whitespace`, `whitespace=-blank-at-eol`, `whitespace=cr-at-eol`); a marker needs
+  `conflict-marker-size`.
 - **decisions / dup / clone / comments** — see each gate's message; it names the offending file and
   the fix. For `guard-comments`, see the section below.
 
@@ -404,7 +409,7 @@ still perform the scoped merge after `init` or `doctor --fix` refreshed the mana
 
 ## `✗ deterministic gates failed: <names>`
 
-The deterministic gates (structure, fanout, size, dup, clone, anti-slop, comments …) run
+The deterministic gates (whitespace, structure, fanout, size, dup, clone, anti-slop, comments …) run
 all-and-**aggregate**: instead of failing fast on the first, they collect every failure into one report
 naming each (`guard-<id>`). Fix each named gate (see **A pre-commit gate blocked my commit** above) and
 re-commit. To converge without a ship round, stage the paths and run `guard-deterministic` locally.

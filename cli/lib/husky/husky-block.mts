@@ -30,6 +30,7 @@ import {
   LEGACY_ESLINT_OVERLAY_MARKER,
 } from './overlay/eslint-overlay-marker.mts';
 import { shQuote } from '../ship/redact-secrets.mts';
+import { DETERMINISTIC } from '../../../gate-engine/deterministic/registry.mts';
 
 /**
  * A superset of every builder's needs; each reads only its own fields. `biome` keeps owning whether
@@ -64,8 +65,8 @@ __dk_gate_deterministic "$__dk_package_bin_dir/guard-deterministic" --hook "\${D
 # /devkit:deterministic`;
 
 // Guard run order: the deterministic orchestrator first (one aggregated report), AI gates last so
-// a doomed commit never pays for a judge. Explicit lists — never rely on object-key order.
-const DETERMINISTIC_GUARD_IDS = ['size', 'fanout', 'dup', 'clone', 'coverage', 'comments'];
+// a doomed commit never pays for a judge. The orchestrator owns its own order (the registry).
+const DETERMINISTIC_GUARD_IDS = DETERMINISTIC.map((gate) => gate.id);
 const AI_GUARD_IDS = ['decisions', 'review'] as const;
 // ui-evidence runs last: a reminder about the final staged set, which never blocks. It speaks on a
 // plain commit and a ship alike, and `|| true` keeps a missing bin fail-open.
