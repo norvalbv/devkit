@@ -134,6 +134,7 @@ export function loadScopedTargets(dir) {
             continue;
         out.push({
             slug: f.slice(0, -3),
+            date: t.date,
             ruling: t.ruling,
             vision: t.fields['vision-fit'] ?? t.fields.context ?? '',
             scopeGlobs: scope

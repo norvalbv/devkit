@@ -1,6 +1,6 @@
 /** Whether every declared direct dependency has a package.json under node_modules, and which install
  * fixes it when not. Shared by `devkit ship` and `devkit coverage-run`. */
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, matchesGlob, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -10,14 +10,25 @@ const manifestSchema = z.object({
     dependencies: z.record(z.string(), z.unknown()).optional(),
     devDependencies: z.record(z.string(), z.unknown()).optional(),
 });
-const LOCKFILES = [
-    'bun.lock',
-    'bun.lockb',
-    'pnpm-lock.yaml',
-    'yarn.lock',
-    'package-lock.json',
-    'npm-shrinkwrap.json',
+/** Lockfiles in precedence order, each with its frozen install. agents-hooks' resolve_pm mirrors it. */
+const LOCKFILE_LADDER = [
+    ['bun.lock', 'bun install --frozen-lockfile'],
+    ['bun.lockb', 'bun install --frozen-lockfile'],
+    ['pnpm-lock.yaml', 'pnpm install --frozen-lockfile'],
+    ['yarn.lock', 'yarn install --immutable'],
+    ['package-lock.json', 'npm ci'],
+    ['npm-shrinkwrap.json', 'npm ci'],
 ];
+export const LOCKFILES = LOCKFILE_LADDER.map(([lockfile]) => lockfile);
+/** A regular file or a link to one, as bash `[ -f ]` tests it; a stat error reads as absent. */
+function hasLockfile(dir, lockfile) {
+    try {
+        return statSync(join(dir, lockfile)).isFile();
+    }
+    catch {
+        return false;
+    }
+}
 const validPart = (part) => part.length > 0 && part !== '.' && part !== '..' && !part.includes('\\');
 function safePackageParts(name) {
     const parts = name.split('/');
@@ -45,18 +56,10 @@ export function missingDeclaredDependencies(manifestPath, nodeModulesPath) {
         return [];
     return declaredDependencies(readFileSync(manifestPath, 'utf8')).filter((name) => !existsSync(join(nodeModulesPath, ...safePackageParts(name), 'package.json')));
 }
-/** The frozen-lockfile install command for the checkout at `dir` (mirrors gate_dependency_install_remedy). */
+/** The frozen-lockfile install command for the checkout at `dir`. */
 export function dependencyInstallRemedy(dir) {
-    const has = (name) => existsSync(join(dir, name));
-    if (has('bun.lock') || has('bun.lockb'))
-        return 'bun install --frozen-lockfile';
-    if (has('pnpm-lock.yaml'))
-        return 'pnpm install --frozen-lockfile';
-    if (has('yarn.lock'))
-        return 'yarn install --immutable';
-    if (has('package-lock.json') || has('npm-shrinkwrap.json'))
-        return 'npm ci';
-    return "install dependencies with this repo's package manager";
+    const rung = LOCKFILE_LADDER.find(([lockfile]) => hasLockfile(dir, lockfile));
+    return rung?.[1] ?? "install dependencies with this repo's package manager";
 }
 /** One pattern per runtime wording; each captures the specifier, then the importer to end of line. */
 const MISSING_MODULE_PATTERNS = [
@@ -146,7 +149,7 @@ export function installDirFor(missing, root) {
             const declares = installed || declaresPackage(manifest, name);
             const member = declarer && relative(dir, declarer).replaceAll('\\', '/');
             const provides = declares || (member !== null && listsWorkspace(manifest, member));
-            if (provides && LOCKFILES.some((lock) => existsSync(join(dir, lock))))
+            if (provides && LOCKFILES.some((lock) => hasLockfile(dir, lock)))
                 return dir;
             if (declares)
                 declarer ??= dir;
@@ -184,7 +187,7 @@ export function formatMissingRootDependencies(cwd) {
     const shown = missing.slice(0, 10).join(', ') + (missing.length > 10 ? ', …' : '');
     return [
         `⚠️  ${missing.length} declared dependenc${missing.length === 1 ? 'y is' : 'ies are'} not installed: ${shown}`,
-        LOCKFILES.some((lock) => existsSync(join(cwd, lock)))
+        LOCKFILES.some((lock) => hasLockfile(cwd, lock))
             ? `   Test files importing them will fail to load. Run \`${dependencyInstallRemedy(cwd)}\` first.`
             : '   Test files importing them will fail to load. Install them first.',
     ];

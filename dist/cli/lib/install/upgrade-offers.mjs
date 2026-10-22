@@ -21,7 +21,7 @@ import { detectGitRoot } from '../detect-git-root.mjs';
 import { isTracked } from '../git-tracked.mjs';
 import { GUARD_IDS, GUARD_OPTIONS, newBundledGates, unofferedComponents, } from '../components.mjs';
 const interactive = () => Boolean(process.stdout.isTTY && process.stdin.isTTY);
-export async function offerNewGates(recordedDisabled, sel, dryRun, options = {}) {
+export async function offerNewGates(recordedDisabled, sel, dryRun, { initCmd = 'devkit init', ...options } = {}) {
     const disabled = GUARD_IDS.filter((guard) => recordedDisabled?.includes(guard) && !sel.guards.includes(guard));
     console.log('\n3. gates');
     if (!sel.husky) {
@@ -44,7 +44,7 @@ export async function offerNewGates(recordedDisabled, sel, dryRun, options = {})
     if (!(options.interactive ?? interactive())) {
         for (const id of offered) {
             const kind = recommended.includes(id) ? 'recommended' : 'opt-in';
-            console.log(`  • devkit bundles ${id} (${kind}) — not in this repo's guards; enable with 'devkit init --guards …,${id}'`);
+            console.log(`  • devkit bundles ${id} (${kind}) — not in this repo's guards; enable with '${initCmd} --guards …,${id}'`);
         }
         return disabled;
     }
@@ -181,7 +181,7 @@ export async function offerLineGrowth(cwd, sel, dryRun, { canWrite = () => true 
  * pass to applyInit as `undecided` — otherwise step 4's broad refresh records the normalized `false`
  * as a decision nobody made and suppresses the offer permanently.
  */
-export async function offerOptionalComponents(recorded, sel, dryRun, { unavailable = [] } = {}) {
+export async function offerOptionalComponents(recorded, sel, dryRun, { unavailable = [], initCmd = 'devkit init', } = {}) {
     const allUnoffered = unofferedComponents(recorded);
     const unavailableIds = allUnoffered
         .filter((component) => unavailable.includes(component.id))
@@ -207,7 +207,7 @@ export async function offerOptionalComponents(recorded, sel, dryRun, { unavailab
         // Non-TTY: REPORT, never auto-add — the same policy as step 3. Deliberately leaves the keys
         // absent so the repo still gets a real offer the next time someone upgrades interactively.
         for (const c of unoffered)
-            console.log(`  • devkit bundles ${describe(c)} (${c.hint}) — enable with 'devkit init ${c.flag}'`);
+            console.log(`  • devkit bundles ${describe(c)} (${c.hint}) — enable with '${initCmd} ${c.flag}'`);
         return [...ids, ...unavailableIds];
     }
     const picked = await multiselect({

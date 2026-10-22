@@ -9,13 +9,13 @@ import { execFileSync } from 'node:child_process';
 import { commitIndexEnv } from '../ratchets/commit-index.mjs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { ts } from 'ts-morph';
 import { resolveGuardConfig, sourceMatchers } from '../config.mjs';
 import { gitPrefix } from '../ratchets/git-index.mjs';
 import { anchorContext, anchorFor, changedTextLineCount, emptyInventory, hunkIntersects, hunkTouches, recordParagraph, textLineCount, } from './inventory.mjs';
 import { commentTouchLines, parsePatchHunks } from './patch.mjs';
 import { loadCommentPolicy } from './policy.mjs';
 import { refFindings } from './refs.mjs';
+import { scanCommentTokens } from './scan.mjs';
 export { parsePatchHunks } from './patch.mjs';
 export const COMMENT_ADAPTER_VERSION = 'typescript-scanner-v2';
 export const COMMENT_FINDING_POLICY = 'changed-comment-paragraph-v6';
@@ -27,7 +27,6 @@ const TRAILING_SLASH = /\/$/;
 const TRAILING_CARRIAGE_RETURN = /\r$/;
 const TRAILING_BLANKS = /[ \t\r]+$/;
 const LEADING_BLANKS = /^[ \t]+/;
-const TRAILING_STRUCTURAL_PUNCTUATION = /^(?:[)\]};,.:]+|<\/(?:[A-Za-z][\w:.-]*|)>)+$/;
 const LINE_COMMENT_PREFIX = /^\s*\/\/[/!]?[ \t]?/;
 const BLOCK_COMMENT_PREFIX = /^\s*\/\*+!?[ \t]?/;
 const BLOCK_COMMENT_SUFFIX = /[ \t]*\*\/[ \t]*$/;
@@ -59,14 +58,15 @@ function stagedPaths(cwd, ref) {
         args.push(ref);
     return new Set(splitNul(git(cwd, args)));
 }
-/** Staged renames keyed by new path, so a moved file is diffed against its pre-move blob. */
+/** Staged renames keyed by cwd-relative new path. `--relative` would drop a source outside the cwd
+ * before git pairs it, so pairing runs repo-wide and `from` comes back cwd-relative (maybe `../`). */
 function stagedRenames(cwd, ref) {
     const args = [
         'diff',
         '--cached',
         '--name-status',
         '-z',
-        '--relative',
+        '--no-relative',
         '--find-renames',
         '--diff-filter=R',
         '--no-ext-diff',
@@ -74,13 +74,16 @@ function stagedRenames(cwd, ref) {
     if (ref)
         args.push(ref);
     const fields = splitNul(git(cwd, args));
+    const prefix = gitPrefix(cwd);
     const renamed = new Map();
     for (let i = 0; i < fields.length;) {
         const status = fields[i++] ?? '';
         const from = fields[i++];
         const newPath = fields[i++];
-        if (from && newPath)
-            renamed.set(newPath, { from, pure: status === 'R100' });
+        if (!from || !newPath?.startsWith(prefix))
+            continue;
+        const entry = { from: path.posix.relative(prefix, from), pure: status === 'R100' };
+        renamed.set(newPath.slice(prefix.length), entry);
     }
     return renamed;
 }
@@ -108,79 +111,13 @@ function patch(cwd, file, ref, from) {
         '--no-ext-diff',
         '--find-renames',
         '--unified=4',
-        '--relative',
+        '--no-relative',
         '--diff-filter=ACMR',
     ];
     if (ref)
         args.push(ref);
     args.push('--', ...(from ? [from, file] : [file]));
     return git(cwd, args);
-}
-function lineStarts(source) {
-    const starts = [0];
-    for (let i = 0; i < source.length; i++)
-        if (source.charCodeAt(i) === 10)
-            starts.push(i + 1);
-    return starts;
-}
-function lineAt(starts, position) {
-    let low = 0;
-    let high = starts.length;
-    while (low + 1 < high) {
-        const mid = (low + high) >>> 1;
-        if ((starts[mid] ?? 0) <= position)
-            low = mid;
-        else
-            high = mid;
-    }
-    return low + 1;
-}
-export function scanCommentTokens(source, extension) {
-    const scriptKind = extension === 'jsx'
-        ? ts.ScriptKind.JSX
-        : extension === 'tsx'
-            ? ts.ScriptKind.TSX
-            : extension === 'js' || extension === 'mjs' || extension === 'cjs'
-                ? ts.ScriptKind.JS
-                : ts.ScriptKind.TS;
-    const sourceFile = ts.createSourceFile(`staged.${extension}`, source, ts.ScriptTarget.Latest, true, scriptKind);
-    const starts = lineStarts(source);
-    const ranges = new Map();
-    const collect = (items) => {
-        for (const item of items ?? [])
-            ranges.set(`${item.pos}:${item.end}`, item);
-    };
-    // Closed JSX text is not trivia; text an unclosed tag swallows to EOF is still scanned.
-    const jsxText = [];
-    const visit = (node) => {
-        if (ts.isJsxText(node) && node.parent.end > node.end)
-            jsxText.push([node.pos, node.end]);
-        collect(ts.getLeadingCommentRanges(source, node.getFullStart()));
-        collect(ts.getTrailingCommentRanges(source, node.end));
-        for (const child of node.getChildren(sourceFile))
-            visit(child);
-    };
-    visit(sourceFile);
-    return [...ranges.values()]
-        .filter((range) => !jsxText.some(([pos, end]) => range.pos >= pos && range.pos < end))
-        .sort((left, right) => left.pos - right.pos)
-        .map((range) => {
-        const start = range.pos;
-        const end = range.end;
-        const kind = range.kind === ts.SyntaxKind.SingleLineCommentTrivia ? 'line' : 'block';
-        const startLine = lineAt(starts, start);
-        const endLine = lineAt(starts, Math.max(start, end - 1));
-        const before = source.slice(starts[startLine - 1], start).trim();
-        const after = source.slice(end, starts[endLine] ?? source.length).trim();
-        const clearAfter = after.length === 0 || TRAILING_STRUCTURAL_PUNCTUATION.test(after);
-        return {
-            kind,
-            startLine,
-            endLine,
-            text: source.slice(start, end),
-            standalone: clearAfter && (before.length === 0 || (kind === 'block' && startLine < endLine)),
-        };
-    });
 }
 function stagedBlob(cwd, file) {
     const repoPath = `${gitPrefix(cwd)}${file}`;
@@ -195,7 +132,7 @@ function commentFragmentsAt(cwd, file, ref) {
         return fragments;
     let source;
     try {
-        source = git(cwd, ['show', `${ref}:${gitPrefix(cwd)}${file}`]);
+        source = git(cwd, ['show', `${ref}:./${file}`]);
     }
     catch {
         return fragments;

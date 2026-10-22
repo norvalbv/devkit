@@ -16,8 +16,9 @@ Usage:
 The overlay pre-commit hook runs this from a linked worktree whose projection has a gap, passing the
 checkout that holds its own hook. It links the shared gate inputs and copies the branch-local ones
 (lint overlay, ratchet baselines), exactly as devkit doctor --fix does. It exits 1 when a gap stays
-open, which blocks the commit. The home itself, and a checkout with its own overlay, are left as they
-are.`,
+open, which blocks the commit. The home itself is left as it is. A worktree holding a copy of the
+home's .devkit (its own config.json) is never projected into: it is named, with the remedy, and the
+commit is blocked.`,
 };
 export default function run(args, cwd) {
     const { values } = parseArgs({

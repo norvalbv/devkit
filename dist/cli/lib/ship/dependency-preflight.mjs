@@ -8,13 +8,18 @@
  *
  * Usage: dependency-preflight.mjs <package.json> <node_modules>
  * Missing packages are emitted one per line and exit 1. An unreadable/unsafe manifest exits 2.
+ * `dependency-preflight.mjs --remedy <dir>` prints the frozen install command for `dir` and exits 0.
  */
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { missingDeclaredDependencies } from '../../../gate-engine/coverage/dependencies.mjs';
+import { dependencyInstallRemedy, missingDeclaredDependencies, } from '../../../gate-engine/coverage/dependencies.mjs';
 function run(args) {
     if (args.length !== 2) {
-        throw new Error('usage: dependency-preflight <package.json> <node_modules>');
+        throw new Error('usage: dependency-preflight <package.json> <node_modules> | --remedy <dir>');
+    }
+    if (args[0] === '--remedy') {
+        process.stdout.write(`${dependencyInstallRemedy(args[1])}\n`);
+        return 0;
     }
     const [manifestPath, nodeModulesPath] = args;
     const missing = missingDeclaredDependencies(manifestPath, nodeModulesPath);

@@ -3,7 +3,7 @@
  * `--project` prints nothing: it projects that overlay into a borrowing `<root>`, exit 1 on a gap. */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { shipOverlayRoot } from './overlay-home.mjs';
+import { shipOverlayRoot } from './copied-overlay.mjs';
 import { projectBorrowedOverlay } from './projection-report.mjs';
 const [root = process.cwd(), mode] = process.argv.slice(2);
 // SAFETY: init records pkgRel ('' for a root install); shipOverlayRoot already parsed this file.

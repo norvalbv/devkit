@@ -145,6 +145,7 @@ function envelope(cwd, baseRef, candidateTree) {
     return {
         layout: repo,
         baseTree,
+        baseOid: resolveRef(repo.root, baseRef),
         candidateTree,
         changes,
         base: baselineAtTree(repo, baseTree),
@@ -329,6 +330,7 @@ export function withStagedAntiSlopSnapshot(cwd, action, { overlay = false, baseR
             skipped,
             base: evidence.base,
             baseTree: evidence.baseTree,
+            baseOid: evidence.baseOid,
             baseCheckoutCwd: cwd,
             introducedPaths: evidence.introducedPaths,
             activatedRuleIds: evidence.activatedRuleIds,

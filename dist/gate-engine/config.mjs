@@ -288,6 +288,7 @@ function resolveLoadedGuardConfig(file, cwd) {
         research: { referenceCheckouts: globs(file.research?.referenceCheckouts) },
         uiEvidence: { paths: globs(file.uiEvidence?.paths) },
         extraGates: file.extraGates,
+        structureRaw: file.structure,
         noLog: noLogEnv ?? Boolean(file.noLog ?? DEFAULTS.noLog),
         noLlm: noLlmEnv ?? Boolean(file.noLlm ?? DEFAULTS.noLlm),
         // Echo the resolution base so engines never have to re-derive it (and never reach

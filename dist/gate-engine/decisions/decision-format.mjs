@@ -8,7 +8,7 @@ const INDEX_HEADER = '# Decision Index\n\n' +
 const INDEX_SEPARATOR_RE = /^\|[\s:|-]+\|$/;
 const INDEX_SLUG_RE = /^\[([^\]]+)\]/;
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
-const TARGET_HEAD_RE = /^## Target · /;
+const TARGET_HEAD_RE = /^## Target · (\d{4}-\d{2}-\d{2})?/;
 // Leading indentation is TOLERATED, not merely allowed. renderTarget writes Vision-fit onward with
 // no blank line after the last Consequences bullet, so CommonMark folds those lines into that list
 // item as a lazy continuation — and any markdown formatter that round-trips the AST (prettier,
@@ -237,6 +237,7 @@ export function currentTarget(body) {
     }
     const fields = parseTargetFields(blockLines.join('\n'));
     return {
+        date: TARGET_HEAD_RE.exec(last)?.[1] ?? '',
         ruling: fields.ruling ?? '',
         scope: fields.scope ?? '',
         fields,

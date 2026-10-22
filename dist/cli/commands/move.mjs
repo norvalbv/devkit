@@ -8,8 +8,9 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSy
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { STRUCTURE_BASELINE_DIR } from '../../gate-engine/ratchets/baseline-paths.mjs';
 import { resolveBaselineRoots } from '../lib/generate/generate-structure-baseline.mjs';
-import { assertMovedSource, moveTrackedWithGit, moveUntrackedWithGit, trackedPathState, } from '../lib/git-tracked.mjs';
+import { assertMovedSource, hasFilesystemLeaf, moveTrackedWithGit, moveUntrackedWithGit, trackedPathState, } from '../lib/git-tracked.mjs';
 import { readProjectConfig } from '../lib/move/config.mjs';
+import { findNestedDangling, lstatOrNull, nestedRepoOf } from '../lib/move/nested-boundary.mjs';
 import { rewriteFile } from '../lib/move/write.mjs';
 import { findDangling, mapPath as mapPathTo, unmapPath, moveContext, rewriteSource, SOURCE_EXT_RE, } from '../lib/move/rewrite-plan.mjs';
 import { reviewPathWithin } from '../lib/ship/review/runtime-paths.mjs';
@@ -21,18 +22,6 @@ const toPosix = (p) => p.replaceAll('\\', '/');
 function testSiblings(fileAbs) {
     const base = stripExt(fileAbs);
     return TEST_SUFFIXES.map((suffix) => ({ path: base + suffix, suffix })).filter((s) => existsSync(s.path));
-}
-function lstatOrNull(path) {
-    try {
-        return lstatSync(path);
-    }
-    catch (error) {
-        if (error instanceof Error &&
-            'code' in error &&
-            (error.code === 'ENOENT' || error.code === 'ENOTDIR'))
-            return null;
-        throw error;
-    }
 }
 function nearestExistingAncestor(path) {
     let cursor = path;
@@ -60,15 +49,8 @@ function mapDirectoryLeaves(oldDir, newDir, addMove) {
     }
 }
 function shouldRewriteSourceFile(fileAbs, worktreeRoot, gitDir) {
-    let parent = dirname(fileAbs);
-    while (parent !== worktreeRoot) {
-        if (lstatOrNull(join(parent, '.git')))
-            return false;
-        const next = dirname(parent);
-        if (next === parent)
-            return false;
-        parent = next;
-    }
+    if (nestedRepoOf(fileAbs, worktreeRoot))
+        return false;
     const stat = lstatOrNull(fileAbs);
     if (!stat || stat.isSymbolicLink())
         return false;
@@ -105,7 +87,7 @@ function pruneBaselines(cwd, oldRelPaths, dryRun) {
     }
     return removed;
 }
-const USAGE = 'usage: devkit move <src...> <dest> [--rename] [--dry-run] [--no-baseline] [--alias=@/=src/renderer]';
+const USAGE = 'usage: devkit move <src...> <dest> [--rename] [--dry-run] [--no-baseline] [--allow-nested-dangling] [--alias=@/=src/renderer]';
 export const meta = {
     name: 'move',
     agentFacing: true,
@@ -124,9 +106,12 @@ except that an alias is never written from outside its root, so it never emits @
 Colocated *.test / *.spec siblings follow their file. Every rewritten specifier is re-resolved
 after the move, exiting 1 naming any that dangle. Prunes moved entries from .devkit/baselines/
 structure (no regen). Tracked sources keep history via git mv; untracked need no first commit.
+A nested repository is never edited: a move into or out of one is refused, and so is a move that
+would leave one of its specifiers dangling, naming each with the spelling it needs.
   --rename         Rename a single directory source to <dest>.
   --dry-run        Preview the moves and the rewrite count only.
   --no-baseline    Skip the baseline prune.
+  --allow-nested-dangling  Move anyway, leaving the named nested-repository specifiers dangling.
   --alias=@/=DIR   Add a path alias mapping tsconfig does not declare.`,
 };
 export default async function move(args, cwd) {
@@ -189,6 +174,9 @@ export default async function move(args, cwd) {
             reviewPathWithin(gitDir, canonicalParent) ||
             (canonicalSource != null && reviewPathWithin(gitDir, canonicalSource)))
             throw new Error(`source is Git worktree metadata: ${relative(cwd, oldAbs)}`);
+        const sourceRepo = nestedRepoOf(oldAbs, worktreeRoot);
+        if (sourceRepo)
+            throw new Error(`source is inside nested repository ${relative(cwd, sourceRepo)}: ${relative(cwd, oldAbs)}`);
         const oldGitRel = toPosix(relative(worktreeRoot, oldAbs));
         const trackedAtPreflight = trackedPaths.contains(oldGitRel);
         const sourceIdentity = {
@@ -226,6 +214,11 @@ export default async function move(args, cwd) {
         if (physicalTargets.has(m.newAbs))
             return fail(`duplicate destination: ${relative(cwd, m.newAbs)}`);
         physicalTargets.add(m.newAbs);
+        if (!m.trackedAtPreflight &&
+            m.sourceIdentity.isDirectory &&
+            !m.sourceIdentity.isSymbolicLink &&
+            !hasFilesystemLeaf(m.oldAbs))
+            return fail(`source is an empty directory with no imports to rewrite; drop it from this move and use mv: ${relative(cwd, m.oldAbs)}`);
         if (lstatOrNull(m.newAbs))
             return fail(`destination already exists: ${relative(cwd, m.newAbs)}`);
         if (trackedPaths.conflictsTarget(toPosix(relative(worktreeRoot, m.newAbs))))
@@ -237,6 +230,9 @@ export default async function move(args, cwd) {
             return fail(`destination resolves outside the Git worktree: ${relative(cwd, m.newAbs)}`);
         if (targetAncestor.canonical !== targetAncestor.lexical)
             return fail(`destination traverses a symlinked directory: ${relative(cwd, m.newAbs)}`);
+        const destRepo = nestedRepoOf(m.newAbs, worktreeRoot);
+        if (destRepo)
+            return fail(`destination is inside nested repository ${relative(cwd, destRepo)}: ${relative(cwd, m.newAbs)}`);
         if (reviewPathWithin(m.oldAbs, m.newAbs))
             return fail(`destination cannot be inside source: ${relative(cwd, m.newAbs)} is inside ${relative(cwd, m.oldAbs)}`);
     }
@@ -305,6 +301,17 @@ export default async function move(args, cwd) {
             console.error(`⚠ ${unresolved} relative specifier(s) in moved files did not resolve before the move and were left unchanged`);
         return { checks, rewrites, optionsByDisk };
     };
+    const nested = findNestedDangling([...new Set(planFiles)], worktreeRoot, config.scopeOf, pathMoves, movedSources);
+    if (nested.length) {
+        const allow = flags.has('--allow-nested-dangling');
+        console.error(`${allow ? '⚠' : '✗'} ${nested.length} specifier(s) in nested repositories will not resolve after the move; devkit move never edits a nested repository:`);
+        for (const d of nested)
+            console.error(`  ${relative(cwd, d.file)}: '${d.spec}' → '${d.suggestion}' (nested repository ${relative(cwd, d.repo)})`);
+        if (!allow) {
+            console.error('  re-run with --allow-nested-dangling to move anyway, then update each in its own repository');
+            return 1;
+        }
+    }
     const prefix = dryRun ? '[dry] ' : '';
     for (const m of physicalMoves)
         console.log(`${prefix}mv ${relative(cwd, m.oldAbs)} → ${relative(cwd, m.newAbs)}`);

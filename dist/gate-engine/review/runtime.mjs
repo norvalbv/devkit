@@ -22,7 +22,11 @@ export const UNATTRIBUTABLE_IDENTITY_SALT = 'devkit:unattributable-v1';
 /** Entrypoint selected by the generated hook from a frozen review package runtime. */
 export const PACKAGED_REVIEW_RUNTIME_ENTRYPOINT = 'gate-engine/review/baseline-gate';
 /** Entrypoint plus every package-local module it imports, without source/build extensions. */
-export const PACKAGED_REVIEW_RUNTIME_MODULE_STEMS = Object.freeze(['gate-engine/review/baseline-fallow-paths', PACKAGED_REVIEW_RUNTIME_ENTRYPOINT].sort());
+export const PACKAGED_REVIEW_RUNTIME_MODULE_STEMS = Object.freeze([
+    'gate-engine/review/baseline/base-resolve-hook',
+    'gate-engine/review/baseline-fallow-paths',
+    PACKAGED_REVIEW_RUNTIME_ENTRYPOINT,
+].sort());
 function reviewerAssetPaths(reviewer) {
     const paths = [`agents/${reviewer.name}.md`];
     if (hasChecklist(reviewer)) {

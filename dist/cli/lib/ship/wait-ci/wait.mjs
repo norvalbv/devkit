@@ -325,7 +325,8 @@ async function main(argv) {
         result.attribution = await attribute(pr, result.failures);
     console.error(verdictLine(result, pr));
     recordCiEvent(result, pr);
-    return 0; // the ship already succeeded; this process never speaks for it
+    // Without --strict the ship already succeeded and this process never speaks for it.
+    return argv.includes('--strict') && result.outcome !== 'passed' ? 5 : 0;
 }
 // Run only as a CLI entrypoint — a test importing waitForChecks must not exit. Realpath argv[1] so
 // the guard also fires through a symlink, matching reconcile-manifest-write.mts.

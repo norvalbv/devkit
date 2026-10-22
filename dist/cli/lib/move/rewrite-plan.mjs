@@ -119,7 +119,7 @@ function viewHost(files, disk) {
         },
     };
 }
-function resolveWith(spec, file, options, host) {
+export function resolveWith(spec, file, options, host) {
     const hit = ts.resolveModuleName(spec, file, options, host).resolvedModule;
     return hit && !hit.isExternalLibraryImport ? hit.resolvedFileName : null;
 }

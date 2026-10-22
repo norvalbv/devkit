@@ -1,6 +1,7 @@
 /** The one projection repair and its report, shared by doctor, the overlay pre-commit (devkit
  * sync-worktree) and devkit review and ship. Rationale: docs/decisions/overlay-self-heal.md. */
 import { sameDir } from '../../doctor/hooks-path.mjs';
+import { copiedFrom, copiedOverlayRow } from './copied-overlay.mjs';
 import { ownsOverlayConfig, projectionGaps, repairProjection } from './overlay-home.mjs';
 const MAX_LISTED = 5;
 export const listed = (paths) => paths.length > MAX_LISTED
@@ -26,10 +27,14 @@ export function printProjectionGaps(path, home, pkgRel, fix) {
         return false;
     }
 }
-/** Project `home`'s overlay into the checkout `wt` that borrows it; false while a gap stays open. The
- * home itself, and a checkout with its own overlay config, are left as they are. */
+/** Project `home`'s overlay into the checkout `wt` that borrows it; false while a gap stays open, or
+ * when `wt` holds a copy of the overlay. The home itself, and an owner of its own config, are left. */
 export function projectBorrowedOverlay(wt, home, pkgRel) {
-    return (sameDir(home, wt) ||
-        ownsOverlayConfig(wt, pkgRel) ||
-        printProjectionGaps(wt, home, pkgRel, true));
+    if (sameDir(home, wt))
+        return true;
+    if (copiedFrom(wt, pkgRel)) {
+        console.log(copiedOverlayRow(wt, pkgRel));
+        return false;
+    }
+    return ownsOverlayConfig(wt, pkgRel) || printProjectionGaps(wt, home, pkgRel, true);
 }

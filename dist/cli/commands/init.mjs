@@ -781,8 +781,9 @@ async function run(args, cwd) {
     if (!flags.dryRun)
         assertRunsFromSource(cwd, 'init');
     const detectedStack = flags.stack ?? detectStack(cwd);
-    // Mode: --overlay / --standalone seed it; the wizard asks (so the interactive flow exposes it).
-    const detectedMode = flags.overlay ? 'overlay' : flags.standalone ? 'standalone' : 'package';
+    const recorded = readJson(join(cwd, '.devkit', 'config.json'));
+    // Mode: --overlay / --standalone, else a recorded overlay, seed it; the wizard asks.
+    const detectedMode = initFlags.initMode(flags, recorded);
     const interactive = !flags.yes && process.stdout.isTTY && !flags.dryRun;
     let stack = detectedStack;
     let selection;
@@ -812,7 +813,6 @@ async function run(args, cwd) {
     const selfHost = isDevkitRepo(cwd);
     if (selfHost) {
         mode = 'self-host';
-        const recorded = readJson(join(cwd, '.devkit', 'config.json'));
         selection = selfHostSelection(recorded?.components);
         disabledGuards = recorded?.components?.disabledGuards;
     }
@@ -823,8 +823,7 @@ async function run(args, cwd) {
             detectedMode,
             structureAvailable: STRUCTURE_STACKS.has(detectedStack),
             installed,
-            existingReview: readJson(join(cwd, '.devkit', 'config.json'))
-                ?.review,
+            existingReview: recorded?.review,
         });
         if (!result)
             return 0; // cancelled — nothing written
@@ -837,6 +836,7 @@ async function run(args, cwd) {
     else {
         ({ selection, disabledGuards, undecided } = initFlags.resolveFlagSelection(cwd, args, flags));
     }
+    initFlags.assertKeepsRecordedOverlay(recorded, mode);
     if (mode === 'overlay')
         selection = applyOverlayConstraints(selection, stack);
     if (!selfHost && !interactive) {

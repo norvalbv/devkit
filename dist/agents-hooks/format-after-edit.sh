@@ -58,8 +58,8 @@ fi
 # oxfmt, dprint — that silently rewrites every edited file into a style the repo's real format gate
 # then rejects, turning one small edit into a whole-file diff.
 if [[ "$file_path" =~ \.(ts|tsx|js|jsx|json|jsonc)$ ]] && { [ -f "biome.json" ] || [ -f "biome.jsonc" ]; }; then
-  if command -v bun &>/dev/null && [ -f "package.json" ] && [ -x "./node_modules/.bin/biome" ]; then
-    bun run biome check --write "$file_path" 2>/dev/null || true
+  if [ -f "package.json" ] && [ -x "./node_modules/.bin/biome" ]; then
+    "./node_modules/.bin/biome" check --write "$file_path" >/dev/null 2>&1 || true
   fi
 fi
 

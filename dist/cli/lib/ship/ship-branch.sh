@@ -109,6 +109,7 @@ DRAFT=0            # --draft opens the PR as a draft; default stays ready-for-re
 NO_STACK=0         # --no-stack skips registering the PR in its base PR's GitHub stack
 RESUME_READY=0     # --ready seen under --resume, before the record reveals ship-vs-reship mode
 WAIT_CI=0          # --wait-ci polls the PR's checks after everything else is durable
+WAIT_CI_STRICT=0   # --wait-ci-strict: exit 5 unless the verdict is passed
 WAIT_CI_TIMEOUT=900
 WAIT_CI_TIMEOUT_SET=0
 while [ "$#" -gt 0 ]; do
@@ -121,7 +122,7 @@ while [ "$#" -gt 0 ]; do
     --link)
       [ "$RESUME" -eq 0 ] || { echo "--resume replays the recorded invocation — to change --link, run the full devkit ship command (it re-records)" >&2; exit 1; }
       LINK_EXTRA+=("${2:?--link requires a directory}"); shift 2 ;;
-    --body) BODY_FLAG="${2:?--body requires text}"; BODY_SET=1; shift 2 ;;
+    --body) BODY_FLAG="${2?--body requires text}"; BODY_SET=1; shift 2 ;;
     --body-file) BODY_FILE_FLAG="${2:?--body-file requires a path}"; BODY_FILE_SET=1; shift 2 ;;
     --dry-gates)
       [ "$RESUME" -eq 0 ] || { echo "--dry-gates cannot be combined with --resume" >&2; exit 1; }
@@ -152,6 +153,7 @@ while [ "$#" -gt 0 ]; do
       # No --resume guard, unlike --base/--link: neither changes WHAT ships. Neither is recorded, so
       # a resume that wants the wait re-passes the flags (decision record).
       if [ "$1" = --wait-ci ]; then WAIT_CI=1; else WAIT_CI_REQUIRED=1; fi; shift ;;
+    --wait-ci-strict) WAIT_CI_STRICT=1; shift ;;
     --wait-ci-timeout)
       WAIT_CI_TIMEOUT="${2:?--wait-ci-timeout requires seconds}"; WAIT_CI_TIMEOUT_SET=1; shift 2 ;;
     --resume) echo "--resume must come FIRST: devkit ship --resume <branch> [--] <extra-path...>" >&2; exit 1 ;;
@@ -1058,7 +1060,7 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
     # already match, or an operator who changed BOTH would be pointed at the wrong half.
     RECOVERY_BODY=$(git log -1 --format=%b "$RECOVERY_COMMIT" 2>/dev/null || true)
     RECOVERY_SUBJECT=$(git log -1 --format=%s "$RECOVERY_COMMIT" 2>/dev/null || true)
-    if [ -z "$BODY" ] && [ -n "$RECOVERY_BODY" ] && [ "$RECOVERY_SUBJECT" = "$TITLE" ]; then
+    if [ "$BODY_SET" -eq 0 ] && [ "$BODY_FILE_SET" -eq 0 ] && [ -z "$BODY" ] && [ -n "$RECOVERY_BODY" ] && [ "$RECOVERY_SUBJECT" = "$TITLE" ]; then
       RECOVERY_REASON="this run supplied no PR body, but its commit has one"
       RECOVERY_HINTS+=("re-supply it with --body \"<text>\" — this run's stdin was empty, and an empty stdin is a valid empty body")
     fi
@@ -1552,7 +1554,7 @@ if [ -n "${SHIP_DRY_RUN:-}" ]; then
   echo "DRY: committed locally on $BR, skipped push + PR." >&2
   git -C "$WT" show --stat --oneline HEAD >&2
   [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" dry-run-opened-no-pr
-  exit 0
+  exit "$WAIT_CI_STATUS"
 fi
 
 # sc-1508: hand the pre-push hook the EXACT commit this ship built, so it can skip its
@@ -1731,3 +1733,4 @@ git worktree remove --force "$WT" 2>/dev/null || true
 # --wait-ci runs LAST: the push, PR, manifest, intent release and worktree/branch cleanup above are
 # all durable, so a wait that is killed, times out or reports red cannot cost this ship.
 [ "$WAIT_CI" -eq 0 ] || ship_run_wait_ci "$PR_NUM" "$REPO" "$WAIT_CI_TIMEOUT" "$PR_URL" "${WAIT_CI_REQUIRED:-0}"
+exit "$WAIT_CI_STATUS"

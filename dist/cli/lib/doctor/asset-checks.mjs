@@ -250,11 +250,13 @@ export function checkRegistrations(cwd, hookComponents, targets, overlay = false
         return check('hook registrations', 'DRIFT', error instanceof Error ? error.message : String(error), 'inspect or remove the invalid hook ownership ledger, then run `devkit init`', false);
     }
     const { ok, missing, advisories } = result;
+    // `; ` because an advisory carries a raw hook command, which can contain commas.
+    const advice = advisories.join('; ');
     if (ok && advisories.length)
-        return check('hook registrations', 'DRIFT', `retired hook in a committed file: ${advisories.join(', ')}`, 'remove the fallow-gate.sh hook from that file (overlay never edits a committed file)', false, true);
+        return check('hook registrations', 'DRIFT', `fallow-gate.sh hooks devkit will not remove: ${advice}`, 'delete them from the named files by hand: devkit never edits a committed file or removes an unrecognised spelling', false, true);
     if (ok)
         return check('hook registrations', 'OK', `${hookComponents.join(', ')} registered`);
-    return check('hook registrations', 'DRIFT', `${missing.length} provider registration issue(s): ${missing.join(', ')}`, 'run `devkit init` to re-register', true);
+    return check('hook registrations', 'DRIFT', `${missing.length} provider registration issue(s): ${missing.join(', ')}${advice ? `; also: ${advice}` : ''}`, 'run `devkit init` to re-register', true);
 }
 /** Resolve on disk the target of every hook command devkit REGISTERS, from `scriptRel` data rather
  * than shell text. The check this replaces went through packageDir(), already inside dist/. */
