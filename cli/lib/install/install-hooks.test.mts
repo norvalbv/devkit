@@ -1146,3 +1146,67 @@ describe('removal report', () => {
     for (const line of removals()) expect(line).toMatch(/\(uninstalled: agentHooks\)$/);
   });
 });
+
+const readRel = (root, rel) => readFileSync(join(root, rel), 'utf8');
+function gitRoot() {
+  const root = tmpRepo();
+  execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
+  return root;
+}
+
+describe('Claude install-scope switch', () => {
+  const overlay = { targets: ['claude'], overlay: true };
+  const SHARED = '.claude/settings.json';
+  const LOCAL = '.claude/settings.local.json';
+
+  it('a component deselected after shared → overlay leaves neither settings file', () => {
+    const root = gitRoot();
+    installHookRegistrations(root, ['decisions', 'searchSteering'], { targets: ['claude'] });
+    installHookRegistrations(root, ['decisions', 'searchSteering'], overlay);
+    installHookRegistrations(root, ['searchSteering'], overlay);
+
+    expect(readRel(root, SHARED)).not.toContain('decision-');
+    expect(readRel(root, SHARED)).not.toContain('search-tool');
+    expect(readRel(root, LOCAL)).not.toContain('decision-');
+    expect(new Set(ledger(root).entries.map((e) => e.destinationRel))).toEqual(new Set([LOCAL]));
+  });
+
+  it('strips a superseded spelling left in the old file', () => {
+    const root = gitRoot();
+    installHookRegistrations(root, ['searchSteering'], { targets: ['claude'] });
+    const downgrade = (text) => text.replaceAll('/dist/gate-engine/', '/gate-engine/');
+    writeFileSync(join(root, SHARED), downgrade(readRel(root, SHARED)));
+    writeFileSync(ledgerPath(root), downgrade(readFileSync(ledgerPath(root), 'utf8')));
+
+    installHookRegistrations(root, ['searchSteering'], overlay);
+
+    expect(readRel(root, SHARED)).not.toContain('gate-engine/search-tool');
+    expect(readRel(root, LOCAL)).toContain('/dist/gate-engine/search-tool/search-tool-guard.mjs');
+    expect(new Set(ledger(root).entries.map((e) => e.destinationRel))).toEqual(new Set([LOCAL]));
+  });
+
+  it('a collision in the new file throws before the old file loses its hooks', () => {
+    const root = gitRoot();
+    installHookRegistrations(root, ['searchSteering'], { targets: ['claude'] });
+    writeFileSync(join(root, LOCAL), readRel(root, SHARED)); // the user's own, unledgered copy
+    const before = readRel(root, SHARED);
+    const stored = readFileSync(ledgerPath(root), 'utf8');
+
+    expect(() => installHookRegistrations(root, ['searchSteering'], overlay)).toThrow(
+      /hook registration conflicts require resolution/,
+    );
+    expect(readRel(root, SHARED)).toBe(before);
+    expect(readFileSync(ledgerPath(root), 'utf8')).toBe(stored);
+  });
+
+  // codex and cursor write one file in both scopes, so the other-scope pass must leave it alone.
+  it.each(['codex', 'cursor'])('%s keeps its hooks across a scope switch', (provider) => {
+    const root = gitRoot();
+    installHookRegistrations(root, ['searchSteering'], { targets: [provider] });
+    installHookRegistrations(root, ['searchSteering'], { targets: [provider], overlay: true });
+
+    expect(readRel(root, `.${provider}/hooks.json`)).toContain('search-tool-guard');
+    const opts = { targets: [provider], overlay: true };
+    expect(checkHookRegistrations(root, ['searchSteering'], opts).ok).toBe(true);
+  });
+});
