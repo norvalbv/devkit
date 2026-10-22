@@ -59,3 +59,21 @@ describe('the frontend reviewer briefs', () => {
     expect(brief).toContain('Never skip `generate`');
   });
 });
+
+// The gate's backend scope is wider than the raw config: review mode falls back to scanRoots, and a
+// commit that edits backendRoots also keeps the HEAD config's roots. A judge must take the gate's list.
+describe('the backend reviewer briefs', () => {
+  const names = REVIEWERS.filter((r) => r.domain === 'backend').map((r) => r.name);
+
+  it('covers every shipped backend brief, so a renamed domain cannot empty the table', () => {
+    expect(names).toEqual(['api-security-reviewer', 'backend-performance-reviewer']);
+  });
+
+  it.each(names)('%s takes scope from the gate instead of guard.config.json', (name) => {
+    const brief = readFileSync(join(ROOT, 'agents', `${name}.md`), 'utf8');
+    expect(brief).not.toContain('Defaults to `["src"]`');
+    expect(brief).not.toContain('exit early');
+    expect(brief).toContain('Do not re-derive scope');
+    expect(brief).toContain('Never skip `generate`');
+  });
+});

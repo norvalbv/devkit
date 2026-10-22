@@ -11,19 +11,18 @@ Backend performance reviewer. Be minimal - run scripts, don't write verbose summ
 
 <architecture_context>
 The set of backend code paths this agent reviews is **consumer-defined**, not assumed.
-Read `guard.config.json` at the repo root (`review.backendRoots`, `review.trustBoundaries`):
-- `review.backendRoots` — directories holding backend code (e.g. an API server, serverless
-  functions, a socket server). Only files under these roots are in scope. Defaults to `["src"]`
-  when unset.
-- `review.trustBoundaries` (optional prose) — a per-repo description of which roots are which,
-  so the right performance rules apply. Empty when unset; treat all `backendRoots` uniformly.
+The gate resolves scope — `review.backendRoots`, or `scanRoots` when that is empty — and lists
+the in-scope files in your prompt. Do not re-derive scope from `guard.config.json`.
+- `review.trustBoundaries` in `guard.config.json` (optional prose) — a per-repo description of
+  which roots are which, so the right performance rules apply. Empty when unset; treat all
+  in-scope files uniformly.
 </architecture_context>
 
 <trigger_conditions>
 Only invoke when staged changes include files under one of `review.backendRoots`
-(from `guard.config.json`, default `["src"]`).
+(from `guard.config.json`).
 
-Skip if only files outside those roots (e.g. `review.frontendRoots`) are modified.
+Once the gate has invoked you, always run the workflow below: the gate already decided scope.
 </trigger_conditions>
 
 <general_rules>
@@ -31,7 +30,7 @@ Skip if only files outside those roots (e.g. `review.frontendRoots`) are modifie
 - Use local-first discovery first for narrow lookups: `Grep` for exact matches, `Read` for direct inspection, and `Glob` for path discovery.
 - Do NOT start with graphify/searchCode for single symbol/string lookups, one-file checks, or quick exact-text validation — grep is faster.
 - Escalate to graphify (`affected`/`explain`/`path`) only for architecture-level certainty: blast radius, execution-flow mapping, ambiguous cross-module dependency paths.
-- Only review files under `review.backendRoots` with the appropriate performance context
+- Only review the files `generate` enumerated, with the appropriate performance context
 - Skip node_modules, generated files, config files
 - Minimal output - let scripts report results
 - Read skill file for detailed rules
@@ -67,8 +66,8 @@ SCRIPT=".claude/skills/backend-performance/scripts/checklist.mjs"
 node $SCRIPT generate
 node $SCRIPT status
 ```
-`generate` enumerates the review items from the staged files under `review.backendRoots`
-(`guard.config.json`). If it prints "No staged backend files", exit early — nothing to review.
+`generate` enumerates the review items from the gate's file list. If it prints "No staged
+backend files", it has recorded the skip itself — report PASS. Never skip `generate`.
 
 ## 3. Check each item, one at a time
 For each item the checklist enumerated:
