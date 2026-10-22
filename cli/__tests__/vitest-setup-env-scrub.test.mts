@@ -19,6 +19,7 @@ import {
   SENTRY_MODEL_ENVS,
 } from '../../gate-engine/judge/outage/family-override.mts';
 import { meta } from '../commands/ship.mts';
+import { BYPASS_FLAGS, REAIM_FLAGS, SOFTEN_FLAGS } from '../lib/ship/merge-verdict/bypasses.mts';
 import { SLOT_DIR_ENV, SLOT_ENV, SLOT_RELEASE_ENV } from '../lib/ship/queue/enter.mts';
 import {
   BYPASS_ENV,
@@ -83,7 +84,14 @@ const SHIP_ENV = {
   GUARD_DECISIONS_DIR: '/elsewhere/docs/decisions',
   GUARD_STRUCTURE_OK: '1',
   FRINK_HOOK_PARITY_OK: '1',
+  GUARD_MASS_DELETION_OK: '1',
+  GUARD_SHIP_BASE_OK: '1',
+  GUARD_SHIP_REPLACE_OK: '1',
+  GUARD_NO_REVIEW: '1',
+  FRINK_REVIEW_SKIP: 'correctness-reviewer',
 };
+
+const bothSpellings = (suffix: string) => [`GUARD_${suffix}`, `FRINK_${suffix}`];
 
 /** Loads vitest.setup.mjs in a clean node process and reports the env it leaves behind. */
 function envAfterSetup(extra: Record<string, string>): Record<string, string | undefined> {
@@ -205,6 +213,18 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
         expect(BYPASS_ENV, `${name}: add it to vitest.setup.mjs BYPASS_ENV`).toContain(name);
       }
     }
+  });
+
+  it('scrubs every one-run control the merge verdict reports, in both spellings', () => {
+    // bypasses.test.mts binds the commit-gates skill's control list to these, so a control the skill
+    // documents reaches this check too.
+    expect([...BYPASS_ENV].sort()).toEqual(BYPASS_FLAGS.flatMap(bothSpellings).sort());
+    const controls = [...BYPASS_FLAGS, ...REAIM_FLAGS, ...SOFTEN_FLAGS].flatMap(bothSpellings);
+    for (const name of controls) {
+      expect(SCRUBBED_ENV, `${name}: add it to vitest.setup.mjs RUN_CONTROL_ENV`).toContain(name);
+    }
+    const env = envAfterSetup(Object.fromEntries(controls.map((name) => [name, '1'])));
+    for (const name of controls) expect(env[name], name).toBeUndefined();
   });
 
   it('scrubs every judge-routing knob the outage remedy exports', () => {
