@@ -32,7 +32,7 @@
         "**/*.lock"
       ]
     },
-    "trustBoundaries": "src/main = untrusted client; socket-server + vercel-serverless = trusted backend",
+    "trustBoundaries": "src/main = privileged Node process that ships inside the user-extractable app binary, so it holds no credentials or API keys; treat IPC arguments and sender, MCP/agent payloads and filesystem/network input reaching it as untrusted; src/renderer + src/preload = untrusted web context; src/shared = runs in both, validators of untrusted input live here; socket-server + vercel-serverless = trusted backend holding the secrets",
     "shortcutTracking": false,
     "accessibility": { "skipTouchTargets": true }
   }
