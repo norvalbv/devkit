@@ -1,44 +1,83 @@
-/** `devkit follow-up start`: start one builds-on follow-up of a shipped story (see `help`). */
-import { AUTO_START_PREFIX, decideStart, isDepthCapped } from '../../lib/follow-up/record.mts';
+/** `devkit follow-up`: file the follow-ups a story deferred, and start one of them (see `help`). */
+import { readFileSync } from 'node:fs';
+import { parseArgs } from 'node:util';
+import { z } from 'zod';
 import {
+  AUTO_START_PREFIX,
+  decideStart,
+  FOLLOW_UP_TYPES,
+  isDepthCapped,
+  isPrUrl,
+  normalisedTitle,
+  parseRecord,
+  RECORD_LABEL,
+  renderRecord,
+} from '../../lib/follow-up/record.mts';
+import {
+  archiveStory,
   assignStory,
+  createStory,
+  defaultStateId,
+  linkStories,
   readStory,
   type RunShort,
   renameStory,
   runShort,
+  type TrackerStory,
 } from '../../lib/follow-up/shortcut-cli.mts';
+import { errorMessage } from '../../lib/ship/review/shared/common.mts';
+
+const USAGE = `Usage:
+  devkit follow-up file --parent <story> [--pr <url>]   < items.json
+  devkit follow-up start --parent <story> [--owner <member>]`;
 
 export const meta = {
   name: 'follow-up',
   agentFacing: false,
   notRoutedBecause:
-    "Run by a Flow's last step after a story ships (frink-work's Start Follow-up node). Starting " +
-    'a follow-up queues paid agent work and narrows the human gate on follow-ups, so an agent never ' +
-    'invokes it by hand.',
+    "Called by a Flow's closing steps after a story ships: frink-work's Track Follow-ups agent pipes " +
+    'the deferred items into `file`, then its Start Follow-up node runs `start`. `start` queues paid ' +
+    'agent work and narrows the human gate on follow-ups, so it is not routed to agents by hand.',
   summary:
-    'Start one builds-on follow-up of a shipped story: prefix it [auto-start], then assign it.',
-  help: `devkit follow-up start — start at most one builds-on follow-up of a shipped story.
+    'File the follow-ups a story deferred (linked, unowned), or start one builds-on follow-up of it.',
+  help: `devkit follow-up — file the follow-ups a story deferred, and start one of them.
 
-Usage:
-  devkit follow-up start --parent <story> [--owner <member>]
+${USAGE}
 
-  --parent <story>   The story that just shipped (7315 or sc-7315).
-  --owner <member>   Who to assign the follow-up to. Default: the parent's first owner.
+  --parent <story>   The story the follow-ups come from (7315 or sc-7315).
+  --pr <url>         file: the parent's pull request. Without it the record names no PR.
+  --owner <member>   start: who to assign to. Default: the parent's first owner.
 
-Reads the parent and every story linked to it through the machine's \`short\` CLI. A linked story
-qualifies when its description says **Follow-up of:** sc-<parent>, **Follow-up type:** builds-on,
-it is open, and, when the parent had a PR, it carries **Stack on:** with that PR's URL. The lowest
-qualifying id is renamed "${AUTO_START_PREFIX} <title>" and then assigned; assigning is what fires a
-story-assigned trigger. blocks-done and discovery follow-ups are left for a human.
+file reads a JSON array on stdin, one object per deferred item:
+  {"title": "...", "followUpType": "builds-on", "storyType": "feature", "project": "devkit", "body": "..."}
 
-Depth is capped at one hop: when the parent is itself a follow-up (its title starts with
-${AUTO_START_PREFIX} or it carries **Follow-up of:**), nothing starts. At most one follow-up per
-parent ever starts, so running it again is safe: an assigned ${AUTO_START_PREFIX} follow-up means
-done, and an unassigned one is assigned without a second rename.
+  followUpType  blocks-done: the parent's acceptance criteria are not met without it, or the parent
+                left a defect a user would hit. builds-on: the parent is complete and this extends or
+                hardens it. discovery: a pre-existing problem unrelated to the parent.
+  storyType     bug for a defect that still exists, otherwise feature or chore.
+  project       The name of the repo that owns this fix, which can differ from the parent's.
+  body          The problem, why it was deferred, the files involved, and acceptance criteria.
+                It must not contain a record line such as **Stack on:**.
 
-Prints one JSON line: {"started":true,"story":<id>} or {"started":false,"reason":"..."}.
-Exits 1 when Shortcut cannot be read or written, or the parent has no owner and no --owner.`,
-  valueFlags: ['--parent', '--owner'],
+Every item is validated before anything is written. Each story is filed unowned, in the parent's
+team and its workflow's default state, then linked "relates to" the parent. Its description starts:
+  **Project:** <project>
+  **Follow-up of:** sc-<parent> · <pr url>
+  **Follow-up type:** <followUpType>
+  **Stack on:** <pr url>          (blocks-done and builds-on, with --pr only)
+An item whose title matches a follow-up already linked to the parent is reported, not filed again,
+so running it again after a run ends is safe. A story that cannot be linked is archived. Prints
+one JSON line, also when filing stops early:
+  {"followups":[{"id":7555,"status":"new","type":"builds-on"}]}
+
+start assigns at most one builds-on follow-up of the parent: open, carrying **Stack on:** with the
+parent's PR when it had one. The lowest qualifying id is renamed "${AUTO_START_PREFIX} <title>" and
+then assigned, which fires a story-assigned trigger. Nothing starts when the parent is itself a
+follow-up, or once an ${AUTO_START_PREFIX} follow-up of it is assigned or closed. Prints
+{"started":true,"story":<id>} or {"started":false,"reason":"..."}.
+
+Exits 1 on bad input, or when Shortcut cannot be read or written.`,
+  valueFlags: ['--parent', '--owner', '--pr'],
 };
 
 export interface StartResult {
@@ -68,22 +107,181 @@ export function startFollowUp(
   return { started: true, story: story.id };
 }
 
-function flag(args: readonly string[], name: string): string | undefined {
-  const index = args.indexOf(name);
-  return index >= 0 ? args[index + 1] : undefined;
+const ONE_LINE = /^[^\r\n\u2028\u2029]*$/;
+
+const ITEM = z.object({
+  title: z
+    .string()
+    .trim()
+    .min(1)
+    .max(512)
+    .regex(ONE_LINE, 'must be one line')
+    .refine((title) => !title.startsWith(AUTO_START_PREFIX), `must not start ${AUTO_START_PREFIX}`),
+  followUpType: z.enum(FOLLOW_UP_TYPES),
+  storyType: z.enum(['feature', 'bug', 'chore']),
+  project: z
+    .string()
+    .trim()
+    .regex(/^[\w.-]+$/, 'must be a repo name'),
+  body: z.string().refine((body) => !RECORD_LABEL.test(body), 'must not contain a record line'),
+});
+const ITEMS = z.array(ITEM).min(1);
+export type FollowUpItem = z.infer<typeof ITEM>;
+
+export interface FiledFollowUp {
+  id: number;
+  status: 'new' | 'existing';
+  type: string;
 }
 
-export default function followUp(args: string[], _cwd: string, run: RunShort = runShort): number {
-  const parentId = Number(flag(args, '--parent')?.replace(/^sc-/, ''));
-  if (args[0] !== 'start' || !Number.isInteger(parentId) || parentId <= 0) {
-    console.error('Usage: devkit follow-up start --parent <story> [--owner <member>]');
+/** What was filed, and why filing stopped early when it did. */
+export interface FileResult {
+  followups: FiledFollowUp[];
+  error?: string;
+}
+
+/** Follow-ups already linked to the parent, by normalised title. */
+function linkedFollowUps(parent: TrackerStory, run: RunShort): Map<string, FiledFollowUp> {
+  const known = new Map<string, FiledFollowUp>();
+  for (const id of parent.linkedIds) {
+    const child = readStory(run, id);
+    const record = parseRecord(child.description);
+    if (child.archived || record?.parent !== parent.id) continue;
+    known.set(normalisedTitle(child.name), { id, status: 'existing', type: record.type ?? '' });
+  }
+  return known;
+}
+
+/** A story that cannot be linked is archived, so a rerun files it afresh instead of twice. */
+function linkOrArchive(run: RunShort, id: number, parentId: number): void {
+  try {
+    linkStories(run, id, parentId);
+  } catch (linkError) {
+    const failure = `linking sc-${id} to sc-${parentId} failed: ${errorMessage(linkError)}`;
+    try {
+      archiveStory(run, id);
+    } catch (archiveError) {
+      throw new Error(
+        `${failure}; archiving it failed too (${errorMessage(archiveError)}), so archive sc-${id} by hand before rerunning`,
+      );
+    }
+    throw new Error(`${failure}, so sc-${id} was archived`);
+  }
+}
+
+function fileOne(
+  run: RunShort,
+  parent: TrackerStory,
+  stateId: number,
+  prUrl: string | null,
+  item: FollowUpItem,
+): FiledFollowUp {
+  const record = renderRecord(item.project, parent.id, item.followUpType, prUrl);
+  const id = createStory(run, {
+    name: item.title,
+    description: `${record}\n\n${item.body}`,
+    storyType: item.storyType,
+    stateId,
+    teamId: parent.teamId,
+  });
+  linkOrArchive(run, id, parent.id);
+  return { id, status: 'new', type: item.followUpType };
+}
+
+/** Files each item not already linked to the parent; stops at the first failure, keeping the rest. */
+export function fileFollowUps(
+  parentId: number,
+  prUrl: string | null,
+  items: readonly FollowUpItem[],
+  run: RunShort = runShort,
+): FileResult {
+  const parent = readStory(run, parentId);
+  const known = linkedFollowUps(parent, run);
+  const stateId = defaultStateId(run, parent.workflowId);
+  const followups: FiledFollowUp[] = [];
+  for (const [index, item] of items.entries()) {
+    const key = normalisedTitle(item.title);
+    let entry = known.get(key);
+    if (!entry) {
+      try {
+        entry = fileOne(run, parent, stateId, prUrl, item);
+      } catch (error) {
+        return { followups, error: `${errorMessage(error)} (${items.length - index} not filed)` };
+      }
+      known.set(key, entry);
+    }
+    if (!followups.includes(entry)) followups.push(entry);
+  }
+  return { followups };
+}
+
+function fileCommand(parentId: number, pr: string | undefined, input: string, run: RunShort) {
+  if (pr !== undefined && !isPrUrl(pr)) {
+    console.error(`devkit follow-up file: --pr must be a pull request URL, got "${pr}"`);
+    return 1;
+  }
+  const items = ITEMS.safeParse(JSON.parse(input));
+  if (!items.success) {
+    console.error(`devkit follow-up file: nothing filed.\n${z.prettifyError(items.error)}`);
+    return 1;
+  }
+  const { followups, error } = fileFollowUps(parentId, pr ?? null, items.data, run);
+  console.log(JSON.stringify({ followups }));
+  if (!error) return 0;
+  console.error(`devkit follow-up file: ${error}`);
+  return 1;
+}
+
+const OPTIONS = {
+  parent: { type: 'string' },
+  owner: { type: 'string' },
+  pr: { type: 'string' },
+} as const;
+
+/** Strict, so a flag left without a value fails instead of swallowing the next flag. */
+function strictArgs(args: string[]) {
+  try {
+    return parseArgs({ args, options: OPTIONS, allowPositionals: true, strict: true });
+  } catch {
+    return null;
+  }
+}
+
+type Invocation =
+  | { verb: 'file'; parentId: number; pr?: string }
+  | { verb: 'start'; parentId: number; owner?: string };
+
+function parseInvocation(args: string[]): Invocation | null {
+  const parsed = strictArgs(args);
+  if (!parsed || parsed.positionals.length !== 1) return null;
+  const { values } = parsed;
+  const parentId = Number(values.parent?.replace(/^sc-/, ''));
+  if (!Number.isInteger(parentId) || parentId <= 0) return null;
+  const [verb] = parsed.positionals;
+  if (verb === 'file' && values.owner === undefined) return { verb, parentId, pr: values.pr };
+  if (verb === 'start' && values.pr === undefined) return { verb, parentId, owner: values.owner };
+  return null;
+}
+
+export default function followUp(
+  args: string[],
+  _cwd: string,
+  run: RunShort = runShort,
+  readInput: () => string = () => readFileSync(0, 'utf8'),
+): number {
+  const invocation = parseInvocation(args);
+  if (!invocation) {
+    console.error(USAGE);
     return 1;
   }
   try {
-    console.log(JSON.stringify(startFollowUp(parentId, flag(args, '--owner'), run)));
+    if (invocation.verb === 'file') {
+      return fileCommand(invocation.parentId, invocation.pr, readInput(), run);
+    }
+    console.log(JSON.stringify(startFollowUp(invocation.parentId, invocation.owner, run)));
     return 0;
   } catch (error) {
-    console.error(`devkit follow-up: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`devkit follow-up: ${errorMessage(error)}`);
     return 1;
   }
 }

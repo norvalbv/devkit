@@ -19,3 +19,4 @@ created: 2026-10-21
 **Revisit-when:** A Shortcut update webhook is shown to carry priority or a custom field; the owner's work tracker is not Shortcut; or auto-started follow-ups complete below the 13% baseline over 10 parents.
 **Scope:** cli/lib/follow-up/**,cli/commands/follow-up/**
 **Source:** collab · sc-7472
+- 2026-10-21 — devkit follow-up file is the writer of the record lines and the relates-to link: it validates every item before writing, files each story unowned in the parent's team and its workflow's default state, links it to the parent, and archives a story whose link fails so a rerun cannot file it twice. Free text may not contain a record label, because the readers take the first match. start now treats an [auto-start] child as started when it is assigned or closed, so clearing the owner of a finished follow-up cannot let a sibling start.

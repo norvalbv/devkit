@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   AUTO_START_PREFIX,
   decideStart,
+  FOLLOW_UP_TYPES,
   ineligibleReason,
   isDepthCapped,
+  isPrUrl,
+  normalisedTitle,
   parseRecord,
+  renderRecord,
   type StoryView,
 } from './record.mts';
 
@@ -62,6 +66,33 @@ describe('parseRecord', () => {
   });
 });
 
+describe('renderRecord', () => {
+  it('writes lines parseRecord reads back, with Stack on only for a stackable type with a PR', () => {
+    for (const type of FOLLOW_UP_TYPES) {
+      for (const prUrl of [PR, null]) {
+        expect(parseRecord(`${renderRecord('devkit', 7438, type, prUrl)}\n\nBody`)).toEqual({
+          parent: 7438,
+          prUrl,
+          type,
+          stackOn: prUrl && type !== 'discovery' ? prUrl : null,
+        });
+      }
+    }
+  });
+});
+
+describe('normalisedTitle and isPrUrl', () => {
+  it('ignores case, spacing and a leading start marker, and accepts only a whole PR URL', () => {
+    expect(normalisedTitle(`${AUTO_START_PREFIX}  Split   The Row `)).toBe('split the row');
+    expect(normalisedTitle(`Add ${AUTO_START_PREFIX} logging`)).toBe(
+      `add ${AUTO_START_PREFIX} logging`,
+    );
+    expect(isPrUrl(PR)).toBe(true);
+    expect(isPrUrl(`${PR}/files`)).toBe(false);
+    expect(isPrUrl(`see ${PR}`)).toBe(false);
+  });
+});
+
 describe('isDepthCapped', () => {
   it('caps a story devkit started and a story that is itself a follow-up', () => {
     expect(isDepthCapped(story(1, '', { name: `${AUTO_START_PREFIX} Fix it` }))).toBe(true);
@@ -114,6 +145,14 @@ describe('decideStart', () => {
 
   it('still counts a started follow-up once it is closed, so a sibling never starts', () => {
     const done = ok(20, { name: `${AUTO_START_PREFIX} Story 20`, ownerIds: ['u1'], closed: true });
+    expect(decideStart(1, [done, ok(30)])).toEqual({
+      action: 'none',
+      reason: 'sc-20 was already started',
+    });
+  });
+
+  it('counts a closed marked follow-up as started even after its owner was cleared', () => {
+    const done = ok(20, { name: `${AUTO_START_PREFIX} Story 20`, closed: true });
     expect(decideStart(1, [done, ok(30)])).toEqual({
       action: 'none',
       reason: 'sc-20 was already started',
