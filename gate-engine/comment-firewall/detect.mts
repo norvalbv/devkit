@@ -9,7 +9,6 @@ import { execFileSync } from 'node:child_process';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { ts } from 'ts-morph';
 import { resolveGuardConfig, sourceMatchers } from '../config.mts';
 import { gitPrefix } from '../ratchets/git-index.mts';
 import {
@@ -25,6 +24,7 @@ import {
 import { commentTouchLines, type PatchHunk, parsePatchHunks } from './patch.mts';
 import { loadCommentPolicy } from './policy.mts';
 import { refFindings } from './refs.mts';
+import { type CommentToken, scanCommentTokens } from './scan.mts';
 import type { CommentFinding, CommentInventory, DetectionResult } from './types.mts';
 
 export { parsePatchHunks } from './patch.mts';
@@ -39,19 +39,10 @@ const TRAILING_SLASH = /\/$/;
 const TRAILING_CARRIAGE_RETURN = /\r$/;
 const TRAILING_BLANKS = /[ \t\r]+$/;
 const LEADING_BLANKS = /^[ \t]+/;
-const TRAILING_STRUCTURAL_PUNCTUATION = /^(?:[)\]};,.:]+|<\/(?:[A-Za-z][\w:.-]*|)>)+$/;
 const LINE_COMMENT_PREFIX = /^\s*\/\/[/!]?[ \t]?/;
 const BLOCK_COMMENT_PREFIX = /^\s*\/\*+!?[ \t]?/;
 const BLOCK_COMMENT_SUFFIX = /[ \t]*\*\/[ \t]*$/;
 const BLOCK_COMMENT_CONTINUATION = /^\s*\*[ \t]?/;
-
-export interface CommentToken {
-  kind: 'line' | 'block';
-  startLine: number;
-  endLine: number;
-  text: string;
-  standalone: boolean;
-}
 
 const sha12 = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 12);
 
@@ -151,76 +142,6 @@ function patch(cwd: string, file: string, ref?: string, from?: string): string {
   if (ref) args.push(ref);
   args.push('--', ...(from ? [from, file] : [file]));
   return git(cwd, args);
-}
-
-function lineStarts(source: string): number[] {
-  const starts = [0];
-  for (let i = 0; i < source.length; i++) if (source.charCodeAt(i) === 10) starts.push(i + 1);
-  return starts;
-}
-
-function lineAt(starts: number[], position: number): number {
-  let low = 0;
-  let high = starts.length;
-  while (low + 1 < high) {
-    const mid = (low + high) >>> 1;
-    if ((starts[mid] ?? 0) <= position) low = mid;
-    else high = mid;
-  }
-  return low + 1;
-}
-
-export function scanCommentTokens(source: string, extension: string): CommentToken[] {
-  const scriptKind =
-    extension === 'jsx'
-      ? ts.ScriptKind.JSX
-      : extension === 'tsx'
-        ? ts.ScriptKind.TSX
-        : extension === 'js' || extension === 'mjs' || extension === 'cjs'
-          ? ts.ScriptKind.JS
-          : ts.ScriptKind.TS;
-  const sourceFile = ts.createSourceFile(
-    `staged.${extension}`,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    scriptKind,
-  );
-  const starts = lineStarts(source);
-  const ranges = new Map<string, ts.CommentRange>();
-  const collect = (items: ts.CommentRange[] | undefined): void => {
-    for (const item of items ?? []) ranges.set(`${item.pos}:${item.end}`, item);
-  };
-  // Closed JSX text is not trivia; text an unclosed tag swallows to EOF is still scanned.
-  const jsxText: [number, number][] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isJsxText(node) && node.parent.end > node.end) jsxText.push([node.pos, node.end]);
-    collect(ts.getLeadingCommentRanges(source, node.getFullStart()));
-    collect(ts.getTrailingCommentRanges(source, node.end));
-    for (const child of node.getChildren(sourceFile)) visit(child);
-  };
-  visit(sourceFile);
-  return [...ranges.values()]
-    .filter((range) => !jsxText.some(([pos, end]) => range.pos >= pos && range.pos < end))
-    .sort((left, right) => left.pos - right.pos)
-    .map((range) => {
-      const start = range.pos;
-      const end = range.end;
-      const kind = range.kind === ts.SyntaxKind.SingleLineCommentTrivia ? 'line' : 'block';
-      const startLine = lineAt(starts, start);
-      const endLine = lineAt(starts, Math.max(start, end - 1));
-      const before = source.slice(starts[startLine - 1], start).trim();
-      const after = source.slice(end, starts[endLine] ?? source.length).trim();
-      const clearAfter = after.length === 0 || TRAILING_STRUCTURAL_PUNCTUATION.test(after);
-      return {
-        kind,
-        startLine,
-        endLine,
-        text: source.slice(start, end),
-        standalone:
-          clearAfter && (before.length === 0 || (kind === 'block' && startLine < endLine)),
-      };
-    });
 }
 
 function stagedBlob(cwd: string, file: string): string {
