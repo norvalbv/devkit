@@ -14,7 +14,6 @@ function agentManifest(): SyncManifestV2 {
     schemaVersion: 2,
     kind: 'agents',
     devkitRef: 'v1.2.3',
-    generatedAt: '2026-07-21T00:00:00.000Z',
     files: { 'feature-critique.md': A },
     providers: {
       claude: { files: { 'feature-critique.md': A } },
@@ -29,7 +28,6 @@ describe('sync manifest v2 codec', () => {
       schemaVersion: 2,
       kind: 'skills',
       devkitRef: null,
-      generatedAt: '2026-07-21T00:00:00.000Z',
       files: { 'brainstorming/SKILL.md': A },
       providers: {
         cursor: { files: { 'brainstorming/SKILL.md': A } },
@@ -53,6 +51,21 @@ describe('sync manifest v2 codec', () => {
     expect(
       decodeSyncManifest(JSON.parse(encodeSyncManifestV2(agentManifest(), 'agents')), 'agents'),
     ).toEqual({ version: 2, manifest: agentManifest() });
+  });
+
+  it('accepts a legacy generatedAt stamp and re-encodes without it', () => {
+    const stamped = { ...agentManifest(), generatedAt: '2026-07-21T00:00:00.000Z' };
+    expect(decodeSyncManifest(stamped, 'agents')).toEqual({
+      version: 2,
+      manifest: agentManifest(),
+    });
+    expect(encodeSyncManifestV2(stamped, 'agents')).not.toContain('generatedAt');
+    expect(
+      decodeSyncManifest(
+        { files: { 'reviewer.md': A }, targets: ['claude'], generatedAt: '2026-07-21' },
+        'agents',
+      ),
+    ).toEqual({ version: 1, manifest: { files: { 'reviewer.md': A }, targets: ['claude'] } });
   });
 
   it('cannot enter legacy broad-ownership helpers through structural typing', () => {

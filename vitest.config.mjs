@@ -19,6 +19,7 @@ const GIT_INTEGRATION_TESTS = [
   'cli/__tests__/fallow-staged-coverage.test.mts',
   'cli/__tests__/guard-branch.test.mts',
   'cli/__tests__/hook-parity.test.mts',
+  'cli/__tests__/manifest-merge.test.mts',
   'cli/__tests__/overlay-anti-slop.test.mts',
   'cli/__tests__/overlay-global-hook.test.mts',
   'cli/__tests__/overlay.test.mts',

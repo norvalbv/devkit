@@ -125,7 +125,6 @@ describe('migrating a repo installed before the relocation', () => {
     const next = legacySchema
       ? {
           devkitRef: m.devkitRef,
-          generatedAt: m.generatedAt,
           targets: ['claude', 'cursor'],
           files: m.files,
         }

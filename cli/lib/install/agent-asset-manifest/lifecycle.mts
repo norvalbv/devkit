@@ -31,7 +31,6 @@ export interface ProviderNativeAssetOptions {
   skipTracked?: (rootRelativePath: string) => boolean;
   override?: (kind: string, unit: string) => boolean;
   fileMode?: number;
-  now?: () => string;
 }
 export interface ProviderNativeAssetSkip {
   unit: string;
@@ -279,22 +278,12 @@ function buildPlan(options: ProviderNativeAssetOptions, decoded: DecodedSyncMani
           .map((output) => [output.outputRel, output.sha]),
       ),
     };
-  const base = {
-    schemaVersion: 2 as const,
+  const manifest: SyncManifestV2 = {
+    schemaVersion: 2,
     kind: options.kind,
     devkitRef: options.devkitRef,
     files,
     providers: providerRecords,
-  };
-  const priorTime = decoded?.version === 2 ? decoded.manifest.generatedAt : '';
-  const withPriorTime: SyncManifestV2 = { ...base, generatedAt: priorTime };
-  const unchanged =
-    decoded?.version === 2 &&
-    encodeSyncManifestV2(withPriorTime, options.kind) ===
-      encodeSyncManifestV2(decoded.manifest, options.kind);
-  const manifest: SyncManifestV2 = {
-    ...base,
-    generatedAt: unchanged ? priorTime : (options.now?.() ?? new Date().toISOString()),
   };
   const encoded = encodeSyncManifestV2(manifest, options.kind);
   const currentPaths = new Set([...outputs, ...carried].map((output) => output.rootRel));
@@ -360,7 +349,7 @@ export function syncProviderNativeAssets(
   });
 }
 export function findProviderNativeAssetConflicts(
-  options: Omit<ProviderNativeAssetOptions, 'devkitRef' | 'override' | 'now'>,
+  options: Omit<ProviderNativeAssetOptions, 'devkitRef' | 'override'>,
 ): ProviderNativeAssetSkip[] {
   const path = manifestPath(options.root, options.kind, options.manifestFilename);
   const decoded = readAgentAssetManifest(path, options.kind);
@@ -412,9 +401,6 @@ export function removeProviderNativeAssets(options: RemoveProviderNativeAssetsOp
       ...decoded.manifest,
       files,
       providers,
-      generatedAt: !targets.some((provider) => decoded.manifest.providers[provider])
-        ? decoded.manifest.generatedAt
-        : new Date().toISOString(),
     };
     const encoded = encodeSyncManifestV2(manifest, options.kind);
     if (!dryRun) {
