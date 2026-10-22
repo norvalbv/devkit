@@ -94,6 +94,8 @@ describe('guard-structure gate — zero consumer deps', () => {
       const result = await runStructureGate(root);
       expect(result.code).toBe(2);
       expect(result.text).toContain('structure.walls declares 2 import wall(s)');
+      // The bundled parser loads from devkit's own install, so no parser gap rides along.
+      expect(result.text).not.toContain('TypeScript source parser unavailable');
     });
 
     it('a placement violation still blocks, and the walls notice rides along', async () => {
