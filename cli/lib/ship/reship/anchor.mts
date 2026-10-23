@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** `ship --pr` append staging: merge what reached the PR branch since the caller's copy was taken.
- *  Usage: anchor.mjs --root --wt --branch --tip --head --out <f> -- <path...>; <f> feeds --anchors. */
+ *  Usage: anchor.mjs --root --wt --branch --tip --head [--base-ref] --out <f> -- <path...>. */
 import { spawnSync } from 'node:child_process';
 import {
   closeSync,
@@ -125,13 +125,13 @@ export function anchorEntry(
 
 const sameEntry = (a: Side, b: Side): boolean =>
   a === null || b === null ? a === b : a.blob === b.blob && a.mode === b.mode;
+const regular = (e: Side): e is Entry => !!e && e.mode !== '120000' && e.mode !== '160000';
 
 /** copy: tip unmoved or equal to the caller. keep: caller unchanged. merge: both changed a file. */
 export function decide(here: Side, tip: Side, anchor: Side): Action {
   if (sameEntry(tip, anchor) || sameEntry(here, tip)) return 'copy';
   if (sameEntry(here, anchor)) return 'keep';
   if (!here || !tip || !anchor) return 'refuse';
-  const regular = (e: Entry) => e.mode !== '120000' && e.mode !== '160000';
   return regular(here) && regular(tip) && regular(anchor) ? 'merge' : 'refuse';
 }
 
@@ -174,6 +174,54 @@ export function foreignCommits(
   return lines(git(root, ['log', '-3', '--no-renames', '--format=%h %s', range, '--', path]));
 }
 
+/** The caller's copy without base content the PR lacks; `commits` brought it, `refuse` if inseparable. */
+interface Strip {
+  here: Side;
+  commits: string[];
+  refuse: boolean;
+}
+
+const mergeBase = (root: string, a: string, b: string): string =>
+  git(root, ['merge-base', a, b])?.toString('utf8').trim() ?? '';
+
+/** The tip already holds the base change <f>→<m> (a cherry-pick, an earlier override ship). */
+function tipCarries(root: string, tip: Side, f: Side, m: Side): boolean {
+  if (sameEntry(tip, m)) return true;
+  if (!regular(tip) || !regular(f) || !regular(m)) return false;
+  if (f.mode !== m.mode && tip.mode !== m.mode) return false;
+  return mergeBlobs(root, tip, f, m) === tip.blob;
+}
+
+/** <here> with the base change <m>→<f> reverted, or null when it cannot be separated. */
+function withoutBase(root: string, here: Entry, f: Side, m: Side): Side | undefined {
+  if (sameEntry(here, m)) return f;
+  const blob = regular(here) && regular(f) && regular(m) ? mergeBlobs(root, here, m, f) : null;
+  return blob && f ? { blob, mode: here.mode === m?.mode ? f.mode : here.mode } : undefined;
+}
+
+/** Leave out <baseRef> changes the caller's HEAD holds and the PR tip does not (a local base merge). */
+export function stripBase(
+  root: string,
+  here: Side,
+  tipEntry: Side,
+  { tip, head, baseRef }: { tip: string; head: string; baseRef: string },
+  path: string,
+): Strip {
+  const none = { here, commits: [], refuse: false };
+  const from = baseRef && head ? mergeBase(root, tip, baseRef) : '';
+  const to = from ? mergeBase(root, head, baseRef) : '';
+  if (!to || !here || sameEntry(here, tipEntry)) return none;
+  const [f, m] = [treeEntry(root, from, path), treeEntry(root, to, path)];
+  if (sameEntry(f, m) || tipCarries(root, tipEntry, f, m)) return none;
+  const commits = lines(
+    git(root, ['log', '-3', '--no-renames', '--format=%h %s', `${from}..${to}`, '--', path]),
+  );
+  const stripped = withoutBase(root, here, f, m);
+  return stripped === undefined
+    ? { here, commits, refuse: true }
+    : { here: stripped, commits, refuse: false };
+}
+
 interface Plan {
   path: string;
   action: Action;
@@ -183,6 +231,8 @@ interface Plan {
   merged?: Entry;
   commits: string[];
   token: string;
+  /** Base commits whose changes were left out of the caller's copy, or block it when `refuse`. */
+  base?: Strip;
 }
 
 /** Plan one briefed path. A `merge` that conflicts comes back as `refuse`. */
@@ -192,12 +242,15 @@ export function planPath(
   tip: string,
   head: string,
   path: string,
+  baseRef = '',
 ): Plan {
-  const here = hereEntry(root, path);
   const tipEntry = treeEntry(root, tip, path);
+  const strip = stripBase(root, hereEntry(root, path), tipEntry, { tip, head, baseRef }, path);
+  const here = strip.here;
+  const base = strip.commits.length > 0 || strip.refuse ? strip : undefined;
   const { entry: anchor, since, token } = anchorEntry(root, branch, tip, head, path);
   let action = decide(here, tipEntry, anchor);
-  if (action === 'copy') return { path, action, here, tip: tipEntry, commits: [], token };
+  if (action === 'copy') return { path, action, here, tip: tipEntry, commits: [], token, base };
   let merged: Entry | undefined;
   if (action === 'merge' && here && tipEntry && anchor) {
     const blob = mergeBlobs(root, here, anchor, tipEntry);
@@ -205,16 +258,19 @@ export function planPath(
     else action = 'refuse';
   }
   const commits = foreignCommits(root, tip, path, anchor, since);
-  return { path, action, here, tip: tipEntry, merged, commits, token };
+  return { path, action, here, tip: tipEntry, merged, commits, token, base };
 }
 
-function report(branch: string, heading: string, plans: Plan[]): void {
+/** The commits a report names for <p>: the base's when <base>, else the PR branch's. */
+const listed = (p: Plan, base: boolean): string[] => (base ? p.base?.commits : p.commits) ?? [];
+
+function report(branch: string, heading: string, plans: Plan[], base = false): void {
   console.error(heading);
   for (const p of plans) {
     console.error(`  ${shown(p.path)}`);
-    for (const c of p.commits) console.error(`      ${c}`);
+    for (const c of listed(p, base)) console.error(`      ${c}`);
   }
-  if (plans.every((p) => p.commits.length === 0))
+  if (plans.every((p) => listed(p, base).length === 0))
     console.error(`      (see git log origin/${branch})`);
 }
 
@@ -225,6 +281,7 @@ interface StageOptions {
   tip: string;
   head: string;
   out: string;
+  baseRef?: string;
 }
 
 /** Stage <entry> at <path> in the worktree's index and files; null removes it. */
@@ -239,12 +296,28 @@ function stageEntry(wt: string, path: string, entry: Side): void {
 
 /** Plan every path, then stage each from the bytes it was judged on. Returns the exit code. */
 export function stageAppend(
-  { root, wt, branch, tip, head, out }: StageOptions,
+  { root, wt, branch, tip, head, out, baseRef = '' }: StageOptions,
   paths: string[],
 ): number {
-  const plans = paths.map((p) => planPath(root, branch, tip, head, p));
+  const plans = paths.map((p) => planPath(root, branch, tip, head, p, baseRef));
   const blocked = plans.filter((p) => p.action === 'refuse');
   const replace = envFlag('SHIP_REPLACE_OK');
+  const inseparable = plans.filter((p) => p.base?.refuse);
+  if (inseparable.length > 0 && !replace) {
+    report(
+      branch,
+      `ship --pr: your copy of these path(s) holds ${baseRef} changes that origin/${branch} does not:`,
+      inseparable,
+      true,
+    );
+    console.error(
+      '  They cannot be left out of this commit (your edits overlap them, or the path is',
+    );
+    console.error(`  binary, a symlink or a submodule). Bring ${baseRef} into the PR branch first`);
+    console.error(`  (gh pr update-branch ${branch}, or merge it there and push), then re-run;`);
+    console.error('  or, to ship your whole copy, re-run with GUARD_SHIP_REPLACE_OK=1.');
+    return 1;
+  }
   if (blocked.length > 0 && !replace) {
     report(
       branch,
@@ -280,6 +353,26 @@ export function stageAppend(
       p.action === 'keep' ? '' : p.merged && p.here ? `${p.here.mode} ${p.here.blob}` : '=';
     guards.push(p.token, record, p.path);
   }
+  const left = plans.filter((p) => p.base && !p.base.refuse);
+  if (left.length > 0) {
+    report(
+      branch,
+      `ship --pr: left ${baseRef} changes origin/${branch} does not have out of these path(s):`,
+      left,
+      true,
+    );
+    console.error(
+      `  To ship them, bring ${baseRef} into the PR branch (gh pr update-branch ${branch}).`,
+    );
+  }
+  const replaced = plans.filter((p) => p.base?.refuse);
+  if (replaced.length > 0)
+    report(
+      branch,
+      `⚠️  GUARD_SHIP_REPLACE_OK: shipping ${baseRef} changes with your copy of:`,
+      replaced,
+      true,
+    );
   const merged = plans.filter((p) => p.action === 'merge');
   if (merged.length > 0) {
     report(
@@ -306,6 +399,7 @@ function main(): number {
     tip: str('tip'),
     head: str('head'),
     out: str('out'),
+    baseRef: str('base-ref'),
   };
   if (!opts.root || !opts.wt || !opts.branch || !opts.tip || !opts.out || paths.length === 0) {
     console.error('reship-anchor: missing one of --root/--wt/--branch/--tip/--out or the paths');
