@@ -931,6 +931,28 @@ describe('the producer fails loudly when it produces nothing', () => {
     );
     expect(await produceTestReport(dir, [])).toBe(1);
   });
+
+  // The json report's `success` ignores errors outside any test; the summary must still count them.
+  it.each([
+    [
+      '[{"file":"a","message":"E: x"},{"file":"a","message":"E: x"},{"file":null,"message":"E: y"}]',
+      2,
+    ],
+    [null, 0],
+    ['{torn', undefined],
+  ])('records unhandled.json %j as unhandled=%j', async (unhandled, expected) => {
+    const report = '{"success":true,"testResults":[]}';
+    const write = unhandled === null ? '' : `printf '%s' '${unhandled}' > "$d/unhandled.json";`;
+    fakeVitest(
+      `d=$(ls -d .devkit/test-reports/*/ | head -1); printf '%s' '${report}' > "$d/report.json"; ${write} exit 1`,
+    );
+    expect(await produceTestReport(dir, [])).toBe(1);
+    const [run] = readdirSync(join(dir, '.devkit/test-reports'));
+    const summary = JSON.parse(
+      readFileSync(join(dir, '.devkit/test-reports', run, 'summary.json'), 'utf8'),
+    );
+    expect(summary.unhandled).toBe(expected);
+  });
 });
 
 describe('final round: unsupported input and unestablishable history', () => {
