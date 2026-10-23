@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** `ship --pr` append staging: merge what reached the PR branch since the caller's copy was taken.
- *  Usage: anchor.mjs --root --wt --branch --tip --head [--base-ref] --out <f> -- <path...>. */
+ *  Usage: anchor.mjs --root --wt --branch --tip --head [--pr-base] --out <f> -- <path...>. */
 import { spawnSync } from 'node:child_process';
 import {
   closeSync,
@@ -197,6 +197,21 @@ function withoutBase(root: string, here: Entry, f: Side, m: Side): Side | undefi
   if (sameEntry(here, m)) return f;
   const blob = regular(here) && regular(f) && regular(m) ? mergeBlobs(root, here, m, f) : null;
   return blob && f ? { blob, mode: here.mode === m?.mode ? f.mode : here.mode } : undefined;
+}
+
+/** origin/<PR base>: gh's name, else the base this checkout recorded shipping <branch> onto; '' skips. */
+export function resolveBaseRef(root: string, branch: string, prBase: string): string {
+  const name = prBase || loadManifest(root).branches[branch]?.baseRef || '';
+  const keep = 'so base changes your checkout holds are not left out';
+  if (!name) {
+    const why = `gh did not name the PR's base and this checkout has no record of shipping ${branch}`;
+    console.error(`ship --pr: ${why}, ${keep}`);
+    return '';
+  }
+  const ref = `origin/${name}`;
+  if (git(root, ['rev-parse', '-q', '--verify', `${ref}^{commit}`])) return ref;
+  console.error(`ship --pr: could not compare with ${ref}, ${keep}`);
+  return '';
 }
 
 /** [F, M]: the base as the PR tip has it and as the caller's HEAD has it; empty unless HEAD is ahead. */
@@ -407,14 +422,16 @@ function main(): number {
     tip: str('tip'),
     head: str('head'),
     out: str('out'),
-    baseRef: str('base-ref'),
   };
   if (!opts.root || !opts.wt || !opts.branch || !opts.tip || !opts.out || paths.length === 0) {
     console.error('reship-anchor: missing one of --root/--wt/--branch/--tip/--out or the paths');
     return 1;
   }
   try {
-    return stageAppend(opts, paths);
+    return stageAppend(
+      { ...opts, baseRef: resolveBaseRef(opts.root, opts.branch, str('pr-base')) },
+      paths,
+    );
   } catch (e: unknown) {
     console.error(
       `ship --pr: could not compare your paths with origin/${opts.branch}: ${e instanceof Error ? e.message : String(e)}`,

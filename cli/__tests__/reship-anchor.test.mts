@@ -16,6 +16,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import {
   decide,
   hereEntry,
+  resolveBaseRef,
   stageAppend,
   stripBase,
   treeEntry,
@@ -45,7 +46,7 @@ function tmp(prefix: string) {
 }
 
 /** A checkout on `work` whose a.ts (and bin.dat) were shipped to origin/feat/pr, plus a peer clone. */
-function prRepo({ record = true } = {}) {
+function prRepo({ record = true, baseRef = 'main' } = {}) {
   const bare = tmp('reship-anchor-bare-');
   const dir = tmp('reship-anchor-wt-');
   const peer = tmp('reship-anchor-peer-');
@@ -78,7 +79,7 @@ function prRepo({ record = true } = {}) {
   chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
   if (record) {
     const sha = git(dir, ['rev-parse', 'HEAD']);
-    const opts = { root: dir, branch: 'feat/pr', repo: 'acme/app', baseRef: 'work', baseSha: sha };
+    const opts = { root: dir, branch: 'feat/pr', repo: 'acme/app', baseRef, baseSha: sha };
     expect(recordShip({ ...opts, pr: '7' }, ['a.ts', 'bin.dat'])).toBe(0);
   }
   git(peer, ['clone', '-q', '-b', 'feat/pr', bare, '.']);
@@ -201,6 +202,16 @@ function stageRepo(tipEdit: (dir: string) => void = () => {}) {
   const diff = () => git(wt, ['diff', '--cached', '--name-status']);
   return { dir, wt, git, run, staged, diff };
 }
+
+describe("resolveBaseRef — the strip base is gh's PR base, else the recorded one, never a guess", () => {
+  it("prefers gh's name even when only the recorded base resolves, and names a skip", () => {
+    const r = stageRepo(); // recorded the `pr` branch as shipped onto `work`
+    r.git(r.dir, ['update-ref', 'refs/remotes/origin/work', 'HEAD']);
+    expect(resolveBaseRef(r.dir, 'pr', '')).toBe('origin/work');
+    expect(resolveBaseRef(r.dir, 'pr', 'retargeted')).toBe('');
+    expect(resolveBaseRef(r.dir, 'unshipped', '')).toBe('');
+  });
+});
 
 describe('reship-anchor — stageAppend stages what the copy loop staged', () => {
   it('stages a nested new file, a symlink, an edit and a deletion over an unmoved tip', () => {
@@ -498,6 +509,26 @@ describe('reship --pr — base content only the caller holds stays out of the PR
     expect(res.stderr).not.toContain('left origin/main');
     expect(res.stderr).toContain('could not compare with origin/feat/parent');
     expect(stacked.remote('a.ts')).toBe(text({ 0: 'from main', 9: 'lane edit' }).trim());
+  });
+
+  it('without gh, strips against the recorded base and never against origin/HEAD', () => {
+    const stacked = prRepo({ baseRef: 'feat/parent' }); // shipped onto a parent never fetched here
+    stacked.onMain('main: new intro', intro);
+    stacked.caller(['merge', '-q', '--no-edit', 'origin/main']);
+    writeFileSync(join(stacked.dir, 'a.ts'), text({ 0: 'from main', 9: 'lane edit' }));
+    const res = stacked.reship();
+    expect(res.status, res.stderr).toBe(0);
+    expect(res.stderr).toContain('could not compare with origin/feat/parent');
+    expect(res.stderr).not.toContain('left origin/main');
+    expect(stacked.remote('a.ts')).toBe(text({ 0: 'from main', 9: 'lane edit' }).trim());
+
+    const unknown = prRepo({ record: false });
+    unknown.onMain('main: new intro', intro);
+    unknown.caller(['merge', '-q', '--no-edit', 'origin/main']);
+    writeFileSync(join(unknown.dir, 'a.ts'), text({ 0: 'from main', 9: 'lane edit' }));
+    const dry = unknown.staged('a.ts');
+    expect(dry.stderr).toContain("gh did not name the PR's base");
+    expect(dry.out).toBe(text({ 0: 'from main', 9: 'lane edit' }).trim());
   });
 
   it("keeps the caller's own unpushed commit while leaving the base out", () => {
