@@ -565,6 +565,20 @@ describe('reship --pr — base content only the caller holds stays out of the PR
     expect(ok.status, ok.stderr).toBe(0);
     expect(ok.stderr).toContain('GUARD_SHIP_REPLACE_OK');
     expect(r.remote('a.ts')).toBe(text({ 0: 'mine over main' }).trim());
+
+    // The tip now holds the override, so an edit elsewhere ships without it.
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine over main', 9: 'second edit' }));
+    const again = r.reship();
+    expect(again.status, again.stderr).toBe(0);
+    expect(r.remote('a.ts')).toBe(text({ 0: 'mine over main', 9: 'second edit' }).trim());
+
+    // A tip hunk the copy lacks is never re-added or dropped silently: the push still refuses.
+    r.peerGit(['pull', '-q', '--ff-only', 'origin', 'feat/pr']);
+    const suggested = text({ 0: 'mine over main', 5: 'review suggestion', 9: 'second edit' });
+    r.foreign('a.ts', suggested, 'Apply review suggestion');
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine over main', 9: 'second edit', 11: 'x' }));
+    expect(r.reship().status).toBe(1);
+    expect(r.remote('a.ts')).toBe(suggested.trim());
   });
 
   it('copies as before once the PR branch already holds the base change', () => {
@@ -647,5 +661,36 @@ describe('stripBase — a base change the tip already carries is never removed',
       commits: [],
       refuse: false,
     });
+  });
+
+  it('ships an overridden copy the tip already holds, but never a base chmod the tip lacks', () => {
+    const dir = tmp('reship-anchor-held-');
+    const env = { ...process.env, ...GENV };
+    const git = (a: string[]) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8' }).trim();
+    const commit = (content: string, mode = 0o644) => {
+      writeFileSync(join(dir, 'a.ts'), content);
+      chmodSync(join(dir, 'a.ts'), mode);
+      git(['add', 'a.ts']);
+      git(['commit', '-q', '-m', 'c']);
+      return git(['rev-parse', 'HEAD']);
+    };
+    git(['init', '-q', '-b', 'main']);
+    git(['config', 'user.email', 'a@b.c']);
+    git(['config', 'user.name', 'a']);
+    const fork = commit(text());
+    const head = commit(text({ 0: 'from main' }), 0o755); // main changed line 1 and made it executable
+    git(['checkout', '-q', '-f', '-b', 'pr', fork]);
+    const tip = commit(text({ 0: 'mine' })); // the override ship: the caller's line 1, mode 644
+    const strip = (mode: number) => {
+      writeFileSync(join(dir, 'a.ts'), text({ 0: 'mine', 9: 'elsewhere' }));
+      chmodSync(join(dir, 'a.ts'), mode);
+      const here = hereEntry(dir, 'a.ts');
+      const opts = { tip, head, baseRef: 'main' };
+      return { here, got: stripBase(dir, here, treeEntry(dir, tip, 'a.ts'), opts, 'a.ts') };
+    };
+    const held = strip(0o644);
+    expect(held.got).toEqual({ here: held.here, commits: [], refuse: false });
+    expect(strip(0o755).got.refuse).toBe(true);
   });
 });

@@ -199,6 +199,13 @@ function withoutBase(root: string, here: Entry, f: Side, m: Side): Side | undefi
   return blob && f ? { blob, mode: here.mode === m?.mode ? f.mode : here.mode } : undefined;
 }
 
+/** The tip already holds every base hunk in <here>, as after an override ship: nothing to leave out. */
+function tipHoldsCopy(root: string, here: Entry, m: Side, tip: Side): boolean {
+  if (!regular(here) || !regular(m) || !regular(tip)) return false;
+  if (here.mode === m.mode && tip.mode !== here.mode) return false;
+  return mergeBlobs(root, here, m, tip) === here.blob;
+}
+
 /** origin/<PR base>: gh's name, else the base this checkout recorded shipping <branch> onto; '' skips. */
 export function resolveBaseRef(root: string, branch: string, prBase: string): string {
   const name = prBase || loadManifest(root).branches[branch]?.baseRef || '';
@@ -241,7 +248,8 @@ export function stripBase(
     git(root, ['log', '-3', '--no-renames', '--format=%h %s', `${from}..${to}`, '--', path]),
   );
   const stripped = withoutBase(root, here, f, m);
-  if (stripped === undefined) return { here, commits, refuse: true };
+  if (stripped === undefined)
+    return tipHoldsCopy(root, here, m, tipEntry) ? none : { here, commits, refuse: true };
   return sameEntry(stripped, here) ? none : { here: stripped, commits, refuse: false };
 }
 
