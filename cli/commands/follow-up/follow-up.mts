@@ -54,9 +54,9 @@ ${USAGE}
 file reads a JSON array on stdin, one object per deferred item:
   {"title": "...", "followUpType": "builds-on", "storyType": "feature", "project": "devkit", "body": "..."}
 
-  followUpType  blocks-done: the parent's acceptance criteria are not met without it, or the parent
-                left a defect a user would hit. builds-on: the parent is complete and this extends or
-                hardens it. discovery: a pre-existing problem unrelated to the parent.
+  followUpType  blocks-done: work the parent needs that its own PR could not build (an owner
+                decision, another repo, or overflow). builds-on: the parent is complete and this
+                extends it. discovery: code the parent's PR did not touch.
   storyType     bug for a defect that still exists, otherwise feature or chore.
   project       The name of the repo that owns this fix, which can differ from the parent's.
   body          The problem, why it was deferred, the files involved, and acceptance criteria.

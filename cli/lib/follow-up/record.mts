@@ -125,8 +125,8 @@ export function openFollowUps(
 }
 
 /**
- * A non-discovery follow-up that is owned or completed means one already started, by `start`, the
- * guard Flow or a human, so a rerun assigns nothing. An archived one does not count.
+ * A non-discovery follow-up that is owned or completed means one already started, by `start`, a
+ * consumer's agent or a human, so a rerun assigns nothing. An archived, uncompleted one is ignored.
  */
 export function decideStart(parentId: number, children: readonly StoryView[]): StartDecision {
   const ofParent = children.filter((child) => parseRecord(child.description)?.parent === parentId);
