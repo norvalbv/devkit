@@ -236,11 +236,11 @@ export function stripBase(
   root: string,
   here: Side,
   tipEntry: Side,
-  { tip, head, baseRef }: { tip: string; head: string; baseRef: string },
+  opts: { tip: string; head: string; baseRef: string; range?: string[] },
   path: string,
 ): Strip {
   const none = { here, commits: [], refuse: false };
-  const [from, to] = baseRange(root, { tip, head, baseRef });
+  const [from, to] = opts.range ?? baseRange(root, opts);
   if (!to || !here || sameEntry(here, tipEntry)) return none;
   const [f, m] = [treeEntry(root, from, path), treeEntry(root, to, path)];
   if (sameEntry(f, m) || tipCarries(root, tipEntry, f, m)) return none;
@@ -273,10 +273,16 @@ export function planPath(
   tip: string,
   head: string,
   path: string,
-  baseRef = '',
+  range = ['', ''],
 ): Plan {
   const tipEntry = treeEntry(root, tip, path);
-  const strip = stripBase(root, hereEntry(root, path), tipEntry, { tip, head, baseRef }, path);
+  const strip = stripBase(
+    root,
+    hereEntry(root, path),
+    tipEntry,
+    { tip, head, baseRef: '', range },
+    path,
+  );
   const here = strip.here;
   const base = strip.commits.length > 0 || strip.refuse ? strip : undefined;
   const { entry: anchor, since, token } = anchorEntry(root, branch, tip, head, path);
@@ -330,7 +336,8 @@ export function stageAppend(
   { root, wt, branch, tip, head, out, baseRef = '' }: StageOptions,
   paths: string[],
 ): number {
-  const plans = paths.map((p) => planPath(root, branch, tip, head, p, baseRef));
+  const range = baseRange(root, { tip, head, baseRef }); // one F/M for every path in the run
+  const plans = paths.map((p) => planPath(root, branch, tip, head, p, range));
   const blocked = plans.filter((p) => p.action === 'refuse');
   const replace = envFlag('SHIP_REPLACE_OK');
   const inseparable = plans.filter((p) => p.base?.refuse);
