@@ -100,6 +100,9 @@ export function hereEntry(root: string, path: string): Side {
   return { blob, mode: here.mode };
 }
 
+const mergeBase = (root: string, a: string, b: string): string =>
+  git(root, ['merge-base', a, b])?.toString('utf8').trim() ?? '';
+
 /** What this checkout's copy of <path> was taken from. */
 export function anchorEntry(
   root: string,
@@ -116,7 +119,7 @@ export function anchorEntry(
   if (shipped?.mode && git(root, ['cat-file', '-e', shipped.blobSha])) {
     return { entry: { blob: shipped.blobSha, mode: shipped.mode }, token };
   }
-  const fork = head ? git(root, ['merge-base', tip, head])?.toString('utf8').trim() : '';
+  const fork = head ? mergeBase(root, tip, head) : '';
   // Unrelated histories: nothing to anchor on, so the tip stands in and the path is copied as before.
   return fork
     ? { entry: treeEntry(root, fork, path), since: fork, token }
@@ -181,9 +184,6 @@ interface Strip {
   refuse: boolean;
 }
 
-const mergeBase = (root: string, a: string, b: string): string =>
-  git(root, ['merge-base', a, b])?.toString('utf8').trim() ?? '';
-
 /** The tip already holds the base change <f>→<m> (a cherry-pick, an earlier override ship). */
 function tipCarries(root: string, tip: Side, f: Side, m: Side): boolean {
   if (sameEntry(tip, m)) return true;
@@ -199,6 +199,16 @@ function withoutBase(root: string, here: Entry, f: Side, m: Side): Side | undefi
   return blob && f ? { blob, mode: here.mode === m?.mode ? f.mode : here.mode } : undefined;
 }
 
+/** [F, M]: the base as the PR tip has it and as the caller's HEAD has it; empty unless HEAD is ahead. */
+function baseRange(
+  root: string,
+  { tip, head, baseRef }: { tip: string; head: string; baseRef: string },
+): string[] {
+  const from = baseRef && head ? mergeBase(root, tip, baseRef) : '';
+  const to = from ? mergeBase(root, head, baseRef) : '';
+  return to && git(root, ['merge-base', '--is-ancestor', from, to]) ? [from, to] : ['', ''];
+}
+
 /** Leave out <baseRef> changes the caller's HEAD holds and the PR tip does not (a local base merge). */
 export function stripBase(
   root: string,
@@ -208,8 +218,7 @@ export function stripBase(
   path: string,
 ): Strip {
   const none = { here, commits: [], refuse: false };
-  const from = baseRef && head ? mergeBase(root, tip, baseRef) : '';
-  const to = from ? mergeBase(root, head, baseRef) : '';
+  const [from, to] = baseRange(root, { tip, head, baseRef });
   if (!to || !here || sameEntry(here, tipEntry)) return none;
   const [f, m] = [treeEntry(root, from, path), treeEntry(root, to, path)];
   if (sameEntry(f, m) || tipCarries(root, tipEntry, f, m)) return none;
@@ -217,9 +226,8 @@ export function stripBase(
     git(root, ['log', '-3', '--no-renames', '--format=%h %s', `${from}..${to}`, '--', path]),
   );
   const stripped = withoutBase(root, here, f, m);
-  return stripped === undefined
-    ? { here, commits, refuse: true }
-    : { here: stripped, commits, refuse: false };
+  if (stripped === undefined) return { here, commits, refuse: true };
+  return sameEntry(stripped, here) ? none : { here: stripped, commits, refuse: false };
 }
 
 interface Plan {

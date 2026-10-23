@@ -13,6 +13,8 @@ reship_stage_paths() {
     # A known PR base whose ref is missing must not fall back to origin/HEAD: wrong for a stacked PR.
     if [ -n "${DRIFT_TARGET:-}" ] && { [ -z "${PR_SEEN_BASE:-}" ] || [ "$DRIFT_REF" = "origin/$PR_SEEN_BASE" ]; }; then
       bref=$DRIFT_REF
+    elif [ -n "${PR_SEEN_BASE:-}" ]; then
+      echo "ship --pr: origin/$PR_SEEN_BASE is not fetched, so base changes your checkout holds are not left out" >&2
     fi
     node "$ra" --root "$ROOT" --wt "$WT" --branch "$BR" --tip "$BASE" --head "$CALLER_HEAD" \
       ${bref:+--base-ref "$bref"} --out "$ANCHOR_OUT" -- "${PATHS[@]}"

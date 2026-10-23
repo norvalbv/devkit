@@ -496,6 +496,7 @@ describe('reship --pr — base content only the caller holds stays out of the PR
     const res = stacked.reship();
     expect(res.status, res.stderr).toBe(0);
     expect(res.stderr).not.toContain('left origin/main');
+    expect(res.stderr).toContain('origin/feat/parent is not fetched');
     expect(stacked.remote('a.ts')).toBe(text({ 0: 'from main', 9: 'lane edit' }).trim());
   });
 
@@ -595,5 +596,25 @@ describe('stripBase — a base change the tip already carries is never removed',
     expect(left.refuse).toBe(false);
     expect(left.commits).toHaveLength(1);
     expect(git(['cat-file', 'blob', left.here?.blob ?? ''])).toBe(text({ 9: 'mine' }).trim());
+
+    // A copy that already lacks the base change names nothing as left out.
+    writeFileSync(join(dir, 'a.ts'), text({ 9: 'mine' }));
+    const reverted = hereEntry(dir, 'a.ts');
+    const tipEntry = treeEntry(dir, bare, 'a.ts');
+    const opts = { tip: bare, head, baseRef: 'main' };
+    expect(stripBase(dir, reverted, tipEntry, opts, 'a.ts')).toEqual({
+      here: reverted,
+      commits: [],
+      refuse: false,
+    });
+    // A HEAD older than the PR's fork holds no base change the PR lacks: nothing is touched.
+    git(['checkout', '-q', '-f', '-b', 'late', head]);
+    const late = commit(text({ 0: 'from main', 11: 'late pr' }));
+    const old = { tip: late, head: fork, baseRef: 'main' };
+    expect(stripBase(dir, reverted, treeEntry(dir, late, 'a.ts'), old, 'a.ts')).toEqual({
+      here: reverted,
+      commits: [],
+      refuse: false,
+    });
   });
 });
