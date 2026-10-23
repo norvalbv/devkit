@@ -663,6 +663,38 @@ describe('stripBase — a base change the tip already carries is never removed',
     });
   });
 
+  it('strips the mainline delta when the PR forked from a side branch the base later merged', () => {
+    const dir = tmp('reship-anchor-side-');
+    const env = { ...process.env, ...GENV };
+    const git = (a: string[]) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8' }).trim();
+    const commit = (content: string, subject: string) => {
+      writeFileSync(join(dir, 'a.ts'), content);
+      git(['add', 'a.ts']);
+      git(['commit', '-q', '-m', subject]);
+      return git(['rev-parse', 'HEAD']);
+    };
+    git(['init', '-q', '-b', 'main']);
+    git(['config', 'user.email', 'a@b.c']);
+    git(['config', 'user.name', 'a']);
+    const root = commit(text(), 'root');
+    const head = commit(text({ 0: 'from a' }), 'mainline change'); // the caller sits here
+    git(['checkout', '-q', '-b', 'side', root]);
+    const side = commit(text({ 11: 'side' }), 'side change');
+    git(['checkout', '-q', 'main']);
+    git(['merge', '-q', '--no-edit', 'side']); // main now holds both lines of work
+    git(['checkout', '-q', '-b', 'pr', side]);
+    const tip = commit(text({ 5: 'pr', 11: 'side' }), 'pr change'); // forked from the side line
+    git(['checkout', '-q', '-f', head]);
+    writeFileSync(join(dir, 'a.ts'), text({ 0: 'from a', 9: 'mine' }));
+    const here = hereEntry(dir, 'a.ts');
+    const opts = { tip, head, baseRef: 'main' };
+    const got = stripBase(dir, here, treeEntry(dir, tip, 'a.ts'), opts, 'a.ts');
+    expect(got.refuse).toBe(false);
+    expect(got.commits.join('\n')).toContain('mainline change');
+    expect(git(['cat-file', 'blob', got.here?.blob ?? ''])).toBe(text({ 9: 'mine' }).trim());
+  });
+
   it('ships an overridden copy the tip already holds, but never a base chmod the tip lacks', () => {
     const dir = tmp('reship-anchor-held-');
     const env = { ...process.env, ...GENV };

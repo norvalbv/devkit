@@ -221,14 +221,14 @@ export function resolveBaseRef(root: string, branch: string, prBase: string): st
   return '';
 }
 
-/** [F, M]: the base as the PR tip has it and as the caller's HEAD has it; empty unless HEAD is ahead. */
+/** [F, M]: M is the base the caller's HEAD holds, F what of M the PR tip has; F..M is what the PR lacks. */
 function baseRange(
   root: string,
   { tip, head, baseRef }: { tip: string; head: string; baseRef: string },
 ): string[] {
-  const from = baseRef && head ? mergeBase(root, tip, baseRef) : '';
-  const to = from ? mergeBase(root, head, baseRef) : '';
-  return to && git(root, ['merge-base', '--is-ancestor', from, to]) ? [from, to] : ['', ''];
+  const to = baseRef && head ? mergeBase(root, head, baseRef) : '';
+  const from = to ? mergeBase(root, tip, to) : '';
+  return from ? [from, to] : ['', ''];
 }
 
 /** Leave out <baseRef> changes the caller's HEAD holds and the PR tip does not (a local base merge). */
