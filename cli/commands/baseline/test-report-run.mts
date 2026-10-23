@@ -49,6 +49,10 @@ names:
       path: ${RUNS_DIR}/*/${REPORT_NAME}
       include-hidden-files: true
 
+Sharded CI: each shard job runs \`vitest run --shard=<i>/<N> --reporter=blob\` and uploads its blob;
+one job downloads them all and runs \`devkit test-report-run --mergeReports\`. Check first that every
+shard's blob arrived: vitest merges a partial set without complaint, and that would publish a green.
+
 The console summary and the GitHub PR annotations are preserved — the json reporter is added
 alongside them, never in place of them. Vitest-only; \`devkit baseline-status\` is not.`,
 };
