@@ -496,7 +496,7 @@ describe('reship --pr — base content only the caller holds stays out of the PR
     const res = stacked.reship();
     expect(res.status, res.stderr).toBe(0);
     expect(res.stderr).not.toContain('left origin/main');
-    expect(res.stderr).toContain('origin/feat/parent is not fetched');
+    expect(res.stderr).toContain('could not compare with origin/feat/parent');
     expect(stacked.remote('a.ts')).toBe(text({ 0: 'from main', 9: 'lane edit' }).trim());
   });
 

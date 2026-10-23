@@ -14,7 +14,7 @@ reship_stage_paths() {
     if [ -n "${DRIFT_TARGET:-}" ] && { [ -z "${PR_SEEN_BASE:-}" ] || [ "$DRIFT_REF" = "origin/$PR_SEEN_BASE" ]; }; then
       bref=$DRIFT_REF
     elif [ -n "${PR_SEEN_BASE:-}" ]; then
-      echo "ship --pr: origin/$PR_SEEN_BASE is not fetched, so base changes your checkout holds are not left out" >&2
+      echo "ship --pr: could not compare with origin/$PR_SEEN_BASE, so base changes your checkout holds are not left out" >&2
     fi
     node "$ra" --root "$ROOT" --wt "$WT" --branch "$BR" --tip "$BASE" --head "$CALLER_HEAD" \
       ${bref:+--base-ref "$bref"} --out "$ANCHOR_OUT" -- "${PATHS[@]}"
