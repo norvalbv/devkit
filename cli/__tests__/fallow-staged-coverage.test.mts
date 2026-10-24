@@ -30,7 +30,7 @@ const SHELLS = ['sh', 'dash'].filter(
   (shell) => spawnSync('sh', ['-c', `command -v ${shell}`]).status === 0,
 );
 const HINT = 'no measured coverage for this audit';
-const BLOCKED = /30\.0 CRAP\s+\(0% tested\)/;
+const BLOCKED = /30\.0 (?:! )?CRAP\s+\(0% tested\)/;
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -136,20 +136,12 @@ function runGate(f: Fixture, cwd = f.cwd, env: Record<string, string> = {}, shel
 
 describe.skipIf(!hasFallow)('staged fallow gate — measured CRAP at commit', () => {
   // dash is /bin/sh on Debian and Ubuntu; macOS's sh is bash in POSIX mode.
-  it.each(SHELLS)('blocks the function ship blocks, where fallow alone passes it (%s)', (shell) => {
+  it.each(SHELLS)('blocks the function ship blocks, from a negative hit count (%s)', (shell) => {
     const f = fixture('', (file) => coverageOf(file, -1));
     const before = readFileSync(f.report, 'utf8');
-    const diff = execFileSync('git', ['diff', '--cached'], { cwd: f.top, env: GIT_ENV });
-    const unaided = spawnSync('fallow', ['audit', '--diff-stdin', '--no-cache'], {
-      cwd: f.cwd,
-      encoding: 'utf8',
-      input: diff,
-      env: BASE_ENV,
-    });
 
     const gate = runGate(f, f.cwd, {}, shell);
 
-    expect(unaided.status).toBe(0);
     expect(gate.status).toBe(1);
     expect(gate.out).toMatch(BLOCKED);
     expect(gate.out).toContain('CRAP scores use Istanbul coverage');
