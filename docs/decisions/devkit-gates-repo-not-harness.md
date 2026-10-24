@@ -76,3 +76,4 @@ created: 2026-08-04
 **Scope:** agents-hooks/**,cli/lib/install/hook-registration-ledger/**,gate-engine/prior-art/shell-writes.mts
 **Source:** brainstorm
 **Evidence-change:** The Bash bypass accepted on 2026-10-15 is the common path, not an edge: 553 of 2,361 Frink session transcripts over 7 days wrote through Bash with no Edit-tool call, driven by Claude Code's auto-mode prompt steering file changes to Bash.
+- 2026-10-23 — devkit machine (axis agent-machine) is agent-invoked tooling, not a gate: the agent runs it by choice, it reads no harness tool argument, denies no tool call, is called by no generated hook and never changes a commit or ship exit code, so it sits outside this ruling like prove-regression.
