@@ -446,6 +446,35 @@ describe('attributeFailures against a stubbed gh', () => {
     );
   });
 
+  // The reader caches each run's summary, so each case gets its own test and so its own cache.
+  const truncatedCase = (
+    base: TestReportSummary['unhandled'],
+    pr: TestReportSummary['unhandled'],
+  ) => {
+    const a = { 'a.test.mts': names(['x > broke']) };
+    const at = (runId: number, unhandled: TestReportSummary['unhandled']) =>
+      JSON.stringify({ ...summary({ 'a.test.mts': 'failed' }, a, runId), unhandled });
+    put('summary-100.json', at(100, base));
+    put('summary-200.json', at(200, pr));
+    return attribute().line;
+  };
+
+  it('names a cut-short base list as truncated, not as an unrecorded run', () => {
+    const line = truncatedCase(
+      { errors: [err('Error: x')], truncated: true },
+      { errors: [err('Error: y')] },
+    );
+    expect(line).toMatch(/^attribution=unknown .* unhandled=truncated /);
+  });
+
+  it('marks a new count from a truncated PR list as a floor', () => {
+    const line = truncatedCase(
+      { errors: [err('Error: x')] },
+      { errors: [err('Error: y')], truncated: true },
+    );
+    expect(line).toMatch(/^attribution=new .* unhandled=\+1,truncated /);
+  });
+
   it('never treats a shard that failed before any step ran as a moved shard', () => {
     // A runner that never started reports the job with no steps, so no sibling signature matches it.
     const a = { 'a.test.mts': names(['x > broke']) };

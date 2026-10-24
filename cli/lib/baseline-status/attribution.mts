@@ -138,9 +138,17 @@ export function capped(values: string[]): string {
   return rest > 0 ? `${shown.join(',')},+${rest}` : shown.join(',');
 }
 
-/** The verdict-line field for outside-test errors: absent when the PR added none. */
-const unhandledField = (extra: UnhandledError[] | null): string =>
-  extra === null ? ' unhandled=unrecorded' : extra.length > 0 ? ` unhandled=+${extra.length}` : '';
+/** The verdict-line field for outside-test errors: absent when the PR added none. `truncated` marks a
+ * comparison a capped list cut short, or a new count that is only a floor. */
+function unhandledField(
+  extra: UnhandledError[] | null,
+  pr?: UnhandledRecord,
+  base?: UnhandledRecord,
+) {
+  if (extra === null) return pr && base ? ' unhandled=truncated' : ' unhandled=unrecorded';
+  if (extra.length === 0) return '';
+  return ` unhandled=+${extra.length}${pr?.truncated ? ',truncated' : ''}`;
+}
 
 const unknown = (reason: string, base = ''): Attribution => ({
   token: 'unknown',
@@ -217,7 +225,7 @@ export function attributeFailures({
       line:
         `attribution=${token} inherited=${files.inherited.length} new=${files.fresh.length}${unsure}` +
         ` new-failing=${capped(files.fresh)} new-steps=${capped(newSteps)}` +
-        `${unhandledField(extraUnhandled)}${other}${base}`,
+        `${unhandledField(extraUnhandled, prSummary.unhandled, baseSummary.unhandled)}${other}${base}`,
     };
   } catch (e) {
     if (e instanceof GhUnavailable) return unknown(e.reason, base);
