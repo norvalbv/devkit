@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AUTO_START_PREFIX,
   decideStart,
   FOLLOW_UP_TYPES,
   ineligibleReason,
@@ -31,6 +30,7 @@ function story(id: number, description: string, extra: Partial<StoryView> = {}):
     description,
     ownerIds: [],
     closed: false,
+    completed: false,
     linkedIds: [],
     ...extra,
   };
@@ -61,6 +61,12 @@ describe('parseRecord', () => {
     expect(parseRecord('**Follow-up of:** someone else')).toBeNull();
   });
 
+  it('reads the lines from a footer under the body, as file writes them', () => {
+    const footer = `## Problem\nPR #569 does two things.\n\n${renderRecord('frink', 7438, 'builds-on', PR)}`;
+    expect(parseRecord(footer)).toEqual(parseRecord(followUpOf(7438, 'builds-on')));
+    expect(parseRecord(footer)).toMatchObject({ parent: 7438, stackOn: PR });
+  });
+
   it('leaves an unknown type unset instead of guessing', () => {
     expect(parseRecord(followUpOf(1, 'builds on'))?.type).toBeNull();
   });
@@ -82,11 +88,9 @@ describe('renderRecord', () => {
 });
 
 describe('normalisedTitle and isPrUrl', () => {
-  it('ignores case, spacing and a leading start marker, and accepts only a whole PR URL', () => {
-    expect(normalisedTitle(`${AUTO_START_PREFIX}  Split   The Row `)).toBe('split the row');
-    expect(normalisedTitle(`Add ${AUTO_START_PREFIX} logging`)).toBe(
-      `add ${AUTO_START_PREFIX} logging`,
-    );
+  it('ignores case, spacing and a legacy leading start marker, and accepts only a whole PR URL', () => {
+    expect(normalisedTitle('[auto-start]  Split   The Row ')).toBe('split the row');
+    expect(normalisedTitle('Add [auto-start] logging')).toBe('add [auto-start] logging');
     expect(isPrUrl(PR)).toBe(true);
     expect(isPrUrl(`${PR}/files`)).toBe(false);
     expect(isPrUrl(`see ${PR}`)).toBe(false);
@@ -94,10 +98,13 @@ describe('normalisedTitle and isPrUrl', () => {
 });
 
 describe('isDepthCapped', () => {
-  it('caps a story devkit started and a story that is itself a follow-up', () => {
-    expect(isDepthCapped(story(1, '', { name: `${AUTO_START_PREFIX} Fix it` }))).toBe(true);
+  it('caps a story that carries a Follow-up of line, wherever it sits, and ignores the title', () => {
     expect(isDepthCapped(story(1, followUpOf(9, 'builds-on')))).toBe(true);
+    expect(
+      isDepthCapped(story(1, `Body.\n\n${renderRecord('devkit', 9, 'discovery', null)}`)),
+    ).toBe(true);
     expect(isDepthCapped(story(1, '**Project:** frink\n\nNew feature.'))).toBe(false);
+    expect(isDepthCapped(story(1, 'New feature.', { name: '[auto-start] Fix it' }))).toBe(false);
   });
 });
 
@@ -129,43 +136,44 @@ describe('ineligibleReason', () => {
 describe('decideStart', () => {
   const ok = (id: number, extra: Partial<StoryView> = {}) =>
     story(id, followUpOf(1, 'builds-on'), extra);
+  const started = (id: number) => ({ action: 'none', reason: `sc-${id} was already started` });
 
-  it('renames and assigns the lowest-id unowned eligible follow-up', () => {
+  it('assigns the lowest-id unowned eligible follow-up without touching its title', () => {
     const decision = decideStart(1, [ok(30), ok(20), story(10, followUpOf(1, 'discovery'))]);
-    expect(decision).toMatchObject({ action: 'assign', rename: true, story: { id: 20 } });
+    expect(decision).toEqual({ action: 'assign', story: ok(20) });
   });
 
-  it('starts nothing once a marked follow-up is owned, so a rerun is a no-op', () => {
-    const decision = decideStart(1, [
-      ok(30, { name: `${AUTO_START_PREFIX} Story 30`, ownerIds: ['u1'] }),
-      ok(20),
-    ]);
-    expect(decision).toEqual({ action: 'none', reason: 'sc-30 was already started' });
+  it('starts nothing once a follow-up is owned, so a rerun or a guard-assigned one stops it', () => {
+    expect(decideStart(1, [ok(30, { ownerIds: ['u1'] }), ok(20)])).toEqual(started(30));
   });
 
-  it('still counts a started follow-up once it is closed, so a sibling never starts', () => {
-    const done = ok(20, { name: `${AUTO_START_PREFIX} Story 20`, ownerIds: ['u1'], closed: true });
-    expect(decideStart(1, [done, ok(30)])).toEqual({
-      action: 'none',
-      reason: 'sc-20 was already started',
-    });
+  it('counts a completed follow-up as started even after its owner was cleared', () => {
+    const done = ok(20, { closed: true, completed: true });
+    expect(decideStart(1, [done, ok(30)])).toEqual(started(20));
   });
 
-  it('counts a closed marked follow-up as started even after its owner was cleared', () => {
-    const done = ok(20, { name: `${AUTO_START_PREFIX} Story 20`, closed: true });
-    expect(decideStart(1, [done, ok(30)])).toEqual({
-      action: 'none',
-      reason: 'sc-20 was already started',
-    });
+  it('does not count an archived follow-up, owned or not, so its sibling can still start', () => {
+    for (const archived of [ok(20, { closed: true }), ok(20, { closed: true, ownerIds: ['u1'] })]) {
+      expect(decideStart(1, [archived, ok(30)])).toEqual({ action: 'assign', story: ok(30) });
+    }
   });
 
-  it('resumes a marked follow-up whose assign failed before picking a new one', () => {
-    const decision = decideStart(1, [ok(20), ok(30, { name: `${AUTO_START_PREFIX} Story 30` })]);
-    expect(decision).toMatchObject({ action: 'assign', rename: false, story: { id: 30 } });
+  it('counts an owned blocks-done or untyped follow-up as started, but not an owned discovery', () => {
+    const blocksDone = story(20, followUpOf(1, 'blocks-done'), { ownerIds: ['u1'] });
+    const discovery = story(20, followUpOf(1, 'discovery'), { ownerIds: ['u1'] });
+    const untyped = story(20, followUpOf(1, 'builds on'), { ownerIds: ['u1'] });
+    expect(decideStart(1, [blocksDone, ok(30)])).toEqual(started(20));
+    expect(decideStart(1, [untyped, ok(30)])).toEqual(started(20));
+    expect(decideStart(1, [discovery, ok(30)])).toEqual({ action: 'assign', story: ok(30) });
   });
 
-  it('skips a follow-up a human already took', () => {
-    expect(decideStart(1, [ok(20, { ownerIds: ['u1'] })])).toEqual({
+  it('ignores owned stories that are not follow-ups of this parent', () => {
+    const other = story(20, followUpOf(5, 'builds-on'), { ownerIds: ['u1'] });
+    expect(decideStart(1, [other, ok(30)])).toEqual({ action: 'assign', story: ok(30) });
+  });
+
+  it('starts nothing when no follow-up qualifies', () => {
+    expect(decideStart(1, [story(20, followUpOf(1, 'blocks-done'))])).toEqual({
       action: 'none',
       reason: 'no unowned builds-on follow-up qualifies',
     });

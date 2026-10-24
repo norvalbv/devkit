@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import {
-  AUTO_START_PREFIX,
   decideStart,
   FOLLOW_UP_TYPES,
   isDepthCapped,
@@ -23,7 +22,6 @@ import {
   linkStories,
   readStory,
   type RunShort,
-  renameStory,
   runShort,
   type TrackerStory,
 } from '../../lib/follow-up/shortcut-cli.mts';
@@ -56,16 +54,17 @@ ${USAGE}
 file reads a JSON array on stdin, one object per deferred item:
   {"title": "...", "followUpType": "builds-on", "storyType": "feature", "project": "devkit", "body": "..."}
 
-  followUpType  blocks-done: the parent's acceptance criteria are not met without it, or the parent
-                left a defect a user would hit. builds-on: the parent is complete and this extends or
-                hardens it. discovery: a pre-existing problem unrelated to the parent.
+  followUpType  blocks-done: work the parent needs that its own PR could not build (an owner
+                decision, another repo, or overflow). builds-on: the parent is complete and this
+                extends it. discovery: code the parent's PR did not touch.
   storyType     bug for a defect that still exists, otherwise feature or chore.
   project       The name of the repo that owns this fix, which can differ from the parent's.
   body          The problem, why it was deferred, the files involved, and acceptance criteria.
                 It must not contain a record line such as **Stack on:**.
 
 Every item is validated before anything is written. Each story is filed unowned, in the parent's
-team and its workflow's default state, then linked "relates to" the parent. Its description starts:
+team and its workflow's default state, then linked "relates to" the parent. Its description is the
+body, then a blank line, then this footer:
   **Project:** <project>
   **Follow-up of:** sc-<parent> · <pr url>
   **Follow-up type:** <followUpType>
@@ -75,10 +74,10 @@ so running it again after a run ends is safe. A story that cannot be linked is a
 one JSON line, also when filing stops early:
   {"followups":[{"id":7555,"status":"new","type":"builds-on"}]}
 
-start assigns at most one builds-on follow-up of the parent: open, carrying **Stack on:** with the
-parent's PR when it had one. The lowest qualifying id is renamed "${AUTO_START_PREFIX} <title>" and
-then assigned, which fires a story-assigned trigger. Nothing starts when the parent is itself a
-follow-up, or once an ${AUTO_START_PREFIX} follow-up of it is assigned or closed. Prints
+start assigns the lowest-id builds-on follow-up of the parent that is open, unowned and carries
+**Stack on:** with the parent's PR when it had one; assigning fires a story-assigned trigger. Nothing
+starts when the parent is itself a follow-up (it carries **Follow-up of:**), or once any follow-up of
+it other than a discovery is owned or completed. Titles are never changed. Prints
 {"started":true,"story":<id>} or {"started":false,"reason":"..."}.
 
 status lists the open follow-ups that hold the story's feature back: blocks-done, builds-on and
@@ -111,10 +110,8 @@ export function startFollowUp(
   const assignee = owner ?? parent.ownerIds[0];
   if (!assignee)
     throw new Error(`sc-${parentId} has no owner to give its follow-up to; pass --owner`);
-  const { story } = decision;
-  if (decision.rename) renameStory(run, story.id, `${AUTO_START_PREFIX} ${story.name}`);
-  assignStory(run, story.id, assignee);
-  return { started: true, story: story.id };
+  assignStory(run, decision.story.id, assignee);
+  return { started: true, story: decision.story.id };
 }
 
 export interface StatusResult {
@@ -140,13 +137,7 @@ export function followUpStatus(storyId: number, run: RunShort = runShort): Statu
 const ONE_LINE = /^[^\r\n\u2028\u2029]*$/;
 
 const ITEM = z.object({
-  title: z
-    .string()
-    .trim()
-    .min(1)
-    .max(512)
-    .regex(ONE_LINE, 'must be one line')
-    .refine((title) => !title.startsWith(AUTO_START_PREFIX), `must not start ${AUTO_START_PREFIX}`),
+  title: z.string().trim().min(1).max(512).regex(ONE_LINE, 'must be one line'),
   followUpType: z.enum(FOLLOW_UP_TYPES),
   storyType: z.enum(['feature', 'bug', 'chore']),
   project: z
@@ -209,7 +200,7 @@ function fileOne(
   const record = renderRecord(item.project, parent.id, item.followUpType, prUrl);
   const id = createStory(run, {
     name: item.title,
-    description: `${record}\n\n${item.body}`,
+    description: [item.body.trimEnd(), record].filter(Boolean).join('\n\n'),
     storyType: item.storyType,
     stateId,
     teamId: parent.teamId,

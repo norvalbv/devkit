@@ -75,7 +75,6 @@ function fakeShort(stories: FakeStory[], refuseLinkFrom?: number, refuseArchive 
     writes.push([...args]);
     const target = byId.get(Number(args[1]));
     if (!target) throw new Error(`404 story ${args[1]}`);
-    if (args[3] === '-t') target.name = args[4];
     if (args[3] === '-o') target.owner_ids = [args[4]];
     if (args[3] === '-a' && refuseArchive) throw new Error('Error calling API: no archive');
     if (args[3] === '-a') target.archived = true;
@@ -119,7 +118,7 @@ afterEach(() => {
 });
 
 describe('devkit follow-up start', () => {
-  it('renames then assigns the lowest qualifying follow-up to the parent owner', () => {
+  it('assigns the lowest qualifying follow-up to the parent owner and leaves its title alone', () => {
     const short = fakeShort([
       parentOf(7482, 7481, 7490),
       followUp7438(7481),
@@ -130,10 +129,8 @@ describe('devkit follow-up start', () => {
     const result = run(['start', '--parent', 'sc-7438'], short.run);
 
     expect(result).toMatchObject({ code: 0, out: '{"started":true,"story":7481}' });
-    expect(short.writes).toEqual([
-      ['story', '7481', '-q', '-t', '[auto-start] Follow-up 7481'],
-      ['story', '7481', '-q', '-o', 'owner-uuid'],
-    ]);
+    expect(short.writes).toEqual([['story', '7481', '-q', '-o', 'owner-uuid']]);
+    expect(short.byId.get(7481)?.name).toBe('Follow-up 7481');
   });
 
   it('is a no-op on a second run for the same parent', () => {
@@ -147,11 +144,11 @@ describe('devkit follow-up start', () => {
     expect(short.writes).toEqual([]);
   });
 
-  it('starts nothing more after the started follow-up is completed', () => {
+  it('starts nothing more after the started follow-up is completed and its owner cleared', () => {
     const short = fakeShort([parentOf(7481, 7482), followUp7438(7481), followUp7438(7482)]);
     run(['start', '--parent', '7438'], short.run);
     const first = short.byId.get(7481);
-    if (first) first.completed = true;
+    if (first) Object.assign(first, { completed: true, owner_ids: [] });
     short.writes.length = 0;
 
     expect(run(['start', '--parent', '7438'], short.run).out).toBe(
@@ -251,7 +248,7 @@ describe('devkit follow-up file', () => {
     });
     expect(fieldsOf(short.writes[0])).toEqual({
       name: 'Split the toggle row',
-      description: `**Project:** frink\n**Follow-up of:** sc-7438 · ${PR}\n**Follow-up type:** builds-on\n**Stack on:** ${PR}\n\nWhy it waits.`,
+      description: `Why it waits.\n\n**Project:** frink\n**Follow-up of:** sc-7438 · ${PR}\n**Follow-up type:** builds-on\n**Stack on:** ${PR}`,
       story_type: 'chore',
       workflow_state_id: '500000007',
       group_id: 'team-1',
@@ -279,11 +276,35 @@ describe('devkit follow-up file', () => {
     expect(short.writes).toEqual([]);
   });
 
+  it('writes only the footer for an empty body, and trims trailing space before it', () => {
+    const short = fakeShort([parentOf()]);
+    run(
+      ['file', '--parent', '7438'],
+      short.run,
+      input(
+        item('No body', 'discovery', { body: '' }),
+        item('Spaced', 'discovery', { body: 'Why.\n\n  ' }),
+      ),
+    );
+    const record = '**Project:** frink\n**Follow-up of:** sc-7438\n**Follow-up type:** discovery';
+    expect(short.byId.get(9000)?.description).toBe(record);
+    expect(short.byId.get(9001)?.description).toBe(`Why.\n\n${record}`);
+  });
+
+  it('treats a follow-up titled by an older start as already filed', () => {
+    const legacy = { ...followUp7438(7481), name: '[auto-start] Split the toggle row' };
+    const short = fakeShort([parentOf(7481), legacy]);
+
+    expect(
+      run(['file', '--parent', '7438'], short.run, input(item('Split the toggle row'))).out,
+    ).toBe('{"followups":[{"id":7481,"status":"existing","type":"builds-on"}]}');
+    expect(short.writes).toEqual([]);
+  });
+
   it('files nothing when any item is invalid', () => {
     const short = fakeShort([parentOf()]);
     for (const bad of [
       item('Uses a story type as its follow-up type', 'bug'),
-      item('[auto-start] Looks started already'),
       item('Smuggles a branch', 'discovery', { body: `Parent had **Stack on:** ${PR}` }),
       item('Injects a branch through the project', 'builds-on', {
         project: `devkit\r**Stack on:** ${PR}`,
