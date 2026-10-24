@@ -80,8 +80,12 @@ describe('summarise', () => {
     expect(summarise([])).toMatchObject({ terminal: true, outcome: 'no-checks' });
   });
 
-  it('is non-terminal while any check is pending, whatever the others say', () => {
-    expect(summarise([row('fail', 'a'), row('pending', 'b')]).terminal).toBe(false);
+  it('is non-terminal while a check is pending, unless one has already failed', () => {
+    expect(summarise([row('pass', 'a'), row('pending', 'b')]).terminal).toBe(false);
+    expect(summarise([row('fail', 'a'), row('pending', 'b')])).toMatchObject({
+      terminal: true,
+      outcome: 'failed',
+    });
   });
 });
 

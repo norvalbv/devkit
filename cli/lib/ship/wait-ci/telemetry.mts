@@ -22,6 +22,7 @@ export function recordCiEvent(result: WaitCiResult, pr: string, env = process.en
     polls: result.polls,
     reason: result.unavailableReason ?? null,
     required: result.required ?? false,
+    required_contexts: result.requiredContexts ?? null,
     attribution: result.attribution?.token ?? null,
     inherited: result.attribution?.inherited ?? null,
     new_failures: result.attribution?.fresh ?? null,
