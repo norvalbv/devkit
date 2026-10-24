@@ -204,7 +204,7 @@ export function renderScopeDriftHints(reviewer: string, drifts: ScopeDrift[]): s
 }
 
 const DEFAULT_DEPS: Omit<ScopeDriftDeps, 'cwd'> = {
-  loadTargets: () => loadScopedTargets(),
+  loadTargets: () => loadScopedTargets(undefined, 'index'),
   exists: existsSync,
   emit: (ev) => {
     emitGateEvent(ev);
