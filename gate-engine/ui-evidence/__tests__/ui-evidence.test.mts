@@ -45,6 +45,27 @@ describe('uiPaths', () => {
 });
 
 describe('uiPathReason', () => {
+  it('ignores UI extensions inside agent-tool and devkit dirs, at the root or nested', () => {
+    const staged = [
+      '.claude/skills/x/eval-viewer/viewer.html',
+      '.cursor/skills/x/a.css',
+      'packages/app/.agents/skills/x/page.html',
+      '.devkit/report.html',
+    ];
+    expect(uiPathReason(staged, [])).toBeNull();
+  });
+
+  it('still counts an agent dir that uiEvidence.paths names', () => {
+    expect(uiPathReason(['.agents/ui/page.ts', '.claude/x.html'], ['.agents/ui/**'])).toBe(
+      'UI paths changed: .agents/ui/page.ts',
+    );
+  });
+
+  it("still counts an app's own agents/ or dot-lookalike dirs as UI", () => {
+    const staged = ['src/agents/AgentCard.tsx', 'src/.claude-theme/a.css', 'app/my.devkit/x.tsx'];
+    expect(uiPathReason(staged, [])).toBe(`UI paths changed: ${staged.join(', ')}`);
+  });
+
   it('names at most three UI files and counts the rest', () => {
     const staged = ['a.tsx', 'b.tsx', 'c.tsx', 'd.css', 'e.css'];
     expect(uiPathReason(staged, [])).toBe('UI paths changed: a.tsx, b.tsx, c.tsx, +2 more');
@@ -286,6 +307,31 @@ describe('guard-ui-evidence CLI', () => {
     const r = runGate(dir, null, judgeStub(dir, 'printf "a card changes\\nVERDICT: VISIBLE\\n"'));
     expect(r).toMatchObject({ code: 0, stderr: '', events: [] });
     expect(judgeCalls(dir)).toBe(0);
+  });
+
+  it('a devkit asset sync, root or nested, never asks the judge', () => {
+    const dir = stagedRepo({
+      '.claude/agents/a.md': 'x',
+      '.cursor/hooks/h.mjs': 'x',
+      '.codex/agents/c.toml': 'x',
+      '.agents/skills/s/SKILL.md': 'x',
+      '.devkit/config.json': '{}',
+      'packages/app/.claude/settings.json': '{}',
+    });
+    const r = runGate(dir, null, judgeStub(dir, 'printf "a card changes\\nVERDICT: VISIBLE\\n"'));
+    expect(r).toMatchObject({ code: 0, stderr: '', events: [] });
+    expect(judgeCalls(dir)).toBe(0);
+  });
+
+  it('a devkit asset staged beside app code is left out of the judge input', () => {
+    const dir = stagedRepo({
+      '.claude/settings.json': '{}',
+      'server/price.ts': 'export const fmt = 2;',
+    });
+    runGate(dir, null, judgeStub(dir, 'printf "nothing shown\\nVERDICT: NONE\\n"'));
+    const judged = readFileSync(path.join(dir, '.git', 'judged'), 'utf8');
+    expect(judged).toContain('server/price.ts');
+    expect(judged).not.toContain('.claude');
   });
 
   it('devkit review stays silent even with UI files staged', () => {
