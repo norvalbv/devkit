@@ -73,11 +73,11 @@ describe('stagedTargetChanges', () => {
     expect(stagedTargetChanges(staged(), repo)).toEqual([]);
   });
 
-  it('reads the index, not the worktree, and is empty with no decision file staged', () => {
-    write('src/a.ts', 'export {};\n');
-    git('add', 'src/a.ts');
-    write('docs/decisions/kept.md', axis('kept', target('Unstaged edit.')));
-    expect(stagedTargetChanges(staged(), repo)).toEqual([]);
+  it('reads the index, not the worktree: a staged ruling wins over a different unstaged one', () => {
+    write('docs/decisions/kept.md', axis('kept', target('The staged ruling.')));
+    git('add', 'docs/decisions/kept.md');
+    write('docs/decisions/kept.md', axis('kept', target('The old ruling.')));
+    expect(stagedTargetChanges(staged(), repo)).toEqual(['kept']);
     expect(renderChangedTargets([])).toBe('');
   });
 
@@ -103,6 +103,27 @@ describe('stagedTargetChanges', () => {
     write('packages/app/adr/pkg-axis.md', axis('pkg-axis', target('Package claim.')));
     git('add', '.');
     expect(stagedTargetChanges(staged(), pkg)).toEqual(['pkg-axis']);
+  });
+
+  it('treats a decisions dir whose name starts with two dots as inside the repository', () => {
+    write('guard.config.json', JSON.stringify({ decisionsDir: '..notes' }));
+    write('..notes/dotted.md', axis('dotted', target('A dotted claim.')));
+    git('add', '.');
+    expect(stagedTargetChanges(staged(), repo)).toEqual(['dotted']);
+  });
+
+  it('ignores a staged file that only shares its path with a decisions dir in another repository', () => {
+    const shared = mkdtempSync(path.join(tmpdir(), 'staged-targets-shared-'));
+    execFileSync('git', ['init', '-q'], { cwd: shared });
+    mkdirSync(path.join(shared, 'docs/decisions'), { recursive: true });
+    write(
+      'guard.config.json',
+      JSON.stringify({ decisionsDir: path.join(shared, 'docs/decisions') }),
+    );
+    write('docs/decisions/kept.md', axis('kept', target('A local, unconfigured claim.')));
+    git('add', '.');
+    expect(stagedTargetChanges(staged(), repo)).toEqual([]);
+    rmSync(shared, { recursive: true, force: true });
   });
 });
 
@@ -141,6 +162,27 @@ describe('runCompleteness — Targets the commit changes', () => {
     );
     expect(prompt).not.toContain('### kept');
     expect(prompt).toContain('NOT AUTHORITY: kept');
+  });
+
+  it('an unstaged ruling edit and an untracked axis never reach the prompt', async () => {
+    const dir = fixture(target('The old ruling.'));
+    write('docs/decisions/kept.md', axis('kept', target('An unstaged draft ruling.')));
+    write('docs/decisions/fresh.md', axis('fresh', target('An untracked claim.')));
+    const prompt = await judgedPrompt(dir);
+    expect(prompt).toContain('### kept');
+    expect(prompt).toContain('The old ruling.');
+    expect(prompt).not.toContain('unstaged draft');
+    expect(prompt).not.toContain('### fresh');
+  });
+
+  it('still renders Targets from a git-ignored decision log', async () => {
+    const dir = consumerRepo({ backend: true });
+    repo = dir;
+    writeFileSync(path.join(dir, '.git', 'info', 'exclude'), 'docs/\n');
+    write('docs/decisions/kept.md', axis('kept', target('The ignored-log ruling.')));
+    const prompt = await judgedPrompt(dir);
+    expect(prompt).toContain('### kept');
+    expect(prompt).toContain('The ignored-log ruling.');
   });
 
   it('keeps a note-only append under the authority block with no NOT AUTHORITY note', async () => {

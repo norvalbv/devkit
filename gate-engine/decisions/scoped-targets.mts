@@ -16,14 +16,18 @@
  * nothing governs. Fail-open: any error → exit 2 with `[]` so the consumer degrades to a SKIP note.
  */
 
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import path from 'node:path';
+import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { matchesRepoGlob } from '../../skills/_devkit/review-roots.mjs';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { clip, EVENT_BUDGET } from '../judge/odb-probe.mts';
-import { loadScopedTargets, matchScope } from './check-alignment.mts';
+import {
+  type DecisionSource,
+  decisionTexts,
+  matchScope,
+  parseScopedTargets,
+} from './check-alignment.mts';
 import { currentTarget, parseDecision, rankAxes } from './decisions.mts';
 
 /** A recorded Target that governs a change: its axis slug, current ruling, scope, and match source. */
@@ -37,11 +41,11 @@ export interface GoverningTarget {
 // The current Target's full ruling + scope for an axis, read from its file (not the clamped INDEX row).
 function rulingFor(
   slug: string,
-  decisionsDir: string,
+  texts: Map<string, string>,
 ): { ruling: string; scope: string | null } | null {
-  const file = path.join(decisionsDir, `${slug}.md`);
-  if (!existsSync(file)) return null;
-  const t = currentTarget(parseDecision(readFileSync(file, 'utf8')).body);
+  const text = texts.get(slug);
+  if (text === undefined) return null;
+  const t = currentTarget(parseDecision(text).body);
   if (!t?.ruling) return null;
   return { ruling: t.ruling, scope: t.scope ?? null };
 }
@@ -60,17 +64,20 @@ function codeUnitOrder(x: string, y: string): number {
  * @param files changed files (scope-match key)
  * @param query free-text (plan terms) for the semantic supplement; '' skips it
  * @param k semantic top-k
+ * @param from 'index' for commit-time gates; the CLI briefs from the worktree draft
  */
 export async function scopedTargets(
   files: string[],
   query: string,
   k = 6,
   cwd = process.cwd(),
+  from: DecisionSource = 'index',
 ): Promise<GoverningTarget[]> {
   const decisionsDir = resolveFromCwd(resolveGuardConfig(cwd), 'decisionsDir');
   if (decisionsDir == null) return []; // fail-open: nothing resolvable → nothing governs
+  const texts = decisionTexts(decisionsDir, from, cwd);
   const scoped = files.length
-    ? loadScopedTargets(decisionsDir)
+    ? parseScopedTargets(texts)
         .filter((t) => matchScope(files, t.scopeGlobs))
         .sort(newestFirst)
     : [];
@@ -90,7 +97,7 @@ export async function scopedTargets(
       const { rows } = await rankAxes(query, k, cwd);
       for (const r of rows) {
         if (scopedSlugs.has(r.slug)) continue;
-        const rf = rulingFor(r.slug, decisionsDir);
+        const rf = rulingFor(r.slug, texts);
         if (rf) blocks.push({ slug: r.slug, ruling: rf.ruling, scope: rf.scope, via: 'semantic' });
       }
     } catch {
@@ -183,7 +190,7 @@ export async function main(args: string[]): Promise<void> {
   const brief = hookSpec(flag(args, '--brief'), 2, 1);
   const query = flag(args, '--query') ?? '';
   const top = Number.parseInt(flag(args, '--top') ?? '6', 10) || 6;
-  await scopedTargets(files, query, top)
+  await scopedTargets(files, query, top, process.cwd(), 'worktree')
     .then((blocks) => rankBySpecificity(files, blocks))
     .then((blocks) => {
       process.stdout.write(JSON.stringify(blocks));
