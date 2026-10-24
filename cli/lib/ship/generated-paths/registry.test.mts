@@ -71,6 +71,15 @@ describe('parseGeneratedConfig', () => {
     });
   });
 
+  // Only an opener directly before `(` is extglob: a Next.js route group or an npm scope is literal.
+  it.each([
+    ['app/(marketing)/**', 'app/(marketing)/page.tsx'],
+    ['packages/@scope/dist/**', 'packages/@scope/dist/x.js'],
+  ])('accepts %s as literal text', (glob, path) => {
+    const entries = parseGeneratedConfig(JSON.stringify({ generated: [{ glob, command: 'x' }] }));
+    expect(classifyGenerated([path], entries).generated).toHaveLength(1);
+  });
+
   it.each([
     ['a non-array', { glob: 'a', command: 'b' }],
     ['a non-object entry', ['gen/**']],
@@ -92,6 +101,11 @@ describe('parseGeneratedConfig', () => {
     // Outside the supported grammar (*, **, ?): refused, never silently half-supported.
     ['a character class', [{ glob: 'gen/[.]a.json', command: 'b' }]],
     ['a brace set', [{ glob: 'gen/{a,b}.json', command: 'b' }]],
+    ['an @( extglob', [{ glob: 'dist/@(a|b)/**', command: 'b' }]],
+    ['a mid-pattern !( extglob', [{ glob: 'gen/x!(a)', command: 'b' }]],
+    ['a +( extglob', [{ glob: 'gen/+(a)', command: 'b' }]],
+    ['a ?( extglob', [{ glob: 'gen/?(a)', command: 'b' }]],
+    ['a *( extglob', [{ glob: 'gen/*(a)', command: 'b' }]],
     // Git reports canonical paths, so a `.`/empty segment could never match — reject, don't ignore.
     ['a glob with a `.` segment', [{ glob: 'dist/./**', command: 'b' }]],
     ['a glob with an empty segment', [{ glob: 'dist//x', command: 'b' }]],
