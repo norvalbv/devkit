@@ -19,10 +19,7 @@ import { detectGitRoot } from '../../lib/detect-git-root.mts';
 import { assertRunsFromSource } from '../../lib/doctor/pin/runner-identity.mts';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../../lib/fs-helpers.mts';
 import type { SyncManifestV2 } from '../../lib/install/agent-asset-manifest/codec.mts';
-import {
-  assertLegacyAssetWriterCompatible,
-  nextLegacyManifestGeneratedAt,
-} from '../../lib/install/agent-asset-manifest/compatibility.mts';
+import { assertLegacyAssetWriterCompatible } from '../../lib/install/agent-asset-manifest/compatibility.mts';
 import {
   findProviderNativeAssetConflicts,
   requiresProviderNativeLifecycle,
@@ -35,10 +32,9 @@ import { resolveExistingAgentProviders } from '../../lib/install/agent-assets/ag
 import { findConflicts, type SyncManifest } from '../../lib/sync-manifest.mts';
 
 // The manifest devkit writes for a synced asset set: the SyncManifest ownership shape (files +
-// targets) plus the provenance fields (which devkit tag wrote it, and when).
+// targets) plus the provenance field (which devkit tag wrote it).
 interface LegacyAssetManifest extends SyncManifest {
   devkitRef?: string | null;
-  generatedAt?: string;
 }
 type AssetManifest = LegacyAssetManifest | SyncManifestV2;
 
@@ -155,8 +151,8 @@ function syncSkillsLocked(
 
   const devkitPkg: { version?: string } | null = readJson(join(packageDir(), 'package.json'));
   const devkitRef = devkitPkg ? `v${devkitPkg.version}` : null;
-  // The prior manifest (also reused for the idempotency check below) — its keys tell findConflicts
-  // which on-disk skills devkit already OWNS (overwrite freely) vs the consumer's own (preserve).
+  // The prior manifest's keys tell findConflicts which on-disk skills devkit already OWNS
+  // (overwrite freely) vs the consumer's own (preserve).
   const manifestPath = join(cwd, '.devkit', 'skills-manifest.json');
   const decoded = readAgentAssetManifest(manifestPath, 'skills');
   if (requiresProviderNativeLifecycle(decoded, targets)) {
@@ -269,13 +265,9 @@ function syncSkillsLocked(
     }
   }
 
-  // Idempotency: keep generatedAt STABLE when nothing about the synced set changed
-  // (same devkitRef + same file shas), so a re-run produces no spurious git diff. (manifestPath +
-  // prev were read above — reused here, also the provenance source for findConflicts.)
-  const generatedAt = nextLegacyManifestGeneratedAt(prev, devkitRef, files);
   // `targets` records WHICH surfaces devkit wrote to, so findConflicts can tell a name it owns on
   // one surface from a same-named divergent asset on another (surface-aware ownership).
-  const manifest = { devkitRef, generatedAt, targets: [...targets], files };
+  const manifest = { devkitRef, targets: [...targets], files };
 
   if (dryRun) {
     console.log(`  [dry-run] write .devkit/skills-manifest.json (${rels.length} files)`);

@@ -23,10 +23,7 @@ import {
   removeManifested,
   type SyncManifest,
 } from '../sync-manifest.mts';
-import {
-  assertLegacyAssetWriterCompatible,
-  nextLegacyManifestGeneratedAt,
-} from './agent-asset-manifest/compatibility.mts';
+import { assertLegacyAssetWriterCompatible } from './agent-asset-manifest/compatibility.mts';
 import {
   findProviderNativeAssetConflicts,
   isSafeAgentAssetPath,
@@ -92,7 +89,6 @@ interface RemoveHookScriptsOptions {
 
 interface AgentHooksManifest extends SyncManifest {
   devkitRef: string | null;
-  generatedAt: string;
 }
 
 // Copy the bundled agent-hook scripts (agents-hooks/*.mjs|.sh) into the consumer's hook dirs and
@@ -209,10 +205,8 @@ export function syncHookScripts(
         chmodSync(dest, 0o755);
       }
     }
-    const generatedAt = nextLegacyManifestGeneratedAt(prev, devkitRef, files);
     const manifest: AgentHooksManifest = {
       devkitRef,
-      generatedAt,
       targets: [...targets],
       files,
     };

@@ -60,10 +60,7 @@ afterEach(() => {
 describe('provider-native asset sync', () => {
   it('writes exact provider projections before a stable strict manifest', () => {
     const root = tempRoot();
-    const first = syncProviderNativeAssets({
-      ...agentOptions(root),
-      now: () => '2026-07-22T10:00:00.000Z',
-    });
+    const first = syncProviderNativeAssets(agentOptions(root));
     const claude = readFileSync(join(root, '.claude/agents/reviewer.md'));
     const codex = readFileSync(join(root, '.codex/agents/reviewer.toml'));
     const cursor = readFileSync(join(root, '.cursor/agents/reviewer.md'));
@@ -73,7 +70,6 @@ describe('provider-native asset sync', () => {
     expect(first.manifest).toMatchObject({
       schemaVersion: 2,
       kind: 'agents',
-      generatedAt: '2026-07-22T10:00:00.000Z',
       files: { 'reviewer.md': sha(AGENT) },
       providers: {
         claude: { files: { 'reviewer.md': sha(AGENT) } },
@@ -83,13 +79,22 @@ describe('provider-native asset sync', () => {
     });
 
     const bytes = readFileSync(join(root, '.devkit/agents-manifest.json'), 'utf8');
-    const second = syncProviderNativeAssets({
-      ...agentOptions(root),
-      now: () => '2026-07-22T11:00:00.000Z',
-    });
-    expect(second.manifest.generatedAt).toBe('2026-07-22T10:00:00.000Z');
+    expect(bytes).not.toContain('generatedAt');
+    syncProviderNativeAssets(agentOptions(root));
     expect(readFileSync(join(root, '.devkit/agents-manifest.json'), 'utf8')).toBe(bytes);
     expect(existsSync(join(root, '.devkit/agent-assets.lock'))).toBe(false);
+  });
+
+  it('rewrites a manifest written with a generatedAt stamp without it', () => {
+    const root = tempRoot();
+    syncProviderNativeAssets(agentOptions(root));
+    const path = join(root, '.devkit/agents-manifest.json');
+    const clean = readFileSync(path, 'utf8');
+    const stamped = { ...JSON.parse(clean), generatedAt: '2026-07-21T10:00:00.000Z' };
+    writeFileSync(path, `${JSON.stringify(stamped, null, 2)}\n`);
+
+    syncProviderNativeAssets(agentOptions(root));
+    expect(readFileSync(path, 'utf8')).toBe(clean);
   });
 
   it('preserves a foreign or tracked unit across every selected provider unless adopted', () => {
