@@ -174,6 +174,36 @@ export function splitNul(out: string): string[] {
   return out.split('\0').filter((line) => line.length > 0);
 }
 
+export interface NameStatusRecord {
+  status: string;
+  path: string;
+  from?: string;
+}
+
+export type Renames = Map<string, { from: string; pure: boolean }>;
+
+/** Decode `git diff --name-status -z`: R and C records carry their source path first. */
+export function nameStatusRecords(out: string): NameStatusRecord[] {
+  const fields = out.split('\0');
+  const records: NameStatusRecord[] = [];
+  for (let i = 0; fields[i];) {
+    const status = fields[i++];
+    const from = /^[RC]/.test(status) ? fields[i++] : undefined;
+    records.push({ status, from, path: fields[i++] ?? '' });
+  }
+  return records;
+}
+
+/** Renames keyed by destination; R100 is a pure move. Copies are not renames. */
+export function renamesFrom(records: readonly NameStatusRecord[]): Renames {
+  const renames: Renames = new Map();
+  for (const { status, from, path } of records) {
+    if (status.startsWith('R') && from && path)
+      renames.set(path, { from, pure: status === 'R100' });
+  }
+  return renames;
+}
+
 function mergeInProgress(root: string): boolean {
   return (
     spawnSync('git', ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'], {

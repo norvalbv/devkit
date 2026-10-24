@@ -469,6 +469,21 @@ describe('guard-structure staged execution', () => {
     expect(result.text).toContain('src');
   });
 
+  it('probes the root a staged rename moved its last file out of', async () => {
+    const root = repo();
+    write(root, 'guard.config.json', JSON.stringify(config));
+    write(root, 'src/Ok.ts');
+    initializeGit(root);
+    execFileSync('git', ['add', '--', 'guard.config.json', 'src/Ok.ts'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'initial'], { cwd: root });
+    execFileSync('git', ['mv', '--', 'src/Ok.ts', 'Ok.ts'], { cwd: root });
+    const status = execFileSync('git', ['diff', '--cached', '--name-status'], { cwd: root });
+    expect(status.toString()).toMatch(/^R100\tsrc\/Ok\.ts\tOk\.ts$/m);
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(2); // only the rename's old side names src, which is now empty
+    expect(result.text).toContain('src');
+  });
+
   it('exit 0 when nothing structure-relevant is staged (delegation must not become an opt-out)', async () => {
     const root = repo();
     write(root, 'guard.config.json', JSON.stringify(config));

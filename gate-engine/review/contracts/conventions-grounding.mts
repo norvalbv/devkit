@@ -3,6 +3,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { parsePatchHunks } from '../../comment-firewall/patch.mts';
+import { nameStatusRecords, type Renames, renamesFrom } from '../../ratchets/git-index.mts';
 import { countLines } from '../../ratchets/size-line-authority.mts';
 import { ancestorDirs } from '../claude-md.mts';
 import {
@@ -258,21 +259,12 @@ function git(cwd: string, args: string[]): string {
 }
 
 /** Rename sources (new path → base path) between two trees, so a moved file keeps its old self. */
-function renamesBetween(cwd: string, base: string, tree: string): Map<string, string> {
-  const renames = new Map<string, string>();
-  const fields = safe(
+function renamesBetween(cwd: string, base: string, tree: string): Renames {
+  const raw = safe(
     () => git(cwd, ['diff', '-M', '--name-status', '-z', '--no-color', base, tree]),
     '',
-  ).split('\0');
-  for (let index = 0; index < fields.length; index += 1) {
-    const status = fields[index];
-    if (/^[RC]\d*$/.test(status)) {
-      if (status.startsWith('R') && fields[index + 1] && fields[index + 2])
-        renames.set(fields[index + 2], fields[index + 1]);
-      index += 2;
-    } else if (status) index += 1;
-  }
-  return renames;
+  );
+  return renamesFrom(nameStatusRecords(raw));
 }
 
 function memo<T>(read: (file: string) => T): (file: string) => T {
@@ -311,8 +303,9 @@ export function stagedGroundingSource(
   if (tree === null || head === null || (pinnedTree !== undefined && pinnedTree !== tree))
     return UNREADABLE;
   const base = head.startsWith('unborn:') ? EMPTY_TREE : head;
-  let renames: Map<string, string> | null = null;
-  const renameSource = (file: string) => (renames ??= renamesBetween(cwd, base, tree)).get(file);
+  let renames: Renames | null = null;
+  const renameSource = (file: string) =>
+    (renames ??= renamesBetween(cwd, base, tree)).get(file)?.from;
   const blob = (rev: string, file: string) =>
     safe(() => git(cwd, ['cat-file', 'blob', `${rev}:${file}`]), null);
   const literal = (file: string) => `:(top,literal)${file}`;
