@@ -816,7 +816,8 @@ describe('extras (--extra hard gates on the deterministic line)', () => {
 // One staged audit per consumer hook, and never a ref-range one: `--base` cannot express the index.
 describe('staged fallow gate across the hook builders', () => {
   const SEL = { guards: [...GUARD_IDS], fallow: true };
-  const audits = (hook: string) => hook.split('fallow audit --diff-stdin').length - 1;
+  // Each gate's verdict pass; the human re-run for its report is the same audit.
+  const audits = (hook: string) => hook.split('fallow audit --diff-stdin --format json').length - 1;
 
   it.each(['package', 'global-optional'] as const)(
     'emits the gate iff fallow is selected, ahead of the AI guards (%s)',
