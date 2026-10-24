@@ -160,6 +160,22 @@ describe('inspectDistIntegrity', () => {
     ]);
   });
 
+  it('walks an artifact once when the brief names both it and its source', async () => {
+    const { base, root } = repo();
+    buildableFixture(root);
+    mkdirSync(join(root, 'cli'));
+    mkdirSync(join(root, 'dist/cli'));
+    writeFileSync(join(root, 'cli/new.mts'), "import './missing.mjs';\n");
+    writeFileSync(join(root, 'dist/cli/new.mjs'), "import './missing.mjs';\n");
+
+    // Both brief entries map to dist/cli/new.mjs: the shape of every feature ship with a new module.
+    const report = await inspectDistIntegrity(root, base, ['cli/new.mts', 'dist/cli/new.mjs']);
+
+    expect(report.unresolved).toEqual([
+      { importer: 'dist/cli/new.mjs', specifier: './missing.mjs', target: 'dist/cli/missing.mjs' },
+    ]);
+  });
+
   it('reports the full physical closure behind an untracked generated artifact', async () => {
     const { base, root } = repo();
     mkdirSync(join(root, 'dist/cli'));
