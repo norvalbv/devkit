@@ -105,38 +105,49 @@ function declaredLiteral(body: string): boolean | null {
   return items.every((item) => LITERAL_MAGIC.test(item.replace(/^["']/, '')));
 }
 
+function recordAssignment(node: JsonObject, arrays: Map<string, boolean[]>): void {
+  const elements = wordValues(node.array);
+  if (node.type === 'Assignment' && isJsonString(node.name) && elements.length > 0) {
+    recordArray(
+      arrays,
+      node.name,
+      elements.every((v) => LITERAL_MAGIC.test(v)),
+    );
+  }
+}
+
+/** `local name=(…)` and the other declarers: each word that declares a non-empty array body. */
+function recordDeclared(words: string[], arrays: Map<string, boolean[]>): void {
+  for (const word of words) {
+    const match = DECLARED_ARRAY.exec(word);
+    const literal = match ? declaredLiteral(match[2]!) : null;
+    if (match && literal !== null) recordArray(arrays, match[1]!, literal);
+  }
+}
+
+function readsArray(head: string, words: string[]): boolean {
+  return (
+    head === 'mapfile' ||
+    head === 'readarray' ||
+    (head === 'read' && words.some((w) => /^-\w*a/.test(w)))
+  );
+}
+
+function recordShellArrays(node: JsonObject, arrays: Map<string, boolean[]>): void {
+  recordAssignment(node, arrays);
+  if (node.type !== 'Command') return;
+  const head = wordValue(node.name);
+  const words = wordValues(node.suffix);
+  if (DECLARERS.has(head)) recordDeclared(words, arrays);
+  if (readsArray(head, words)) {
+    for (const word of words.filter((w) => /^\w+$/.test(w))) recordArray(arrays, word, false);
+  }
+}
+
 /** Every non-empty assignment to each shell array, across all files: `true` when literal-prefixed. */
 export function collectShellArrays(texts: string[]): Map<string, boolean[]> {
   const arrays = new Map<string, boolean[]>();
-  for (const text of texts) {
-    walk(shellAst(text), (node) => {
-      const elements = wordValues(node.array);
-      if (node.type === 'Assignment' && isJsonString(node.name) && elements.length > 0) {
-        recordArray(
-          arrays,
-          node.name,
-          elements.every((v) => LITERAL_MAGIC.test(v)),
-        );
-      }
-      if (node.type !== 'Command') return;
-      const head = wordValue(node.name);
-      const words = wordValues(node.suffix);
-      if (DECLARERS.has(head)) {
-        for (const word of words) {
-          const match = DECLARED_ARRAY.exec(word);
-          const literal = match ? declaredLiteral(match[2]!) : null;
-          if (match && literal !== null) recordArray(arrays, match[1]!, literal);
-        }
-      }
-      if (
-        head === 'mapfile' ||
-        head === 'readarray' ||
-        (head === 'read' && words.some((w) => /^-\w*a/.test(w)))
-      ) {
-        for (const word of words.filter((w) => /^\w+$/.test(w))) recordArray(arrays, word, false);
-      }
-    });
-  }
+  for (const text of texts) walk(shellAst(text), (node) => recordShellArrays(node, arrays));
   return arrays;
 }
 
@@ -148,30 +159,44 @@ function shellArgSafety(arg: string, arrays: Map<string, boolean[]>): Safety {
   return assigned?.length && assigned.every(Boolean) ? 'magic' : 'raw';
 }
 
+function shellLiteralMode(node: JsonObject, words: string[], at: number): boolean {
+  return (
+    words.slice(0, at).includes('--literal-pathspecs') ||
+    wordList(node.prefix).some(
+      (p) => p.name === 'GIT_LITERAL_PATHSPECS' && wordValue(p.value) === '1',
+    )
+  );
+}
+
+function gitCommandHits(
+  node: JsonObject,
+  text: string,
+  file: string,
+  arrays: Map<string, boolean[]>,
+): Hit[] {
+  if (node.type !== 'Command' || wordValue(node.name) !== 'git') return [];
+  const suffix = wordList(node.suffix);
+  const words = suffix.map(wordValue);
+  const at = subcommandIndex(words);
+  const sub = words[at] ?? '';
+  const dashes = words.indexOf('--', at);
+  if (!PATHSPEC_SUBS.has(sub) || dashes < 0) return [];
+  const literalMode = shellLiteralMode(node, words, at);
+  const hits: Hit[] = [];
+  for (const word of suffix.slice(dashes + 1)) {
+    const arg = wordValue(word);
+    const line = lineAt(text, isJsonInteger(word.pos) ? word.pos : 0);
+    const safety = shellArgSafety(arg, arrays);
+    const kind = classify(safety, literalMode, marked(text, line, SHELL_MARKER));
+    if (kind) hits.push({ file, line, sub, arg, kind });
+  }
+  return hits;
+}
+
 /** Hits in one shell file; `arrays` comes from collectShellArrays over every scanned shell file. */
 export function scanShell(text: string, file: string, arrays: Map<string, boolean[]>): Hit[] {
   const hits: Hit[] = [];
-  walk(shellAst(text), (node) => {
-    if (node.type !== 'Command' || wordValue(node.name) !== 'git') return;
-    const suffix = wordList(node.suffix);
-    const words = suffix.map(wordValue);
-    const at = subcommandIndex(words);
-    const sub = words[at] ?? '';
-    const dashes = words.indexOf('--', at);
-    if (!PATHSPEC_SUBS.has(sub) || dashes < 0) return;
-    const literalMode =
-      words.slice(0, at).includes('--literal-pathspecs') ||
-      wordList(node.prefix).some(
-        (p) => p.name === 'GIT_LITERAL_PATHSPECS' && wordValue(p.value) === '1',
-      );
-    for (const word of suffix.slice(dashes + 1)) {
-      const arg = wordValue(word);
-      const line = lineAt(text, isJsonInteger(word.pos) ? word.pos : 0);
-      const safety = shellArgSafety(arg, arrays);
-      const kind = classify(safety, literalMode, marked(text, line, SHELL_MARKER));
-      if (kind) hits.push({ file, line, sub, arg, kind });
-    }
-  });
+  walk(shellAst(text), (node) => hits.push(...gitCommandHits(node, text, file, arrays)));
   return hits;
 }
 
@@ -192,58 +217,90 @@ function calleeName(call: ts.CallExpression): string {
   return ts.isPropertyAccessExpression(callee) ? callee.name.text : '';
 }
 
+function isName(node: ts.Node | undefined, name: string): boolean {
+  return node !== undefined && ts.isIdentifier(node) && node.text === name;
+}
+
+/** The node `name` declares here: a const initializer, a function, or a parameter. */
+function declaredNode(node: ts.Node, name: string): ts.Node | undefined {
+  if (ts.isVariableDeclaration(node) && isName(node.name, name)) return node.initializer ?? node;
+  if ((ts.isFunctionDeclaration(node) || ts.isParameter(node)) && isName(node.name, name))
+    return node;
+  return undefined;
+}
+
+function collectDeclarations(node: ts.Node, name: string, found: ts.Node[]): void {
+  const declared = declaredNode(node, name);
+  if (declared) found.push(declared);
+  ts.forEachChild(node, (child) => {
+    collectDeclarations(child, name, found);
+  });
+}
+
 /** Every same-file declaration of `name`: a const initializer or a function body. */
 function declarations(sf: ts.SourceFile, name: string): ts.Node[] {
   const found: ts.Node[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name) {
-      found.push(node.initializer ?? node);
-    } else if (ts.isFunctionDeclaration(node) && node.name?.text === name) found.push(node);
-    else if (ts.isParameter(node) && ts.isIdentifier(node.name) && node.name.text === name)
-      found.push(node);
-    ts.forEachChild(node, visit);
-  };
-  visit(sf);
+  collectDeclarations(sf, name, found);
   return found;
+}
+
+function collectReturns(node: ts.Node, fn: ts.Node, out: ts.Expression[]): void {
+  if (ts.isReturnStatement(node) && node.expression) out.push(node.expression);
+  if (ts.isFunctionLike(node) && node !== fn) return;
+  ts.forEachChild(node, (child) => {
+    collectReturns(child, fn, out);
+  });
 }
 
 function returned(fn: ts.Node): ts.Expression[] {
   if ((ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) && !ts.isBlock(fn.body))
     return [fn.body];
   const out: ts.Expression[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isReturnStatement(node) && node.expression) out.push(node.expression);
-    if (!ts.isFunctionLike(node) || node === fn) ts.forEachChild(node, visit);
-  };
-  visit(fn);
+  collectReturns(fn, fn, out);
   return out;
+}
+
+/** The worst safety over `name`'s declarations, rated by `rate`; undeclared and parameters are `raw`. */
+function worstDeclared(sf: ts.SourceFile, name: string, rate: (decl: ts.Node) => Safety): Safety {
+  const decls = declarations(sf, name);
+  if (decls.length === 0) return 'raw';
+  return worst(decls.map((d) => (ts.isParameter(d) ? 'raw' : rate(d))));
+}
+
+function returnedSafety(sf: ts.SourceFile, fn: ts.Node, depth: number): Safety {
+  return worst(returned(fn).map((e) => tsSafety(sf, e, depth + 1)));
 }
 
 /** What a function-valued expression yields when called: its return expressions' worst safety. */
 function mapperSafety(sf: ts.SourceFile, fn: ts.Expression, depth: number): Safety {
-  if (ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) {
-    return worst(returned(fn).map((e) => tsSafety(sf, e, depth + 1)));
-  }
+  if (ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) return returnedSafety(sf, fn, depth);
   if (!ts.isIdentifier(fn) || depth > 4) return 'raw';
-  const decls = declarations(sf, fn.text);
-  if (decls.length === 0) return 'raw';
-  return worst(
-    decls.map((d) =>
-      ts.isParameter(d) ? 'raw' : worst(returned(d).map((e) => tsSafety(sf, e, depth + 1))),
-    ),
-  );
+  return worstDeclared(sf, fn.text, (d) => returnedSafety(sf, d, depth));
+}
+
+function literalSafety(expr: ts.Expression): Safety {
+  if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) {
+    return expr.text.startsWith(':') ? 'magic' : 'const';
+  }
+  if (!ts.isTemplateExpression(expr) || !expr.head.text.startsWith(':')) return 'raw';
+  return SAFE_MAGIC.test(expr.head.text) ? 'magic' : 'loose';
+}
+
+/** A call's argv result: a mapper's returns for `.map` and plain calls, its operands for array copies. */
+function callSafety(sf: ts.SourceFile, call: ts.CallExpression, depth: number): Safety {
+  const callee = call.expression;
+  if (!ts.isPropertyAccessExpression(callee)) return mapperSafety(sf, callee, depth);
+  const method = callee.name.text;
+  if (method === 'map' && call.arguments[0]) return mapperSafety(sf, call.arguments[0], depth);
+  if (!['filter', 'slice', 'sort', 'concat'].includes(method)) return 'raw';
+  const operands =
+    method === 'concat' ? [callee.expression, ...call.arguments] : [callee.expression];
+  return worst(operands.map((e) => tsSafety(sf, e, depth + 1)));
 }
 
 /** How an argv element resolves within its own file; anything unresolved is `raw`. */
 export function tsSafety(sf: ts.SourceFile, expr: ts.Expression, depth = 0): Safety {
   if (depth > 4) return 'raw';
-  if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) {
-    return expr.text.startsWith(':') ? 'magic' : 'const';
-  }
-  if (ts.isTemplateExpression(expr)) {
-    if (!expr.head.text.startsWith(':')) return 'raw';
-    return SAFE_MAGIC.test(expr.head.text) ? 'magic' : 'loose';
-  }
   if (ts.isParenthesizedExpression(expr) || ts.isAsExpression(expr) || ts.isSpreadElement(expr)) {
     return tsSafety(sf, expr.expression, depth);
   }
@@ -253,106 +310,111 @@ export function tsSafety(sf: ts.SourceFile, expr: ts.Expression, depth = 0): Saf
     return worst([tsSafety(sf, expr.whenTrue, depth + 1), tsSafety(sf, expr.whenFalse, depth + 1)]);
   }
   if (ts.isIdentifier(expr)) {
-    const decls = declarations(sf, expr.text);
-    if (decls.length === 0) return 'raw';
-    return worst(
-      decls.map((d) =>
-        ts.isParameter(d) || !ts.isExpression(d) ? 'raw' : tsSafety(sf, d, depth + 1),
-      ),
+    return worstDeclared(sf, expr.text, (d) =>
+      ts.isExpression(d) ? tsSafety(sf, d, depth + 1) : 'raw',
     );
   }
-  if (ts.isCallExpression(expr)) {
-    const callee = expr.expression;
-    if (ts.isPropertyAccessExpression(callee)) {
-      if (callee.name.text === 'map' && expr.arguments[0])
-        return mapperSafety(sf, expr.arguments[0], depth);
-      if (['filter', 'slice', 'sort', 'concat'].includes(callee.name.text)) {
-        return worst(
-          [
-            callee.expression,
-            ...expr.arguments.filter((a) => callee.name.text === 'concat' && a),
-          ].map((e) => tsSafety(sf, e, depth + 1)),
-        );
-      }
-      return 'raw';
-    }
-    return mapperSafety(sf, callee, depth);
-  }
-  return 'raw';
+  if (ts.isCallExpression(expr)) return callSafety(sf, expr, depth);
+  return literalSafety(expr);
 }
 
 function literalModeText(text: string): boolean {
   return text.includes("'--literal-pathspecs'") || LITERAL_ENV.test(text);
 }
 
-/** The callee's own definition text: same file, else one relative-import hop. */
-function wrapperText(
-  sf: ts.SourceFile,
-  file: string,
+type Load = (path: string) => string | undefined;
+
+/** One TS file under scan, and the reader for the modules it imports. */
+interface TsFile {
+  sf: ts.SourceFile;
+  text: string;
+  file: string;
+  load: Load;
+}
+
+function declarationText(sf: ts.SourceFile, name: string): string {
+  return declarations(sf, name)
+    .filter((d) => !ts.isParameter(d))
+    .map((d) => d.getText(sf))
+    .join('\n');
+}
+
+/** The relative module `name` is imported from, and the name it has there. */
+function namedImport(
+  stmt: ts.Statement,
   name: string,
-  load: (path: string) => string | undefined,
-): string {
-  const local = declarations(sf, name).filter((d) => !ts.isParameter(d));
-  if (local.length > 0) return local.map((d) => d.getText(sf)).join('\n');
+): { spec: string; original: string } | undefined {
+  if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) return undefined;
+  const spec = stmt.moduleSpecifier.text;
+  const named = stmt.importClause?.namedBindings;
+  if (!spec.startsWith('.') || !named || !ts.isNamedImports(named)) return undefined;
+  const bound = named.elements.find((el) => el.name.text === name);
+  return bound && { spec, original: bound.propertyName?.text ?? name };
+}
+
+function importedWrapperText(sf: ts.SourceFile, file: string, name: string, load: Load): string {
   for (const stmt of sf.statements) {
-    if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
-    const spec = stmt.moduleSpecifier.text;
-    const named = stmt.importClause?.namedBindings;
-    if (!spec.startsWith('.') || !named || !ts.isNamedImports(named)) continue;
-    const bound = named.elements.find((el) => el.name.text === name);
+    const bound = namedImport(stmt, name);
     if (!bound) continue;
-    const target = resolve(dirname(file), spec);
+    const target = resolve(dirname(file), bound.spec);
     const source = load(target);
     if (source === undefined) return '';
     const other = ts.createSourceFile(target, source, ts.ScriptTarget.Latest, true);
-    const original = bound.propertyName?.text ?? name;
-    return declarations(other, original)
-      .filter((d) => !ts.isParameter(d))
-      .map((d) => d.getText(other))
-      .join('\n');
+    return declarationText(other, bound.original);
   }
   return '';
 }
 
+/** The callee's own definition text: same file, else one relative-import hop. */
+function wrapperText(sf: ts.SourceFile, file: string, name: string, load: Load): string {
+  return declarationText(sf, name) || importedWrapperText(sf, file, name, load);
+}
+
+function argvHits(argv: ts.ArrayLiteralExpression, literalMode: boolean, ctx: TsFile): Hit[] {
+  const { sf, text, file } = ctx;
+  const consts = argv.elements.map((e) => (ts.isStringLiteral(e) ? e.text : null));
+  const at = subcommandIndex(consts.map((c) => c ?? ''));
+  const sub = consts[at] ?? '';
+  const dashes = consts.indexOf('--', at);
+  if (!PATHSPEC_SUBS.has(sub) || dashes < 0) return [];
+  const literal = literalMode || consts.slice(0, at).includes('--literal-pathspecs');
+  const hits: Hit[] = [];
+  for (const el of argv.elements.slice(dashes + 1)) {
+    const line = sf.getLineAndCharacterOfPosition(el.getStart(sf)).line + 1;
+    const kind = classify(tsSafety(sf, el), literal, marked(text, line, TS_MARKER));
+    if (kind) hits.push({ file, line, sub, arg: el.getText(sf), kind });
+  }
+  return hits;
+}
+
+function gitCallHits(call: ts.CallExpression, ctx: TsFile): Hit[] {
+  const name = calleeName(call);
+  const first = call.arguments[0];
+  const spawned =
+    SPAWNERS.has(name) && first !== undefined && ts.isStringLiteral(first) && first.text === 'git';
+  if (!spawned && !/git/i.test(name)) return [];
+  const optionsLiteral = call.arguments
+    .slice(1)
+    .some((a) => !ts.isArrayLiteralExpression(a) && LITERAL_ENV.test(a.getText(ctx.sf)));
+  const wrapperLiteral = !spawned && literalModeText(wrapperText(ctx.sf, ctx.file, name, ctx.load));
+  return call.arguments
+    .filter(ts.isArrayLiteralExpression)
+    .flatMap((argv) => argvHits(argv, optionsLiteral || wrapperLiteral, ctx));
+}
+
+/** Post-order, so a nested call's hits come before its enclosing call's. */
+function scanTsNode(node: ts.Node, ctx: TsFile, hits: Hit[]): void {
+  ts.forEachChild(node, (child) => {
+    scanTsNode(child, ctx, hits);
+  });
+  if (ts.isCallExpression(node)) hits.push(...gitCallHits(node, ctx));
+}
+
 /** Hits in one TS file; `load` reads an imported module so a literal-mode wrapper is recognised. */
-export function scanTs(
-  text: string,
-  file: string,
-  load: (path: string) => string | undefined,
-): Hit[] {
+export function scanTs(text: string, file: string, load: Load): Hit[] {
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   const hits: Hit[] = [];
-  const visit = (node: ts.Node): void => {
-    ts.forEachChild(node, visit);
-    if (!ts.isCallExpression(node)) return;
-    const name = calleeName(node);
-    const first = node.arguments[0];
-    const spawned =
-      SPAWNERS.has(name) &&
-      first !== undefined &&
-      ts.isStringLiteral(first) &&
-      first.text === 'git';
-    if (!spawned && !/git/i.test(name)) return;
-    const optionsLiteral = node.arguments
-      .slice(1)
-      .some((a) => !ts.isArrayLiteralExpression(a) && LITERAL_ENV.test(a.getText(sf)));
-    const wrapperLiteral = !spawned && literalModeText(wrapperText(sf, file, name, load));
-    for (const argv of node.arguments.filter(ts.isArrayLiteralExpression)) {
-      const consts = argv.elements.map((e) => (ts.isStringLiteral(e) ? e.text : null));
-      const at = subcommandIndex(consts.map((c) => c ?? ''));
-      const sub = consts[at] ?? '';
-      const dashes = consts.indexOf('--', at);
-      if (!PATHSPEC_SUBS.has(sub) || dashes < 0) continue;
-      const literalMode =
-        optionsLiteral || wrapperLiteral || consts.slice(0, at).includes('--literal-pathspecs');
-      for (const el of argv.elements.slice(dashes + 1)) {
-        const line = sf.getLineAndCharacterOfPosition(el.getStart(sf)).line + 1;
-        const kind = classify(tsSafety(sf, el), literalMode, marked(text, line, TS_MARKER));
-        if (kind) hits.push({ file, line, sub, arg: el.getText(sf), kind });
-      }
-    }
-  };
-  visit(sf);
+  scanTsNode(sf, { sf, text, file, load }, hits);
   return hits;
 }
 
