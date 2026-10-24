@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,6 +62,39 @@ function ship(argv: string[], log: string, rows = GREEN, extraEnv: Record<string
   });
   return { dir, r };
 }
+
+describe('wait.mts — an early red through the real gh exec', () => {
+  it('reads the failed step of a still-running job from gh exit 8 and reports it red at once', () => {
+    // Unit tests stub the exec; this proves the CLI entrypoint wires poller, steps and attribution.
+    const bin = mkdtempSync(join(tmpdir(), 'gh-early-'));
+    const link = 'https://github.com/acme/app/actions/runs/9/job/42';
+    writeFileSync(
+      join(bin, 'gh'),
+      `#!/bin/sh
+case "$1" in
+  pr) printf '%s' '[{"bucket":"pending","name":"gate","state":"IN_PROGRESS","link":"${link}","workflow":"gate"}]'; exit 8 ;;
+  api) printf '%s' '{"jobs":[{"id":42,"steps":[{"name":"Lint (Oxlint)","conclusion":"failure"}]}]}' ;;
+esac
+`,
+    );
+    chmodSync(join(bin, 'gh'), 0o755);
+    const wait = fileURLToPath(new URL('../lib/ship/wait-ci/wait.mts', import.meta.url));
+    const r = spawnSync(
+      process.execPath,
+      [wait, '--pr', '42', '--repo', 'acme/app', '--timeout', String(MIN_TIMEOUT_S)],
+      {
+        cwd: bin,
+        encoding: 'utf8',
+        env: { ...process.env, ...FAST, PATH: `${bin}:${process.env.PATH}` },
+      },
+    );
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain(
+      `ci-outcome=failed pr=42 failing=gate:${link} failed-steps=gate › Lint (Oxlint)` +
+        ' attribution=unknown reason=run-in-progress',
+    );
+  });
+});
 
 describe('ship-branch.sh — --wait-ci refusals', () => {
   const refuse = (extraArgs: string[]) =>

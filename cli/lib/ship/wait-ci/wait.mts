@@ -11,6 +11,7 @@ import type { Attribution } from '../../baseline-status/attribution.mts';
 import type { UnknownReason } from '../../baseline-status/gh.mts';
 import { classifyChecksFailure, type ExecFailure } from './classify.mts';
 import { requiredSetPoller } from './required.mts';
+import { withFailedSteps } from './steps.mts';
 import { recordCiEvent } from './telemetry.mts';
 
 /** The five states gh collapses `state` into. Ordered for stable rendering, not by severity. */
@@ -43,6 +44,8 @@ export interface CheckRow {
   state: string;
   link: string;
   workflow: string;
+  /** `check › step` for a still-pending job whose step already failed; set only by steps.mts. */
+  failedSteps?: string[];
 }
 
 /**
@@ -147,6 +150,11 @@ const linked = (rows: CheckRow[]): string =>
   rows.map((r) => (r.link ? `${oneLine(r.name)}:${oneLine(r.link)}` : oneLine(r.name))).join(' ') ||
   'none';
 
+const renderFailedSteps = (rows: CheckRow[]): string => {
+  const steps = rows.flatMap((r) => r.failedSteps ?? []).map(oneLine);
+  return steps.length ? ` failed-steps=${steps.join(',')}` : '';
+};
+
 /** The one machine-readable line. A caller branches on this, never on ship's exit code. */
 export function verdictLine(result: WaitCiResult, pr: string): string {
   const contexts =
@@ -154,7 +162,7 @@ export function verdictLine(result: WaitCiResult, pr: string): string {
   const head = `${VERDICT_PREFIX}${result.outcome} pr=${pr}${result.required ? ' scope=required' : ''}${contexts}`;
   switch (result.outcome) {
     case 'failed':
-      return `${head} failing=${linked(result.failures)}${result.attribution ? ` ${result.attribution.line}` : ''}`;
+      return `${head} failing=${linked(result.failures)}${renderFailedSteps(result.failures)}${result.attribution ? ` ${result.attribution.line}` : ''}`;
     case 'cancelled':
       return `${head} cancelled=${linked(result.cancelled)}`;
     case 'timed-out':
@@ -372,11 +380,15 @@ export function ghChecksPoller(options: ChecksPollerOptions): () => PollResult {
   const exec = options.exec ?? defaultExec(options.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS);
   const args = ['pr', 'checks', options.pr, '--repo', options.repo, '--json', CHECKS_JSON_FIELDS];
   if (options.required) args.push('--required');
-  const unparseable = (raw: string): PollResult => ({
-    kind: 'unavailable',
-    reason: 'gh-json-unparseable',
-    message: `gh pr checks returned JSON this reader cannot use: ${raw.slice(0, 200)}`,
-  });
+  const read = (raw: string): PollResult => {
+    const rows = parseChecksJson(raw);
+    if (rows) return { kind: 'rows', rows: withFailedSteps(rows, { ...options, exec }) };
+    return {
+      kind: 'unavailable',
+      reason: 'gh-json-unparseable',
+      message: `gh pr checks returned JSON this reader cannot use: ${raw.slice(0, 200)}`,
+    };
+  };
   return () => {
     let raw: string;
     try {
@@ -386,14 +398,9 @@ export function ghChecksPoller(options: ChecksPollerOptions): () => PollResult {
       const failure = e as ExecFailure;
       // Exit 8 means pending and gh still prints the rows; read them before classifying.
       const out = failure.stdout === undefined ? '' : String(failure.stdout);
-      if (out.trim()) {
-        const rows = parseChecksJson(out);
-        return rows ? { kind: 'rows', rows } : unparseable(out);
-      }
-      return classifyChecksFailure(failure);
+      return out.trim() ? read(out) : classifyChecksFailure(failure);
     }
-    const rows = parseChecksJson(raw);
-    return rows ? { kind: 'rows', rows } : unparseable(raw);
+    return read(raw);
   };
 }
 
@@ -426,13 +433,14 @@ function unknownAttribution(reason: string): Attribution {
 }
 
 /** Loaded lazily, so a broken import can never cost the verdict line of any outcome. */
-async function attribute(
+export async function attribute(
   pr: string,
   failures: CheckRow[],
   pending: CheckRow[],
 ): Promise<Attribution> {
   // A red that ended the wait early leaves a run unfinished: no summary yet, and more red to come.
-  if (pending.length > 0) return unknownAttribution('run-in-progress');
+  if (pending.length > 0 || failures.some((f) => f.failedSteps))
+    return unknownAttribution('run-in-progress');
   try {
     const { attributeFailures } = await import('../../baseline-status/attribution.mts');
     return attributeFailures({ cwd: process.cwd(), pr, failures });

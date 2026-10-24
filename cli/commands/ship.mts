@@ -158,6 +158,8 @@ Usage:
                       summaries of the PR run and of the run on the commit CI merged it onto. "new"
                       means not failing on that base run, so a flake reads as new; unknown names a
                       reason= or counts unsure= files whose test names cannot settle it.
+                      A running Actions job with an already-failed step is red at once, named by
+                      failed-steps=<job › step>.
                       A red that ends the wait while any check still runs says attribution=unknown
                       reason=run-in-progress: the unfinished run may still add failures.
                       The verdict NEVER reaches the exit code (unless --wait-ci-strict): a red PR is
