@@ -33,6 +33,7 @@ afterEach(() => {
   delete process.env.GUARD_HOOK_PARITY_OK;
   delete process.env.GUARD_DECISIONS_INTEGRITY_OK;
   delete process.env.DEVKIT_SHIP_PR_BASE_SHA;
+  delete process.env.DEVKIT_SHIP_BASE_SHA;
   delete process.env.DEVKIT_SHIP_BRANCH;
   // Both spellings: envVar() accepts the FRINK_ alias, and `devkit ship` exports strict envs that a
   // pre-push vitest inherits — a leak that would silently flip every fail-open assertion below.
@@ -541,7 +542,7 @@ describe('runDeterministic — --structure / --extra / --only', () => {
     expect(bypassEvents).toHaveLength(2);
   });
 
-  it('a structure failure prints the explicit base-debt remedy', () => {
+  it('a structure failure names when GUARD_STRUCTURE_OK applies', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const d = repo(['size']);
     expect(
@@ -550,7 +551,10 @@ describe('runDeterministic — --structure / --extra / --only', () => {
         structure: 'guard-structure gate',
       }),
     ).toBe(1);
-    expect(err.mock.calls.flat().join('\n')).toContain('export GUARD_STRUCTURE_OK=1');
+    const hint = err.mock.calls.flat().join('\n');
+    expect(hint).toContain('GUARD_STRUCTURE_OK=1 is for base');
+    // The electron preset attributes base debt too, so it is no longer an override case.
+    expect(hint).not.toContain('electron');
   });
 
   it('--extra gates run under their own label and aggregate with the built-ins', () => {
@@ -793,6 +797,13 @@ describe('prefixCacheScope', () => {
     expect(firstBase).toBe(`devkit-guards:review:size:base:${'a'.repeat(40)}:runtime:unmanaged`);
     expect(secondBase).toBe(`devkit-guards:review:size:base:${'b'.repeat(40)}:runtime:unmanaged`);
     expect(secondBase).not.toBe(firstBase);
+  });
+
+  it('binds a ship PASS to its base: guard-structure judges edited-file debt against HEAD', () => {
+    process.env.DEVKIT_SHIP_BASE_SHA = 'a'.repeat(40);
+    expect(prefixCacheScope()).toBe(`devkit-guards:ship-base:${'a'.repeat(40)}`);
+    process.env.DEVKIT_SHIP_BASE_SHA = 'b'.repeat(40);
+    expect(prefixCacheScope('custom')).toBe(`custom:ship-base:${'b'.repeat(40)}`);
   });
 
   it('keeps identical trees under different dependency/asset runtimes in separate entries', () => {
