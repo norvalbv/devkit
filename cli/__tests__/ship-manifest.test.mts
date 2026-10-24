@@ -602,4 +602,30 @@ describe('recordShip --merge — a `devkit ship --pr` re-push extends the branch
     expect(Object.keys(m.branches).sort()).toEqual(['feat/x', 'feat/y']);
     expect(m.branches['feat/y']).toEqual(yBefore); // untouched
   });
+
+  it('a path added then deleted since the fork point becomes a delete only while its anchor is fresh', () => {
+    const { root, base } = repo();
+    writeFileSync(join(root, 'tmp.ts'), 'T\n');
+    recordShip(
+      { root, branch: 'feat/x', repo: 'acme/app', baseRef: 'release', baseSha: base, pr: '7' },
+      ['tmp.ts'],
+    );
+    const added = readManifest(root).branches['feat/x'].paths[0];
+    rmSync(join(root, 'tmp.ts')); // absent at the fork-point base AND the worktree: the caller deleted it
+    const file = join(root, '.devkit', 'reconcile-manifest.json');
+    const guards = join(root, 'anchors');
+    const merge = (token: string) => {
+      writeFileSync(guards, `${token}\0=\0tmp.ts\0`);
+      return recordShip({ root, branch: 'feat/x', baseSha: base, merge: true, anchors: guards }, [
+        'tmp.ts',
+      ]);
+    };
+    expect(merge('add:100644:0000000')).toBe(1); // a concurrent ship replaced the record meanwhile
+    expect(readManifest(root).branches['feat/x'].paths).toEqual([added]);
+    expect(merge(`add:${added.mode}:${added.blobSha}`)).toBe(0);
+    expect(readManifest(root).branches['feat/x'].paths).toEqual([{ ...added, op: 'delete' }]);
+    const raw = readFileSync(file, 'utf8');
+    expect(merge(`delete:${added.mode}:${added.blobSha}`)).toBe(1); // already a delete: nothing changes
+    expect(readFileSync(file, 'utf8')).toBe(raw);
+  });
 });
