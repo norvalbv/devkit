@@ -202,7 +202,7 @@ describe('guard-ui-evidence CLI', () => {
     const dir = stagedRepo({ 'src/Card.tsx': 'x', 'guard.config.json': config });
     const r = runGate(dir, 'feat: card');
     expect(r.stderr).toContain(
-      '📸 ui-evidence: Record it working with `devkit machine up` + `run <flow>`',
+      '📸 ui-evidence: Record it working: `devkit machine up` + `run <flow>`, then `devkit machine attach <pr>`',
     );
     expect(r.stderr).not.toContain('Add before (base branch)');
   });

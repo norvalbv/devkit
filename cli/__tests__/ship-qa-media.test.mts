@@ -11,10 +11,11 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { evidenceDir } from '../lib/machine/manifest.mts';
-import { publishMedia } from '../lib/ship/evidence/publish-media.mts';
+import { attachCapture } from '../lib/ship/evidence/attach.mts';
+import { publishMedia, withPrEvidenceLock } from '../lib/ship/evidence/publish-media.mts';
 
 const temps: string[] = [];
 const savedPath = process.env.PATH;
@@ -31,6 +32,7 @@ const stateSchema = z.object({
   attachCalls: z.number(),
   attach: z.boolean(),
   failAttach: z.boolean().default(false),
+  state: z.string().default('OPEN'),
 });
 type GhState = z.infer<typeof stateSchema>;
 
@@ -41,7 +43,8 @@ const fs = require('node:fs'), path = require('node:path');
 const file = process.env.FAKE_GH_STATE, s = JSON.parse(fs.readFileSync(file, 'utf8'));
 const a = process.argv.slice(2);
 if (a[0] === 'pr' && a[1] === 'view') {
-  process.stdout.write(JSON.stringify({ title: 't', body: s.body, headRefOid: s.head, baseRefOid: s.base }));
+  const pull = { title: 't', body: s.body, headRefOid: s.head, baseRefOid: s.base };
+  process.stdout.write(JSON.stringify({ ...pull, state: s.state || 'OPEN', baseRefName: 'main' }));
 } else if (a[0] === 'pr' && a[1] === 'edit' && a.includes('--help')) {
   process.stdout.write(s.attach ? 'Use --attach to upload an image or video.' : 'Edit a pull request.');
 } else if (a[0] === 'pr' && a[1] === 'edit') {
@@ -78,6 +81,7 @@ function shipped(attach = true) {
   const root = mkdtempSync(join(tmpdir(), 'qa-media-'));
   temps.push(root);
   git(root, ['init', '-q', '-b', 'main']);
+  git(root, ['remote', 'add', 'origin', 'https://github.com/o/r.git']);
   const commit = (message: string) =>
     git(root, [
       '-c',
@@ -104,7 +108,14 @@ function shipped(attach = true) {
   writeFileSync(join(bin, 'gh'), `#!${process.execPath}\n${FAKE_GH}`);
   chmodSync(join(bin, 'gh'), 0o755);
   const state = join(root, '.gh-state.json');
-  const initial: GhState = { body: 'caller text', head, base, attachCalls: 0, attach };
+  const initial: GhState = {
+    body: 'caller text',
+    head,
+    base,
+    attachCalls: 0,
+    attach,
+    state: 'OPEN',
+  };
   writeFileSync(state, JSON.stringify(initial));
   process.env.PATH = `${bin}:${savedPath}`;
   process.env.FAKE_GH_STATE = state;
@@ -112,8 +123,9 @@ function shipped(attach = true) {
   return { root, head, read };
 }
 
-/** A passing `click` flow captured on `tree`, as `devkit machine run` writes it. */
-function captured(root: string, tree: string, flow = 'click', passed = true): void {
+/** A passing `click` flow captured on `tree`, as `devkit machine run` writes it; `keep` adds it to the
+ * flows already recorded. */
+function captured(root: string, tree: string, flow = 'click', passed = true, keep = false): void {
   const dir = evidenceDir(root);
   mkdirSync(dir, { recursive: true });
   const files = [`${flow}.webm`, `${flow}.final.png`];
@@ -129,7 +141,8 @@ function captured(root: string, tree: string, flow = 'click', passed = true): vo
     };
     return { file, kind, flow, passed, sha256, bytes: 16, ...facts };
   });
-  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ entries }));
+  const kept = keep ? JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')).entries : [];
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ entries: [...kept, ...entries] }));
 }
 
 const args = (root: string, head: string, pr = '7') => ({ source: root, repo: 'o/r', pr, head });
@@ -184,7 +197,7 @@ describe('ship attaches the QA capture to the PR', () => {
     publishMedia(args(root, head));
     expect(read().attachCalls).toBe(0);
     expect(read().body).toContain(
-      '`click`: not uploaded, it ran different code than this PR ships',
+      '`click`: not uploaded, it ran different code than this PR ships at `src/page.html`',
     );
   });
 
@@ -247,5 +260,101 @@ describe('ship attaches the QA capture to the PR', () => {
     publishMedia(args(moved.root, 'f'.repeat(40)));
     expect(moved.read()).toMatchObject({ attachCalls: 0, body: 'caller text' });
     expect(existsSync(join(evidenceDir(moved.root), 'uploads.json'))).toBe(false);
+  });
+});
+
+/** `attachCapture`'s exit code and what it told the agent. */
+function attached(root: string, target: string | undefined) {
+  const lines: string[] = [];
+  const spy = vi
+    .spyOn(console, 'error')
+    .mockImplementation((line) => void lines.push(String(line)));
+  try {
+    return { code: attachCapture(root, target), said: lines.join('\n') };
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+describe('devkit machine attach puts a capture recorded after the ship into its PR', () => {
+  it('uploads it once to the PR it names, then reports it already there', () => {
+    const { root, read } = shipped();
+    captured(root, git(root, ['rev-parse', 'HEAD^{tree}']));
+    expect(attached(root, '7')).toMatchObject({
+      code: 0,
+      said: expect.stringContaining('attached to #7'),
+    });
+    expect(read().body).toContain('#### QA capture (devkit machine)');
+    expect(attached(root, 'https://github.com/o/r/pull/7/files')).toMatchObject({
+      code: 0,
+      said: expect.stringContaining('already in #7: click.webm, click.final.png'),
+    });
+    expect(read().attachCalls).toBe(1);
+  });
+
+  it('fails while any apt capture is still not in the PR, even with another one already there', () => {
+    const { root, read } = shipped();
+    const tree = git(root, ['rev-parse', 'HEAD^{tree}']);
+    captured(root, tree);
+    expect(attached(root, '7').code).toBe(0);
+    captured(root, tree, 'login', true, true);
+    writeFileSync(process.env.FAKE_GH_STATE ?? '', JSON.stringify({ ...read(), attach: false }));
+    const { code, said } = attached(root, '7');
+    expect(code).toBe(1);
+    expect(said).toContain('already in #7: click.webm');
+    expect(said).toContain('needs gh 2.99 or newer');
+  });
+
+  it('keeps failing on a rerun while a capture whose upload failed is still not in the PR', () => {
+    const { root, read } = shipped();
+    const tree = git(root, ['rev-parse', 'HEAD^{tree}']);
+    captured(root, tree);
+    expect(attached(root, '7').code).toBe(0);
+    captured(root, tree, 'login', true, true);
+    const state = process.env.FAKE_GH_STATE ?? '';
+    writeFileSync(state, JSON.stringify({ ...read(), failAttach: true }));
+    expect(attached(root, '7').code).toBe(1);
+    writeFileSync(state, JSON.stringify({ ...read(), failAttach: false }));
+    const rerun = attached(root, '7');
+    expect(rerun.code).toBe(1);
+    expect(rerun.said).toContain('`login.webm`: its upload failed on an earlier ship');
+    expect(read().attachCalls).toBe(2);
+  });
+
+  it('names the paths a capture differs at, and leaves the PR untouched', () => {
+    const { root, read } = shipped();
+    captured(root, git(root, ['rev-parse', 'HEAD~1^{tree}']));
+    const { code, said } = attached(root, '7');
+    expect(code).toBe(1);
+    expect(said).toContain('it ran different code than this PR ships at `src/page.html`');
+    expect(read()).toMatchObject({ attachCalls: 0, body: 'caller text' });
+  });
+
+  it('refuses a merged PR, a PR of another repo, a missing PR and an empty capture', () => {
+    const { root, read } = shipped();
+    expect(attached(root, '7').said).toContain('no capture in this worktree');
+    captured(root, git(root, ['rev-parse', 'HEAD^{tree}']));
+    expect(attached(root, undefined).said).toContain(
+      'usage: devkit machine attach <pr-number|pr-url>',
+    );
+    expect(attached(root, 'https://github.com/x/fork/pull/7').said).toContain('is not in o/r');
+    const state = process.env.FAKE_GH_STATE ?? '';
+    writeFileSync(state, JSON.stringify({ ...read(), state: 'MERGED' }));
+    expect(attached(root, '7')).toMatchObject({
+      code: 1,
+      said: expect.stringContaining('#7 is merged'),
+    });
+    expect(read()).toMatchObject({ attachCalls: 0, body: 'caller text' });
+  });
+
+  it("waits for nobody: a ship publishing the same PR's evidence makes it stop and say so", () => {
+    const { root, read } = shipped();
+    captured(root, git(root, ['rev-parse', 'HEAD^{tree}']));
+    const result = withPrEvidenceLock(root, { repo: 'o/r', pr: '7' }, () => attached(root, '7'), 0);
+    expect(result).toMatchObject({
+      code: 1,
+      said: expect.stringContaining('a devkit ship is publishing #7'),
+    });
+    expect(read().attachCalls).toBe(0);
   });
 });

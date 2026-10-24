@@ -135,7 +135,9 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   less; tests, stories and fixtures excluded) or matches `guard.config.json` `uiEvidence.paths`;
   otherwise the light review model reads the staged diff and fires when a user could see the
   change. It then says: add before (base branch) and after (this branch) screenshots when you open
-  or update the PR, or say there that nothing visible changed, followed by why. A judge outage
+  or update the PR, or say there that nothing visible changed, followed by why. In a repo whose
+  `guard.config.json` declares a `machine` recipe it says instead: record it working with `devkit
+  machine up` + `run <flow>`, then `devkit machine attach <pr>`, which puts the capture in the PR. A judge outage
   means no advice, and the judge can miss: when a change showed in the UI, attach the screenshots
   even if the reminder stayed silent. `uiEvidence.paths` adds globs to the defaults, for backend or
   `.ts` files whose output a repo knows the UI renders.
