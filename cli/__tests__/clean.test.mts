@@ -80,6 +80,20 @@ describe('clean (package mode)', () => {
     expect(existsSync(join(root, 'cfg', 'allow.json'))).toBe(false);
   });
 
+  it('leaves a .fallow/ .gitignore line alone: fallow ignores its own cache, so devkit never wrote it', () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--stack', 'generic', '--yes').status).toBe(0);
+    const cfgPath = join(root, '.devkit/config.json');
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    writeFileSync(
+      cfgPath,
+      JSON.stringify({ ...cfg, components: { ...cfg.components, fallow: true } }),
+    );
+    writeFileSync(join(root, '.gitignore'), 'node_modules\n.fallow/\n');
+    expect(devkit(root, 'clean', '--yes').status).toBe(0);
+    expect(readFileSync(join(root, '.gitignore'), 'utf8')).toContain('.fallow/');
+  });
+
   it('--dry-run removes nothing', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes');
