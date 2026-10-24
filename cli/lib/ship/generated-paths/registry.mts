@@ -29,6 +29,8 @@ export const SYNC_AGENTS = 'devkit sync-agents';
 export const DEVKIT_GENERATED: readonly GeneratedEntry[] = Object.freeze([
   { glob: '.devkit/skills-manifest.json', command: SYNC_SKILLS },
   { glob: '.devkit/agents-manifest.json', command: SYNC_AGENTS },
+  // Not `devkit sync-hooks`: it installs every hook script, ignoring the recorded selection.
+  { glob: '.devkit/agent-hooks-manifest.json', command: 'devkit init' },
 ]);
 
 const LEADING_DOT_SLASH = /^(?:\.\/)+/;
