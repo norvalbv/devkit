@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { blockingFields } from '../../../../gate-engine/review/evidence/items.mts';
+import { STICKY_RULING } from '../../../../gate-engine/review/evidence/base-context.mts';
 import { blockingNote } from '../../../../gate-engine/review/overrides.mts';
 import { DETAIL_CHARS } from './fields.mts';
 import { type GateEvent, readShipEvents, render, summarise } from './gate-digest.mts';
@@ -652,7 +653,7 @@ describe('unverified verdicts (sc-3175)', () => {
     );
     expect(text).toContain('Gate findings this run (1)');
     expect(text).toContain(
-      '· completeness — cached PASS judged an earlier diff — this diff was not re-judged',
+      `· completeness — cached PASS judged an earlier diff — this diff was not re-judged (${STICKY_RULING})`,
     );
     expect(text).toContain('✓ 1 verdict(s) served from cache');
   });

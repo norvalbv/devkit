@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadCache, savePasses } from '../cache.mts';
 import { runCompleteness } from '../completeness.mts';
+import { STICKY_RULING } from '../evidence/base-context.mts';
 import {
   cleanupReviewFixtures,
   consumerRepo,
@@ -200,7 +201,7 @@ describe('runCompleteness — sticky PASS diff fingerprint (sc-3175)', () => {
 
   it('an unchanged staged diff reports a matching intent hit', async () => {
     const repo = consumerRepo({ backend: true });
-    const { exec, rerun, sink } = await earnPass(repo);
+    const { err, exec, rerun, sink } = await earnPass(repo);
     expect(await rerun()).toBe(0);
     expect(exec).toHaveBeenCalledTimes(1);
     expect(hits(sink)).toEqual([
@@ -210,6 +211,7 @@ describe('runCompleteness — sticky PASS diff fingerprint (sc-3175)', () => {
         diff_matches: true,
       }),
     ]);
+    expect(err.mock.calls.flat().join('\n')).not.toContain(STICKY_RULING);
   });
 
   it('a reshaped diff still skips the judge, but reports the mismatch and says so', async () => {
@@ -220,6 +222,7 @@ describe('runCompleteness — sticky PASS diff fingerprint (sc-3175)', () => {
     expect(exec).toHaveBeenCalledTimes(1);
     expect(hits(sink)).toEqual([expect.objectContaining({ scope: 'intent', diff_matches: false })]);
     expect(err.mock.calls.flat().join('\n')).toContain('judged on an earlier diff');
+    expect(err.mock.calls.flat().join('\n')).toContain(STICKY_RULING);
   });
 
   it('a diff reshaped and then restored byte-for-byte matches again', async () => {
