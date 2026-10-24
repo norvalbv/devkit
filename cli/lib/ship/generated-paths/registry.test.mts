@@ -140,12 +140,20 @@ describe('classifyGenerated', () => {
 
   it('splits generated from hand-written paths, preserving input order in each list', () => {
     const out = classifyGenerated(
-      ['src/a.mts', '.devkit/skills-manifest.json', 'dist/x/y.mjs', 'README.md'],
+      [
+        'src/a.mts',
+        '.devkit/skills-manifest.json',
+        'dist/x/y.mjs',
+        '.devkit/agent-hooks-manifest.json',
+        'README.md',
+      ],
       entries,
     );
     expect(out.generated).toEqual([
       { path: '.devkit/skills-manifest.json', command: 'devkit sync-skills' },
       { path: 'dist/x/y.mjs', command: 'bun run build' },
+      // `devkit sync-hooks` would add hook scripts the recorded selection turned off.
+      { path: '.devkit/agent-hooks-manifest.json', command: 'devkit init' },
     ]);
     expect(out.other).toEqual(['src/a.mts', 'README.md']);
   });
