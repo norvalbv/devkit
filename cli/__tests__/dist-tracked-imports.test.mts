@@ -5,12 +5,8 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import {
-  distArtifact,
-  type ImportEdge,
-  moduleImportEdges,
-  shellSourceEdges,
-} from '../lib/ship/dist-integrity.mts';
+import { distArtifact, type ImportEdge, moduleImportEdges } from '../lib/ship/dist-integrity.mts';
+import { shellSourceEdges } from '../lib/ship/preflight/shell-source-edges.mts';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 
