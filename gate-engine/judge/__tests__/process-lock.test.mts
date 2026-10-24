@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -10,7 +11,13 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { LockHeldError, reapIfDead, withProcessLock } from '../process/process-lock.mts';
+import {
+  acquireProcessLock,
+  LockHeldError,
+  reapIfDead,
+  releaseProcessLock,
+  withProcessLock,
+} from '../process/process-lock.mts';
 
 const temps: string[] = [];
 const LABEL = { label: 'test' };
@@ -189,5 +196,28 @@ describe('process lock', () => {
     // ~60 retries in 600 ms; a 250 ms cadence allows 3 checks (plus one for scheduling slack).
     expect(checks).toBeGreaterThanOrEqual(2);
     expect(checks).toBeLessThanOrEqual(4);
+  });
+
+  it('stamps the owner it is given, and its release spares a holder that re-took the lock', () => {
+    const lock = tempLock();
+    const nonce = acquireProcessLock(lock, {
+      ...LABEL,
+      owner: { pid: 4242, identity: 'ps:given' },
+    });
+    expect(readFileSync(join(lock, nonce), 'utf8')).toBe('4242\nps:given');
+
+    rmSync(join(lock, nonce)); // reaped as dead, then taken by a fresh holder
+    writeFileSync(join(lock, 'fresh'), '333\nps:z');
+    releaseProcessLock(lock, nonce);
+    expect(readdirSync(lock)).toEqual(['fresh']);
+  });
+
+  it('gives up after the wait it is given while a live foreign holder keeps the lock', () => {
+    const lock = tempLock();
+    seatLock(lock, process.pid, 'ps:held', 'held');
+    expect(
+      heldErrorOf(() => acquireProcessLock(lock, { ...LABEL, waitMs: 50, isGone: () => false })),
+    ).toBeInstanceOf(LockHeldError);
+    expect(readdirSync(lock)).toEqual(['held']);
   });
 });
