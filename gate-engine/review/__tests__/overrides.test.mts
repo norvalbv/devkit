@@ -1,11 +1,13 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -19,9 +21,11 @@ import {
   fingerprint,
   loadOverrides,
   overriddenLine,
+  overridesLockDir,
   reconcile,
   withOverridesLock,
 } from '../overrides.mts';
+import { LockHeldError } from '../../judge/process/process-lock.mts';
 import { resetReviewBaseContext } from '../evidence/base-context.mts';
 
 const dirs: string[] = [];
@@ -483,7 +487,7 @@ describe('waiver store reached through a symlink (ship gate worktree)', () => {
       return 'ok';
     });
     expect(out).toBe('ok');
-    expect(existsSync(join(cwd, `${STORE}.lock`))).toBe(false);
+    expect(existsSync(join(cwd, `${STORE}.mutex.lock`))).toBe(false);
     expect(withOverridesLock(cwd, () => 'reacquired')).toBe('reacquired');
   });
 
@@ -496,8 +500,8 @@ describe('waiver store reached through a symlink (ship gate worktree)', () => {
       );
     });
     expect(withOverridesLock(worktree, () => 'ok')).toBe('ok');
-    expect(existsSync(join(worktree, `${STORE}.lock`))).toBe(false);
-    expect(existsSync(join(checkout, `${STORE}.lock`))).toBe(false);
+    expect(existsSync(join(worktree, `${STORE}.mutex.lock`))).toBe(false);
+    expect(existsSync(join(checkout, `${STORE}.mutex.lock`))).toBe(false);
   });
 
   it('a waive into a dangling link recreates the checkout store, which the worktree then reads', () => {
@@ -559,5 +563,46 @@ describe('cached waivers (a PASS replayed from the review cache)', () => {
     expect(overriddenLine('r', 'l', FP, ': \u001b[31mred')).toBe(
       `guard-review: r — l overridden [${FP}]: red`,
     );
+  });
+});
+
+describe('overrides lock holders', () => {
+  const seat = (cwd: string, pid: number, identity: string) => {
+    const lock = overridesLockDir(cwd);
+    mkdirSync(lock, { recursive: true });
+    writeFileSync(join(lock, 'holder'), `${pid}\n${identity}`);
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(join(lock, 'holder'), old, old);
+    utimesSync(lock, old, old);
+    return lock;
+  };
+
+  it('never steals a live holder, however old its lock is', () => {
+    const cwd = repo();
+    // The parent is alive and a non-`ps:` identity can never prove it reused, so it is never gone.
+    const lock = seat(cwd, process.ppid, 'node:x');
+    let ran = false;
+    expect(() =>
+      withOverridesLock(cwd, () => {
+        ran = true;
+      }),
+    ).toThrow(LockHeldError);
+    expect(ran).toBe(false);
+    expect(readdirSync(lock)).toEqual(['holder']);
+  }, 20_000);
+
+  it('recovers the lock from a holder that has exited', () => {
+    const cwd = repo();
+    const dead = spawnSync(process.execPath, ['-e', '']).pid;
+    seat(cwd, dead, 'node:x');
+    expect(withOverridesLock(cwd, () => 'recovered')).toBe('recovered');
+    expect(existsSync(overridesLockDir(cwd))).toBe(false);
+  });
+
+  it("is not blocked by an older devkit's lock file left at the old path", () => {
+    const cwd = repo();
+    mkdirSync(join(cwd, '.devkit'), { recursive: true });
+    writeFileSync(join(cwd, '.devkit/correctness-overrides.json.lock'), `${process.ppid}\n`);
+    expect(withOverridesLock(cwd, () => 'ok')).toBe('ok');
   });
 });

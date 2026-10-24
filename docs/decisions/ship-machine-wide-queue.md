@@ -48,3 +48,4 @@ created: 2026-09-30
 **Scope:** cli/lib/ship/queue/**,cli/commands/ship.mts,cli/lib/ship/wait-ci/args.sh,cli/lib/ship/ship-branch.sh,cli/lib/ship/reship.sh
 **Source:** collab
 **Evidence-change:** Tests are now bounded by their own queue, and the owner ruled that serial shipping costs more than the unmeasured memory risk of a configurable N.
+- 2026-10-18 — The queue lock moved from cli/lib/ship/queue/queue-lock.mts to gate-engine/judge/process/process-lock.mts (withProcessLock, label 'queue') with the same on-disk shape (slot.lock and seq.lock, nonce-named holder, provable-death reap), so an older devkit and this one still exclude each other; contention now surfaces as LockHeldError instead of a 'timed out acquiring queue lock' message, and liveness is re-checked every 250 ms rather than every 10 ms retry. See cli-cross-process-lock.
