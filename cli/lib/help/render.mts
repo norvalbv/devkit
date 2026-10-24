@@ -17,6 +17,9 @@ export interface CommandMeta {
   agentFacing: boolean;
   /** Required when `agentFacing` is false: who invokes it instead, and why an agent must not. */
   notRoutedBecause?: string;
+  /** On an agent-facing verb: subcommand → why no agent may type it. No skill may name
+   *  `devkit <name> <subcommand>`; enforced by the same routing test. */
+  unroutedSubcommands?: Readonly<Record<string, string>>;
   /** Flags that consume the next token as an opaque value, so generic `--help` detection must
    *  skip that token (sc-2485). See `wantsCommandHelp` in ./wants-help.mts. */
   valueFlags?: readonly string[];
