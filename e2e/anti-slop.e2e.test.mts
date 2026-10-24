@@ -34,7 +34,6 @@ const INIT_ARGS = [
   '--yes',
   '--standalone',
   '--anti-slop',
-  '--no-biome',
   '--no-tsconfig',
   '--no-skills',
   '--no-agents',

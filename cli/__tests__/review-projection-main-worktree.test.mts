@@ -27,7 +27,7 @@ const { mkTmp, cleanup } = rootRegistry();
 const INDEX = '.search-code/index.db';
 const OVERRIDES = '.devkit/correctness-overrides.json';
 const BRANCH_BASELINE = '.devkit/baselines/size-lines.json';
-const SHARED_CONFIG = 'biome.devkit.jsonc';
+const SHARED_CONFIG = 'oxlint.devkit.json';
 
 afterEach(cleanup);
 

@@ -6,7 +6,6 @@
   "standalone": false,
   "selfHost": true,
   "components": {
-    "biome": true,
     "tsconfig": true,
     "skills": true,
     "agents": true,

@@ -53,7 +53,7 @@ import {
 import { DECISIONS_INDEX_IGNORES } from './install/gitignore-cache.mts';
 import { installSearchCode, SEARCH_CODE_WRITTEN } from './install/install-search-code.mts';
 import { overlayAssetExcludes } from './install/overlay-asset-excludes.mts';
-import { writeBiomeOverlay, writeEslintOverlay } from './install/overlay-lint-configs.mts';
+import { writeEslintOverlay } from './install/overlay-lint-configs.mts';
 import { addToGitExclude, overlayExcludeLines } from './install/overlay-excludes.mts';
 import { firstLine } from './standalone.mts';
 import { removeAgents, removeSkills } from './sync-manifest.mts';
@@ -393,7 +393,7 @@ export async function installOverlay(
   // absent file hides nothing, and the list stays the registry's.
   const excludes = new Set([
     ...overlayExcludeLines('', { path: LOCAL_HOOKS, kind: 'dir' }), // at the git root
-    ...overlayExcludeLines(pfx, { path: '.devkit', kind: 'dir' }), // config + vendored biome
+    ...overlayExcludeLines(pfx, { path: '.devkit', kind: 'dir' }), // config + devkit state
     ...OVERLAY_WRITTEN.flatMap((input) => overlayExcludeLines(pfx, input)),
     // Any `guard-decisions query` writes it, whatever the guard selection.
     ...DECISIONS_INDEX_IGNORES.map((line) => `${pfx}${line}`),
@@ -433,9 +433,8 @@ export async function installOverlay(
       for (const l of overlayExcludeLines(pfx, input)) excludes.add(l);
   }
 
-  // ours-extends-theirs lint overlays, in the package.
-  console.log('  lint overlays (extend the repo config)');
-  if (sel.biome) writeBiomeOverlay(cwd, stack, force, dryRun);
+  // ours-extends-theirs lint overlay, in the package.
+  console.log('  lint overlay (extends the repo config)');
   writeEslintOverlay(cwd, force, dryRun);
 
   // Resolve fallow before rendering the hook; an unavailable binary aborts only that component.

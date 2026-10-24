@@ -1,4 +1,15 @@
 {
+  "plugins": [
+    "eslint",
+    "typescript",
+    "oxc",
+    "react"
+  ],
+  "categories": {
+    "correctness": "deny",
+    "perf": "deny",
+    "suspicious": "deny"
+  },
   "overrides": [
     {
       "files": [
@@ -10,7 +21,9 @@
       }
     }
   ],
-  "rules": {},
+  "rules": {
+    "react/rules-of-hooks": "deny"
+  },
   "extends": [
     "../anti-slop/oxlint.json"
   ]

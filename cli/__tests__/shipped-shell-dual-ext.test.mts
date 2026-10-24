@@ -19,6 +19,9 @@ const QUOTE_RE = /["']/g;
 const EXPANSION_RE = /\$\([^)]*\)|\$\{[^}]*\}/g;
 const WHITESPACE_RE = /\s/;
 const ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
+// A file-test operand inside `[`/`test` (`[ -f "x.mts" ]`) probes a path; it can still be a twin.
+const FILE_TEST_RE = /^-[efrsx]$/;
+const TEST_OPENERS = new Set(['[', '[[', 'test', '!']);
 
 type Finding = { line: number; ref: string; missing: string };
 
@@ -65,12 +68,16 @@ function modulePath(word: string): string | null {
 
 /** Every .mts path a script resolves whose identical .mjs path is not beside the call site. */
 function unresolvedMtsRefs(source: string): Finding[] {
-  const perLine = source
-    .split('\n')
-    .map((line) => shellWords(stripComment(line)).flatMap((word) => modulePath(word) ?? []));
+  const words = source.split('\n').map((line) => shellWords(stripComment(line)));
+  const perLine = words.map((ws) => ws.flatMap((word) => modulePath(word) ?? []));
   const findings: Finding[] = [];
-  perLine.forEach((refs, index) => {
-    for (const ref of refs.filter((path) => MTS_SUFFIX_RE.test(path))) {
+  words.forEach((ws, index) => {
+    const runs = ws.filter(
+      (_, i) => !(FILE_TEST_RE.test(ws[i - 1] ?? '') && TEST_OPENERS.has(ws[i - 2] ?? '')),
+    );
+    for (const ref of runs
+      .flatMap((w) => modulePath(w) ?? [])
+      .filter((p) => MTS_SUFFIX_RE.test(p))) {
       const missing = ref.replace(MTS_SUFFIX_RE, '.mjs');
       const window = perLine.slice(
         Math.max(0, index - RESOLUTION_WINDOW),
@@ -186,6 +193,25 @@ describe('shipped shell scripts resolve both module extensions', () => {
     const nearbyProse = 'echo "note: consider $D/foo.mjs as an alternative"\nnode "$D/foo.mts"\n';
     expect(unresolvedMtsRefs(nearbyProse)).toEqual([
       { line: 2, ref: '$D/foo.mts', missing: '$D/foo.mjs' },
+    ]);
+  });
+
+  it('reads a file-test operand as a probe, not a module it runs', () => {
+    const probe = 'if [ -f "oxfmt.config.ts" ] || [ -f "oxfmt.config.mts" ]; then\n';
+    expect(unresolvedMtsRefs(probe)).toEqual([]);
+  });
+
+  it('flags a module a runner flag preloads (`node -r x.mts`), which is not a file test', () => {
+    const preload = 'node -r "$D/register.mts" app.mjs\n';
+    expect(unresolvedMtsRefs(preload)).toEqual([
+      { line: 1, ref: '$D/register.mts', missing: '$D/register.mjs' },
+    ]);
+  });
+
+  it('still flags the run site that follows a file-test probe of the same module', () => {
+    const probed = '[ -f "$D/foo.mts" ] && node "$D/foo.mts"\n';
+    expect(unresolvedMtsRefs(probed)).toEqual([
+      { line: 1, ref: '$D/foo.mts', missing: '$D/foo.mjs' },
     ]);
   });
 

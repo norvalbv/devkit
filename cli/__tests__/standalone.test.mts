@@ -1,6 +1,6 @@
 /**
  * Standalone (no-package) install: `devkit init --standalone` must add NOTHING to package.json,
- * vendor the biome/tsconfig bases (relative extends), and write a fail-open hook that calls the
+ * vendor the tsconfig base (relative extends), and write a fail-open hook that calls the
  * GLOBAL guard-* bins — the "like fallow init" model for shared work repos.
  */
 import { execFileSync } from 'node:child_process';
@@ -45,11 +45,9 @@ describe('standalone (no-package) install', () => {
     // package.json is byte-identical — NO @norvalbv/devkit dep, no scripts
     expect(readFileSync(join(root, 'package.json'), 'utf8')).toBe(pkgBefore);
 
-    // biome/tsconfig vendored + extended by RELATIVE path
-    expect(existsSync(join(root, '.devkit/biome/base.jsonc'))).toBe(true);
-    expect(JSON.parse(readFileSync(join(root, 'biome.jsonc'), 'utf8')).extends).toEqual([
-      './.devkit/biome/react.jsonc',
-    ]);
+    // tsconfig vendored + extended by RELATIVE path; no Biome config or presets
+    expect(existsSync(join(root, '.devkit/biome'))).toBe(false);
+    expect(existsSync(join(root, 'biome.jsonc'))).toBe(false);
     expect(JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf8')).extends).toBe(
       './.devkit/tsconfig/base.json',
     );
@@ -92,10 +90,6 @@ describe('standalone (no-package) install', () => {
     // Consumer-tuned configs that DRIFTED their extends to the package pointer (the pre-fix bug
     // force-rewrote these from the package template, wiping the deltas + flipping to package mode).
     writeFileSync(
-      join(root, 'biome.jsonc'),
-      '{\n  // repo-local tweak\n  "extends": ["@norvalbv/devkit/biome/base"],\n  "overrides": [{ "includes": ["**/*.test.ts"] }]\n}\n',
-    );
-    writeFileSync(
       join(root, 'tsconfig.json'),
       '{\n  "extends": "@norvalbv/devkit/tsconfig/base",\n  "compilerOptions": { "paths": { "@/*": ["src/*"] } }\n}\n',
     );
@@ -109,13 +103,7 @@ describe('standalone (no-package) install', () => {
     expect(readFileSync(join(root, 'package.json'), 'utf8')).toBe(pkgBefore);
     expect(readFileSync(join(root, 'package.json'), 'utf8')).not.toContain('@norvalbv/devkit');
 
-    // Fix 2: only the extends pointer repaired (mode-correct) — comment + deltas intact.
-    const biome = readFileSync(join(root, 'biome.jsonc'), 'utf8');
-    expect(biome).toContain('"./.devkit/biome/react.jsonc"');
-    expect(biome).not.toContain('@norvalbv/devkit/biome/base');
-    expect(biome).toContain('// repo-local tweak');
-    expect(biome).toContain('overrides');
-
+    // Fix 2: only the extends pointer repaired (mode-correct) — deltas intact.
     const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf8'));
     expect(tsconfig.extends).toBe('./.devkit/tsconfig/base.json');
     expect(tsconfig.compilerOptions.paths['@/*']).toEqual(['src/*']);
@@ -146,12 +134,7 @@ describe('standalone (no-package) install', () => {
     const structure = JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8')).structure;
     expect((structure?.trees ?? []).map((t) => t.root)).toContain('src');
 
-    // component-lib standalone extends the REACT biome base (S4 parity) — not a false DRIFT.
-    expect(JSON.parse(readFileSync(join(root, 'biome.jsonc'), 'utf8')).extends).toEqual([
-      './.devkit/biome/react.jsonc',
-    ]);
-
-    // doctor is clean (structure-line present, biome react, no pin check).
+    // doctor is clean (structure-line present, no pin check).
     const r = await doctorRun([], root);
     expect(r).toBe(0);
   });

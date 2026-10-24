@@ -108,8 +108,6 @@ gate-engine/edge-cases/eval/cases.jsonl
 !.devkit/baselines/structure/*.mjs
 !.devkit/structure/
 !.devkit/structure/exempt.mjs
-!.devkit/biome/
-!.devkit/biome/**
 !.devkit/tsconfig/
 !.devkit/tsconfig/**
 !.devkit/anti-slop/

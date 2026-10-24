@@ -348,7 +348,7 @@ SHIP_HOOK_WRAPPER
   # sc-2753: guard-comments aggregates in the deterministic stage; alone, it keeps its own name.
   elif grep -qE '✗ deterministic gates failed: guard-comments(\([^)]*\))?$' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
   elif grep -q '✗ deterministic gates failed' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
-  # A hook-shell gate (fallow, the eslint/biome overlays) keeps its own token, as comments does.
+  # A hook-shell gate (fallow, the eslint overlay) keeps its own token, as comments does.
   # Whole lines only (a finding may quote one); LC_ALL=C because BSD sed aborts on invalid UTF-8.
   elif shell_gate=$(LC_ALL=C sed -n 's/^✗ staged gate blocked: \([a-z-]*\) (its report is above)$/\1/p' "$log" 2>/dev/null | tail -n 1) &&
     [ -n "$shell_gate" ]; then blocked_json="\"$shell_gate\""; timed_out=false
@@ -533,7 +533,7 @@ SHIP_HOOK_WRAPPER
   # purpose: it is the classifier's catch-all, so it also covers a commit-msg hook failing after the
   # gates passed, and a line that says "the gates judged" must not be printed on a maybe.
   case "$blocked_json" in
-    '"deterministic"'|'"decisions"'|'"comments"'|'"review"'|'"fallow"'|'"eslint-overlay"'|'"biome-overlay"')
+    '"deterministic"'|'"decisions"'|'"comments"'|'"review"'|'"fallow"'|'"eslint-overlay"')
     {
       local brief_n=0 brief_list="" brief_p brief_base
       brief_base="${BASE:-}"

@@ -168,14 +168,7 @@ export function checkVersion(cwd: string, env = process.env): CheckResult {
 // Reproduce the recorded selection rather than the all-on `--yes` default.
 function selectionFlags(sel: Partial<Selection>): string[] {
   const flags = ['--yes'];
-  const toggles: (keyof Selection)[] = [
-    'biome',
-    'tsconfig',
-    'skills',
-    'agents',
-    'husky',
-    'structure',
-  ];
+  const toggles: (keyof Selection)[] = ['tsconfig', 'skills', 'agents', 'husky', 'structure'];
   for (const id of toggles) {
     if (sel[id] === false) flags.push(`--no-${id}`);
   }
@@ -286,9 +279,9 @@ function applyFix(
       stdio: 'inherit',
     });
   }
-  if (needsAntiSlopSync) syncAntiSlopCapability(cwd);
+  if (needsAntiSlopSync) syncAntiSlopCapability(cwd, { refreshStarters: true });
   if (needsOxcSync && !needsAntiSlopSync)
-    syncOxcCapability(cwd, { antiSlop: sel.antiSlop === true });
+    syncOxcCapability(cwd, { antiSlop: sel.antiSlop === true, refreshStarters: true });
   const skills = results.find((r) => r.name === 'skills');
   if (skills?.fixable && skills.status !== 'OK') {
     execFileSync(process.execPath, [join(packageDir(), 'cli', `index${SELF_EXT}`), 'sync-skills'], {
@@ -308,7 +301,6 @@ function applyFix(
 
 // The default component selection (pre-`components`-block configs, and the all-on fallback).
 const DEFAULT_DOCTOR_SEL: Partial<Selection> = {
-  biome: true,
   tsconfig: true,
   skills: true,
   husky: true,
@@ -335,7 +327,7 @@ async function collectResults(
   const { gitRoot } = detectGitRoot(cwd);
   const surfaces = resolveExistingAgentProviders(gitRoot, recorded.agentTargets);
   const sel: Partial<Selection> = { ...recorded, agentTargets: surfaces };
-  // Standalone (no-package): biome/tsconfig extend VENDORED relative paths, and there is no devkit
+  // Standalone (no-package): tsconfig extends a VENDORED relative path, and there is no devkit
   // pin to check (the whole point — no package dep).
   const standalone = Boolean(cfg.standalone);
   const stack = cfg.stack ?? 'generic';
@@ -348,12 +340,16 @@ async function collectResults(
   results.push(checkDevkitCacheGitignore(cwd));
   if (sel.husky && commitMsgGuards(sel.guards ?? []).length)
     results.push(checkCommitMsgHook(cwd, sel.guards ?? []));
-  // biome and tsconfig differ only by filename and expected pointer.
-  for (const [on, file, want] of [
-    [sel.biome, 'biome.jsonc', expected.biome],
-    [sel.tsconfig, 'tsconfig.json', expected.tsconfig],
-  ] as const)
-    if (on) results.push(checkExtends(cwd, file, want, 'extends', overrides.has(file)));
+  if (sel.tsconfig)
+    results.push(
+      checkExtends(
+        cwd,
+        'tsconfig.json',
+        expected.tsconfig,
+        'extends',
+        overrides.has('tsconfig.json'),
+      ),
+    );
   if (sel.guards?.length || sel.structure)
     results.push(
       ...(await checkGuardConfig(

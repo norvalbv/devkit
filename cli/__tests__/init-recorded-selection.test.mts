@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -28,7 +27,7 @@ function hookSnapshot(root: string): Record<string, string> {
 describe('selectionFromFlags — recorded re-run precedence', () => {
   it('preserves unspecified values while explicit positive and negative flags win', () => {
     const recorded: Partial<Selection> = {
-      biome: false,
+      tsconfig: false,
       agentHooks: true,
       adhd: true,
       priorArtGate: true,
@@ -42,7 +41,7 @@ describe('selectionFromFlags — recorded re-run precedence', () => {
     );
 
     expect(selection).toMatchObject({
-      biome: false,
+      tsconfig: false,
       agentHooks: true,
       searchCode: true,
       adhd: false,
@@ -64,7 +63,6 @@ describe('devkit init --yes — recorded selection re-run', () => {
       '--stack',
       'generic',
       '--yes',
-      '--no-biome',
       '--agent-hooks',
       '--search-steering',
       '--anti-slop',
@@ -140,20 +138,18 @@ describe('devkit init --yes — recorded selection re-run', () => {
     expect(existsSync(join(root, 'eslint.config.mjs'))).toBe(true);
   });
 
-  it('preserves a legacy overlay biome opt-out and records it for later reruns', () => {
+  it('drops a retired recorded biome key on rerun', () => {
     const root = tmpRepo();
-    execFileSync('git', ['init', '-q'], { cwd: root });
-    const first = devkit(root, 'init', '--stack', 'generic', '--overlay', '--yes', '--no-biome');
-    expect(first.status, first.stderr).toBe(0);
+    expect(devkit(root, 'init', '--stack', 'generic', '--yes').status).toBe(0);
     const configPath = join(root, '.devkit', 'config.json');
     const legacy = readConfig(root);
-    delete legacy.components.biome;
+    legacy.components.biome = false;
     writeFileSync(configPath, `${JSON.stringify(legacy, null, 2)}\n`);
 
-    const rerun = devkit(root, 'init', '--stack', 'generic', '--overlay', '--yes', '--agent-hooks');
+    const rerun = devkit(root, 'init', '--stack', 'generic', '--yes', '--search-code');
 
     expect(rerun.status, rerun.stderr).toBe(0);
-    expect(readConfig(root).components.biome).toBe(false);
-    expect(existsSync(join(root, 'biome.devkit.jsonc'))).toBe(false);
+    expect(readConfig(root).components).not.toHaveProperty('biome');
+    expect(existsSync(join(root, 'biome.jsonc'))).toBe(false);
   });
 });
