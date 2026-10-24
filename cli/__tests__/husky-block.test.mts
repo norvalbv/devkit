@@ -458,6 +458,19 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
     expect(sentIdx).toBeGreaterThan(-1);
     expect(hook).toContain(`[ -n "\${DEVKIT_SHIP:-}" ] && echo 'devkit-gates: chain start' >&2`);
     expect(sentIdx).toBeLessThan(guardIdx); // before the gates → a first-gate block still records it
+    expect(hook.split('devkit-gates: chain start')).toHaveLength(2); // emitted once
+  });
+
+  it('every install mode opens its block with the sentinel, before any gate or exit trap', () => {
+    for (const block of [
+      buildGuardBlock(ALL),
+      buildGuardBlock(ALL, 'packages/app'),
+      buildFullHook(ALL),
+    ]) {
+      const firstGate = block.indexOf('trap ');
+      expect(block.indexOf('devkit-gates: chain start')).toBeGreaterThan(-1);
+      expect(block.indexOf('devkit-gates: chain start')).toBeLessThan(firstGate);
+    }
   });
 
   it('places the guard BEFORE the chain exec (the chain runs only when the env is unset)', () => {

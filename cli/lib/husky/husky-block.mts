@@ -126,6 +126,9 @@ interface BlockOptions {
   formatChain?: StepFormatter[];
 }
 
+// Ship-only proof that this block started: husky's runner exits 0 under HUSKY=0 without running it.
+const SHIP_CHAIN_SENTINEL = `[ -n "\${DEVKIT_SHIP:-}" ] && echo 'devkit-gates: chain start' >&2`;
+
 /** The ONE gate body for every install mode: format (the prefix-cache key hashes the post-format
  *  index) → deterministic → preAi → AI guards → postGuards. */
 export function buildGuardBlock(
@@ -134,7 +137,11 @@ export function buildGuardBlock(
   { binDir = 'package', preAi, postGuards, formatChain }: BlockOptions = {},
 ): string {
   const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
-  const pieces = [buildPreCommitExit(handoff), ...gateBlockPrelude(BIN_DIRS[binDir].open)];
+  const pieces = [
+    SHIP_CHAIN_SENTINEL,
+    buildPreCommitExit(handoff),
+    ...gateBlockPrelude(BIN_DIRS[binDir].open),
+  ];
   // First so a first-gate block still records the run's terminal (the trap covers every exit path).
   if (!pkgRel && (selection.biome || formatChain))
     pieces.push(formatFragment(BIN_DIRS[binDir].formatter, formatChain));
@@ -282,10 +289,6 @@ export function buildOverlayHook(
   return `${HOOK_PREAMBLE}
 # devkit OVERLAY (LOCAL, git-ignored). Runs devkit's gates + lint overlay on this commit, then
 # the repo's OWN committed hook UNCHANGED. Invisible to the team — nothing here is committed.
-# Sentinel: proves the chain actually started, so \`devkit ship\` can tell a real run from a silent
-# no-op and never report "gates ran" when they didn't. Only during ship (DEVKIT_SHIP=1) — a normal
-# \`git ci\` stays quiet. Emitted before the gates so even a first-gate block still records it.
-[ -n "\${DEVKIT_SHIP:-}" ] && echo 'devkit-gates: chain start' >&2
 ${prelude ? `${prelude}\n` : ''}${block}
 
 # Invoked by the global init.sh shim (husky reclaimed core.hooksPath on a plain \`git commit\`):
