@@ -239,7 +239,6 @@ function runtimeFields(context: SetupContext, destination: string): ReviewSetupR
     hooksPath: context.manifest.setup.hooksPath,
     overlay: context.manifest.setup.overlay,
     enabled: context.manifest.setup.profile.enabled,
-    decisionsDir: context.manifest.setup.profile.decisionsDir,
     chainHook:
       chain && chain.fingerprint !== REVIEW_SETUP_ABSENT
         ? resolve(destination, ...mappedRelative(context, chain).split('/'))

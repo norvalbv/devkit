@@ -116,14 +116,14 @@ argument, setup, gate, or formatting failure, and timeout statuses such as `124`
 {
   "review": {
     "enabled": true,
-    "guards": ["size", "fanout", "dup", "clone", "decisions", "review"],
-    "decisionsDir": "docs/decisions"
+    "guards": ["size", "fanout", "dup", "clone", "decisions", "review"]
   }
 }
 ```
 
 `guards` is a positive allowlist of installed pre-commit gates. Architectural decision records do
-not accumulate in this config; they remain Markdown under `decisionsDir`.
+not accumulate in this config; they remain Markdown under `guard.config.json`'s `decisionsDir`,
+which review reads exactly as commit and ship do.
 
 ## Governance capabilities
 

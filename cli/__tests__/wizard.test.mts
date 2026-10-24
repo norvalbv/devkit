@@ -97,7 +97,6 @@ describe('wizard agent-surface selection', () => {
     expect(r.review).toEqual({
       enabled: true,
       guards: ['decisions'],
-      decisionsDir: 'docs/decisions',
     });
   });
 
@@ -129,30 +128,7 @@ describe('wizard agent-surface selection', () => {
     expect(r.review).toEqual({
       enabled: true,
       guards: [],
-      decisionsDir: 'docs/decisions',
     });
-  });
-
-  it('preserves a custom decisions directory that the wizard does not expose', async () => {
-    setAnswers('claude');
-    Object.assign(answers, {
-      'Select components to install': ['skills', 'agents', 'husky'],
-      'Select gate guards': ['decisions'],
-      'Enable devkit review?': true,
-      'Select guards for devkit review': ['decisions'],
-    });
-
-    const r = await runWizard({
-      ...WIZ_OPTS,
-      installed: new Set(['devkit-review']),
-      existingReview: {
-        enabled: true,
-        guards: ['decisions'],
-        decisionsDir: 'architecture/decisions',
-      },
-    });
-
-    expect(r.review.decisionsDir).toBe('architecture/decisions');
   });
 
   it('keeps review disabled when the effective selection has no Husky hook', async () => {
@@ -165,7 +141,6 @@ describe('wizard agent-surface selection', () => {
     expect(r.review).toEqual({
       enabled: false,
       guards: [],
-      decisionsDir: 'docs/decisions',
     });
   });
 

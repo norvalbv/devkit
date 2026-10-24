@@ -48,7 +48,6 @@
       "decisions",
       "ui-evidence",
       "review"
-    ],
-    "decisionsDir": "docs/decisions"
+    ]
   }
 }

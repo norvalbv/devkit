@@ -657,8 +657,8 @@ node "$SETUP_RUNTIME_TOOL" materialize "$SETUP_MANIFEST" "$FINAL_WT" \
   "$SETUP_RUNTIME_MANIFEST" > "$SETUP_FIELDS_FILE"
 SETUP_FIELDS=()
 while IFS= read -r -d '' field; do SETUP_FIELDS+=("$field"); done < "$SETUP_FIELDS_FILE"
-[ "${#SETUP_FIELDS[@]}" -ge 8 ] && \
-  [ "${SETUP_FIELDS[0]}" = devkit-review-setup-v1 ] || {
+[ "${#SETUP_FIELDS[@]}" -ge 7 ] && \
+  [ "${SETUP_FIELDS[0]}" = devkit-review-setup-v2 ] || {
   echo 'devkit review: setup runtime returned a malformed protocol.' >&2
   exit 1
 }
@@ -666,9 +666,8 @@ TARGET_RELATIVE=${SETUP_FIELDS[1]}
 HOOKS_PATH=${SETUP_FIELDS[2]}
 OVERLAY=${SETUP_FIELDS[3]}
 REVIEW_ENABLED=${SETUP_FIELDS[4]}
-DECISIONS_DIR=${SETUP_FIELDS[5]}
-CHAIN_HOOK=${SETUP_FIELDS[6]}
-GUARD_COUNT=${SETUP_FIELDS[7]}
+CHAIN_HOOK=${SETUP_FIELDS[5]}
+GUARD_COUNT=${SETUP_FIELDS[6]}
 case "$GUARD_COUNT" in
   '' | *[!0-9]*) echo 'devkit review: setup runtime fields are invalid.' >&2; exit 1 ;;
 esac
@@ -676,7 +675,7 @@ case "$OVERLAY:$REVIEW_ENABLED:$HOOKS_PATH" in
   0:1:.husky/_ | 1:1:.devkit/hooks) ;;
   *) echo 'devkit review: setup runtime fields are invalid.' >&2; exit 1 ;;
 esac
-[ "${#SETUP_FIELDS[@]}" -eq "$((8 + GUARD_COUNT))" ] || {
+[ "${#SETUP_FIELDS[@]}" -eq "$((7 + GUARD_COUNT))" ] || {
   echo 'devkit review: setup runtime guard list is truncated.' >&2
   exit 1
 }
@@ -692,7 +691,7 @@ fi
 GUARDS=
 index=0
 while [ "$index" -lt "$GUARD_COUNT" ]; do
-  guard=${SETUP_FIELDS[$((8 + index))]}
+  guard=${SETUP_FIELDS[$((7 + index))]}
   if [ -n "$GUARDS" ]; then GUARDS=$GUARDS,$guard; else GUARDS=$guard; fi
   index=$((index + 1))
 done
@@ -790,7 +789,6 @@ done
 
 export DEVKIT_RUN_MODE=review
 export DEVKIT_REVIEW_GUARDS="$GUARDS"
-export GUARD_DECISIONS_DIR="$DECISIONS_DIR"
 export DEVKIT_REVIEW_PACKAGE_ROOT="$ASSET_RUNTIME"
 export DEVKIT_REVIEW_ASSET_ROOT="$ASSET_RUNTIME"
 export DEVKIT_REVIEW_DATA_ROOT="$PRIVATE_DATA_ROOT"

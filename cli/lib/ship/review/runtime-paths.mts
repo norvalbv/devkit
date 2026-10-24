@@ -15,17 +15,6 @@ export function isSafeReviewRelativePath(path: string): boolean {
   );
 }
 
-/** Canonicalize harmless dot/slash syntax while rejecting traversal and absolute paths. */
-export function normalizeSafeReviewRelativePath(path: string): string | null {
-  const value = path.trim();
-  if (!value || value.includes('\0') || value.includes('\\') || isAbsolute(value)) return null;
-  if (win32.isAbsolute(value)) return null;
-  const segments = value.split('/');
-  if (segments.includes('..')) return null;
-  const normalized = segments.filter((segment) => segment && segment !== '.').join('/');
-  return isSafeReviewRelativePath(normalized) ? normalized : null;
-}
-
 /** True when candidate is root itself or a descendant, never a lexical sibling. */
 export function reviewPathWithin(root: string, candidate: string): boolean {
   const rel = relative(root, candidate);

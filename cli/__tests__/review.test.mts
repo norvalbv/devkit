@@ -12,6 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { normalizeSelection, type Selection } from '../lib/components.mts';
 import { buildFullHook } from '../lib/husky/husky-block.mts';
@@ -85,6 +86,12 @@ function write(root: string, relativePath: string, contents: string, executable 
   writeFileSync(path, contents);
   chmodSync(path, executable ? 0o755 : 0o644);
 }
+
+const CONFIG_MODULE = JSON.stringify(
+  fileURLToPath(new URL('../../gate-engine/config.mts', import.meta.url)),
+);
+/** Hook action printing the decisions directory gate code resolves in the review worktree. */
+const PRINT_DECISIONS_DIR = `node --input-type=module -e 'import { resolveGuardConfig } from ${CONFIG_MODULE}; console.log("REVIEW_DECISIONS=" + resolveGuardConfig(process.cwd()).decisionsDir);'`;
 
 function hookWith(action: string): string {
   return buildFullHook(EMPTY_SELECTION).replace('\nexit 0\n', () => `\n${action}\nexit 0\n`);
@@ -386,6 +393,59 @@ printf 'REVIEW_NO_SOURCE_HEAD_OK\\n'
     });
     expect(result.status, combinedOutput(result)).toBe(0);
     expect(combinedOutput(result)).toContain('REVIEW_NO_SOURCE_HEAD_OK');
+  });
+
+  it("gates read guard.config.json's decisionsDir, not .devkit/config.json or the caller env", () => {
+    const action = `
+test -z "\${GUARD_DECISIONS_DIR:-}" || exit 86
+test -f adr/x.md || exit 87
+${PRINT_DECISIONS_DIR}
+`;
+    const target = fixture(action);
+    addCommittedChange(target);
+    write(target.root, 'guard.config.json', '{"decisionsDir":"adr"}\n');
+    write(target.root, 'adr/x.md', '# x\n');
+    git(target.root, 'add', 'guard.config.json', 'adr/x.md');
+    git(target.root, 'commit', '-qm', 'custom decisions dir');
+    const result = runReview(target, [], {
+      env: { ...target.env, GUARD_DECISIONS_DIR: '/elsewhere/docs/decisions' },
+    });
+    expect(result.status, combinedOutput(result)).toBe(0);
+    expect(combinedOutput(result)).toContain('REVIEW_DECISIONS=adr\n');
+  });
+
+  // Catches a misaligned setup-runtime field offset: every other review fixture has no guards.
+  it('passes the review guard allowlist in order, and the default decisions dir with no guard.config.json', () => {
+    const action = `
+test "\${DEVKIT_REVIEW_GUARDS:-}" = size,comments || exit 88
+printf 'REVIEW_GUARDS_OK\\n'
+${PRINT_DECISIONS_DIR}
+`;
+    const target = fixture();
+    addCommittedChange(target);
+    const components = { ...EMPTY_SELECTION, guards: ['size', 'comments'] };
+    write(
+      target.root,
+      '.devkit/config.json',
+      `${JSON.stringify({
+        stack: 'generic',
+        standalone: false,
+        overlay: false,
+        components,
+        review: { enabled: true, guards: ['size', 'comments'] },
+      })}\n`,
+    );
+    // The fixture installs no gate binaries, so the check runs and exits ahead of the gate block.
+    const hook = buildFullHook(components).replace(
+      '#!/bin/sh\n',
+      () => `#!/bin/sh\n${action}exit 0\n`,
+    );
+    write(target.root, '.husky/pre-commit', hook, true);
+    git(target.root, 'commit', '-qam', 'review two guards');
+    const result = runReview(target);
+    expect(result.status, combinedOutput(result)).toBe(0);
+    expect(combinedOutput(result)).toContain('REVIEW_GUARDS_OK');
+    expect(combinedOutput(result)).toContain('REVIEW_DECISIONS=docs/decisions\n');
   });
 
   it('an empty reviewed range leaves the intent var unset and the review completes (sc-1442)', () => {
