@@ -1,13 +1,16 @@
-import {
+import fs, {
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -87,6 +90,54 @@ describe('writeIfAbsent — symlink dest is replaced with a real entry, never fo
     writeIfAbsent(join(root, 'real', 'new.txt'), 'new', { force: true });
     expect(readFileSync(join(root, 'real', 'keep.txt'), 'utf8')).toBe('keep'); // sibling untouched
     expect(readFileSync(join(root, 'real', 'new.txt'), 'utf8')).toBe('new');
+  });
+});
+
+describe('writeIfAbsent force — replaces via temp + rename, never truncates in place', () => {
+  it('swaps in a new inode rather than rewriting the old one', () => {
+    const f = join(tmp(), 'SKILL.md');
+    writeFileSync(f, 'old');
+    const before = statSync(f).ino;
+    expect(writeIfAbsent(f, 'new', { force: true })).toBe('forced');
+    expect(statSync(f).ino).not.toBe(before);
+    expect(readFileSync(f, 'utf8')).toBe('new');
+  });
+
+  it('leaves the old file intact and no temp behind when the replace is interrupted', () => {
+    const root = tmp();
+    const f = join(root, 'manifest.json');
+    writeFileSync(f, '{"old":true}');
+    const realRenameSync = fs.renameSync;
+    fs.renameSync = () => {
+      throw Object.assign(new Error('simulated crash'), { code: 'EIO' });
+    };
+    syncBuiltinESMExports(); // atomic-write.mts binds renameSync by name
+    try {
+      expect(() => writeIfAbsent(f, '{"new":true}', { force: true })).toThrow(/simulated crash/);
+    } finally {
+      fs.renameSync = realRenameSync;
+      syncBuiltinESMExports();
+    }
+    expect(readFileSync(f, 'utf8')).toBe('{"old":true}');
+    expect(readdirSync(root)).toEqual(['manifest.json']);
+  });
+
+  it('keeps an executable hook executable across a Buffer replace', () => {
+    const f = join(tmp(), 'hook.sh');
+    writeFileSync(f, '#!/bin/sh\n', { mode: 0o755 });
+    writeIfAbsent(f, Buffer.from('#!/bin/sh\nexit 0\n'), { force: true });
+    expect(statSync(f).mode & 0o777).toBe(0o755);
+    expect(readFileSync(f, 'utf8')).toBe('#!/bin/sh\nexit 0\n');
+  });
+
+  it('replaces a LIVE leaf symlink with a real file and leaves its target alone', () => {
+    const root = tmp();
+    writeFileSync(join(root, 'theirs.md'), 'theirs');
+    symlinkSync('theirs.md', join(root, 'SKILL.md'));
+    expect(writeIfAbsent(join(root, 'SKILL.md'), 'ours', { force: true })).toBe('forced');
+    expect(lstatSync(join(root, 'SKILL.md')).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(root, 'SKILL.md'), 'utf8')).toBe('ours');
+    expect(readFileSync(join(root, 'theirs.md'), 'utf8')).toBe('theirs');
   });
 });
 
