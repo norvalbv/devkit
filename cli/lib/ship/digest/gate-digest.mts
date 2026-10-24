@@ -9,6 +9,7 @@
  * blocked: the shell settled that and published it on this ship's ship_result row, which this
  * reader consumes, so the two can never disagree.
  */
+import { STICKY_RULING } from '../../../../gate-engine/review/evidence/base-context.mts';
 import { blockingFindings, judgeFinding } from './blocking.mts';
 import { count, oneLine, textOf } from './fields.mts';
 import { scanBackward } from './tail.mts';
@@ -365,7 +366,7 @@ const cacheGate = (e: GateEvent): string =>
 /** A PASS reused across a reshaped diff (sc-3175), or ''. `=== false`: an absent field covers it. */
 const earlierDiffDetail = (e: GateEvent): string =>
   e.diff_matches === false
-    ? 'cached PASS judged an earlier diff — this diff was not re-judged'
+    ? `cached PASS judged an earlier diff — this diff was not re-judged (${STICKY_RULING})`
     : '';
 
 /** A PASS judged on an earlier base whose reviewed paths moved (sc-3468), or ''. An absent

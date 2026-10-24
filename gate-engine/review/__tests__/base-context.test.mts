@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   baseProvenanceLines,
@@ -12,6 +13,7 @@ import {
   judgedBaseSha,
   resetReviewBaseContext,
   reviewBaseContext,
+  STICKY_RULING,
   storedBaseSchema,
 } from '../evidence/base-context.mts';
 import { cleanupReviewFixtures, trackReviewFixtureDir } from './run-review-fixtures.mts';
@@ -464,5 +466,15 @@ describe('base provenance line scoped to the reviewers that ran (sc-3468)', () =
     expect(first).toBe(
       `guard-review: reviewed against ${base.slice(0, 12)} (local HEAD) — findings below name lines in THAT tree.`,
     );
+  });
+});
+
+describe('STICKY_RULING', () => {
+  it('links a decision record that exists in this repository', () => {
+    const slug = /\/docs\/decisions\/([a-z0-9-]+)\.md/.exec(STICKY_RULING)?.[1];
+    expect(slug).toBeDefined();
+    expect(STICKY_RULING).toContain(`ruling ${slug}:`);
+    const record = fileURLToPath(new URL(`../../../docs/decisions/${slug}.md`, import.meta.url));
+    expect(existsSync(record)).toBe(true);
   });
 });
