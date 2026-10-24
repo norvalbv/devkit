@@ -48,6 +48,14 @@ describe('measureDiffEvidenceCap', () => {
     expect(m.evidence_bytes_shown).toBeLessThan(Buffer.byteLength(wide, 'utf8')); // never the whole diff
   });
 
+  it('quotes a truncated path starting with `=` in the git diff hint, since zsh expands a bare one', () => {
+    const rendered = buildCappedDiffEvidence(
+      segment('=big.ts', 9_000) + segment('src/pad.ts', 70_000),
+      '',
+    );
+    expect(rendered).toContain("git diff --cached -- '=big.ts'");
+  });
+
   it('is pure and stable across calls', () => {
     const diff = segment('src/a.ts', 70_000);
     expect(measureDiffEvidenceCap(diff)).toEqual(measureDiffEvidenceCap(diff));

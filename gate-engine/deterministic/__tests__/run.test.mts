@@ -1415,6 +1415,12 @@ describe('recheckCommand', () => {
     dirs.push(link);
     expect(recheckCommand(['node', join(real, 'm.mjs')], link)).toBe('env -- node m.mjs');
   });
+
+  it('quotes an argument starting with `=`, which zsh would expand to a command path', () => {
+    expect(recheckCommand(['node', 'gate.mjs', '=x.ts'], repo())).toBe(
+      "env -- node gate.mjs '=x.ts'",
+    );
+  });
 });
 
 // The class behind a reviewer counterexample: whatever a shell would parse differently from the
