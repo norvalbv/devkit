@@ -114,3 +114,17 @@ describe('overlay install whose root entry config is missing', () => {
     expect(antiSlop(['check', '--staged'], root)).toBe(0);
   });
 });
+
+describe('overlay version bump', () => {
+  it('skips a commit that stages only package.json instead of linting the whole repository', () => {
+    const root = overlayWithStagedMove();
+    git(root, ['reset', '-q']);
+    writeFileSync(join(root, 'package.json'), '{ "version": "0.2.0" }\n');
+    git(root, ['add', 'package.json']);
+
+    expect(antiSlop(['check', '--staged'], root)).toBe(0);
+    expect(out.join('\n')).toContain('no relevant staged files or configuration changes');
+    expect(out.join('\n')).toContain('anti-slop: overlay');
+    expect(out.join('\n')).not.toContain('current finding(s)');
+  });
+});

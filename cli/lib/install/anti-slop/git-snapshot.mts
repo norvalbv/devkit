@@ -28,8 +28,8 @@ export { withStableGitIndex } from './git-index-lock.mts';
 export type { GitBaseIdentity, GitHeadIdentity } from './git-index-lock.mts';
 
 const LINT_SOURCE = /\.(?:[cm]?[jt]sx?)$/u;
-const FULL_SCAN_FILES = new Set([
-  ANTI_SLOP_BASELINE_REL,
+/** Consumer manifests and Oxlint configs; overlay lints with its own runtime and entry config. */
+const OVERLAY_INERT_FILES = new Set([
   '.oxlintrc.json',
   '.oxlintrc.jsonc',
   'oxlint.config.ts',
@@ -37,6 +37,7 @@ const FULL_SCAN_FILES = new Set([
   'package.json',
   'bun.lock',
 ]);
+const FULL_SCAN_FILES = new Set([ANTI_SLOP_BASELINE_REL, ...OVERLAY_INERT_FILES]);
 
 interface GitChange {
   status: string;
@@ -355,7 +356,8 @@ export function gitBaselineEnvelope(
   };
 }
 
-function requiresFullScan(path: string): boolean {
+function requiresFullScan(path: string, overlay: boolean): boolean {
+  if (overlay && OVERLAY_INERT_FILES.has(path)) return false;
   return (
     FULL_SCAN_FILES.has(path) ||
     path.startsWith('.devkit/oxc/') ||
@@ -418,7 +420,7 @@ export function withStagedAntiSlopSnapshot<T>(
     return path === null ? [] : [{ ...change, path }];
   });
   const changedFiles = packageChanges.map((change) => change.path);
-  const fullScan = changedFiles.some(requiresFullScan);
+  const fullScan = changedFiles.some((path) => requiresFullScan(path, overlay));
   const paths = fullScan
     ? []
     : packageChanges
