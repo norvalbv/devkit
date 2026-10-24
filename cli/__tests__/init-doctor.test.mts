@@ -41,15 +41,12 @@ describe('init --yes (all recommended)', () => {
       '--review',
       '--review-guards',
       'decisions,review',
-      '--review-decisions-dir',
-      'architecture/decisions',
     );
 
     expect(r.status, r.stderr).toBe(0);
     expect(config(root).review).toEqual({
       enabled: true,
       guards: ['decisions', 'review'],
-      decisionsDir: 'architecture/decisions',
     });
   });
 
@@ -61,7 +58,6 @@ describe('init --yes (all recommended)', () => {
     expect(config(root).review).toEqual({
       enabled: true,
       guards: [],
-      decisionsDir: 'docs/decisions',
     });
   });
 
@@ -70,17 +66,6 @@ describe('init --yes (all recommended)', () => {
     const guardsResult = devkit(guardsOnly, 'init', '--yes', '--review-guards', 'size');
     expect(guardsResult.status).toBe(1);
     expect(guardsResult.stderr).toMatch(/--review-guards require --review/);
-
-    const directoryOnly = tmpRepo();
-    const directoryResult = devkit(
-      directoryOnly,
-      'init',
-      '--yes',
-      '--review-decisions-dir',
-      'architecture/decisions',
-    );
-    expect(directoryResult.status).toBe(1);
-    expect(directoryResult.stderr).toMatch(/--review-decisions-dir require --review/);
 
     const disabledWithModifier = tmpRepo();
     const disabledResult = devkit(
@@ -162,7 +147,6 @@ describe('init --yes (all recommended)', () => {
     expect(recorded.review).toEqual({
       enabled: true,
       guards: ['size'],
-      decisionsDir: 'docs/decisions',
     });
   });
 

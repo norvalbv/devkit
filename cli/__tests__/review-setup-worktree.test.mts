@@ -44,7 +44,7 @@ function overlayConfig(origHooksPath: string) {
     overlay: true,
     origHooksPath,
     components: selection,
-    review: { enabled: true, guards: ['size', 'decisions'], decisionsDir: 'docs/decisions' },
+    review: { enabled: true, guards: ['size', 'decisions'] },
   };
 }
 
@@ -379,6 +379,6 @@ function packageConfig() {
     standalone: true,
     overlay: false,
     components: selection,
-    review: { enabled: true, guards: ['size', 'decisions'], decisionsDir: 'docs/decisions' },
+    review: { enabled: true, guards: ['size', 'decisions'] },
   };
 }
