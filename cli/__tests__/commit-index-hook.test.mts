@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buildCommitMsgBlock } from '../lib/husky/commit-msg-block.mts';
 import { buildFullHook, buildOverlayHook } from '../lib/husky/husky-block.mts';
 import { DK_COMMIT_INDEX_CAPTURE } from '../lib/husky/review-fragments.mts';
+import { GIT_ENV_VARS } from '../../gate-engine/judge/judge-isolation.mts';
 import { rootRegistry } from './_helpers.mts';
 
 const REPO = resolve(import.meta.dirname, '../..');
@@ -44,11 +45,13 @@ interface GateView {
   stagedSet: string[];
 }
 
-// A stand-in `fallow`: records the paths of the diff it was handed on stdin, exits FALLOW_RC.
+// A stand-in `fallow`: records the paths of the diff it was handed on stdin and the GIT_* names in
+// its environment, exits FALLOW_RC.
 const STUB_FALLOW = `#!/bin/sh
 [ "$1" = audit ] || exit 0
 paths=$(sed -n 's|^+++ b/||p' | sort | tr '\\n' ' ')
-printf '{"fallowDiff":"%s"}\\n' "$paths" >> "$STUB_OUT"
+names=$(env | sed -n 's/^\\(GIT_[A-Z_]*\\)=.*/\\1/p' | sort | tr '\\n' ' ')
+printf '{"fallowDiff":"%s","gitEnv":"%s"}\\n' "$paths" "$names" >> "$STUB_OUT"
 exit \${FALLOW_RC:-0}
 `;
 
@@ -211,7 +214,60 @@ describe('staged fallow gate audits exactly what the commit records', () => {
     git(['commit', '-qam', 'lands'], { FALLOW_RC: '2' });
     expect(git(['log', '-1', '--format=%s']).trim()).toBe('lands');
   });
+
+  // Only a linked worktree exports an absolute GIT_DIR to its hooks: an unscrubbed diff from a
+  // package dir then exits 0 with a repo-root path, where a main checkout fails loudly.
+  it.each(['', 'packages/app'])(
+    'a ship commit in a linked worktree audits its index (%j)',
+    (rel) => {
+      const repo = seedHookedRepo(rel, FALLOW);
+      shipWorktree(repo).ship(['commit', '-qm', 'ship']);
+      expect(audited(repo.views)).toEqual(['f.txt']);
+      expect(leakedGitEnv(repo.views)).toEqual([]);
+    },
+  );
+
+  it('a dry-gates `hook run` in a linked worktree audits its index', () => {
+    const repo = seedHookedRepo('', FALLOW);
+    shipWorktree(repo).ship(['hook', 'run', 'pre-commit']);
+    expect(audited(repo.views)).toEqual(['f.txt']);
+    expect(leakedGitEnv(repo.views)).toEqual([]);
+  });
+
+  it('`commit -am` in a linked worktree hands fallow its index.lock carrier', () => {
+    const repo = seedHookedRepo('', FALLOW);
+    const { wt, ship } = shipWorktree(repo);
+    writeFileSync(join(wt, 'baseline.json'), 'unstaged, committed by -a\n');
+    ship(['commit', '-qam', 'all']);
+    expect(audited(repo.views)).toEqual(['baseline.json f.txt']);
+  });
 });
+
+/** Scrubbed git variables that still reached the stub fallow. */
+function leakedGitEnv(views: () => GateView[]) {
+  return views().flatMap((v) =>
+    'gitEnv' in v
+      ? String(v.gitEnv)
+          .split(' ')
+          .filter((n) => GIT_ENV_VARS.includes(n))
+      : [],
+  );
+}
+
+/**
+ * A linked worktree (its path holds a space) with f.txt staged while MAIN stages an unrelated g.txt,
+ * plus `ship`, which runs git there as ship does: `-c core.hooksPath=…` exports GIT_CONFIG_PARAMETERS.
+ */
+function shipWorktree({ root, pkg, git }: ReturnType<typeof seedHookedRepo>) {
+  const wt = join(mkTmp('commit-index-wt-'), 'ship wt');
+  git(['worktree', 'add', '-q', '--detach', wt]);
+  writeFileSync(join(pkg, 'g.txt'), 'staged in main\n');
+  git(['add', '-A']);
+  writeFileSync(join(wt, relative(root, pkg), 'f.txt'), 'edited\n');
+  git(['add', '-A'], {}, wt);
+  const hooks = `core.hooksPath=${join(root, '.git', 'hooks')}`;
+  return { wt, ship: (args: string[]) => git(['-c', hooks, ...args], {}, wt) };
+}
 
 describe('DK_COMMIT_INDEX_CAPTURE', () => {
   const capture = (cwd: string, env: NodeJS.ProcessEnv) =>
