@@ -51,13 +51,15 @@ import { describeCachedPrefix, prefixEntry, recordPrefix } from '../prefix-cache
 import { type GateFailure, gateEnv, readGateReason, withReasonFiles } from './reason.mts';
 import {
   bypassedSuffixes,
+  commandGate,
   configExtraGates,
   GUARD_PREFIX_RE,
   reportCachedBypasses,
   type ExtraGate,
+  type Gate,
   structureBypassed,
 } from './command-gates.mts';
-import { recheckCommand, recheckLines, registryRecheck } from './recheck.mts';
+import { recheckLines, registryRecheck } from './recheck.mts';
 import { DETERMINISTIC } from './registry.mts';
 import { type FailedGate, reportFailures, reportOptedOut } from './report.mts';
 import { canonicalIds, resolveSelection, reviewIds } from './selection.mts';
@@ -74,8 +76,6 @@ const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 const COULD_NOT_RUN = '(could-not-run)';
 const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
-// Splits a `--structure` / `--extra` command into argv tokens. Hoisted: no per-call regex compile.
-const WHITESPACE_RE = /\s+/;
 // Rewrites a sibling gate module's `.mjs` literal to the runtime extension. Hoisted (perf: no
 // per-gate regex compile).
 const MJS_EXT_RE = /\.mjs$/;
@@ -94,19 +94,6 @@ interface ParsedOpts {
 // (tests pass a stub; production defaults to execFileSync).
 interface RunDeterministicOpts extends Partial<ParsedOpts> {
   exec?: typeof execFileSync;
-}
-
-// A runnable gate descriptor. `argv` is null for an unrunnable gate (empty command).
-interface Gate {
-  /** The registry id of a built-in gate; absent for `--extra` / structure commands. */
-  id?: string;
-  label: string;
-  argv: string[] | null;
-  failOpen2: boolean;
-  rcLabels?: Record<number, string>;
-  /** sc-3443: the local command that re-judges this gate, and its documented short form. */
-  recheck?: string;
-  alias?: string;
 }
 
 export function parseOpts(argv: string[]): ParsedOpts {
@@ -201,22 +188,6 @@ function runArgv(cwd: string, argv: string[], exec: typeof execFileSync, reasonF
   }
 }
 
-// A `--structure` / `--extra` command → a runnable gate descriptor. `guard-structure …` resolves to
-// the sibling module (same no-bunx resolution as the built-ins) and keeps the trichotomy (its exit
-// 2 = could-not-run → fail-open); any other command spawns its own argv[0] via PATH and BLOCKS on
-// every non-zero code (eslint's exit 2 is a fatal config error, not an opt-out). An empty command
-// (a malformed `--extra` spec) yields argv null → reported as unrunnable, never silently skipped.
-function commandGate(label: string, cwd: string, cmd?: string): Gate {
-  const tokens = (cmd ?? '').split(WHITESPACE_RE).filter(Boolean);
-  if (!tokens.length) return { label, argv: null, failOpen2: false };
-  if (tokens[0] === 'guard-structure') {
-    const argv = ['node', path.resolve(HERE, `../structure/run${SELF_EXT}`), ...tokens.slice(1)];
-    return { label, argv, failOpen2: true, recheck: recheckCommand(argv, cwd) };
-  }
-  // The tokens that RUN, quoted — never the raw string, which a shell would parse differently.
-  return { label, argv: tokens, failOpen2: false, recheck: recheckCommand(tokens) };
-}
-
 // What one run settled before any gate spawned: computed once, passed to every phase below.
 interface RunPlan {
   cwd: string;
@@ -299,10 +270,11 @@ function runGates(cwd: string, gates: Gate[], exec: typeof execFileSync): GateOu
   const out: GateOutcome = { fails: [], failed: [], rechecks: [], skipped: [] };
   withReasonFiles((fileFor) => {
     gates.forEach((gate, i) => {
-      if (!gate.argv) {
-        recordFailure(out, gate, '(unrunnable: empty command)', true);
-        return;
+      if (gate.notRun) console.log(`${gate.label}: ${gate.notRun}`);
+      else if (!gate.argv) {
+        recordFailure(out, gate, `(unrunnable: ${gate.unrunnable ?? 'empty command'})`, true);
       }
+      if (!gate.argv) return;
       const reasonFile = fileFor(i);
       const rc = runArgv(cwd, gate.argv, exec, reasonFile);
       const failRc = (suffix = '') =>
