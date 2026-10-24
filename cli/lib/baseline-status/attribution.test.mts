@@ -13,6 +13,7 @@ import {
   compareSummaries,
   newFailingSteps,
   newUnhandled,
+  stepKey,
 } from './attribution.mts';
 import type { FileTests, TestReportSummary } from './produce.mts';
 
@@ -28,9 +29,10 @@ const summary = (
   testsPassed: !Object.values(files).includes('failed'),
   files,
   tests,
-  unhandled: 0,
+  unhandled: { errors: [] },
   droppedForeignPaths: 0,
 });
+const err = (message: string, file: string | null = 'a.test.mts') => ({ file, message });
 const names = (failed: string[], passed: string[] = [], truncated?: true): FileTests =>
   truncated ? { failed, passed, truncated } : { failed, passed };
 
@@ -89,53 +91,143 @@ describe('attributionToken', () => {
   const files = (fresh: string[], unsure: string[] = []) => ({ inherited: ['a'], fresh, unsure });
 
   it('claims inherited-only only when every failure is accounted for', () => {
-    expect(attributionToken(files([]), [], [], 0)).toBe('inherited-only');
-    expect(attributionToken(files(['b']), [], [], 0)).toBe('new');
-    expect(attributionToken(files([], ['b']), [], [], 0)).toBe('unknown');
+    expect(attributionToken(files([]), [], [], [])).toBe('inherited-only');
+    expect(attributionToken(files(['b']), [], [], [])).toBe('new');
+    expect(attributionToken(files([], ['b']), [], [], [])).toBe('unknown');
   });
 
   it('never claims inherited-only past a new failing step or an unread check', () => {
     // A PR that breaks typecheck on a base whose tests are red must not read as "not yours".
-    expect(attributionToken(files([]), ['gate › Typecheck'], [], 0)).toBe('new');
-    expect(attributionToken(files([]), [], ['CodeRabbit'], 0)).toBe('unknown');
+    expect(attributionToken(files([]), ['gate › Typecheck'], [], [])).toBe('new');
+    expect(attributionToken(files([]), [], ['CodeRabbit'], [])).toBe('unknown');
   });
 
-  it('reads an extra outside-test error as new, and an unrecorded count as unknown', () => {
-    // vitest's json `success` ignores unhandled errors, so only this count can show one.
-    expect(attributionToken(files([]), [], [], 1)).toBe('new');
+  it('reads an extra outside-test error as new, and an unrecorded list as unknown', () => {
+    // vitest's json `success` ignores unhandled errors, so only this list can show one.
+    expect(attributionToken(files([]), [], [], [err('Error: y')])).toBe('new');
     expect(attributionToken(files([]), [], [], null)).toBe('unknown');
-    const base = summary({ 'a.test.mts': 'failed' });
-    expect(newUnhandled({ ...base, unhandled: 2 }, { ...base, unhandled: 1 })).toBe(1);
-    expect(newUnhandled({ ...base, unhandled: 0 }, { ...base, unhandled: 3 })).toBe(0);
-    expect(newUnhandled(base, { ...base, unhandled: undefined })).toBeNull();
   });
 });
 
-/** One failed step of matrix shard `n`: siblings share a key, so a moved failure still matches. */
-const shard = (n: number) => ({ label: `tests (${n}) › Tests`, key: 'shards › Tests' });
-const plain = (label: string) => ({ label, key: label });
+describe('newUnhandled', () => {
+  const run = (unhandled: TestReportSummary['unhandled']) => ({
+    ...summary({ 'a.test.mts': 'failed' }),
+    unhandled,
+  });
+
+  it('names an error the base lacks even when the counts match', () => {
+    // The PR fixed the base's error x and introduced y: a count diff reads zero new.
+    expect(
+      newUnhandled(run({ errors: [err('Error: y')] }), run({ errors: [err('Error: x')] })),
+    ).toEqual([err('Error: y')]);
+    expect(
+      newUnhandled(run({ errors: [err('Error: x')] }), run({ errors: [err('Error: x')] })),
+    ).toEqual([]);
+    expect(
+      newUnhandled(
+        run({ errors: [err('Error: x', 'b.test.mts')] }),
+        run({ errors: [err('Error: x')] }),
+      ),
+    ).toEqual([err('Error: x', 'b.test.mts')]);
+  });
+
+  it('needs no base when the PR recorded no error at all', () => {
+    expect(newUnhandled(run({ errors: [] }), run(undefined))).toEqual([]);
+    expect(newUnhandled(run({ errors: [] }), run({ errors: [], truncated: true }))).toEqual([]);
+  });
+
+  it('is unproven when either run is unrecorded or the base list is cut short', () => {
+    expect(newUnhandled(run(undefined), run({ errors: [] }))).toBeNull();
+    expect(newUnhandled(run({ errors: [err('Error: y')] }), run(undefined))).toBeNull();
+    // The base's hidden tail may hold y.
+    const cut = run({ errors: [err('Error: x')], truncated: true });
+    expect(newUnhandled(run({ errors: [err('Error: y')] }), cut)).toBeNull();
+  });
+
+  it('trusts a truncated PR list only for an error it shows', () => {
+    const base = run({ errors: [err('Error: x')] });
+    expect(newUnhandled(run({ errors: [err('Error: x')], truncated: true }), base)).toBeNull();
+    const shown = run({ errors: [err('Error: x'), err('Error: y')], truncated: true });
+    expect(newUnhandled(shown, base)).toEqual([err('Error: y')]);
+  });
+});
+
+/** Failed step `step` of matrix shard `n`, named `name`. */
+const shard = (n: number, name = 'Tests', step = 5, job = 'tests') => ({
+  label: `${job} (${n}) › ${name}`,
+  job: `${job} (${n})`,
+  step,
+});
+const plain = (label: string) => ({ label, job: label.split(' › ')[0], step: 5 });
 
 describe('newFailingSteps', () => {
   it('matches an inherited failure that moved to another shard', () => {
-    expect(newFailingSteps([shard(3)], [shard(2)], 1)).toEqual([]);
+    expect(newFailingSteps([shard(3)], [shard(2)], 1, 'tests')).toEqual([]);
   });
 
   it('calls a shard new when more shards fail than on the base', () => {
-    expect(newFailingSteps([shard(2), shard(3)], [shard(2)], 1)).toEqual(['tests (3) › Tests']);
-    expect(newFailingSteps([shard(3), shard(1)], [shard(2)], 1)).toEqual(['tests (1) › Tests']);
+    expect(newFailingSteps([shard(2), shard(3)], [shard(2)], 1, 'tests')).toEqual([
+      'tests (3) › Tests',
+    ]);
+    expect(newFailingSteps([shard(3), shard(1)], [shard(2)], 1, 'tests')).toEqual([
+      'tests (1) › Tests',
+    ]);
   });
 
   it('spends one inherited file per failing shard, so a fixed shard cannot hide a new one', () => {
     // Base fails shards 2 and 4; the PR fixes 4, keeps 2, and shard 1 fails with no new file.
-    expect(newFailingSteps([shard(2), shard(1)], [shard(2), shard(4)], 1)).toEqual([
+    expect(newFailingSteps([shard(2), shard(1)], [shard(2), shard(4)], 1, 'tests')).toEqual([
       'tests (1) › Tests',
     ]);
   });
 
   it('never matches a step outside a matrix by anything but its label', () => {
     const base = [plain('gate › Tests')];
-    expect(newFailingSteps([plain('gate › Typecheck')], base, 5)).toEqual(['gate › Typecheck']);
-    expect(newFailingSteps([plain('gate › Tests')], base, 0)).toEqual([]);
+    expect(newFailingSteps([plain('gate › Typecheck')], base, 5, 'tests')).toEqual([
+      'gate › Typecheck',
+    ]);
+    expect(newFailingSteps([plain('gate › Tests')], base, 0, 'tests')).toEqual([]);
+  });
+
+  it('pairs shards by step number, so a step named for its shard still matches', () => {
+    const pr = [shard(3, 'Run shard 3')];
+    expect(newFailingSteps(pr, [shard(2, 'Run shard 2')], 1, 'tests')).toEqual([]);
+  });
+
+  it('never pairs a different step of another shard', () => {
+    const pr = [shard(2, 'Install', 4)];
+    expect(newFailingSteps(pr, [shard(3)], 2, 'tests')).toEqual(['tests (2) › Install']);
+  });
+
+  it('never pairs a matrix job other than the configured shard job', () => {
+    const build = (os: string) => ({
+      label: `build (${os}) › Build`,
+      job: `build (${os})`,
+      step: 3,
+    });
+    expect(newFailingSteps([build('windows')], [build('ubuntu')], 2, 'tests')).toEqual([
+      'build (windows) › Build',
+    ]);
+    expect(
+      newFailingSteps([shard(2, 'Tests', 5, 'unit')], [shard(1, 'Tests', 5, 'unit')], 1, 'unit'),
+    ).toEqual([]);
+  });
+});
+
+describe('stepKey', () => {
+  it('never treats a job named exactly the shard job as a shard', () => {
+    // GitHub suffixes every matrix job with its values, so a bare `tests` job is not a sibling of
+    // anything; pairing it by step number would forgive a new Lint failure for an old Tests one.
+    const job = (name: string) => ({ label: `tests › ${name}`, job: 'tests', step: 6 });
+    expect(newFailingSteps([job('Lint')], [job('Tests')], 1, 'tests')).toEqual(['tests › Lint']);
+  });
+
+  it('keys a shard on its job and step number, anything else on its label', () => {
+    expect(stepKey(shard(2), 'tests')).toBe('tests › #5');
+    expect(stepKey({ label: 'tests', job: 'tests', step: null }, 'tests')).toBe('tests');
+    expect(
+      stepKey({ label: 'tests-e2e (1) › Tests', job: 'tests-e2e (1)', step: 5 }, 'tests'),
+    ).toBe('tests-e2e (1) › Tests');
   });
 });
 
@@ -198,8 +290,8 @@ const shardsView = (...failing: number[]) =>
       name: `tests (${n})`,
       conclusion: failing.includes(n) ? 'failure' : 'success',
       steps: [
-        { name: 'Install', conclusion: 'success' },
-        { name: 'Tests', conclusion: failing.includes(n) ? 'failure' : 'success' },
+        { name: 'Install', conclusion: 'success', number: 4 },
+        { name: 'Tests', conclusion: failing.includes(n) ? 'failure' : 'success', number: 5 },
       ],
     })),
   });
@@ -299,16 +391,88 @@ describe('attributeFailures against a stubbed gh', () => {
     expect(attribute().line).toMatch(/^attribution=inherited-only inherited=1 new=0 /);
   });
 
+  it('reads an inherited file that moved shard as inherited-only when steps are named per shard', () => {
+    const a = { 'a.test.mts': names(['x > broke']) };
+    put('summary-200.json', JSON.stringify(summary({ 'a.test.mts': 'failed' }, a, 200)));
+    const perShard = (view: string) =>
+      view.replace(/"tests \((\d)\)",(.*?)"name":"Tests"/g, '"tests ($1)",$2"name":"Run shard $1"');
+    put('view-100.json', perShard(shardsView(2)));
+    put('view-200.json', perShard(shardsView(3)));
+    expect(JSON.parse(perShard(shardsView(3))).jobs[2].steps[1].name).toBe('Run shard 3');
+    expect(attribute().line).toMatch(/^attribution=inherited-only inherited=1 new=0 /);
+  });
+
   it('calls an outside-test error new even when a moved shard explains every failing step', () => {
     // Base fails shards 1 and 2 on two files; the PR runs both in shard 1, and shard 3 errors.
     const both = { 'a.test.mts': names(['x > broke']), 'b.test.mts': names(['y > broke']) };
     const failed = { 'a.test.mts': 'failed', 'b.test.mts': 'failed' } as const;
     put('summary-100.json', JSON.stringify(summary(failed, both, 100)));
-    put('summary-200.json', JSON.stringify({ ...summary(failed, both, 200), unhandled: 1 }));
+    const unhandled = { errors: [err('Error: boom', 'c.test.mts')] };
+    put('summary-200.json', JSON.stringify({ ...summary(failed, both, 200), unhandled }));
     put('view-100.json', shardsView(1, 2));
     put('view-200.json', shardsView(1, 3));
     expect(attribute().line).toContain('attribution=new inherited=2 new=0 ');
     expect(attribute().line).toContain('new-steps=none unhandled=+1 ');
+  });
+
+  it('calls a swapped outside-test error new when every failing file is inherited', () => {
+    const a = { 'a.test.mts': names(['x > broke']) };
+    const base = {
+      ...summary({ 'a.test.mts': 'failed' }, a, 100),
+      unhandled: { errors: [err('Error: x')] },
+    };
+    put('summary-100.json', JSON.stringify(base));
+    const pr = {
+      ...summary({ 'a.test.mts': 'failed' }, a, 200),
+      unhandled: { errors: [err('Error: y')] },
+    };
+    put('summary-200.json', JSON.stringify(pr));
+    expect(attribute().line).toMatch(/^attribution=new inherited=1 new=0 .* unhandled=\+1 /);
+  });
+
+  it('reads a count-only summary from before error lists as unrecorded', () => {
+    const a = { 'a.test.mts': names(['x > broke']) };
+    put(
+      'summary-100.json',
+      JSON.stringify({ ...summary({ 'a.test.mts': 'failed' }, a, 100), unhandled: 0 }),
+    );
+    const pr = {
+      ...summary({ 'a.test.mts': 'failed' }, a, 200),
+      unhandled: { errors: [err('Error: y')] },
+    };
+    put('summary-200.json', JSON.stringify(pr));
+    expect(attribute().line).toMatch(
+      /^attribution=unknown inherited=1 new=0 .* unhandled=unrecorded /,
+    );
+  });
+
+  // The reader caches each run's summary, so each case gets its own test and so its own cache.
+  const truncatedCase = (
+    base: TestReportSummary['unhandled'],
+    pr: TestReportSummary['unhandled'],
+  ) => {
+    const a = { 'a.test.mts': names(['x > broke']) };
+    const at = (runId: number, unhandled: TestReportSummary['unhandled']) =>
+      JSON.stringify({ ...summary({ 'a.test.mts': 'failed' }, a, runId), unhandled });
+    put('summary-100.json', at(100, base));
+    put('summary-200.json', at(200, pr));
+    return attribute().line;
+  };
+
+  it('names a cut-short base list as truncated, not as an unrecorded run', () => {
+    const line = truncatedCase(
+      { errors: [err('Error: x')], truncated: true },
+      { errors: [err('Error: y')] },
+    );
+    expect(line).toMatch(/^attribution=unknown .* unhandled=truncated /);
+  });
+
+  it('marks a new count from a truncated PR list as a floor', () => {
+    const line = truncatedCase(
+      { errors: [err('Error: x')] },
+      { errors: [err('Error: y')], truncated: true },
+    );
+    expect(line).toMatch(/^attribution=new .* unhandled=\+1,truncated /);
   });
 
   it('never treats a shard that failed before any step ran as a moved shard', () => {
@@ -344,6 +508,19 @@ describe('attributeFailures against a stubbed gh', () => {
     const line = attribute([lint, PR_CHECK, required]).line;
     expect(line).toMatch(/^attribution=unknown inherited=1 new=0 /);
     expect(line).toContain(' unattributed=lint base-run=100');
+  });
+
+  it("pairs the consumer's configured shard job, and no longer devkit's default", () => {
+    // Catches attributeFailures not threading baselineStatus.shardJob into the step comparison.
+    const a = { 'a.test.mts': names(['x > broke']) };
+    put('summary-200.json', JSON.stringify(summary({ 'a.test.mts': 'failed' }, a, 200)));
+    const unit = (view: string) => view.replaceAll('"tests (', '"unit (');
+    put('view-100.json', unit(shardsView(2)));
+    put('view-200.json', unit(shardsView(3)));
+    execFileSync('git', ['init', '-q'], { cwd });
+    expect(attribute().line).toContain('new-steps=unit (3) › Tests ');
+    writeFileSync(join(cwd, 'guard.config.json'), '{"baselineStatus":{"shardJob":"unit"}}');
+    expect(attribute().line).toMatch(/^attribution=inherited-only inherited=1 new=0 /);
   });
 
   it("reads the consumer's configured workflow, not devkit's gate.yml", () => {

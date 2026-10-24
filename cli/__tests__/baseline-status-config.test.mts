@@ -311,7 +311,7 @@ describe('configuredSource', () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
   const write = (body: string) => writeFileSync(join(dir, 'guard.config.json'), body);
-  const DEFAULT = { workflow: 'gate.yml', artifact: 'test-report-summary' };
+  const DEFAULT = { workflow: 'gate.yml', artifact: 'test-report-summary', shardJob: 'tests' };
 
   it('defaults with no guard.config.json anywhere up to the git root', () => {
     expect(configuredSource(dir)).toEqual(DEFAULT);
@@ -320,6 +320,15 @@ describe('configuredSource', () => {
   it('overrides per key, trimming the value', () => {
     write('{"baselineStatus":{"workflow":"  ci.yml "}}');
     expect(configuredSource(dir)).toEqual({ ...DEFAULT, workflow: 'ci.yml' });
+  });
+
+  it('reads the shard job, keeping the default for a blank or non-string value', () => {
+    write('{"baselineStatus":{"shardJob":" unit "}}');
+    expect(configuredSource(dir).shardJob).toBe('unit');
+    write('{"baselineStatus":{"shardJob":"  ","workflow":"ci.yml"}}');
+    expect(configuredSource(dir).shardJob).toBe('tests');
+    write('{"baselineStatus":{"shardJob":4}}');
+    expect(configuredSource(dir).shardJob).toBe('tests');
   });
 
   it.each([

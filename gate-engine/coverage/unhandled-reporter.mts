@@ -13,6 +13,9 @@ export interface UnhandledError {
   message: string;
 }
 
+/** An error's identity: each vitest project reports the same error, and a PR run is diffed by it. */
+export const unhandledKey = (e: UnhandledError): string => `${e.file}\0${e.message}`;
+
 /** vitest's worker stamps the originating test file onto every unhandled error. */
 type ReportedError = SerializedError & { VITEST_TEST_PATH?: string };
 
@@ -30,26 +33,27 @@ export default class UnhandledReporter implements Reporter {
   }
 
   onTestRunEnd(_modules: ReadonlyArray<TestModule>, errors: ReadonlyArray<ReportedError>): void {
-    if (!this.out || errors.length === 0) return;
+    if (!this.out) return;
     try {
       const entries = errors.map((e) => ({
         file: e.VITEST_TEST_PATH ?? null,
         message: `${e.name ?? 'Error'}: ${e.message ?? ''}`.split('\n')[0],
       }));
-      writeFileSync(this.out, JSON.stringify(entries));
+      // Written even when empty, so a missing file means the run went unrecorded, not error-free.
+      const unique = new Map(entries.map((e) => [unhandledKey(e), e]));
+      writeFileSync(this.out, JSON.stringify([...unique.values()]));
     } catch {
       /* diagnosis is a courtesy, not a guarantee */
     }
   }
 }
 
-/** The reporter's errors, once each (vitest projects repeat them), or one generic entry when it wrote
- * none: a threshold miss or an empty filter is no error at all, and an older vitest never calls it. */
+/** The reporter's errors, or one generic entry when it recorded none: a threshold miss or an empty
+ * filter is no error at all, and an older vitest never calls it. */
 export function readUnhandled(file: string, exitCode: number): UnhandledError[] {
   try {
     const parsed: UnhandledError[] = JSON.parse(readFileSync(file, 'utf8'));
-    const unique = new Map(parsed.map((e) => [`${e.file}\0${e.message}`, e]));
-    if (unique.size > 0) return [...unique.values()];
+    if (parsed.length > 0) return parsed;
   } catch {
     /* absent or torn — fall through to the generic cause */
   }
