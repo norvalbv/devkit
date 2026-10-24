@@ -72,8 +72,8 @@ environment, which the app inherits. \`up\` waits until the app answers HTTP on 
 
 A flow is \`export default async ({ page, url, shot }) => { … }\`: assert with node:assert/strict
 and locator waits, call \`shot('name')\` for a screenshot. A throw fails the run (exit 1). Captures
-land in the worktree's git dir; attach the passing ones to the PR. Anything on the page ends up in
-the PR, so seed data must be fake.`,
+land in the worktree's git dir, and \`devkit ship\` attaches the passing ones to the PR when they ran
+the code it ships. Anything on the page ends up in the PR, so seed data must be fake.`,
   valueFlags: ['--name'],
 };
 
@@ -193,7 +193,10 @@ async function up(root: string, override: string[]): Promise<number> {
 function report(result: RunResult, evidence: string): number {
   for (const entry of result.entries)
     console.log(`${entry.kind}: ${join(evidence, entry.file)} (${entry.bytes} bytes)`);
-  if (result.passed) say(`flow "${result.flow}" passed`);
+  if (result.passed)
+    say(
+      `flow "${result.flow}" passed; \`devkit ship\` attaches it unless shipped code changes first`,
+    );
   else
     say(
       `flow "${result.flow}" failed: ${result.error}\n  its capture is kept locally and never uploaded`,
