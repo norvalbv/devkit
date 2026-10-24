@@ -5,7 +5,13 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GATE_BYPASSES } from '../../../../gate-engine/deterministic/command-gates.mts';
 import { BYPASS_ENV } from '../../../../vitest.setup.mjs';
-import { attemptBypasses, BYPASS_FLAGS, shipBypasses } from './bypasses.mts';
+import {
+  attemptBypasses,
+  BYPASS_FLAGS,
+  REAIM_FLAGS,
+  SOFTEN_FLAGS,
+  shipBypasses,
+} from './bypasses.mts';
 
 const SHIP = 'ship-1';
 interface RowFields {
@@ -43,11 +49,8 @@ function documentedControls(): string[] {
 
 const ALL_FLAGS = [
   ...BYPASS_FLAGS,
-  'REVIEW_SKIP',
-  'DECISIONS_DIR',
-  'ALLOWLIST_PATH',
-  'COMPLETENESS_HARD',
-  'SENTRY_HARD',
+  ...REAIM_FLAGS,
+  ...SOFTEN_FLAGS,
   ...Object.values(GATE_BYPASSES),
 ].flatMap((name) => [`GUARD_${name}`, `FRINK_${name}`]);
 
