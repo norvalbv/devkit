@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -37,6 +38,14 @@ const TURN_FAILED = JSON.stringify({
   type: 'turn.failed',
   error: { message: 'usage limit reached' },
 });
+
+// `sleep 10` processes still alive in this run's process group, i.e. ones a killed fake stranded.
+function strandedSleeps(): string[] {
+  const own = execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' });
+  return execFileSync('ps', ['-A', '-o', 'pgid=,command='], { encoding: 'utf8' })
+    .split('\n')
+    .filter((row) => row.trim().split(/\s+/)[0] === own.trim() && row.trim().endsWith('sleep 10'));
+}
 
 // Captured VERBATIM from `codex exec --json` (codex-cli 0.162.1, gpt-5.6-terra, 2026-10-12).
 const REAL_STREAM = [
@@ -159,7 +168,7 @@ describe('commands_ref on judge_exec', () => {
     expect(stored(lastEvent().commands_ref)).toContain('[exit 1]');
 
     const killed = fakeBin('codex-killed', [PASSING, STARTED]);
-    writeFileSync(killed, `${readFileSync(killed, 'utf8')}sleep 10\n`);
+    writeFileSync(killed, `${readFileSync(killed, 'utf8')}exec sleep 10\n`);
     process.env.GUARD_CODEX_BIN = killed;
     // Both spawn paths: reviewers run async, where the partial stdout arrives via the callback.
     for (const run of [execJudge, execJudgeAsync]) {
@@ -167,6 +176,8 @@ describe('commands_ref on judge_exec', () => {
       expect(lastEvent().outcome).toBe('timeout');
       expect(stored(lastEvent().commands_ref)).toContain("[in_progress] bash -lc 'ps aux'");
     }
+    // A stranded sleep keeps the group alive, so ship's evidence capture reports it never drained.
+    expect(strandedSleeps()).toEqual([]);
   });
 
   it('concurrent lens parts sharing one reviewer label never overwrite each other', async () => {
