@@ -19,6 +19,7 @@ export function parsePriorArtBaseline(
   input: Json,
   helpers: { ratio: Ratio; rows: (value: Json) => Record<string, unknown> },
 ): ParsedBaseline {
+  if (input.priorArtWorkflow) return parsePriorArtWorkflow(input.priorArtWorkflow, helpers);
   const { ratio, rows } = helpers;
   const value = input.priorArt ?? input;
   const metrics = [
@@ -85,6 +86,110 @@ export function parsePriorArtBaseline(
       reason: accepted
         ? 'K=3 full-corpus run with zero outages'
         : 'Requires K=3, zero outages, and every corpus row executed',
+    },
+  };
+}
+
+/** [metric suffix, label, block key, direction] for each per-condition `{ ok, total }` count. */
+const WORKFLOW_METRICS: [string, string, string, ('higher' | 'lower')?][] = [
+  ['valid', 'valid response', 'valid'],
+  ['verdict', 'verdict accuracy', 'verdict'],
+  ['framing', 'framing accuracy', 'framing'],
+  ['leg-honesty', 'local-leg attestation honest', 'legHonesty'],
+  ['recall-own', 'own-repo evidence recall', 'recallOwn'],
+  ['recall-ref', 'reference-checkout evidence recall', 'recallRef'],
+  ['spans-read', 'required spans read', 'spansRead'],
+  ['spans-located', 'required spans located', 'spansLocated'],
+  ['decoy-endorsement', 'decoy endorsement rate', 'decoyEndorsements', 'lower'],
+  ['genuine-accepted', 'genuine work not dissolved', 'genuineAccepted'],
+  ['insufficient-natural', 'insufficient-evidence calibration (natural)', 'insufficientNatural'],
+  [
+    'insufficient-artificial',
+    'insufficient-evidence calibration (broken tool)',
+    'insufficientArtificial',
+  ],
+  ['families-both-sides', 'families with every member correct', 'familiesBothSides'],
+];
+
+/** The frozen retrieval tier (gate-engine/prior-art/eval/workflow/): every measure per condition,
+ *  never blended, plus the paired retrieval-vs-interpretation failure split. */
+function conditionObservations(ratio: Ratio, condition: string, block: Json): MetricObservation[] {
+  const observations = WORKFLOW_METRICS.filter(([, , key]) => block[key]?.total > 0).map(
+    ([suffix, label, key, direction]) =>
+      ratio(
+        `${condition}-${suffix}`,
+        `${label} (${condition})`,
+        block[key].ok,
+        block[key].total,
+        direction,
+      ),
+  );
+  const claims = block.claims ?? {};
+  const local = ['supported', 'decoy', 'unjudged', 'unverifiable'].reduce(
+    (sum, key) => sum + (claims[key] ?? 0),
+    0,
+  );
+  if (local > 0)
+    observations.push(
+      ratio(
+        `${condition}-claims-supported`,
+        `local claims inside a gold span (${condition})`,
+        claims.supported,
+        local,
+      ),
+      ratio(
+        `${condition}-claims-unjudged`,
+        `local claims about unlabelled files (${condition})`,
+        claims.unjudged,
+        local,
+        'lower',
+      ),
+    );
+  return observations;
+}
+
+function pairedObservations(ratio: Ratio, paired: Json): MetricObservation[] {
+  if (!(paired?.total > 0)) return [];
+  return [
+    ratio(
+      'retrieval-failure',
+      'Retrieval failures (supplied ✓, search ✗)',
+      paired.retrievalFailure,
+      paired.total,
+      'lower',
+    ),
+    ratio(
+      'interpretation-failure',
+      'Interpretation failures (both ✗)',
+      paired.interpretationFailure,
+      paired.total,
+      'lower',
+    ),
+  ];
+}
+
+function parsePriorArtWorkflow(
+  value: Json,
+  helpers: Parameters<typeof parsePriorArtBaseline>[1],
+): ParsedBaseline {
+  const { ratio, rows } = helpers;
+  const metrics = [
+    ...['search', 'supplied'].flatMap((condition) =>
+      conditionObservations(ratio, condition, value.conditions?.[condition] ?? {}),
+    ),
+    ...pairedObservations(ratio, value.paired),
+  ];
+  const fullCorpus = value.cases?.total > 0 && value.cases?.executed === value.cases?.total;
+  const clean = value.outages === 0 && value.faults === 0;
+  const accepted = clean && value.runs >= 3 && value.matchRuns >= 3 && fullCorpus;
+  return {
+    metrics,
+    rows: rows(value),
+    acceptance: {
+      accepted,
+      reason: accepted
+        ? 'K=3 full workflow tier with zero outages and zero harness faults'
+        : 'Requires K=3, zero outages, zero harness faults, and every case executed',
     },
   };
 }
