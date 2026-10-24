@@ -18,14 +18,14 @@ import {
 } from '../lib/husky/self-host.mts';
 
 const PRE_COMMIT = [
-  'biome-format',
+  'format',
   'deterministic',
   'guard-decisions',
   'guard-review',
   'guard-sentry-prewarm',
   'guard-ui-evidence',
 ];
-const ALL = { biome: true, guards: GUARD_IDS };
+const ALL = { guards: GUARD_IDS };
 
 // Pins the stage order each builder emits. A reorder, or a new `# devkit:` sentinel that is neither
 // listed here nor declared infrastructure in hookStages, fails here before doctor prints it.
@@ -37,7 +37,7 @@ describe('hookStages reads the order the generated hooks run', () => {
 
   it('overlay: the same body plus its staged lint overlay ahead of the judges', () => {
     expect(hookStages(buildOverlayHook(ALL))).toEqual([
-      'biome-format',
+      'format',
       'deterministic',
       'lint overlay',
       ...PRE_COMMIT.slice(2),

@@ -73,8 +73,6 @@ export const DEVKIT_TRACKED_UNIGNORES = [
   '!.devkit/baselines/structure/*.mjs',
   '!.devkit/structure/',
   '!.devkit/structure/exempt.mjs',
-  '!.devkit/biome/',
-  '!.devkit/biome/**',
   '!.devkit/tsconfig/',
   '!.devkit/tsconfig/**',
   '!.devkit/anti-slop/',

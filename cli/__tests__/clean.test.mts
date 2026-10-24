@@ -80,6 +80,24 @@ describe('clean (package mode)', () => {
     expect(existsSync(join(root, 'cfg', 'allow.json'))).toBe(false);
   });
 
+  // The scripts call `devkit oxc`, which clean uninstalls, so devkit's own values must go; a value
+  // the consumer rewrote is theirs and stays.
+  it("removes devkit's lint/format scripts but keeps one the consumer rewrote", () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--stack', 'generic', '--yes', '--no-husky').status).toBe(0);
+    const pkgPath = join(root, 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+    expect(pkg.scripts.lint).toContain('devkit oxc lint');
+    pkg.scripts.lint = 'eslint .';
+    writeFileSync(pkgPath, JSON.stringify(pkg));
+
+    expect(devkit(root, 'clean', '--yes').status).toBe(0);
+
+    const scripts = JSON.parse(readFileSync(pkgPath, 'utf8')).scripts ?? {};
+    expect(scripts.format).toBeUndefined();
+    expect(scripts.lint).toBe('eslint .');
+  });
+
   it('--dry-run removes nothing', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes');

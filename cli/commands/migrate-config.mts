@@ -7,7 +7,7 @@
  *     your existing values are NEVER clobbered. NOTE: the `maxLines` line-growth cap is deliberately
  *     NOT template-merged — enabling it must grandfather current giants (a freeze), so it's offered by
  *     `devkit upgrade` (which freezes in the same step), never silently added here.
- *   - biome.jsonc / tsconfig.json need nothing — they `extends` the package, so they already track it.
+ *   - tsconfig.json needs nothing — it `extends` the package, so it already tracks it.
  *
  * This was the `devkit migrate` command; the standalone verb was removed (a half-command that never
  * refreshed husky). `devkit upgrade` is the single entry point and calls computeMigration here.

@@ -1,12 +1,12 @@
 {
   "schemaVersion": 2,
   "kind": "agents",
-  "devkitRef": "v0.72.0",
-  "generatedAt": "2026-10-22T13:10:37.072Z",
+  "devkitRef": "v0.73.0",
+  "generatedAt": "2026-10-24T15:00:46.342Z",
   "files": {
     "api-security-reviewer.md": "c3ce5b4901f7c96c34f7f1e737e22d2b20a62843b2db613b4703f2bc7e5dff73",
     "backend-performance-reviewer.md": "22153ed4020bf94dc0efe524a1c83b429648cda2bcb97b342b68059f86eea5a8",
-    "commit-guard.md": "146c06409c5abb0708dbe5c8911e08696ba4f67aa302bdfade1cec8a91a5fb53",
+    "commit-guard.md": "3ae76857d33aad07cb74b5234bc42ee37e86a7360120a97d7d3d0710b0b696cf",
     "conventions-reviewer.md": "bc0ed797a3e2feaba7a3ef719f9d8cae993170aa696742cc3928953741e58367",
     "correctness-reviewer.md": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
     "feature-completeness-reviewer.md": "78b9cbba8dc887bb874c115dbe3e2096d6d0a0ee6f103bd421f77f9fba95db69",
@@ -21,7 +21,7 @@
       "files": {
         "api-security-reviewer.md": "c3ce5b4901f7c96c34f7f1e737e22d2b20a62843b2db613b4703f2bc7e5dff73",
         "backend-performance-reviewer.md": "22153ed4020bf94dc0efe524a1c83b429648cda2bcb97b342b68059f86eea5a8",
-        "commit-guard.md": "146c06409c5abb0708dbe5c8911e08696ba4f67aa302bdfade1cec8a91a5fb53",
+        "commit-guard.md": "3ae76857d33aad07cb74b5234bc42ee37e86a7360120a97d7d3d0710b0b696cf",
         "conventions-reviewer.md": "bc0ed797a3e2feaba7a3ef719f9d8cae993170aa696742cc3928953741e58367",
         "correctness-reviewer.md": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
         "feature-completeness-reviewer.md": "78b9cbba8dc887bb874c115dbe3e2096d6d0a0ee6f103bd421f77f9fba95db69",
@@ -36,7 +36,7 @@
       "files": {
         "api-security-reviewer.toml": "ee2aeb39092eecd92246cbfe82d14ab773ea4b5db539e5ba25947faf59d0da2d",
         "backend-performance-reviewer.toml": "eee11c625c980437e232d5fc78a80dfe4d9a259576dab254133f8791373b7718",
-        "commit-guard.toml": "e019529edaf0150c13cde1b1b7a4065fc48cace2b865c68eb06a02d50c63a7cd",
+        "commit-guard.toml": "a8b22458034176d28d19186d4231ae31318495cef527905a347a6203358b09e2",
         "conventions-reviewer.toml": "005673611d4b10a1059aee3d1aa53b5ed21c743aa034dac4191150194d7c4ac7",
         "correctness-reviewer.toml": "782aa14f9a4c67f1ed5453ebce60c21aae82819688b6923df3dff13c747bf8bc",
         "feature-completeness-reviewer.toml": "381fcd8fa288bb69616aca1e68016980d7287ee0ef307a199d524fa181e49cb9",
@@ -51,7 +51,7 @@
       "files": {
         "api-security-reviewer.md": "c3ce5b4901f7c96c34f7f1e737e22d2b20a62843b2db613b4703f2bc7e5dff73",
         "backend-performance-reviewer.md": "22153ed4020bf94dc0efe524a1c83b429648cda2bcb97b342b68059f86eea5a8",
-        "commit-guard.md": "146c06409c5abb0708dbe5c8911e08696ba4f67aa302bdfade1cec8a91a5fb53",
+        "commit-guard.md": "3ae76857d33aad07cb74b5234bc42ee37e86a7360120a97d7d3d0710b0b696cf",
         "conventions-reviewer.md": "bc0ed797a3e2feaba7a3ef719f9d8cae993170aa696742cc3928953741e58367",
         "correctness-reviewer.md": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
         "feature-completeness-reviewer.md": "78b9cbba8dc887bb874c115dbe3e2096d6d0a0ee6f103bd421f77f9fba95db69",

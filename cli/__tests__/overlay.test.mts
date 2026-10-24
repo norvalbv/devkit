@@ -257,10 +257,7 @@ describe('overlay (local-only) install', () => {
     expect(readFileSync(join(root, 'eslint.config.devkit.mjs'), 'utf8')).toContain(
       "import repoConfig from './eslint.config.mjs'",
     );
-    expect(JSON.parse(readFileSync(join(root, 'biome.devkit.jsonc'), 'utf8')).extends).toEqual([
-      './biome.jsonc',
-      './.devkit/biome/react.jsonc',
-    ]);
+    expect(existsSync(join(root, 'biome.devkit.jsonc'))).toBe(false); // Biome left the overlay
 
     // Core Oxc lands as in package mode, but only in git-excluded paths: no discovery-named config.
     const overlayConfig = JSON.parse(readFileSync(join(root, '.devkit', 'config.json'), 'utf8'));
@@ -392,7 +389,6 @@ describe('overlay (local-only) install', () => {
     ).toBe('.husky/_');
     expect(existsSync(join(root, '.devkit'))).toBe(false);
     expect(existsSync(join(root, 'guard.config.json'))).toBe(false);
-    expect(existsSync(join(root, 'biome.devkit.jsonc'))).toBe(false);
     expect(existsSync(join(root, 'eslint.config.devkit.mjs'))).toBe(false);
     expect(existsSync(join(root, 'biome.jsonc'))).toBe(true); // the team's, untouched
     const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
@@ -1705,22 +1701,6 @@ describe('overlay upgrade (re-syncs, not the old bail)', () => {
 
     expect(code).toBe(0);
     expect(readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8')).toBe(stale); // untouched
-  });
-
-  it('records a --no-biome overlay so later refreshes preserve the opt-out', async () => {
-    const root = workRepo();
-    await applyInit(root, {
-      stack: 'react-app',
-      selection: applyOverlayConstraints({ ...defaultSelection(), biome: false }, 'react-app'),
-      overlay: true,
-      devkitRef: 'v0.7.0',
-    });
-    expect(existsSync(join(root, 'biome.devkit.jsonc'))).toBe(false); // opted out at init
-    expect(readCfg(root).components.biome).toBe(false);
-
-    await upgrade([], root);
-
-    expect(existsSync(join(root, 'biome.devkit.jsonc'))).toBe(false);
   });
 
   it('upgrade --force does NOT overwrite a tuned guard.config.json (configs are never overwritten)', async () => {

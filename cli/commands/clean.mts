@@ -5,8 +5,7 @@
  *   - package/standalone → remove devkit-created configs, the husky devkit-guards block, skills,
  *                baselines, .devkit, and the @norvalbv/devkit dep + devkit scripts.
  *
- * Safe: only touches what devkit created (biome/tsconfig are removed ONLY if they still extend
- * devkit). Confirms first unless --yes; --dry-run prints every action and writes nothing.
+ * Safe: only touches what devkit created (tsconfig is removed ONLY if it still extends devkit). Confirms first unless --yes; --dry-run prints every action and writes nothing.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -14,6 +13,7 @@ import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'no
 import { join, relative } from 'node:path';
 import { confirm, isCancel } from '@clack/prompts';
 import { CONFIG_FILENAME } from '../../gate-engine/config.mts';
+import { CONSUMER_FORMATTER } from '../lib/husky/format-fragment.mts';
 import {
   OVERLAY_WRITTEN,
   readableGateInputs,
@@ -105,16 +105,14 @@ function rmUntrackedIn(cwd: string, gitRoot: string, dryRun: boolean) {
   };
 }
 
-// A biome/tsconfig is devkit-created only if it still extends devkit (the package subpath, the
-// vendored .devkit/ base, or an overlay sibling) — never remove a config the user owns.
+// A tsconfig is devkit-created only if it still extends devkit (the package subpath, the vendored
+// .devkit/ base, or an overlay sibling) — never remove a config the user owns.
 function extendsDevkit(path: string): boolean {
   if (!existsSync(path)) return false;
   const raw = readFileSync(path, 'utf8');
   return (
     raw.includes('@norvalbv/devkit') ||
-    raw.includes('.devkit/biome') ||
     raw.includes('.devkit/tsconfig') ||
-    raw.includes('biome.devkit') ||
     raw.includes('eslint.config.devkit')
   );
 }
@@ -279,7 +277,7 @@ function cleanOverlay(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
 }
 
 // Remove the @norvalbv/devkit dep + devkit-only scripts from package.json (leave public deps the
-// user may have had — biome/husky/eslint — untouched).
+// user may have had — husky/eslint — untouched). lint/format go only while devkit's own values.
 // Reason: selective package.json key pruning: one guarded delete per devkit-owned dependency/script key, near-zero nesting; high branch COUNT (loops × per-key existence guards), each trivial
 // fallow-ignore-next-line complexity
 function depesc(cwd: string, dryRun: boolean): void {
@@ -297,6 +295,12 @@ function depesc(cwd: string, dryRun: boolean): void {
   const scripts = pkg.scripts;
   for (const s of ['guard:freeze', 'lint:structure']) {
     if (scripts?.[s]) {
+      delete scripts[s];
+      changed = true;
+    }
+  }
+  for (const [s, value] of Object.entries(CONSUMER_FORMATTER.scripts)) {
+    if (scripts?.[s] === value) {
       delete scripts[s];
       changed = true;
     }
@@ -355,9 +359,8 @@ function cleanPackage(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
   ].filter((id): id is 'searchSteering' | 'agentHooks' => Boolean(id));
   removeHookRegistrations(gitRoot, { dryRun, targets, legacyOwnedComponentIds });
   // devkit-created configs/data in the package.
-  for (const f of ['biome.jsonc', 'tsconfig.json']) {
-    if (extendsDevkit(join(cwd, f))) rm(join(cwd, f), f, dryRun);
-  }
+  if (extendsDevkit(join(cwd, 'tsconfig.json')))
+    rm(join(cwd, 'tsconfig.json'), 'tsconfig.json', dryRun);
   // Read before guard.config.json goes, since it may relocate the allowlist.
   const allowlist = readableGateInputs(cwd, (message) =>
     console.log(`  ⚠ ${message} — the allowlist it configures was left in place`),
@@ -384,7 +387,7 @@ function cleanPackage(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
   pruneDevkitCacheGitignore(cwd, dryRun);
   rm(join(cwd, '.devkit'), '.devkit/', dryRun);
   depesc(cwd, dryRun);
-  console.log('  (left your own biome/husky/eslint deps and any fallow config in place)');
+  console.log('  (left your own husky/eslint deps and any fallow config in place)');
 }
 
 export const meta = {

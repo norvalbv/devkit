@@ -92,7 +92,6 @@ export const AGENT_TARGETS: string[] = [...FRESH_DEFAULT_AGENT_PROVIDERS];
  * stack-gated one (offered iff a structure template exists — currently electron only).
  */
 export const COMPONENTS = [
-  { id: 'biome', label: 'Biome', hint: 'shared formatter + linter config', recommended: true },
   {
     id: 'tsconfig',
     label: 'TypeScript',
@@ -178,7 +177,6 @@ export const GUARD_OPTIONS = [
  * that the apply layer (init) installs. Every field is present after {@link normalizeSelection}.
  */
 export interface Selection {
-  biome: boolean;
   tsconfig: boolean;
   skills: boolean;
   agents: boolean;
@@ -224,7 +222,6 @@ export interface Selection {
 
 /** Recorded component flags whose truthy values count as installed on a config-backed repo. */
 export const RECORDED_COMPONENT_IDS = [
-  'biome',
   'tsconfig',
   'skills',
   'agents',
@@ -246,7 +243,6 @@ export type ComponentToggleId = {
 /** What `--yes` and a non-TTY run select. Per-field exceptions are noted at each field. */
 export function defaultSelection(): Selection {
   return {
-    biome: true,
     tsconfig: true,
     skills: true,
     agents: true,
@@ -301,10 +297,11 @@ export function overlayStructureNotice(stack: string): string | null {
 /** Normalise a (possibly partial) selection to a full one — missing keys take recommended defaults. */
 export function normalizeSelection(partial: Partial<Selection> = {}): Selection {
   const base = defaultSelection();
-  // SAFETY: runtime config JSON may contain the retired `oxc` key even though Selection no longer
-  // exposes it; the widened local copy exists only so that key can be deleted before normalising.
-  const supported = { ...partial } as Partial<Selection> & { oxc?: unknown };
+  // SAFETY: runtime config JSON may contain the retired `oxc`/`biome` keys even though Selection no
+  // longer exposes them; the widened local copy exists only so those keys can be deleted first.
+  const supported = { ...partial } as Partial<Selection> & { oxc?: unknown; biome?: unknown };
   delete supported.oxc;
+  delete supported.biome;
   return {
     ...base,
     ...supported,

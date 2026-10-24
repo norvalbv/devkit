@@ -47,7 +47,6 @@ describe('gate-input registry', () => {
       '.devkit/oxc',
       '.devkit/anti-slop',
       'eslint.config.devkit.mjs',
-      'biome.devkit.jsonc',
       'oxlint.devkit.json',
       '.anti-slop-baseline.json',
       CORRECTNESS_OVERRIDES_FILE,
