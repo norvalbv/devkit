@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-// Ship's evidence step, run by publish-evidence.sh after the PR exists. `budget` sizes the bound,
-// `publish` captures red/green and writes the block, `body` cleans a caller body before gh sees it.
+// Ship's PR-body steps, run by publish-evidence.sh. `budget` sizes the bound, `publish` writes the
+// red/green block, `publish-media` the QA capture, `notes` advisories, `body` cleans caller text.
 import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -11,6 +11,8 @@ import {
   type PreparedRegressionRepository,
   prepareRegressionRepository,
 } from '../../baseline-status/regression-repository.mts';
+import { telemetrySink } from '../../../../gate-engine/judge/run-context.mts';
+import { readShipEvents } from '../digest/gate-digest.mts';
 import { errorMessage } from '../review/shared/common.mts';
 import type { VerdictInput } from '../merge-verdict/ship-change.mts';
 import {
@@ -18,13 +20,15 @@ import {
   type PrintedVerdict,
   readEvidenceBlock,
   renderEvidenceBlock,
+  replaceKeepingSections,
   verdictUnavailable,
 } from './block.mts';
 import { type EvidenceConfig, expandCommand, readEvidenceConfig } from './config.mts';
 import { type EvidenceOutcome, inconclusive, notRun, outcomeFromRegression } from './outcome.mts';
-import { publishEvidenceBlock, readPull } from './pr-body.mts';
+import { publishBody, readPull } from './pr-body.mts';
 import { publishMedia, withPrEvidenceLock } from './publish-media.mts';
 import { buildRedCommit, classifyChange, prBase, treeOf } from './red-ref.mts';
+import { noteLines, upsertNotes } from './reviewer-notes.mts';
 
 /** Ship waits out a `devkit machine attach` on the same PR, whose upload is bounded at 300 s. */
 const LOCK_WAIT_MS = 330_000;
@@ -160,12 +164,22 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<vo
     env,
   });
   const block = renderEvidenceBlock(produced.outcome, produced.evidence, verdict);
-  const write = () => publishEvidenceBlock(repo, pr, head, block);
+  const write = () => publishBody(repo, pr, head, (body) => replaceKeepingSections(body, block));
   const result = withPrEvidenceLock(cwd, { repo, pr }, write, LOCK_WAIT_MS);
   const { status, reason, detail } = produced.outcome;
   console.error(
     `evidence: ${status}${reason ? ` (${reason})` : ''}: ${detail} [PR body ${result}]`,
   );
+}
+
+/** This ship's reviewer advisories into the PR body; a ship whose reviewers raised none makes no gh call. */
+function publishNotes(repo: string, pr: string, head: string, replace: boolean): void {
+  const events = readShipEvents(telemetrySink() ?? '', process.env.DEVKIT_SHIP_ID ?? '');
+  const lines = noteLines(events, head);
+  if (!lines.length) return;
+  const write = () => publishBody(repo, pr, head, (body) => upsertNotes(body, lines, replace));
+  const result = withPrEvidenceLock(process.cwd(), { repo, pr }, write, LOCK_WAIT_MS);
+  console.error(`reviewer notes: ${lines.length} advisory row(s) [PR body ${result}]`);
 }
 
 function required(values: Record<string, string | undefined>, name: string): string {
@@ -187,6 +201,7 @@ async function main(argv: string[]): Promise<void> {
     head: { type: 'string' },
     failed: { type: 'string' },
     source: { type: 'string' },
+    mode: { type: 'string' },
   } as const;
   const { values } = parseArgs({ args: rest, options, strict: true });
   if (command === 'body') {
@@ -205,8 +220,13 @@ async function main(argv: string[]): Promise<void> {
     withPrEvidenceLock(source, { repo, pr }, media, LOCK_WAIT_MS);
     return;
   }
+  if (command === 'notes') {
+    const [repo, pr, head] = ['repo', 'pr', 'head'].map((name) => required(values, name));
+    publishNotes(repo, pr, head, values.mode === 'replace');
+    return;
+  }
   if (command !== 'publish')
-    throw new Error('usage: run.mts budget <dir> | publish … | publish-media … | body …');
+    throw new Error('usage: run.mts budget <dir> | publish … | publish-media … | notes … | body …');
   await publish({
     cwd: required(values, 'cwd'),
     repo: required(values, 'repo'),

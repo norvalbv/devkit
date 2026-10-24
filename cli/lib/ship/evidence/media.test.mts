@@ -1,13 +1,12 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { EvidenceEntry } from '../../machine/manifest.mts';
-import { EVIDENCE_BEGIN, EVIDENCE_END } from './block.mts';
+import { EVIDENCE_BEGIN, EVIDENCE_END, replaceKeepingSections } from './block.mts';
 import {
   type MediaPlan,
   planMedia,
   qaSectionOf,
   renderQaSection,
-  replaceKeepingQa,
   shortSha,
   uploadedMedia,
   withQaSection,
@@ -156,7 +155,7 @@ describe('the QA section in the PR body', () => {
   it('survives a re-render of the evidence block', () => {
     const block = `${EVIDENCE_BEGIN}\n#### Regression evidence\nold\n${EVIDENCE_END}`;
     const withQa = withQaSection(`caller\n\n${block}\n`, renderQaSection(plan, refs));
-    const rerendered = replaceKeepingQa(withQa, block.replace('old', 'new'));
+    const rerendered = replaceKeepingSections(withQa, block.replace('old', 'new'));
     expect(rerendered).toContain('new');
     expect(qaSectionOf(rerendered)).toBe(qaSectionOf(withQa));
   });

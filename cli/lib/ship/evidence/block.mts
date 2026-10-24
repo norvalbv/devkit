@@ -64,7 +64,8 @@ const clip = (text: string, limit: number): string =>
 
 const flat = (text: string): string => stripVTControlCharacters(text).replace(/\s+/g, ' ').trim();
 
-const plain = (text: string): string => clip(flat(text).replaceAll('<', '&lt;'), MAX_DETAIL_CHARS);
+export const plain = (text: string): string =>
+  clip(flat(text).replaceAll('<', '&lt;'), MAX_DETAIL_CHARS);
 
 const failureLine = (item: RegressionFailureSummary): string =>
   `- ${codeSpan(flat(item.fullName))}: ${codeSpan(flat(clip(item.message, MAX_FAILURE_CHARS)))}`;
@@ -159,6 +160,44 @@ export function upsertEvidenceBlock(body: string, block: string): string {
   if (BLOCK.test(body)) return body.replace(BLOCK, () => block);
   const text = body.trimEnd();
   return text ? `${text}\n\n${block}\n` : `${block}\n`;
+}
+
+export const sectionBegin = (name: string): string => `<!-- devkit:evidence:${name}:begin -->`;
+export const sectionEnd = (name: string): string => `<!-- devkit:evidence:${name}:end -->`;
+const sectionPattern = (name: string): RegExp =>
+  new RegExp(`^${sectionBegin(name)}\\r?\\n[\\s\\S]*?\\n${sectionEnd(name)}(?=\\r?$)`, 'm');
+const BLOCK_TAIL = /^<!-- devkit:evidence:(?:data |end -->)/m;
+/** Sections a writer other than the regression step owns; every re-render carries them across. */
+const CARRIED_SECTIONS = ['qa', 'notes'];
+
+/** The block's `name` section; one outside the block is caller text, never ours. */
+export const sectionOf = (name: string, body: string): string | null =>
+  sectionPattern(name).exec(BLOCK.exec(body)?.[0] ?? '')?.[0] ?? null;
+
+/** `body` with `section` as its block's `name` section: replaced in place, else placed before the
+ * block's data line, else in a block of its own. Bytes outside the block are never touched. */
+export function withSection(name: string, body: string, section: string): string {
+  const block = BLOCK.exec(body)?.[0];
+  if (!block) return upsertEvidenceBlock(body, [EVIDENCE_BEGIN, section, EVIDENCE_END].join('\n'));
+  const pattern = sectionPattern(name);
+  if (pattern.test(block))
+    return upsertEvidenceBlock(
+      body,
+      block.replace(pattern, () => section),
+    );
+  const at = BLOCK_TAIL.exec(block)?.index ?? block.length;
+  return upsertEvidenceBlock(body, `${block.slice(0, at)}${section}\n${block.slice(at)}`);
+}
+
+/** `body` with its evidence block replaced by `block`, keeping every section another step wrote. */
+export function replaceKeepingSections(body: string, block: string): string {
+  return CARRIED_SECTIONS.reduce(
+    (next, name) => {
+      const section = sectionOf(name, body);
+      return section ? withSection(name, next, section) : next;
+    },
+    upsertEvidenceBlock(body, block),
+  );
 }
 
 /** A caller's replacement body keeps the PR's current block, so an explicit body never deletes it. */

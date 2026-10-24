@@ -2,7 +2,6 @@
 // so the upsert re-reads after writing and refuses once the PR head is no longer the evidence head.
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
-import { replaceKeepingQa } from './media.mts';
 
 const GH_TIMEOUT_MS = 60_000;
 /** Uploads of a few MB each can take a while on a slow link; this bounds one `--attach` call. */
@@ -51,17 +50,17 @@ export function writeBodyAttaching(repo: string, pr: string, dir: string, files:
   }
 }
 
-/** Upsert `block` while the PR head is still `head`; a lost concurrent write is retried, bounded. */
-export function publishEvidenceBlock(
+/** Apply `edit` while the PR head is still `head`; a lost concurrent write is retried, bounded. */
+export function publishBody(
   repo: string,
   pr: string,
   head: string,
-  block: string,
+  edit: (body: string) => string,
 ): PublishResult {
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     const pull = readPull(repo, pr);
     if (pull.headRefOid !== head) return 'head-moved';
-    const next = replaceKeepingQa(pull.body, block);
+    const next = edit(pull.body);
     if (next === pull.body) return 'unchanged';
     writeBody(repo, pr, next);
     if (readPull(repo, pr).body.trimEnd() === next.trimEnd()) return 'written';
