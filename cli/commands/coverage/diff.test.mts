@@ -195,6 +195,7 @@ describe('devkit coverage-diff — what counts as added', () => {
     expect(code).toBe(0);
     expect(out).toContain('no executable added lines');
     expect(out).not.toContain('Total:');
+    expect(out).not.toContain('not applied'); // total 0 alone is not "unmeasured"
   });
 });
 
@@ -247,6 +248,7 @@ describe('devkit coverage-diff — --min and arguments', () => {
     const below = run(root, '--min', '50.1');
     expect(below.code).toBe(1);
     expect(below.out).toContain('below --min 50.1%');
+    expect(below.out).not.toMatch(/not applied|measured lines only/);
     expect(run(root, '--min', '50').code).toBe(0);
     expect(run(root, '--min', '0').code).toBe(0);
   });
@@ -259,6 +261,49 @@ describe('devkit coverage-diff — --min and arguments', () => {
     const root = half();
     expect(run(root, '--base').code).toBe(2);
     expect(run(root, '--from', 'x').code).toBe(2);
+  });
+});
+
+describe('devkit coverage-diff — --min over unmeasured files', () => {
+  it('exits 1 when source changed and the artifact measured no files, naming the include', () => {
+    const { root } = featureRepo();
+    write(root, 'src/a.mts', lines(2));
+    measure(root, snapshotSource(root), cov(root, {}));
+    const { code, out } = run(root, '--min', '80');
+    expect(code).toBe(1);
+    expect(out).toContain('--min 80% not applied — coverage/coverage-final.json measured no files');
+    expect(out).toContain("Check the runner's coverage include");
+    expect(run(root).code).toBe(0); // without --min the command only reports
+  });
+
+  it('exits 0 over an empty artifact when no source line changed', () => {
+    const { root } = featureRepo();
+    write(root, 'README.md', '# changed\n');
+    measure(root, snapshotSource(root), cov(root, {}));
+    const { code, out } = run(root, '--min', '80');
+    expect(code).toBe(0);
+    expect(out).not.toContain('not applied');
+  });
+
+  it('exits 0 but says --min was not applied when no changed file was measured', () => {
+    const { root } = featureRepo();
+    write(root, 'src/b.mts', lines(2));
+    measure(root, snapshotSource(root), cov(root, { 'src/a.mts': [[1, 1]] }));
+    const { code, out } = run(root, '--min', '80');
+    expect(code).toBe(0);
+    expect(out).toContain(
+      '--min 80% not applied: no measured added lines (1 unmeasured files listed above).',
+    );
+  });
+
+  it('says --min judged measured lines only when some changed files were unmeasured', () => {
+    const { root } = featureRepo();
+    write(root, 'src/a.mts', lines(2));
+    write(root, 'src/b.mts', lines(2));
+    measure(root, snapshotSource(root), cov(root, { 'src/a.mts': [[2, 1]] }));
+    const { code, out } = run(root, '--min', '80');
+    expect(code).toBe(0);
+    expect(out).toContain('--min 80% judged on measured lines only (1 unmeasured files');
   });
 });
 
@@ -449,6 +494,27 @@ describe('devkit coverage-diff — agrees with the scope "diff" gate', () => {
     const { d } = both(root);
     expect(d.code).toBe(1);
     expect(d.out).toContain('would FAIL if this ships — artifact provenance unknown');
+  });
+
+  it('reports an empty artifact as the gate does, before its unknown provenance', () => {
+    const root = diffRepo();
+    write(root, 'src/a.mts', lines(2));
+    write(root, 'coverage/coverage-final.json', '{}');
+    const { g, d } = both(root);
+    expect(g.code).toBe(1);
+    expect(g.out).toContain('measured no files');
+    expect(d.out).toContain(
+      'would FAIL if this ships — coverage/coverage-final.json measured no files',
+    );
+  });
+
+  it('passes an empty artifact when no production line was added, as the gate does', () => {
+    const root = diffRepo();
+    write(root, 'src/a.test.mts', lines(3));
+    write(root, 'coverage/coverage-final.json', '{}');
+    const { d } = both(root);
+    expect(d.code).toBe(0);
+    expect(d.out).toContain('would pass — no added lines in production source');
   });
 
   it('judges the whole branch, as ship does: a committed unmeasured file still fails', () => {
