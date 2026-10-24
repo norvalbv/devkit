@@ -103,6 +103,24 @@ export function ineligibleReason(child: StoryView, parentId: number): string | n
   return null;
 }
 
+export interface OpenFollowUp {
+  id: number;
+  type: FollowUpType | null;
+}
+
+/** Open follow-ups holding the parent's feature back: any type but discovery, untyped included. */
+export function openFollowUps(
+  parentId: number,
+  children: readonly StoryView[],
+  excludeId?: number,
+): OpenFollowUp[] {
+  return children.flatMap((child) => {
+    const record = parseRecord(child.description);
+    if (record?.parent !== parentId || child.closed || child.id === excludeId) return [];
+    return record.type === 'discovery' ? [] : [{ id: child.id, type: record.type }];
+  });
+}
+
 /**
  * At most one follow-up per parent ever starts, so a marked follow-up that is assigned or closed
  * ends it. An open, unassigned marked one (an earlier assign failed) is resumed before a new pick.

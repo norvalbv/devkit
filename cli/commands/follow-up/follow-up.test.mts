@@ -349,3 +349,116 @@ describe('devkit follow-up file', () => {
     expect(files.err).toContain('--pr must be a pull request URL');
   });
 });
+
+/** A follow-up of `parent` with this type, or untyped when `type` is null. */
+function followUpOf(
+  parent: number,
+  id: number,
+  type: string | null,
+  extra: Partial<FakeStory> = {},
+) {
+  const typeLine = type === null ? '' : `\n**Follow-up type:** ${type}`;
+  return {
+    id,
+    name: `Follow-up ${id}`,
+    description: `**Project:** frink\n**Follow-up of:** sc-${parent} · ${PR}${typeLine}\n\nBody`,
+    owner_ids: [],
+    links: [parent],
+    ...extra,
+  };
+}
+
+describe('devkit follow-up status', () => {
+  it('lists open blocks-done, builds-on and untyped follow-ups, never discovery or closed ones', () => {
+    const short = fakeShort([
+      parentOf(7481, 7482, 7483, 7484, 7485, 7486, 7487),
+      followUpOf(7438, 7481, 'blocks-done'),
+      followUpOf(7438, 7482, 'builds-on'),
+      followUpOf(7438, 7483, null),
+      followUpOf(7438, 7484, 'discovery'),
+      followUpOf(7438, 7485, 'blocks-done', { completed: true }),
+      followUpOf(7438, 7486, 'builds-on', { archived: true }),
+      followUpOf(9999, 7487, 'blocks-done'),
+    ]);
+
+    const result = run(['status', '--parent', 'sc-7438'], short.run);
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.out)).toEqual({
+      open: [
+        { id: 7481, type: 'blocks-done' },
+        { id: 7482, type: 'builds-on' },
+        { id: 7483, type: null },
+      ],
+      featureDone: false,
+    });
+    expect(short.writes).toEqual([]);
+  });
+
+  it('reports the feature done when only discovery and closed follow-ups remain', () => {
+    const short = fakeShort([
+      parentOf(7481, 7482),
+      followUpOf(7438, 7481, 'discovery'),
+      followUpOf(7438, 7482, 'blocks-done', { completed: true }),
+    ]);
+
+    const result = run(['status', '--parent', '7438'], short.run);
+
+    expect(result).toMatchObject({ code: 0, out: '{"open":[],"featureDone":true}' });
+  });
+
+  it("adds the parent's other open follow-ups for a story that is itself a follow-up", () => {
+    const short = fakeShort([
+      parentOf(7481, 7482, 7483),
+      followUpOf(7438, 7481, 'builds-on', { links: [7438, 7490] }),
+      followUpOf(7438, 7482, 'blocks-done'),
+      followUpOf(7438, 7483, 'discovery'),
+      followUpOf(7481, 7490, 'builds-on'),
+    ]);
+
+    const result = run(['status', '--parent', '7481'], short.run);
+
+    expect(JSON.parse(result.out)).toEqual({
+      open: [
+        { id: 7482, type: 'blocks-done' },
+        { id: 7490, type: 'builds-on' },
+      ],
+      featureDone: false,
+    });
+  });
+
+  it('still finds the siblings when the story is no longer linked to the parent its record names', () => {
+    const short = fakeShort([
+      parentOf(7481, 7482),
+      followUpOf(7438, 7481, 'builds-on', { links: [] }),
+      followUpOf(7438, 7482, 'blocks-done'),
+    ]);
+
+    const result = run(['status', '--parent', '7481'], short.run);
+
+    expect(result.out).toBe('{"open":[{"id":7482,"type":"blocks-done"}],"featureDone":false}');
+  });
+
+  it('lists each follow-up once when a hand-edited record names the story as its own parent', () => {
+    const short = fakeShort([
+      followUpOf(7481, 7481, 'builds-on', { links: [7490] }),
+      followUpOf(7481, 7490, 'blocks-done'),
+    ]);
+
+    const result = run(['status', '--parent', '7481'], short.run);
+
+    expect(result.out).toBe('{"open":[{"id":7490,"type":"blocks-done"}],"featureDone":false}');
+  });
+
+  it('exits 1 without printing a status when a linked story cannot be read, and on a bad flag', () => {
+    const short = fakeShort([parentOf(7481, 7500), followUpOf(7438, 7481, 'blocks-done')]);
+
+    const missing = run(['status', '--parent', '7438'], short.run);
+    expect(missing).toMatchObject({ code: 1, out: '' });
+    expect(missing.err).toContain('404');
+
+    const flagged = run(['status', '--parent', '7438', '--owner', 'someone'], short.run);
+    expect(flagged.code).toBe(1);
+    expect(flagged.err).toContain('Usage:');
+  });
+});

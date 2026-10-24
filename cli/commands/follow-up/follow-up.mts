@@ -1,4 +1,4 @@
-/** `devkit follow-up`: file the follow-ups a story deferred, and start one of them (see `help`). */
+/** `devkit follow-up`: file the follow-ups a story deferred, start one, and list the open ones. */
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
@@ -9,6 +9,8 @@ import {
   isDepthCapped,
   isPrUrl,
   normalisedTitle,
+  type OpenFollowUp,
+  openFollowUps,
   parseRecord,
   RECORD_LABEL,
   renderRecord,
@@ -29,22 +31,25 @@ import { errorMessage } from '../../lib/ship/review/shared/common.mts';
 
 const USAGE = `Usage:
   devkit follow-up file --parent <story> [--pr <url>]   < items.json
-  devkit follow-up start --parent <story> [--owner <member>]`;
+  devkit follow-up start --parent <story> [--owner <member>]
+  devkit follow-up status --parent <story>`;
 
 export const meta = {
   name: 'follow-up',
   agentFacing: false,
   notRoutedBecause:
     "Called by a Flow's closing steps after a story ships: frink-work's Track Follow-ups agent pipes " +
-    'the deferred items into `file`, then its Start Follow-up node runs `start`. `start` queues paid ' +
-    'agent work and narrows the human gate on follow-ups, so it is not routed to agents by hand.',
+    'the deferred items into `file` and `status` answers its Feature done line; its Start Follow-up ' +
+    'node then runs `start`. `start` queues paid agent work and narrows the human gate on ' +
+    'follow-ups, so it is not routed to agents by hand.',
   summary:
-    'File the follow-ups a story deferred (linked, unowned), or start one builds-on follow-up of it.',
-  help: `devkit follow-up — file the follow-ups a story deferred, and start one of them.
+    'File the follow-ups a story deferred, start one builds-on follow-up of it, or list the open ones.',
+  help: `devkit follow-up — file the follow-ups a story deferred, start one, and list the open ones.
 
 ${USAGE}
 
-  --parent <story>   The story the follow-ups come from (7315 or sc-7315).
+  --parent <story>   The story the follow-ups come from (7315 or sc-7315). status: the story whose
+                     PR this is, which may itself be a follow-up.
   --pr <url>         file: the parent's pull request. Without it the record names no PR.
   --owner <member>   start: who to assign to. Default: the parent's first owner.
 
@@ -76,6 +81,11 @@ then assigned, which fires a story-assigned trigger. Nothing starts when the par
 follow-up, or once an ${AUTO_START_PREFIX} follow-up of it is assigned or closed. Prints
 {"started":true,"story":<id>} or {"started":false,"reason":"..."}.
 
+status lists the open follow-ups that hold the story's feature back: blocks-done, builds-on and
+untyped ones (type null) that are neither done nor archived; discovery ones never count. When the
+story is itself a follow-up, its parent's other open follow-ups count too. Writes nothing. Prints
+  {"open":[{"id":7801,"type":"blocks-done"}],"featureDone":false}
+
 Exits 1 on bad input, or when Shortcut cannot be read or written.`,
   valueFlags: ['--parent', '--owner', '--pr'],
 };
@@ -105,6 +115,26 @@ export function startFollowUp(
   if (decision.rename) renameStory(run, story.id, `${AUTO_START_PREFIX} ${story.name}`);
   assignStory(run, story.id, assignee);
   return { started: true, story: story.id };
+}
+
+export interface StatusResult {
+  open: OpenFollowUp[];
+  featureDone: boolean;
+}
+
+/** Open follow-ups of the story and, when it is itself a follow-up, its parent's other open ones. */
+export function followUpStatus(storyId: number, run: RunShort = runShort): StatusResult {
+  const story = readStory(run, storyId);
+  const children = story.linkedIds.map((id) => readStory(run, id));
+  const open = openFollowUps(storyId, children);
+  const parentId = parseRecord(story.description)?.parent;
+  if (parentId !== undefined && parentId !== storyId) {
+    const parent = children.find((child) => child.id === parentId) ?? readStory(run, parentId);
+    const siblings = parent.linkedIds.map((id) => readStory(run, id));
+    open.push(...openFollowUps(parentId, siblings, storyId));
+  }
+  open.sort((a, b) => a.id - b.id);
+  return { open, featureDone: open.length === 0 };
 }
 
 const ONE_LINE = /^[^\r\n\u2028\u2029]*$/;
@@ -249,7 +279,8 @@ function strictArgs(args: string[]) {
 
 type Invocation =
   | { verb: 'file'; parentId: number; pr?: string }
-  | { verb: 'start'; parentId: number; owner?: string };
+  | { verb: 'start'; parentId: number; owner?: string }
+  | { verb: 'status'; parentId: number };
 
 function parseInvocation(args: string[]): Invocation | null {
   const parsed = strictArgs(args);
@@ -260,6 +291,9 @@ function parseInvocation(args: string[]): Invocation | null {
   const [verb] = parsed.positionals;
   if (verb === 'file' && values.owner === undefined) return { verb, parentId, pr: values.pr };
   if (verb === 'start' && values.pr === undefined) return { verb, parentId, owner: values.owner };
+  if (verb === 'status' && values.pr === undefined && values.owner === undefined) {
+    return { verb, parentId };
+  }
   return null;
 }
 
@@ -277,6 +311,10 @@ export default function followUp(
   try {
     if (invocation.verb === 'file') {
       return fileCommand(invocation.parentId, invocation.pr, readInput(), run);
+    }
+    if (invocation.verb === 'status') {
+      console.log(JSON.stringify(followUpStatus(invocation.parentId, run)));
+      return 0;
     }
     console.log(JSON.stringify(startFollowUp(invocation.parentId, invocation.owner, run)));
     return 0;
