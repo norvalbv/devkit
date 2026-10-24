@@ -1,5 +1,5 @@
 /**
- * At every commit, remind the agent to add before/after PR screenshots when the UI can change.
+ * At every commit, remind the agent to show a UI change in the PR (screenshots or a machine run).
  * Advisory: always exits 0. UI extensions speak free; any other code diff asks the light judge.
  */
 import { readFileSync } from 'node:fs';
@@ -102,7 +102,7 @@ export function declaresMachine(cwd: string): boolean {
 /** Action first: the ship digest cuts a detail at 140 characters, so only the reason may be lost. */
 export const instruction = (reason: string, machine = false): string =>
   machine
-    ? `Record it working with \`devkit machine up\` + \`run <flow>\` (ship attaches it), or say in the PR nothing visible changed — ${reason}`
+    ? `Record it working: \`devkit machine up\` + \`run <flow>\`, then \`devkit machine attach <pr>\`; or say in the PR nothing visible changed — ${reason}`
     : `Add before (base branch) and after (this branch) screenshots when you open or update the PR, or say there that nothing visible changed — ${reason}`;
 
 /** The gate. Every unreadable input means silence: a reminder that cannot tell stays quiet. */

@@ -75,7 +75,7 @@ export function planMedia(
     notes.push(`\`${entry.file}\`: not uploaded, over ${MAX_FILES} files`);
   if (fits.length === 0 && entries.length === 0 && uiReason)
     notes.push(
-      `UI changed (${uiReason}); no QA capture recorded: run \`devkit machine up\`, then \`devkit machine run <flow>\``,
+      `UI changed (${uiReason}); no QA capture recorded: run \`devkit machine up\`, \`devkit machine run <flow>\`, then \`devkit machine attach <this PR>\``,
     );
   return { picks: fits.slice(0, MAX_FILES), notes };
 }

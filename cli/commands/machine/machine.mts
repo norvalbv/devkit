@@ -67,6 +67,7 @@ export const meta = {
 Usage:
   devkit machine up [--full|--light] [-- <command…>]   lease this worktree's slot, start its app, print its env
   devkit machine run <flow.mjs> [--name <label>]   run an asserted flow there, recording video + screenshots
+  devkit machine attach <pr>             put the passing capture into that open PR's description now
   devkit machine screenshot [file.png]   full mode: save the desktop as a PNG and print its path
   devkit machine exec [-d] -- <command…> full mode: run a command on the desktop (xdotool, apt-get, an app)
   devkit machine env                     print \`export\` lines for this worktree's slot
@@ -98,8 +99,9 @@ node:assert/strict and locator waits, call \`shot('name')\` for a screenshot. In
 whatever answers DevTools on the desktop (its Chromium, or an app started with
 --remote-debugging-port=9222 after \`exec -- pkill chromium\`), \`exec([...])\` returns a desktop
 command's stdout, and the video is the whole screen. A throw fails the run (exit 1). Captures land in
-the worktree's git dir, and \`devkit ship\` attaches the passing ones to the PR when they ran the code
-it ships. Anything on screen ends up in the PR, so seed data must be fake.`,
+the worktree's git dir. \`devkit ship\` attaches the passing ones to its PR; for a capture recorded
+after the ship, \`attach <pr>\` does it, either way only when it ran the code that PR ships. Anything
+on screen ends up in the PR, so seed data must be fake.`,
   valueFlags: ['--name'],
 };
 
@@ -292,10 +294,10 @@ function report(result: RunResult, evidence: string): number {
   for (const entry of result.entries)
     console.log(`${entry.kind}: ${join(evidence, entry.file)} (${entry.bytes} bytes)`);
   if (result.entries.some((entry) => entry.kind === 'video' && entry.bytes > VIDEO_CAP))
-    say('the video is over the 9 MB a PR attaches; shorten the flow so ship can upload it');
+    say('the video is over the 9 MB a PR attaches; shorten the flow so it can be uploaded');
   if (result.passed)
     say(
-      `flow "${result.flow}" passed; \`devkit ship\` attaches it unless shipped code changes first`,
+      `flow "${result.flow}" passed; \`devkit ship\` attaches it, or \`devkit machine attach <pr>\` once the PR is open`,
     );
   else
     say(
@@ -398,9 +400,14 @@ function status(): number {
 
 type Verb = (root: string, rest: string[]) => number | Promise<number>;
 
+// Loaded on use: the upload path pulls in ship's evidence modules, which no other verb needs.
+const attach: Verb = async (root, rest) =>
+  (await import('../../lib/ship/evidence/attach.mts')).attachCapture(root, rest[0]);
+
 const VERBS = new Map<string, Verb>([
   ['up', up],
   ['run', run],
+  ['attach', attach],
   ['exec', exec],
   ['screenshot', screen],
   ['down', down],

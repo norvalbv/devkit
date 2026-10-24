@@ -23,8 +23,11 @@ import {
 import { type EvidenceConfig, expandCommand, readEvidenceConfig } from './config.mts';
 import { type EvidenceOutcome, inconclusive, notRun, outcomeFromRegression } from './outcome.mts';
 import { publishEvidenceBlock, readPull } from './pr-body.mts';
-import { publishMedia } from './publish-media.mts';
+import { publishMedia, withPrEvidenceLock } from './publish-media.mts';
 import { buildRedCommit, classifyChange, prBase, treeOf } from './red-ref.mts';
+
+/** Ship waits out a `devkit machine attach` on the same PR, whose upload is bounded at 300 s. */
+const LOCK_WAIT_MS = 330_000;
 
 const REPORT = '.devkit-evidence-report.json';
 
@@ -157,7 +160,8 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<vo
     env,
   });
   const block = renderEvidenceBlock(produced.outcome, produced.evidence, verdict);
-  const result = publishEvidenceBlock(repo, pr, head, block);
+  const write = () => publishEvidenceBlock(repo, pr, head, block);
+  const result = withPrEvidenceLock(cwd, { repo, pr }, write, LOCK_WAIT_MS);
   const { status, reason, detail } = produced.outcome;
   console.error(
     `evidence: ${status}${reason ? ` (${reason})` : ''}: ${detail} [PR body ${result}]`,
@@ -192,8 +196,13 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
   if (command === 'publish-media') {
-    const [source, repo] = [required(values, 'source'), required(values, 'repo')];
-    publishMedia({ source, repo, pr: required(values, 'pr'), head: required(values, 'head') });
+    const [source, repo, pr] = [
+      required(values, 'source'),
+      required(values, 'repo'),
+      required(values, 'pr'),
+    ];
+    const media = () => publishMedia({ source, repo, pr, head: required(values, 'head') });
+    withPrEvidenceLock(source, { repo, pr }, media, LOCK_WAIT_MS);
     return;
   }
   if (command !== 'publish')

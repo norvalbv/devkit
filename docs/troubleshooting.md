@@ -458,7 +458,10 @@ fires on a staged file with a UI extension or matching `uiEvidence.paths` (tests
 fixtures are excluded) with no model call. Otherwise a light judge reads the staged diff and fires
 when the change could alter a rendered screen, and the line gives its one-line reason. The verdict is
 cached per diff, and a judge outage or timeout (30 s) means no reminder. When nothing a user sees
-changed, say so in the PR description rather than attaching screenshots. To be reminded about paths
+changed, say so in the PR description rather than attaching screenshots. A repo with a `machine`
+recipe is asked for a recording instead: `devkit machine up`, `run <flow>`, then `devkit machine
+attach <pr>` once the PR is open (the reminder fires inside the ship, so recording comes after it).
+To be reminded about paths
 the judge misses, add their globs to `uiEvidence.paths` in `guard.config.json`; to drop the reminder
 entirely, deselect the `ui-evidence` guard with `devkit init --guards <the guards you keep>`.
 
