@@ -25,7 +25,6 @@ const SCRUB = 'cli/__tests__/vitest-setup-env-scrub.test.mts';
 const dirs: string[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.unstubAllEnvs();
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -105,7 +104,7 @@ describe('runRelatedTests', () => {
   it('passes without running vitest when nothing is staged', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exec = fakeExec(0);
-    expect(runRelatedTests('/repo', { staged: null, exec })).toBe(0);
+    expect(runRelatedTests('/repo', { staged: [], exec })).toBe(0);
     expect(runRelatedTests('/repo', { staged: ['package.json'], exec })).toBe(0);
     expect(exec).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith('related-tests: none selected');
@@ -157,44 +156,6 @@ describe('runRelatedTests', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const exec = fakeExec(null);
     expect(runRelatedTests('/repo', { staged: ['cli/a.mts'], exec })).toBe(1);
-  });
-
-  it('selects from the index, never from unstaged edits', () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    const repo = editedRepo();
-    git(repo, 'add', 'a.mts');
-    const exec = fakeExec(0);
-    runRelatedTests(repo, { exec });
-    expect(exec).toHaveBeenCalledWith(
-      expect.any(String),
-      ['related', '--run', '--reporter=dot', 'a.mts', REACH],
-      expect.anything(),
-    );
-  });
-
-  // `commit -a` / `commit <path>` stage into an alternate index the hook hands over via the carrier.
-  it('selects from the commit index the hook carries, not the default index', () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    const repo = editedRepo();
-    git(repo, 'add', 'a.mts');
-    const alt = join(repo, '.git', 'next-index');
-    execFileSync('git', ['read-tree', 'HEAD'], {
-      cwd: repo,
-      env: { ...process.env, GIT_INDEX_FILE: alt },
-    });
-    execFileSync('git', ['add', 'b.mts'], {
-      cwd: repo,
-      env: { ...process.env, GIT_INDEX_FILE: alt },
-    });
-    vi.stubEnv('DEVKIT_COMMIT_INDEX_FILE', alt);
-    vi.stubEnv('DEVKIT_COMMIT_GIT_DIR', join(repo, '.git'));
-    const exec = fakeExec(0);
-    runRelatedTests(repo, { exec });
-    expect(exec).toHaveBeenCalledWith(
-      expect.any(String),
-      ['related', '--run', '--reporter=dot', 'b.mts', REACH],
-      expect.anything(),
-    );
   });
 });
 
@@ -277,6 +238,13 @@ describe('noteUnmapped', () => {
 });
 
 describe('related-tests entrypoint', () => {
+  // devkit never spawns a {staged} gate with nothing staged, so no paths means a dropped token.
+  it('blocks when it is given no paths', () => {
+    const r = spawnSync(process.execPath, [GATE], { cwd: tmpdir(), encoding: 'utf8' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('related-tests got no paths');
+  });
+
   // No vitest in the fixture repo, so the run blocks; the note still prints and the code is kept.
   it('names a staged script and its tests after the run, keeping the exit code', () => {
     const repo = editedRepo();
@@ -297,7 +265,8 @@ describe('related-tests entrypoint', () => {
     writeFileSync(join(repo, 'a', 'check.sh'), 'echo edited\n');
     writeFileSync(join(repo, 'a', 'x[1].sh'), 'echo edited\n');
     git(repo, 'add', 'scripts/foo.sh', 'notes.md', 'a/check.sh', 'a/x[1].sh', 'a.mts');
-    const r = spawnSync(process.execPath, [GATE], { cwd: repo, encoding: 'utf8' });
+    const staged = ['scripts/foo.sh', 'notes.md', 'a/check.sh', 'a/x[1].sh', 'a.mts'];
+    const r = spawnSync(process.execPath, [GATE, ...staged], { cwd: repo, encoding: 'utf8' });
     expect(r.status).toBe(1);
     expect(r.stdout).toContain(
       'related-tests: 1 staged path(s) have no import-graph tests — not run here, CI will:\n' +
@@ -319,7 +288,13 @@ describe('related-tests entrypoint', () => {
     writeFileSync(join(repo, 'cli', 'lib', 'ship', 'review', 'x.sh'), 'echo hi\n');
     writeFileSync(join(repo, 'vitest.setup.mjs'), 'export {};\n');
     git(repo, 'add', '.');
-    const r = spawnSync(process.execPath, [GATE], { cwd: repo, encoding: 'utf8' });
+    const staged = execFileSync('git', ['diff', '--cached', '--name-only'], {
+      cwd: repo,
+      encoding: 'utf8',
+    })
+      .split('\n')
+      .filter(Boolean);
+    const r = spawnSync(process.execPath, [GATE, ...staged], { cwd: repo, encoding: 'utf8' });
     expect(r.stdout).toContain(', 1 forced');
     expect(r.stdout).not.toContain('not run here');
   });
