@@ -265,6 +265,22 @@ describe('overlay installed from a linked worktree keeps the native hooks', () =
     );
   });
 
+  // --fix runs under init's lock, which must pass the cause through and not leave itself behind.
+  it.each([[[]], [['--fix']]])(
+    'doctor %j outside any git repository names the cause, not a retry',
+    async (args) => {
+      const dir = mkTmp('overlay-nogit-');
+      mkdirSync(join(dir, '.devkit'));
+      const cfg = { overlay: true, stack: 'generic', origHooksPath: '' };
+      writeFileSync(join(dir, '.devkit', 'config.json'), JSON.stringify(cfg));
+
+      const err = await doctorRun(args, dir).catch((e: Error) => e);
+      expect(String(err)).toMatch(/is not a git repository/);
+      expect(String(err)).not.toMatch(/retry/);
+      expect(existsSync(join(dir, '.devkit', 'init.lock'))).toBe(false);
+    },
+  );
+
   it('warns when the native commit-msg already calls a selected judge', async () => {
     const root = nativeHooksRepo();
     writeFileSync(
