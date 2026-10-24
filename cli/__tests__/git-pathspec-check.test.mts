@@ -82,6 +82,8 @@ describe('scanShell', () => {
     expect(shell('X+=(":(literal)$a")\nX+=("$b")\ngit add -- "${X[@]}"')).toEqual(['3 raw']);
     expect(shell('f() { local -a X=("$p"); git status -- "${X[@]}"; }')).toEqual(['1 raw']);
     expect(shell('read -ra X <<< "$l"\ngit status -- "${X[@]}"')).toEqual(['2 raw']);
+    expect(shell('X=(":(literal)a")\nmapfile -t X < f\ngit add -- "${X[@]}"')).toEqual(['3 raw']);
+    expect(shell('X=(":(literal)a")\nreadarray X < f\ngit add -- "${X[@]}"')).toEqual(['3 raw']);
     expect(shell('git status -- "${Unknown[@]}"')).toEqual(['1 raw']);
   });
 
@@ -143,6 +145,53 @@ describe('scanTs', () => {
     const load = (path: string) => (path === '/repo/provenance.mts' ? wrapper : undefined);
     expect(tsHits(imported, load)).toEqual([]);
     expect(tsHits(imported)).toEqual(['2 raw ...spec']);
+    const aliased =
+      "import { git as gitRun } from './provenance.mts';\ngitRun(top, ['diff', '--', ...spec]);";
+    expect(tsHits(aliased, load)).toEqual([]);
+  });
+
+  it('reports every git call in a file, a nested call before the call enclosing it', () => {
+    const text = [
+      "spawnSync('git', ['add', '--', a]);",
+      "gitRun(root, ['diff', '--', b, ...gitList(root, ['ls-files', '--', c])]);",
+    ].join('\n');
+    expect(tsHits(text)).toEqual([
+      '1 raw a',
+      '2 raw c',
+      '2 raw b',
+      "2 raw ...gitList(root, ['ls-files', '--', c])",
+    ]);
+  });
+
+  it('rates a name by its worst declaration and a helper by its worst return, not a nested one', () => {
+    const shadowed =
+      "const rel = 'a.md';\nfunction f(rel: string) { spawnSync('git', ['add', '--', rel]); }";
+    expect(tsHits(shadowed)).toEqual(['2 raw rel']);
+    const helper = (body: string) =>
+      tsHits(`function lit(f: string) { ${body} }\ngit(cwd, ['diff', '--', ...files.map(lit)]);`);
+    expect(helper('if (f) return `:(literal)${f}`; return f;')).toEqual([
+      '2 raw ...files.map(lit)',
+    ]);
+    expect(helper('function raw() { return f; } return `:(literal)${f}`;')).toEqual([]);
+  });
+
+  it('rates conditionals and array copies by their worst operand', () => {
+    const hits = (argv: string) =>
+      tsHits(`const P = ['x.md'];\ngit(cwd, ['diff', '--', ${argv}]);`).map((h) => h.split(' ')[1]);
+    expect(hits('...P.slice(1).sort()')).toEqual([]);
+    expect(hits('...P.concat(extra)')).toEqual(['raw']);
+    expect(hits("ok ? ':(literal)a' : p")).toEqual(['raw']);
+    expect(hits("ok ? ':(literal)a' : 'b.md'")).toEqual([]);
+  });
+
+  it('stops resolving a cyclic or deep chain of names as raw instead of recursing forever', () => {
+    expect(tsHits("const a = b;\nconst b = a;\nspawnSync('git', ['add', '--', a]);")).toEqual([
+      '3 raw a',
+    ]);
+    const chain =
+      "const n0 = 'x.md';\n" + [1, 2, 3, 4, 5, 6].map((i) => `const n${i} = n${i - 1};`).join('\n');
+    expect(tsHits(`${chain}\nspawnSync('git', ['add', '--', n6]);`)).toEqual(['8 raw n6']);
+    expect(tsHits(`${chain}\nspawnSync('git', ['add', '--', n3]);`)).toEqual([]);
   });
 
   it('honours a pathspec marker on the line above', () => {
