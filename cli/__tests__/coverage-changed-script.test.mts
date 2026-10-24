@@ -151,5 +151,14 @@ describe('test:run:coverage:changed', () => {
       expect(existsSync(join(root, 'outside', 'keep'))).toBe(true);
       expect(readdirSync(join(root, 'coverage', '.changed'))).toEqual([]);
     });
+
+    it("keeps a live run's dir that this user may not signal", () => {
+      // PID 1 is root's, so `kill -0 1` fails with EPERM: only ESRCH proves the run is gone.
+      root = mkdtempSync(join(tmpdir(), 'coverage-changed-'));
+      mkdirSync(join(root, 'coverage', '.changed', '1'), { recursive: true });
+
+      expect(runScript(root).status).toBe(3);
+      expect(readdirSync(join(root, 'coverage', '.changed'))).toEqual(['1']);
+    });
   });
 });
