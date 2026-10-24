@@ -13,7 +13,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
-import { decide, hereEntry, stageAppend } from '../lib/ship/reship/anchor.mts';
+import {
+  decide,
+  hereEntry,
+  resolveBaseRef,
+  stageAppend,
+  stripBase,
+  treeEntry,
+} from '../lib/ship/reship/anchor.mts';
 import { recordShip } from '../lib/ship/reconcile-manifest-write.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 import { manifestOf } from './_ship-branch-fixture.mts';
@@ -39,7 +46,7 @@ function tmp(prefix: string) {
 }
 
 /** A checkout on `work` whose a.ts (and bin.dat) were shipped to origin/feat/pr, plus a peer clone. */
-function prRepo({ record = true } = {}) {
+function prRepo({ record = true, baseRef = 'main' } = {}) {
   const bare = tmp('reship-anchor-bare-');
   const dir = tmp('reship-anchor-wt-');
   const peer = tmp('reship-anchor-peer-');
@@ -66,13 +73,13 @@ function prRepo({ record = true } = {}) {
   writeFileSync(join(dir, 'bin.dat'), Buffer.from([0, 1, 2, 3]));
   git(dir, ['add', '.']);
   git(dir, ['commit', '-q', '-m', 'first ship']);
-  git(dir, ['push', '-q', 'origin', 'HEAD:feat/pr']);
+  git(dir, ['push', '-q', 'origin', 'HEAD:feat/pr', 'HEAD:main']);
   git(dir, ['config', 'core.hooksPath', '.husky/_']);
   writeFileSync(join(dir, '.husky/_/pre-commit'), '#!/bin/sh\nexit 0\n');
   chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
   if (record) {
     const sha = git(dir, ['rev-parse', 'HEAD']);
-    const opts = { root: dir, branch: 'feat/pr', repo: 'acme/app', baseRef: 'work', baseSha: sha };
+    const opts = { root: dir, branch: 'feat/pr', repo: 'acme/app', baseRef, baseSha: sha };
     expect(recordShip({ ...opts, pr: '7' }, ['a.ts', 'bin.dat'])).toBe(0);
   }
   git(peer, ['clone', '-q', '-b', 'feat/pr', bare, '.']);
@@ -108,7 +115,26 @@ function prRepo({ record = true } = {}) {
     git(dir, ['worktree', 'remove', '--force', wt]);
     return { out, stderr: r.stderr };
   };
-  return { dir, foreign, reship, remote, staged, mode, chmodTip };
+  /** Commit <edit> on origin/main from the peer; the caller's origin/HEAD names main from then on. */
+  const onMain = (subject: string, edit: (peerDir: string) => void) => {
+    git(peer, ['fetch', '-q', 'origin', 'main']);
+    git(peer, ['checkout', '-q', '-B', 'main', 'FETCH_HEAD']);
+    edit(peer);
+    git(peer, ['commit', '-q', '-am', subject]);
+    git(peer, ['push', '-q', 'origin', 'main']);
+    git(peer, ['checkout', '-q', 'feat/pr']);
+    git(dir, ['fetch', '-q', 'origin', 'main:refs/remotes/origin/main']);
+    git(dir, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
+  };
+  const caller = (a: string[]) => git(dir, a);
+  const peerGit = (a: string[]) => git(peer, a);
+  /** gh answers `pr view` with an open PR #7 onto <base>, as pr_identity's @tsv. */
+  const ghBase = (base: string) =>
+    writeFileSync(
+      join(bin, 'gh'),
+      `#!/bin/sh\n[ "$1 $2" = "pr view" ] && printf '7\\tOPEN\\tfeat/pr\\tx\\t\\t${base}\\tu\\n'\nexit 0\n`,
+    );
+  return { dir, foreign, reship, remote, staged, mode, chmodTip, onMain, caller, peerGit, ghBase };
 }
 
 describe('reship-anchor — decide', () => {
@@ -176,6 +202,16 @@ function stageRepo(tipEdit: (dir: string) => void = () => {}) {
   const diff = () => git(wt, ['diff', '--cached', '--name-status']);
   return { dir, wt, git, run, staged, diff };
 }
+
+describe("resolveBaseRef — the strip base is gh's PR base, else the recorded one, never a guess", () => {
+  it("prefers gh's name even when only the recorded base resolves, and names a skip", () => {
+    const r = stageRepo(); // recorded the `pr` branch as shipped onto `work`
+    r.git(r.dir, ['update-ref', 'refs/remotes/origin/work', 'HEAD']);
+    expect(resolveBaseRef(r.dir, 'pr', '')).toBe('origin/work');
+    expect(resolveBaseRef(r.dir, 'pr', 'retargeted')).toBe('');
+    expect(resolveBaseRef(r.dir, 'unshipped', '')).toBe('');
+  });
+});
 
 describe('reship-anchor — stageAppend stages what the copy loop staged', () => {
   it('stages a nested new file, a symlink, an edit and a deletion over an unmoved tip', () => {
@@ -413,5 +449,280 @@ describe('reship --pr — what reached the PR branch survives a re-push (sc-4607
       'origin/feat/pr:bin.dat',
     ]);
     expect(shipped).toEqual(readFileSync(join(r.dir, 'bin.dat')));
+  });
+});
+
+describe('reship --pr — base content only the caller holds stays out of the PR (sc-7895)', () => {
+  const intro = (peerDir: string) => writeFileSync(join(peerDir, 'a.ts'), text({ 0: 'from main' }));
+  /** A PR checkout that merged origin/main locally after main changed line 1 of a.ts. */
+  function merged() {
+    const r = prRepo();
+    r.onMain('main: new intro', intro);
+    r.caller(['merge', '-q', '--no-edit', 'origin/main']);
+    return r;
+  }
+
+  it('ships only the lane edit after a local base merge, and again once the tip is ahead', () => {
+    const r = merged();
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'from main', 9: 'lane edit' }));
+    const first = r.reship();
+    expect(first.status, first.stderr).toBe(0);
+    expect(r.remote('a.ts')).toBe(text({ 9: 'lane edit' }).trim());
+    expect(first.stderr).toContain('left origin/main changes');
+    expect(first.stderr).toContain('main: new intro');
+    expect(first.stderr).not.toContain('(see git log'); // the base commits are named, not the fallback
+    const rec = manifestOf(r.dir).branches['feat/pr'].paths.find((p) => p.path === 'a.ts');
+    expect(rec.blobSha).toBe(r.caller(['rev-parse', 'origin/feat/pr:a.ts']));
+
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'from main', 9: 'lane edit', 10: 'second' }));
+    const second = r.reship();
+    expect(second.status, second.stderr).toBe(0);
+    expect(r.remote('a.ts')).toBe(text({ 9: 'lane edit', 10: 'second' }).trim());
+  });
+
+  it("merges the PR branch's own change with the stripped copy", () => {
+    const r = merged();
+    r.foreign('a.ts', text({ 11: 'review suggestion' }), 'Apply review suggestion');
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'from main', 9: 'lane edit' }));
+    const res = r.reship();
+    expect(res.status, res.stderr).toBe(0);
+    expect(r.remote('a.ts')).toBe(text({ 9: 'lane edit', 11: 'review suggestion' }).trim());
+    expect(res.stderr).toContain('left origin/main changes');
+  });
+
+  it("strips against the PR's own base from gh, and never against origin/HEAD for a missing one", () => {
+    const r = merged();
+    r.caller(['symbolic-ref', '--delete', 'refs/remotes/origin/HEAD']);
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'from main', 9: 'lane edit' }));
+    r.ghBase('main');
+    const known = r.reship();
+    expect(known.status, known.stderr).toBe(0);
+    expect(r.remote('a.ts')).toBe(text({ 9: 'lane edit' }).trim());
+
+    const stacked = prRepo();
+    stacked.onMain('main: new intro', intro);
+    stacked.caller(['merge', '-q', '--no-edit', 'origin/main']);
+    writeFileSync(join(stacked.dir, 'a.ts'), text({ 0: 'from main', 9: 'lane edit' }));
+    stacked.ghBase('feat/parent'); // origin/feat/parent was never fetched
+    const res = stacked.reship();
+    expect(res.status, res.stderr).toBe(0);
+    expect(res.stderr).not.toContain('left origin/main');
+    expect(res.stderr).toContain('could not compare with origin/feat/parent');
+    expect(stacked.remote('a.ts')).toBe(text({ 0: 'from main', 9: 'lane edit' }).trim());
+  });
+
+  it('without gh, strips against the recorded base and never against origin/HEAD', () => {
+    const stacked = prRepo({ baseRef: 'feat/parent' }); // shipped onto a parent never fetched here
+    stacked.onMain('main: new intro', intro);
+    stacked.caller(['merge', '-q', '--no-edit', 'origin/main']);
+    writeFileSync(join(stacked.dir, 'a.ts'), text({ 0: 'from main', 9: 'lane edit' }));
+    const res = stacked.reship();
+    expect(res.status, res.stderr).toBe(0);
+    expect(res.stderr).toContain('could not compare with origin/feat/parent');
+    expect(res.stderr).not.toContain('left origin/main');
+    expect(stacked.remote('a.ts')).toBe(text({ 0: 'from main', 9: 'lane edit' }).trim());
+
+    const unknown = prRepo({ record: false });
+    unknown.onMain('main: new intro', intro);
+    unknown.caller(['merge', '-q', '--no-edit', 'origin/main']);
+    writeFileSync(join(unknown.dir, 'a.ts'), text({ 0: 'from main', 9: 'lane edit' }));
+    const dry = unknown.staged('a.ts');
+    expect(dry.stderr).toContain("gh did not name the PR's base");
+    expect(dry.out).toBe(text({ 0: 'from main', 9: 'lane edit' }).trim());
+  });
+
+  it("keeps the caller's own unpushed commit while leaving the base out", () => {
+    const r = prRepo();
+    writeFileSync(join(r.dir, 'a.ts'), text({ 5: 'own commit' }));
+    r.caller(['commit', '-q', '-am', 'own work']);
+    r.onMain('main: new intro', intro);
+    r.caller(['merge', '-q', '--no-edit', 'origin/main']);
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'from main', 5: 'own commit', 9: 'lane edit' }));
+    const res = r.reship();
+    expect(res.status, res.stderr).toBe(0);
+    expect(r.remote('a.ts')).toBe(text({ 5: 'own commit', 9: 'lane edit' }).trim());
+  });
+
+  it('leaves the base out from a shared checkout sitting on a main that moved', () => {
+    const r = prRepo();
+    r.onMain('main: new intro', intro);
+    r.caller(['checkout', '-q', '-B', 'main', 'origin/main']);
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'from main', 9: 'shared edit' }));
+    expect(r.staged('a.ts').out).toBe(text({ 9: 'shared edit' }).trim());
+  });
+
+  it('refuses an edit that overlaps the base change unless GUARD_SHIP_REPLACE_OK=1', () => {
+    const r = merged();
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine over main' }));
+    const res = r.reship();
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain('cannot be left out');
+    expect(res.stderr).toContain('main: new intro');
+    expect(res.stderr).toContain('gh pr update-branch feat/pr');
+    expect(r.remote('a.ts')).toBe(text().trim());
+
+    const ok = r.reship({ GUARD_SHIP_REPLACE_OK: '1' });
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(ok.stderr).toContain('GUARD_SHIP_REPLACE_OK');
+    expect(r.remote('a.ts')).toBe(text({ 0: 'mine over main' }).trim());
+
+    // The tip now holds the override, so an edit elsewhere ships without it.
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine over main', 9: 'second edit' }));
+    const again = r.reship();
+    expect(again.status, again.stderr).toBe(0);
+    expect(r.remote('a.ts')).toBe(text({ 0: 'mine over main', 9: 'second edit' }).trim());
+
+    // A tip hunk the copy lacks is never re-added or dropped silently: the push still refuses.
+    r.peerGit(['pull', '-q', '--ff-only', 'origin', 'feat/pr']);
+    const suggested = text({ 0: 'mine over main', 5: 'review suggestion', 9: 'second edit' });
+    r.foreign('a.ts', suggested, 'Apply review suggestion');
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine over main', 9: 'second edit', 11: 'x' }));
+    expect(r.reship().status).toBe(1);
+    expect(r.remote('a.ts')).toBe(suggested.trim());
+  });
+
+  it('copies as before once the PR branch already holds the base change', () => {
+    const r = merged();
+    r.peerGit(['fetch', '-q', 'origin', 'main']);
+    r.peerGit(['merge', '-q', '--no-edit', 'FETCH_HEAD']);
+    r.peerGit(['push', '-q', 'origin', 'feat/pr']);
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'from main', 9: 'lane edit' }));
+    const res = r.reship();
+    expect(res.status, res.stderr).toBe(0);
+    expect(r.remote('a.ts')).toBe(text({ 0: 'from main', 9: 'lane edit' }).trim());
+    expect(res.stderr).not.toContain('left origin/main');
+  });
+
+  it('ships a deletion of a file the base changed, and leaves a base chmod out', () => {
+    const del = merged();
+    rmSync(join(del.dir, 'a.ts'));
+    const res = del.reship();
+    expect(res.status, res.stderr).toBe(0);
+    expect(del.caller(['ls-tree', 'origin/feat/pr', 'a.ts'])).toBe('');
+
+    const mod = prRepo();
+    mod.onMain('main: make a.ts executable', (p) => chmodSync(join(p, 'a.ts'), 0o755));
+    mod.caller(['merge', '-q', '--no-edit', 'origin/main']);
+    writeFileSync(join(mod.dir, 'a.ts'), text({ 9: 'lane edit' }));
+    const ok = mod.reship();
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(mod.mode('a.ts')).toBe('100644');
+    expect(mod.remote('a.ts')).toBe(text({ 9: 'lane edit' }).trim());
+  });
+});
+
+describe('stripBase — a base change the tip already carries is never removed', () => {
+  it('leaves a cherry-picked base hunk in, and strips it when the tip lacks it', () => {
+    const dir = tmp('reship-anchor-strip-');
+    const env = { ...process.env, ...GENV };
+    const git = (a: string[]) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8' }).trim();
+    const commit = (content: string) => {
+      writeFileSync(join(dir, 'a.ts'), content);
+      git(['add', 'a.ts']);
+      git(['commit', '-q', '-m', 'c']);
+      return git(['rev-parse', 'HEAD']);
+    };
+    git(['init', '-q', '-b', 'main']);
+    git(['config', 'user.email', 'a@b.c']);
+    git(['config', 'user.name', 'a']);
+    const fork = commit(text());
+    const head = commit(text({ 0: 'from main' }));
+    git(['checkout', '-q', '-b', 'pr', fork]);
+    const bare = commit(text({ 11: 'pr' }));
+    const picked = commit(text({ 0: 'from main', 11: 'pr' }));
+    writeFileSync(join(dir, 'a.ts'), text({ 0: 'from main', 9: 'mine' }));
+    const here = hereEntry(dir, 'a.ts');
+    const strip = (tip: string) =>
+      stripBase(dir, here, treeEntry(dir, tip, 'a.ts'), { tip, head, baseRef: 'main' }, 'a.ts');
+
+    expect(strip(picked)).toEqual({ here, commits: [], refuse: false });
+    const left = strip(bare);
+    expect(left.refuse).toBe(false);
+    expect(left.commits).toHaveLength(1);
+    expect(git(['cat-file', 'blob', left.here?.blob ?? ''])).toBe(text({ 9: 'mine' }).trim());
+
+    // A copy that already lacks the base change names nothing as left out.
+    writeFileSync(join(dir, 'a.ts'), text({ 9: 'mine' }));
+    const reverted = hereEntry(dir, 'a.ts');
+    const tipEntry = treeEntry(dir, bare, 'a.ts');
+    const opts = { tip: bare, head, baseRef: 'main' };
+    expect(stripBase(dir, reverted, tipEntry, opts, 'a.ts')).toEqual({
+      here: reverted,
+      commits: [],
+      refuse: false,
+    });
+    // A HEAD older than the PR's fork holds no base change the PR lacks: nothing is touched.
+    git(['checkout', '-q', '-f', '-b', 'late', head]);
+    const late = commit(text({ 0: 'from main', 11: 'late pr' }));
+    const old = { tip: late, head: fork, baseRef: 'main' };
+    expect(stripBase(dir, reverted, treeEntry(dir, late, 'a.ts'), old, 'a.ts')).toEqual({
+      here: reverted,
+      commits: [],
+      refuse: false,
+    });
+  });
+
+  it('strips the mainline delta when the PR forked from a side branch the base later merged', () => {
+    const dir = tmp('reship-anchor-side-');
+    const env = { ...process.env, ...GENV };
+    const git = (a: string[]) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8' }).trim();
+    const commit = (content: string, subject: string) => {
+      writeFileSync(join(dir, 'a.ts'), content);
+      git(['add', 'a.ts']);
+      git(['commit', '-q', '-m', subject]);
+      return git(['rev-parse', 'HEAD']);
+    };
+    git(['init', '-q', '-b', 'main']);
+    git(['config', 'user.email', 'a@b.c']);
+    git(['config', 'user.name', 'a']);
+    const root = commit(text(), 'root');
+    const head = commit(text({ 0: 'from a' }), 'mainline change'); // the caller sits here
+    git(['checkout', '-q', '-b', 'side', root]);
+    const side = commit(text({ 11: 'side' }), 'side change');
+    git(['checkout', '-q', 'main']);
+    git(['merge', '-q', '--no-edit', 'side']); // main now holds both lines of work
+    git(['checkout', '-q', '-b', 'pr', side]);
+    const tip = commit(text({ 5: 'pr', 11: 'side' }), 'pr change'); // forked from the side line
+    git(['checkout', '-q', '-f', head]);
+    writeFileSync(join(dir, 'a.ts'), text({ 0: 'from a', 9: 'mine' }));
+    const here = hereEntry(dir, 'a.ts');
+    const opts = { tip, head, baseRef: 'main' };
+    const got = stripBase(dir, here, treeEntry(dir, tip, 'a.ts'), opts, 'a.ts');
+    expect(got.refuse).toBe(false);
+    expect(got.commits.join('\n')).toContain('mainline change');
+    expect(git(['cat-file', 'blob', got.here?.blob ?? ''])).toBe(text({ 9: 'mine' }).trim());
+  });
+
+  it('ships an overridden copy the tip already holds, but never a base chmod the tip lacks', () => {
+    const dir = tmp('reship-anchor-held-');
+    const env = { ...process.env, ...GENV };
+    const git = (a: string[]) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8' }).trim();
+    const commit = (content: string, mode = 0o644) => {
+      writeFileSync(join(dir, 'a.ts'), content);
+      chmodSync(join(dir, 'a.ts'), mode);
+      git(['add', 'a.ts']);
+      git(['commit', '-q', '-m', 'c']);
+      return git(['rev-parse', 'HEAD']);
+    };
+    git(['init', '-q', '-b', 'main']);
+    git(['config', 'user.email', 'a@b.c']);
+    git(['config', 'user.name', 'a']);
+    const fork = commit(text());
+    const head = commit(text({ 0: 'from main' }), 0o755); // main changed line 1 and made it executable
+    git(['checkout', '-q', '-f', '-b', 'pr', fork]);
+    const tip = commit(text({ 0: 'mine' })); // the override ship: the caller's line 1, mode 644
+    const strip = (mode: number) => {
+      writeFileSync(join(dir, 'a.ts'), text({ 0: 'mine', 9: 'elsewhere' }));
+      chmodSync(join(dir, 'a.ts'), mode);
+      const here = hereEntry(dir, 'a.ts');
+      const opts = { tip, head, baseRef: 'main' };
+      return { here, got: stripBase(dir, here, treeEntry(dir, tip, 'a.ts'), opts, 'a.ts') };
+    };
+    const held = strip(0o644);
+    expect(held.got).toEqual({ here: held.here, commits: [], refuse: false });
+    expect(strip(0o755).got.refuse).toBe(true);
   });
 });
