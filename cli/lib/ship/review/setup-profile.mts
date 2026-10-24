@@ -2,7 +2,6 @@
 
 import { isAbsolute } from 'node:path';
 import {
-  DEFAULT_REVIEW_DECISIONS_DIR,
   GUARD_IDS,
   normalizeReviewProfile,
   normalizeSelection,
@@ -11,7 +10,6 @@ import {
   type Selection,
 } from '../../components.mts';
 import { reviewGuardIssues } from '../../install/flags/review-profile.mts';
-import { normalizeSafeReviewRelativePath } from './runtime-paths.mts';
 import { fail, objectValue } from './shared/common.mts';
 
 export const REVIEW_SETUP_DOCTOR = "run 'devkit doctor --fix'.";
@@ -140,26 +138,9 @@ function parseReviewProfile(config: RawReviewConfig, installed: string[]): Revie
   const enabled = booleanField(settings.enabled, '.devkit/config.json review.enabled') ?? true;
   if (!enabled) fail("disabled by .devkit/config.json — run 'devkit init --review'.");
   const requested = parseRequestedGuards(settings, installed);
-  const decisionsDir = stringField(
-    settings.decisionsDir,
-    '.devkit/config.json review.decisionsDir',
-  );
-  if (decisionsDir !== undefined && !decisionsDir.trim()) {
-    fail(`.devkit/config.json review.decisionsDir must not be empty — ${REVIEW_SETUP_DOCTOR}`);
-  }
-  const normalizedDecisionsDir =
-    decisionsDir === undefined
-      ? DEFAULT_REVIEW_DECISIONS_DIR
-      : normalizeSafeReviewRelativePath(decisionsDir);
-  if (normalizedDecisionsDir === null)
-    fail(
-      `.devkit/config.json review.decisionsDir must be repository-relative — ${REVIEW_SETUP_DOCTOR}`,
-    );
-  return normalizeReviewProfile(
-    { enabled, guards: requested, decisionsDir: normalizedDecisionsDir },
-    installed,
-    { enabledDefault: true },
-  );
+  return normalizeReviewProfile({ enabled, guards: requested }, installed, {
+    enabledDefault: true,
+  });
 }
 
 export function parseReviewSetupProfile(raw: Buffer): ParsedReviewSetupProfile {

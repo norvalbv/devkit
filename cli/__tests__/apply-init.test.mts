@@ -164,18 +164,9 @@ describe('selection helpers', () => {
   });
 
   it('parseFlags reads the local review profile flags', () => {
-    expect(
-      parseFlags([
-        '--review',
-        '--review-guards',
-        'size,decisions',
-        '--review-decisions-dir',
-        'architecture/decisions',
-      ]),
-    ).toMatchObject({
+    expect(parseFlags(['--review', '--review-guards', 'size,decisions'])).toMatchObject({
       review: true,
       reviewGuards: ['size', 'decisions'],
-      reviewDecisionsDir: 'architecture/decisions',
     });
     expect(parseFlags(['--no-review']).review).toBe(false);
   });
@@ -208,11 +199,10 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(cfg.review).toEqual({
       enabled: false,
       guards: ['size'],
-      decisionsDir: 'docs/decisions',
     });
   });
 
-  it('writes and preserves a local review profile, pruning guards removed from the install', async () => {
+  it('writes and preserves a local review profile, pruning removed guards and stale keys', async () => {
     const root = tmpRepo();
     const selection = {
       tsconfig: false,
@@ -224,27 +214,18 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     await applyInit(root, {
       stack: 'generic',
       selection,
-      review: {
-        enabled: true,
-        guards: ['decisions'],
-        decisionsDir: 'architecture/decisions',
-      },
+      review: { enabled: true, guards: ['decisions'] },
     });
-    expect(config(root).review).toEqual({
-      enabled: true,
-      guards: ['decisions'],
-      decisionsDir: 'architecture/decisions',
-    });
+    expect(config(root).review).toEqual({ enabled: true, guards: ['decisions'] });
+    const stale = config(root);
+    stale.review.decisionsDir = 'architecture/decisions';
+    writeFileSync(join(root, '.devkit/config.json'), `${JSON.stringify(stale, null, 2)}\n`);
 
     await applyInit(root, {
       stack: 'generic',
       selection: { ...selection, guards: ['size'] },
     });
-    expect(config(root).review).toEqual({
-      enabled: true,
-      guards: [],
-      decisionsDir: 'architecture/decisions',
-    });
+    expect(config(root).review).toEqual({ enabled: true, guards: [] });
   });
 
   it('migrates a legacy initialized config without a review section as enabled', async () => {
@@ -267,7 +248,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(config(root).review).toEqual({
       enabled: true,
       guards: ['size'],
-      decisionsDir: 'docs/decisions',
     });
   });
 
@@ -308,7 +288,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(config(root).review).toEqual({
       enabled: true,
       guards: ['size'],
-      decisionsDir: 'docs/decisions',
     });
   });
 

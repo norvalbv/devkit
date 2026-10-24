@@ -973,7 +973,6 @@ async function run(args: string[], cwd: string): Promise<number> {
       detectedMode,
       structureAvailable: STRUCTURE_STACKS.has(detectedStack),
       installed: detectInstalled(cwd),
-      existingReview: recorded?.review,
       recorded: recorded?.components,
     });
     if (!result) return 0; // cancelled — nothing written

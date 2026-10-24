@@ -45,7 +45,7 @@ function config(overlay: boolean, pkgRel = '') {
     ...(overlay ? { origHooksPath: '.git/hooks' } : {}),
     ...(pkgRel ? { pkgRel } : {}),
     components: selection,
-    review: { enabled: true, guards: ['size', 'decisions'], decisionsDir: 'docs/decisions' },
+    review: { enabled: true, guards: ['size', 'decisions'] },
   };
 }
 
@@ -208,13 +208,12 @@ describe('private review setup runtime', () => {
       fx.runtimeManifest,
     );
 
-    expect(runtime.fields).toMatchObject({
+    expect(runtime.fields).toEqual({
       targetRelativePath: 'packages/app',
       hooksPath: '.husky/_',
       overlay: false,
       enabled: true,
       guards: ['size', 'decisions'],
-      decisionsDir: 'docs/decisions',
       chainHook: '',
     });
     expect(lstatSync(join(fx.destination, '.husky/_')).isDirectory()).toBe(true);
@@ -399,12 +398,11 @@ describe('private review setup runtime', () => {
     expect(result.status, result.stderr.toString()).toBe(0);
     const fields = result.stdout.subarray(0, -1).toString().split('\0');
     expect(fields).toEqual([
-      'devkit-review-setup-v1',
+      'devkit-review-setup-v2',
       'packages/app',
       '.husky/_',
       '0',
       '1',
-      'docs/decisions',
       '',
       '2',
       'size',
