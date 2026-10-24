@@ -36,12 +36,12 @@ const USAGE = `Usage:
 
 export const meta = {
   name: 'follow-up',
-  agentFacing: false,
-  notRoutedBecause:
-    "Called by a Flow's closing steps after a story ships: frink-work's Track Follow-ups agent pipes " +
-    'the deferred items into `file` and `status` answers its Feature done line; its Start Follow-up ' +
-    'node then runs `start`. `start` queues paid agent work and narrows the human gate on ' +
-    'follow-ups, so it is not routed to agents by hand.',
+  agentFacing: true,
+  unroutedSubcommands: {
+    start:
+      "Run by a Flow's Start Follow-up node after a story ships. It queues paid agent work and " +
+      'narrows the human gate on follow-ups, so an agent never runs it by hand.',
+  },
   summary:
     'File the follow-ups a story deferred, start one builds-on follow-up of it, or list the open ones.',
   help: `devkit follow-up — file the follow-ups a story deferred, start one, and list the open ones.
@@ -79,7 +79,8 @@ start assigns at most one builds-on follow-up of the parent: open, carrying **St
 parent's PR when it had one. The lowest qualifying id is renamed "${AUTO_START_PREFIX} <title>" and
 then assigned, which fires a story-assigned trigger. Nothing starts when the parent is itself a
 follow-up, or once an ${AUTO_START_PREFIX} follow-up of it is assigned or closed. Prints
-{"started":true,"story":<id>} or {"started":false,"reason":"..."}.
+{"started":true,"story":<id>} or {"started":false,"reason":"..."}. start is run by a Flow step
+after a story ships, never by hand.
 
 status lists the open follow-ups that hold the story's feature back: blocks-done, builds-on and
 untyped ones (type null) that are neither done nor archived; discovery ones never count. When the
