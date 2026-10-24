@@ -727,7 +727,7 @@ describe('--ship-staged: the self-host hook runs CI’s check from the ship work
     expect(moved).toBe(true);
   });
 
-  it("is fed CI's PR base by ship and a reship rewrite, never by an append reship", () => {
+  it("is fed CI's PR base by ship, a reship rewrite, and an append reship that GitHub answered", () => {
     const shipDir = fileURLToPath(new URL('../lib/ship/', import.meta.url));
     const ship = readFileSync(join(shipDir, 'ship-branch.sh'), 'utf8');
     const reship = readFileSync(join(shipDir, 'reship.sh'), 'utf8');
@@ -737,7 +737,7 @@ describe('--ship-staged: the self-host hook runs CI’s check from the ship work
     // An append's worktree is cut from the PR tip, so judging from it would refuse a later edit of
     // an artifact the PR itself added, which CI (diffing from the merge-base) accepts.
     expect(reship).toContain(
-      'if [ "$REWRITE" -eq 1 ]; then export DEVKIT_SHIP_PR_BASE_SHA="$BASE"; else unset DEVKIT_SHIP_PR_BASE_SHA; fi',
+      'if [ "$REWRITE" -eq 1 ]; then export DEVKIT_SHIP_PR_BASE_SHA="$BASE"; elif [ -n "$PR_MERGE_BASE" ]; then export DEVKIT_SHIP_PR_BASE_SHA="$PR_MERGE_BASE"; else unset DEVKIT_SHIP_PR_BASE_SHA; fi',
     );
     expect(review).toMatch(/\bDEVKIT_SHIP_PR_BASE_SHA\b[\s\S]*\bunset "\$name"/);
   });
