@@ -13,6 +13,9 @@ export interface ExtraGate {
   cmd?: string;
 }
 
+// Strips a built-in gate's `guard-` bin prefix to its bare telemetry name.
+export const GUARD_PREFIX_RE = /^guard-/;
+
 // Built-in names would merge telemetry with that gate and print its remedies for this one.
 const RESERVED = new Set(['structure-lint', ...DETERMINISTIC.map((g) => g.id)]);
 const labelSchema = z

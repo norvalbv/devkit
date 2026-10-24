@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { configExtraGates } from '../command-gates.mts';
-import { prefixCacheScope, selectedIds } from '../run.mts';
+import { prefixCacheScope } from '../run.mts';
+import { selectedIds } from '../selection.mts';
 
 const dirs: string[] = [];
 afterEach(() => {
