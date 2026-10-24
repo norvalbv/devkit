@@ -219,7 +219,53 @@ describe('every agent-facing command is routed from skills/', async () => {
         'an INTENTIONAL omission from a FORGOTTEN one — which is the entire point of this test.',
     ).not.toBe('');
   });
+
+  const unrouted = unroutedSubcommandRows(metas);
+
+  it('the unrouted-subcommand check has something to check', () => {
+    // Without a row, the negative check below would pass for every skill by never running.
+    expect(unrouted.map(([verb, sub]) => `${verb} ${sub}`)).toContain('follow-up start');
+  });
+
+  it('skills/ route `devkit follow-up file`, not just the bare verb', () => {
+    // The per-verb check above passes on any `devkit follow-up` mention, routed subcommand or not.
+    const matcher = namedInSkills('follow-up file');
+    expect(skills.filter(({ body }) => matcher.test(body)).map(({ rel }) => rel)).toContain(
+      'using-devkit/SKILL.md',
+    );
+  });
+
+  it.each(unrouted)('skills/ never names `devkit %s %s`', (verb, sub, reason, file) => {
+    expect(
+      reason.trim(),
+      `cli/commands/${file}: unroutedSubcommands.${sub} needs a reason`,
+    ).not.toBe('');
+    // A renamed subcommand would make the skills check below pass vacuously.
+    expect(
+      metas.get(verb)?.meta.help,
+      `cli/commands/${file} lists unrouted subcommand "${sub}", but its help never mentions it`,
+    ).toMatch(new RegExp(`devkit ${verb} ${sub}\\b`));
+    const matcher = namedInSkills(`${verb} ${sub}`);
+    const hits = skills.filter(({ body }) => matcher.test(body)).map(({ rel }) => rel);
+    expect(
+      hits,
+      `skills/ names \`devkit ${verb} ${sub}\`, which cli/commands/${file} keeps away from agents:\n` +
+        `  ${reason}\n\nRoute the agent-facing subcommand instead, and describe this one without ` +
+        'spelling its invocation.',
+    ).toEqual([]);
+  });
 });
+
+/** One `[verb, subcommand, reason, file]` row per declared unrouted subcommand. */
+function unroutedSubcommandRows(
+  metas: Map<string, { meta: CommandMeta; file: string }>,
+): [string, string, string, string][] {
+  return [...metas].flatMap(([verb, { meta, file }]) =>
+    Object.entries(meta.unroutedSubcommands ?? {}).map(
+      ([sub, reason]): [string, string, string, string] => [verb, sub, reason, file],
+    ),
+  );
+}
 
 /** Unreachable through the real tree: renaming a `meta.name` moves both sides together, since
  *  --help renders from the same modules. Its detection only runs on healthy input unless pinned. */
