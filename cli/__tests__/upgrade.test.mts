@@ -486,8 +486,8 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
     delete cfg.components.structure; // simulate a pre-structure-key config
     writeFileSync(join(root, '.devkit', 'config.json'), `${JSON.stringify(cfg, null, 2)}\n`);
 
-    // (doctor exit isn't asserted here — a component-lib WITHOUT structure gets the generic base biome,
-    // an orthogonal mismatch; this test only pins that upgrade does not NEWLY add structure-lint.)
+    // (doctor exit isn't asserted here — a component-lib WITHOUT structure is an orthogonal mismatch;
+    // this test only pins that upgrade does not NEWLY add structure-lint.)
     run(root, 'upgrade');
     expect(existsSync(join(root, 'eslint.config.mjs'))).toBe(false); // still off — not newly added
     expect(readFileSync(join(root, '.husky/pre-commit'), 'utf8')).not.toContain('guard-structure');
@@ -511,21 +511,23 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
     expect(config(root).components.structure).toBe(true);
   });
 
-  it('does not recreate Biome config when an Electron structure consumer deselects it', () => {
+  it('reports retired Biome state on upgrade and leaves the consumer files alone', () => {
     const root = tmpRepo({ ...CLIB_PKG, devDependencies: { electron: '^30' } });
     expect(run(root, 'init', '--stack', 'electron', '--yes', '--no-cursor').status).toBe(0);
 
     const cfg = config(root);
     cfg.components.biome = false;
     writeFileSync(join(root, '.devkit', 'config.json'), `${JSON.stringify(cfg, null, 2)}\n`);
-    rmSync(join(root, 'biome.jsonc'));
+    writeFileSync(join(root, 'biome.jsonc'), '{ "formatter": { "lineWidth": 90 } }\n');
 
     const up = run(root, 'upgrade');
     expect(up.status, up.stderr || up.stdout).toBe(0);
-    expect(existsSync(join(root, 'biome.jsonc'))).toBe(false);
+    expect(up.stdout).toContain('devkit no longer ships Biome');
+    expect(up.stdout).toContain('components.biome');
+    expect(readFileSync(join(root, 'biome.jsonc'), 'utf8')).toContain('"lineWidth": 90');
+    expect(config(root).components).not.toHaveProperty('biome');
     expect(existsSync(join(root, 'eslint.config.mjs'))).toBe(true);
     expect(existsSync(join(root, 'tsconfig.json'))).toBe(true);
-    expect(readFileSync(join(root, '.husky/pre-commit'), 'utf8')).not.toContain('biome format');
   });
 });
 

@@ -21,7 +21,12 @@ import {
 } from './gate-policy/block-helpers.mts';
 import { buildPreCommitExit, PRE_COMMIT_PASS_EXIT } from './gate-policy/commit-gate-log.mts';
 import { FALLOW_STAGED, FALLOW_STAGED_BLOCK, indent } from './gate-policy/fallow-staged.mts';
-import { formatFragment, overlayFormatters, type StepFormatter } from './format-fragment.mts';
+import {
+  CONSUMER_FORMATTER,
+  formatFragment,
+  OXFMT_STEP,
+  type StepFormatter,
+} from './format-fragment.mts';
 import { markEnd, markStart } from './husky.mts';
 import { DK_COMMIT_INDEX_CAPTURE, selectedFragment } from './review-fragments.mts';
 import { sentryShipPrewarmFragment } from './sentry-fragments.mts';
@@ -31,12 +36,8 @@ import {
 } from './overlay/eslint-overlay-marker.mts';
 import { shQuote } from '../ship/redact-secrets.mts';
 
-/**
- * A superset of every builder's needs; each reads only its own fields. `biome` keeps owning whether
- * the format step is emitted at all — the opt-out — while the step itself checks for a biome CONFIG.
- */
+/** A superset of every builder's needs; each reads only its own fields. */
 interface HookSelection {
-  biome?: boolean;
   guards?: string[];
   antiSlop?: boolean;
   /** Package and standalone: emit the staged fallow gate. Overlay wires its own via `opts.fallow`. */
@@ -122,7 +123,7 @@ interface BlockOptions {
   preAi?: string;
   /** Diagnostics that must not hide a guard's report, so they run after every guard. */
   postGuards?: string;
-  /** Overlay's config-probed formatter chain; other modes render biome alone when selected. */
+  /** Overlay's formatter chain (the repo's own Oxfmt); other modes run devkit's pinned Oxfmt. */
   formatChain?: StepFormatter[];
 }
 
@@ -131,13 +132,12 @@ interface BlockOptions {
 export function buildGuardBlock(
   selection: HookSelection,
   pkgRel = '',
-  { binDir = 'package', preAi, postGuards, formatChain }: BlockOptions = {},
+  { binDir = 'package', preAi, postGuards, formatChain = [CONSUMER_FORMATTER] }: BlockOptions = {},
 ): string {
   const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
   const pieces = [buildPreCommitExit(handoff), ...gateBlockPrelude(BIN_DIRS[binDir].open)];
   // First so a first-gate block still records the run's terminal (the trap covers every exit path).
-  if (!pkgRel && (selection.biome || formatChain))
-    pieces.push(formatFragment(BIN_DIRS[binDir].formatter, formatChain));
+  if (!pkgRel) pieces.push(formatFragment(BIN_DIRS[binDir].formatter, formatChain));
   if (wantsDeterministic(selection))
     pieces.push(
       DK_DETERMINISTIC_GATE_HELPER,
@@ -173,12 +173,12 @@ export function buildFullHook(selection: HookSelection, pkgRel = '', binDir: Bin
   return `${HOOK_PREAMBLE}\n${buildGuardBlock(selection, pkgRel, { binDir })}\n\nexit 0\n`;
 }
 
-// The eslint/biome overlay steps — run the LOCAL devkit configs (which extend the repo's) over
+// The eslint overlay step — run the LOCAL devkit configs (which extend the repo's) over
 // STAGED files only (so new changes are checked without flooding on the team's existing code,
 // which can't be grandfathered invisibly). Each fires when its local config is present; the binary
 // is the repo's own, so its absence is a visible skip line, never a silent one.
 // `--relative` makes `git diff` emit paths relative to the CURRENT dir, so this works whether
-// the hook runs at the repo root or cd'd into a monorepo package (eslint/biome + their configs
+// the hook runs at the repo root or cd'd into a monorepo package (eslint + its configs
 // are then resolved package-locally). `-M100%` lists an edited rename as an add at its new path;
 // an exact move stays `R` and is skipped, so a pure `git mv` never blocks on debt it did not add.
 const overlayLintStep = (
@@ -213,13 +213,6 @@ const OVERLAY_ESLINT_STAGED = overlayLintStep(
             fi
 `,
 );
-const OVERLAY_BIOME = overlayLintStep(
-  'biome',
-  '🎨 devkit biome overlay (staged)...',
-  'tsx?|jsx?|css|jsonc?',
-  'biome.devkit.jsonc',
-  'node_modules/.bin/biome check --config-path biome.devkit.jsonc',
-);
 
 // Shell twin of eslintNodeFlags: keep a linked node_modules' path so a plugin roots at this worktree.
 // Never for an isolated store (eslint itself linked): the flag breaks its dependency resolution.
@@ -234,8 +227,7 @@ const overlayStagedGates = (
 ) => `# devkit lint overlay — STAGED files only, against configs that EXTEND the repo's (git-ignored).
 if [ "\${DEVKIT_RUN_MODE:-}" != "review" ]; then
 ${indent(ESLINT_PRESERVE_SYMLINKS)}
-${indent(OVERLAY_ESLINT_STAGED)}
-${indent(OVERLAY_BIOME)}${fallow ? `\n    # devkit fallow gate (overlay)\n${indent(FALLOW_STAGED)}` : ''}
+${indent(OVERLAY_ESLINT_STAGED)}${fallow ? `\n    # devkit fallow gate (overlay)\n${indent(FALLOW_STAGED)}` : ''}
 fi`;
 
 /** Under the global husky shim (cli/lib/overlay-global-hook.mts) an overlay hook stops before its
@@ -250,8 +242,7 @@ const overlayReviewBaseline = (
   fallow: boolean,
 ) => `# devkit lint overlay — review mode, merge-base baselines.
 if [ "\${DEVKIT_RUN_MODE:-}" = "review" ]; then
-    __dk_review_baseline_gate eslint || exit 1
-${indent(OVERLAY_BIOME)}${fallow ? '\n    __dk_review_baseline_gate fallow || exit 1' : ''}
+    __dk_review_baseline_gate eslint || exit 1${fallow ? '\n    __dk_review_baseline_gate fallow || exit 1' : ''}
 fi`;
 
 /**
@@ -277,7 +268,7 @@ export function buildOverlayHook(
     binDir: 'global',
     preAi: overlayStagedGates(fallow),
     postGuards: overlayReviewBaseline(fallow),
-    formatChain: overlayFormatters(selection),
+    formatChain: [OXFMT_STEP],
   });
   return `${HOOK_PREAMBLE}
 # devkit OVERLAY (LOCAL, git-ignored). Runs devkit's gates + lint overlay on this commit, then
@@ -354,7 +345,7 @@ export function extractGuardBlock(hookContent: string, pkgRel = ''): string | nu
  * Remove a single per-id fragment (`# devkit:<id>` … `# /devkit:<id>`) from a hook,
  * trimming the blank line that joined it. Returns { content, removed }.
  *
- * `id` is one of GUARD_FRAGMENTS keys or 'biome-format'.
+ * `id` is one of GUARD_FRAGMENTS keys.
  */
 export function removeFragment(
   hookContent: string,

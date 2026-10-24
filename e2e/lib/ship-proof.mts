@@ -90,7 +90,6 @@ export async function prepareShipProof(options: ShipProofOptions): Promise<ShipP
       '--guards',
       guards,
       '--yes',
-      '--no-biome',
     ]);
     if (init.status !== 0) throw new Error(`devkit init failed:\n${out(init)}`);
     dropUninstalledDeps(fx.repoDir);

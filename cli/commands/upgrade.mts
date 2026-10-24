@@ -33,6 +33,7 @@ import {
 } from '../lib/install/anti-slop/managed-state.mts';
 import { collectAntiSlopGroups } from '../lib/install/anti-slop/runner.mts';
 import { lockedCommand } from '../lib/install/init/init-lock.mts';
+import { retiredBiomeNotice } from '../lib/install/oxc/root-configs.mts';
 import {
   offerLineGrowth,
   offerNewGates,
@@ -225,19 +226,14 @@ async function upgrade(args: string[], cwd: string): Promise<number> {
     console.log(
       '\n2. re-sync (regenerate the git-ignored gate chain + configs for the recorded selection)',
     );
-    // biome is a pass-through overlay opt-out that applyOverlay never persists into config.components, so
-    // normalizeSelection would default it back to `true` and silently re-add biome.devkit.jsonc to a repo
-    // init'd with --no-biome. Honour the recorded value; else infer from the on-disk overlay marker (the
-    // same legacy-inference idiom as `structure` above) — biome.devkit.jsonc is written iff biome was on.
-    const biome = cfg.components?.biome ?? existsSync(join(cwd, 'biome.devkit.jsonc'));
     // structure as recorded, never the normalized default: an adopted overlay is never re-baselined.
     const structure = cfg.components?.structure ?? false;
     const sel = applyOverlayConstraints(
-      { ...normalizeSelection(cfg.components), agentTargets, biome, structure },
+      { ...normalizeSelection(cfg.components), agentTargets, structure },
       stack,
     );
-    // `--force` must NOT reach applyOverlay's config writers: writeIfAbsent(guard.config.json) and
-    // writeBiomeOverlay OVERWRITE on force, but upgrade's contract (and the package-mode branch, which
+    // `--force` must NOT reach applyOverlay's config writers: writeIfAbsent(guard.config.json)
+    // OVERWRITES on force, but upgrade's contract (and the package-mode branch, which
     // hardcodes force:false) is that tuned configs are NEVER overwritten. Refreshing overlay configs is
     // the deliberate `devkit init --overlay --force`, not upgrade. Assets are adopted below, as in Step 5.
     if (force) {
@@ -261,6 +257,8 @@ async function upgrade(args: string[], cwd: string): Promise<number> {
         "  • retired components.oxc key will be removed; overlay's Oxc state is git-excluded (.devkit/oxc/, oxlint.devkit.json)",
       );
     }
+    const biomeNotice = retiredBiomeNotice(cwd, Object.hasOwn(cfg.components ?? {}, 'biome'), true);
+    if (biomeNotice) console.log(biomeNotice);
     // Snapshot the rule registry BEFORE the re-sync overwrites it: overlay's activation evidence
     // never comes from Git, so this capture is the only record. See oxc-toolchain-migration.
     const previousAntiSlopRuleIds = sel.antiSlop
@@ -398,6 +396,8 @@ async function upgrade(args: string[], cwd: string): Promise<number> {
       '  • hard cutover: reconcile core Oxc repository state and remove the retired components.oxc key',
     );
   }
+  const biomeNotice = retiredBiomeNotice(cwd, Object.hasOwn(cfg.components ?? {}, 'biome'));
+  if (biomeNotice) console.log(biomeNotice);
 
   // ── 4. broad refresh (idempotent; never clobbers consumer configs) ─────────
   // applyInit(force:false): configs via writeIfAbsent (existing preserved), package.json devDeps,
@@ -429,7 +429,7 @@ async function upgrade(args: string[], cwd: string): Promise<number> {
 
   // ── 5. --force asset adoption (assets only — never configs) ─────────────────
   // --force is driven by the `override` OPT (args only carry --dry-run). Re-syncs the selected
-  // surfaces adopting consumer-authored same-named collisions; tuned biome/tsconfig are untouched.
+  // surfaces adopting consumer-authored same-named collisions; a tuned tsconfig is untouched.
   if (force) {
     console.log('\n5. --force: adopt consumer-authored asset collisions');
     adoptAgentAssetCollisions(gitRoot, sel, dryRun);

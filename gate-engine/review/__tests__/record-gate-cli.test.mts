@@ -27,7 +27,7 @@ function recordGate(gate: string) {
 }
 
 describe('guard-review record-gate', () => {
-  it.each(['fallow', 'eslint-overlay', 'biome-overlay'])(
+  it.each(['fallow', 'eslint-overlay'])(
     'records %s as a family-less gate_result fail on the ship',
     (gate) => {
       const { status, rows } = recordGate(gate);

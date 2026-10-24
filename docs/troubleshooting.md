@@ -26,7 +26,7 @@ invalidates the cached smell verdict.
 
 ## `invalid JSON: …` from `devkit doctor`
 
-A managed config (`biome.jsonc`, `tsconfig.json`) has a syntax error (a trailing comma, a missing brace).
+A managed config (`tsconfig.json`) has a syntax error (a trailing comma, a missing brace).
 doctor now reports the parser's reason. Fix the JSON and re-run `devkit doctor`. For `guard.config.json`
 specifically, the error comes from the config loader — same fix.
 
@@ -429,8 +429,8 @@ at a time, by design.
 
 ## `✗ staged gate blocked: <gate>`
 
-A gate the hook runs as shell blocked the commit: `fallow` (the staged audit), `eslint-overlay` or
-`biome-overlay`. Its own report sits directly above the line; `guard-deterministic` does not re-run
+A gate the hook runs as shell blocked the commit: `fallow` (the staged audit) or
+`eslint-overlay`. Its own report sits directly above the line; `guard-deterministic` does not re-run
 it, so fix what that report names and re-commit. Under `devkit ship` the block also prints the
 `devkit ship … --dry-gates` command that re-checks the fix on ship's exact staging.
 
@@ -445,7 +445,7 @@ Each named gate's findings appear above the line.
 To check a fix without another commit or ship, stage it and run the per-gate command the block prints
 under `Re-check a fix locally` (anti-slop: `devkit anti-slop check --staged`). Under `devkit ship`, those
 commands judge your checkout's index; the ship block also prints the `devkit ship … --dry-gates` invocation
-that re-runs the deterministic set on ship's exact staging. A blocking overlay lint step (eslint, biome,
+that re-runs the deterministic set on ship's exact staging. A blocking overlay lint step (eslint,
 fallow) and devkit's own formatter print the same invocation under `devkit ship`. No judges run after a
 deterministic block.
 A reviewer FAIL prints `guard-review lens <reviewer>[:<lens>]` the same way: it re-judges only that

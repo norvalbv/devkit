@@ -260,44 +260,43 @@ describe.skipIf(!HAS_BUN)('lint-check.sh — session scoping', () => {
     expect(r.status).toBe(0);
   });
 
-  it("runs biome on the session's edited (biome-supported) files only", () => {
+  it("runs Oxfmt on the session's edited (Oxfmt-supported) files only", () => {
     const root = mkTmp('sesb-');
     write(root, 'src/mine.ts');
     write(root, 'src/other.ts');
     write(root, 'notes.md', '# notes\n');
     write(root, 'package.json', JSON.stringify({ name: 'fx', version: '0.0.0' }));
-    write(root, 'biome.json', '{}\n');
+    write(root, '.oxfmtrc.json', '{}\n');
     writeExec(
       root,
-      'node_modules/.bin/biome',
-      '#!/bin/sh\necho "BIOME_ARGS: $@" > biome-args.txt\nexit 0\n',
+      'node_modules/.bin/oxfmt',
+      '#!/bin/sh\necho "OXFMT_ARGS: $@" > oxfmt-args.txt\nexit 0\n',
     );
     const tmp = seedSessionLedger(root, 's1', ['src/mine.ts', 'notes.md']);
     const r = runHook(LINT_HOOK, root, { session_id: 's1' }, tmp);
     expect(r.status).toBe(0);
-    const args = readFileSync(join(root, 'biome-args.txt'), 'utf8');
+    const args = readFileSync(join(root, 'oxfmt-args.txt'), 'utf8');
+    expect(args).toContain('--check');
     expect(args).toContain('src/mine.ts');
     expect(args).not.toContain('src/other.ts');
-    expect(args).not.toContain('notes.md'); // not a biome-supported extension
+    expect(args).not.toContain('notes.md'); // not an Oxfmt-formatted extension
   });
 
-  it('skips biome when the binary is present but the repo carries no biome config', () => {
-    // biome is a common TRANSITIVE dependency. Configless, it checks against its own defaults
-    // (tabs, double quotes), so a repo that formats with prettier/oxfmt/dprint would fail this
-    // gate on every edited file while its real format gate passes — and the suggested `biome
-    // check --write` fix would rewrite the file into a style that repo then rejects.
+  it('skips Oxfmt when the binary is present but the repo carries no Oxfmt config', () => {
+    // Configless, the repo never asked for Oxfmt's style, so its findings would block the stop on
+    // every edited file of a repo that formats some other way.
     const root = mkTmp('sesnb-');
     write(root, 'src/mine.ts');
     write(root, 'package.json', JSON.stringify({ name: 'fx', version: '0.0.0' }));
     writeExec(
       root,
-      'node_modules/.bin/biome',
-      '#!/bin/sh\necho "BIOME_ARGS: $@" > biome-args.txt\nexit 1\n',
+      'node_modules/.bin/oxfmt',
+      '#!/bin/sh\necho "OXFMT_ARGS: $@" > oxfmt-args.txt\nexit 1\n',
     );
     const tmp = seedSessionLedger(root, 's1', ['src/mine.ts']);
     const r = runHook(LINT_HOOK, root, { session_id: 's1' }, tmp);
     expect(r.status).toBe(0);
-    expect(existsSync(join(root, 'biome-args.txt'))).toBe(false);
+    expect(existsSync(join(root, 'oxfmt-args.txt'))).toBe(false);
   });
 
   it('fail-open when session-edits-lib.sh is missing', () => {

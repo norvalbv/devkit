@@ -10,7 +10,7 @@ Usage:
   --dry-run              Print every file action; write nothing.
   --force                Overwrite existing devkit-managed files, AND adopt/overwrite a consumer's
                          own same-named skill/agent/hook collisions (default: preserve them).
-  --no-<component>       Skip a component: --no-biome --no-tsconfig --no-skills --no-husky
+  --no-<component>       Skip a component: --no-tsconfig --no-skills --no-husky
                          --no-structure --no-guards --no-fallow --no-adhd --no-anti-slop.
   --no-<guard>           Turn off one guard without restating the full guard list; for example
                          --no-comments. Use --no-review-gate for the review guard.

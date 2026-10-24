@@ -19,7 +19,7 @@
  * guard), so an unknown bin can't be silently fetched from a registry (npm-squat). Each guard runs
  * as `node <sibling module>` so the set resolves identically in package / standalone / overlay mode
  * without a bunx round-trip. The AI guards (decisions, review) are fail-fast and stay OUTSIDE this
- * orchestrator (the hook runs them after); biome keeps its own format fragment. Structure-lint and
+ * orchestrator (the hook runs them after); Oxfmt keeps its own format fragment. Structure-lint and
  * repo-specific deterministic gates join the SET via flags, so their failures land in the same
  * aggregated report:
  *   --structure "<cmd>"   run <cmd> as the `structure-lint` gate. A `guard-structure …` command

@@ -7,10 +7,10 @@
 // structure, and whichever ESLint parser this repo installed) that live in the CONSUMER repo, not in devkit. TS in
 // the devkit repo can't resolve them; eslint configs aren't type-checked anyway.
 // ESLint config — scoped narrowly to the project-structure plugin (folder
-// hierarchy + file naming + import walls + file/function size). Biome handles
+// hierarchy + file naming + import walls + file/function size). Oxfmt/Oxlint handle
 // all code/style/lint rules; this config is purely structural.
 //
-// Why ESLint not biome: biome 2.x GritQL plugins cannot validate folder
+// Why ESLint: Oxlint's JS plugins cannot run a custom parser to validate folder
 // structure (no path primitives, no cross-file checks). The project-structure
 // plugin is purpose-built for it and gives real-time IDE feedback.
 //

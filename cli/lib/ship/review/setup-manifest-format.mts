@@ -7,7 +7,6 @@ export const REVIEW_SETUP_ABSENT = 'absent';
 /** Target paths the setup authority freezes, present or absent; no gate projection may supply them. */
 export const REVIEW_SETUP_OPTIONAL_PATHS = [
   ['correctness-overrides', '.devkit/correctness-overrides.json'],
-  ['biome-runtime', '.devkit/biome'],
   ['tsconfig-runtime', '.devkit/tsconfig'],
 ] as const;
 const SHA256 = /^[a-f0-9]{64}$/;

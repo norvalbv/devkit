@@ -102,7 +102,6 @@ describe('ensureDevkitCacheGitignore', () => {
       '.devkit/baselines/imports.mjs',
       '.devkit/baselines/structure/renderer.mjs',
       '.devkit/structure/exempt.mjs',
-      '.devkit/biome/base.jsonc',
       '.devkit/tsconfig/base.json',
       '.devkit/anti-slop/manifest.json',
       '.devkit/oxc/manifest.json',

@@ -113,7 +113,6 @@ describe('review setup manifest', () => {
   it('captures and verifies a clean standalone setup without requiring a diff', () => {
     const { root, manifest } = setup('standalone');
     write(root, '.devkit/correctness-overrides.json', '{"allow":[]}\n');
-    write(root, '.devkit/biome/base.jsonc', '{}\n');
     write(root, '.devkit/tsconfig/base.json', '{}\n');
 
     const captured = captureReviewSetup(root, manifest);
@@ -126,7 +125,6 @@ describe('review setup manifest', () => {
     });
     expect(pathRecord(captured, 'effective-hook')?.relativePath).toBe('.husky/pre-commit');
     expect(pathRecord(captured, 'correctness-overrides')?.fingerprint).not.toBe('absent');
-    expect(pathRecord(captured, 'biome-runtime')?.fingerprint).not.toBe('absent');
     expect(pathRecord(captured, 'tsconfig-runtime')?.fingerprint).not.toBe('absent');
     expect(verifyReviewSetup(root, manifest)).toEqual(captured);
   });

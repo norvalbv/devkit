@@ -56,6 +56,8 @@ interface SyncOptions {
   pinRoot?: string;
   /** Forwarded to the Oxc writer so it lays down the git-excluded overlay geometry. */
   overlay?: boolean;
+  /** Forwarded to the Oxc writer: install paths refresh unedited devkit starters, ship never does. */
+  refreshStarters?: boolean;
 }
 
 interface ManagedReplacement {
@@ -203,7 +205,7 @@ function syncUnlocked(cwd: string, dryRun: boolean): ManagedReplacement | null {
 
 /** Install/upgrade the managed plugin without fetching or changing a consumer dependency stack. */
 export function syncAntiSlopCapability(cwd: string, opts: SyncOptions = {}): void {
-  const { dryRun = false, pinRoot, overlay } = opts;
+  const { dryRun = false, pinRoot, overlay, refreshStarters } = opts;
   if (dryRun) {
     assertOxcCapabilityReady(cwd, { overlay });
     syncUnlocked(cwd, true);
@@ -218,7 +220,7 @@ export function syncAntiSlopCapability(cwd: string, opts: SyncOptions = {}): voi
       const replacement = syncUnlocked(cwd, false);
       if (!replacement) throw new Error('anti-slop managed replacement was not prepared');
       try {
-        syncOxcCapability(cwd, { antiSlop: true, pinRoot, overlay });
+        syncOxcCapability(cwd, { antiSlop: true, pinRoot, overlay, refreshStarters });
         replacement.commit();
         console.log(
           `  ✓ anti-slop: ${replacement.manifest.ruleIds.length} rules @ ${replacement.manifest.upstreamCommit.slice(0, 12)}`,

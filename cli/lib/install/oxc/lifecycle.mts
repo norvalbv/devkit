@@ -13,33 +13,25 @@ import {
   overlayEntry,
   readConsumerIgnores,
 } from './overlay-entry.mts';
+import {
+  BIOME_CONFIGS,
+  candidates,
+  type ConfigOwnership,
+  fileDigest,
+  OXFMT_STARTER,
+  OXLINT_CONFIGS,
+  OXLINT_STARTER,
+  ownershipFor,
+  type RefreshedConfig,
+} from './root-configs.mts';
 import { probeOxcRuntime } from './runtime.mts';
 import { OXFMT_CONFIGS } from '../../husky/format-fragment.mts';
 
-export { OVERLAY_ENTRY_REL, OXFMT_CONFIGS };
+export { BIOME_CONFIGS, OVERLAY_ENTRY_REL, OXFMT_CONFIGS, OXLINT_CONFIGS };
 
-// Exactly the names Oxlint discovers (measured on 1.78 and 1.85): `oxlint.config.{js,mjs,cjs,cts}` is
-// never read as a config, so it carries no ignores to honour.
-export const OXLINT_CONFIGS = [
-  '.oxlintrc.json',
-  '.oxlintrc.jsonc',
-  'oxlint.config.ts',
-  'oxlint.config.mts',
-];
-const OXLINT_STARTER = `${JSON.stringify(
-  { extends: ['./.devkit/oxc/oxlint.base.json'], jsPlugins: [], overrides: [], rules: {} },
-  null,
-  2,
-)}\n`;
-const OXFMT_STARTER = '{}\n';
 const MANIFEST_REL = '.devkit/oxc/manifest.json';
 const BASE_REL = '.devkit/oxc/oxlint.base.json';
 const LOCK_REL = '.devkit/oxc.lock';
-
-interface ConfigOwnership {
-  path: string;
-  createdDigest: string | null;
-}
 
 interface OxcManifest {
   schemaVersion: 1;
@@ -77,13 +69,14 @@ interface SyncOptions {
   allowSkew?: boolean;
   /** Write the git-excluded overlay geometry instead of consumer-owned root configs. */
   overlay?: boolean;
+  /** Rewrite a root config devkit created and nobody edited to the current starter (install only). */
+  refreshStarters?: boolean;
 }
 
 /** Everything the writer needs beyond cwd/dryRun, as ONE value so no call path can drop a field. */
 type SyncPlan = Required<Pick<SyncOptions, 'antiSlop'>> &
-  Pick<SyncOptions, 'pinRoot' | 'allowSkew' | 'overlay'>;
+  Pick<SyncOptions, 'pinRoot' | 'allowSkew' | 'overlay' | 'refreshStarters'>;
 
-const fileDigest = (path: string): string => digest(readFileSync(path));
 function baseContent(antiSlop: boolean): string {
   const source = readFileSync(join(packageDir(), 'oxc', 'oxlint.base.json'), 'utf8');
   if (!antiSlop) return source;
@@ -117,10 +110,6 @@ function readManifest(cwd: string): OxcManifest | null {
   } catch {
     return null;
   }
-}
-
-function candidates(cwd: string, names: string[]): string[] {
-  return names.filter((name) => existsSync(join(cwd, name)));
 }
 
 /**
@@ -210,30 +199,6 @@ export function oxcBaseCapabilityIssue(cwd: string): string | null {
   return null;
 }
 
-function ownershipFor(
-  cwd: string,
-  names: string[],
-  starterPath: string,
-  starter: string,
-  previous: ConfigOwnership | undefined,
-  dryRun: boolean,
-): ConfigOwnership {
-  const found = candidates(cwd, names);
-  if (found.length === 1) {
-    const path = found[0];
-    return previous?.path === path ? previous : { path, createdDigest: null };
-  }
-  // Last line of defence: makes a visible root config UNREACHABLE while the repo is still overlaid,
-  // even with every mode signal lost. Both remedies are named — the caller's intent is ambiguous.
-  if (overlayInstall(cwd)) {
-    throw new Error(
-      `refusing to create ${starterPath} in an overlay install: overlay writes no tracked root config. To stay on overlay, run \`devkit init --overlay\` (restores ${OVERLAY_ENTRY_REL}). To convert this repo to a package install, run \`devkit clean\` first.`,
-    );
-  }
-  if (!dryRun) writeFileAtomic(join(cwd, starterPath), starter);
-  return { path: starterPath, createdDigest: digest(starter) };
-}
-
 function syncOxcCapabilityUnlocked(cwd: string, dryRun: boolean, plan: SyncPlan): void {
   const { antiSlop, pinRoot, allowSkew } = plan;
   const previous = readManifest(cwd);
@@ -254,6 +219,8 @@ function syncOxcCapabilityUnlocked(cwd: string, dryRun: boolean, plan: SyncPlan)
   if (overlay && antiSlop && ignores.unreadable)
     throw new Error(`anti-slop cannot honour this repo's Oxlint ignores: ${ignores.unreadable}`);
   const base = baseContent(antiSlop);
+  const refresh = plan.refreshStarters === true && candidates(cwd, BIOME_CONFIGS).length === 0;
+  const rewrites: RefreshedConfig[] | undefined = refresh ? [] : undefined;
   // Validated HERE, immediately before the first write rather than on entry: the runtime probes
   // above take seconds, and a concurrent `bun install` moving the pin inside that window would let
   // an older devkit publish state the new pin rejects. Dry runs write nothing, so they stay open.
@@ -277,6 +244,7 @@ function syncOxcCapabilityUnlocked(cwd: string, dryRun: boolean, plan: SyncPlan)
           OXLINT_STARTER,
           previous?.configs.oxlint,
           dryRun,
+          rewrites,
         );
     if (overlay && !dryRun) writeFileAtomic(join(cwd, OVERLAY_ENTRY_REL), entry);
     if (!dryRun && !hadOxlint && !overlay) created.push([oxlint.path, digest(OXLINT_STARTER)]);
@@ -291,6 +259,7 @@ function syncOxcCapabilityUnlocked(cwd: string, dryRun: boolean, plan: SyncPlan)
           OXFMT_STARTER,
           previous?.configs.oxfmt,
           dryRun,
+          rewrites,
         );
     if (!dryRun && !hadOxfmt) created.push([oxfmt.path, digest(OXFMT_STARTER)]);
     const manifest: OxcManifest = {
@@ -327,6 +296,15 @@ function syncOxcCapabilityUnlocked(cwd: string, dryRun: boolean, plan: SyncPlan)
       `  ✓ Oxc capability: oxlint@${manifest.pins.oxlint} + oxfmt@${manifest.pins.oxfmt}`,
     );
   } catch (error) {
+    // A refreshed starter goes back to its prior bytes, or it would read as consumer-edited forever.
+    for (const [path, before, written] of rewrites ?? []) {
+      try {
+        if (fileDigest(join(cwd, path)) === digest(written))
+          writeFileAtomic(join(cwd, path), before);
+      } catch {
+        // Leave a config another process changed while the failed sync rolled back.
+      }
+    }
     for (const [path, createdDigest] of created) {
       try {
         if (existsSync(join(cwd, path)) && fileDigest(join(cwd, path)) === createdDigest)
@@ -339,14 +317,21 @@ function syncOxcCapabilityUnlocked(cwd: string, dryRun: boolean, plan: SyncPlan)
   }
 }
 
-/** Install or upgrade managed base/provenance while preserving every existing root config byte. */
+/** Install or upgrade managed base/provenance; root configs change only via `refreshStarters`. */
 export function syncOxcCapability(
   cwd: string,
-  { dryRun = false, antiSlop = false, pinRoot, allowSkew, overlay }: SyncOptions = {},
+  {
+    dryRun = false,
+    antiSlop = false,
+    pinRoot,
+    allowSkew,
+    overlay,
+    refreshStarters,
+  }: SyncOptions = {},
 ): void {
   // ONE plan value shared by both arms: the dry-run arm previously dropped `pinRoot`/`allowSkew`,
   // so a dry run narrated a different install than the real one. One object makes that impossible.
-  const plan: SyncPlan = { antiSlop, pinRoot, allowSkew, overlay };
+  const plan: SyncPlan = { antiSlop, pinRoot, allowSkew, overlay, refreshStarters };
   if (dryRun) {
     syncOxcCapabilityUnlocked(cwd, true, plan);
     return;

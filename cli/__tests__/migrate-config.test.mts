@@ -25,25 +25,6 @@ interface OxfmtContract {
   quoteProps: string;
 }
 
-interface BiomePreset {
-  formatter: {
-    lineWidth: number;
-    indentWidth: number;
-    indentStyle: string;
-    bracketSpacing: boolean;
-  };
-  javascript: {
-    formatter: {
-      quoteStyle: string;
-      jsxQuoteStyle: string;
-      semicolons: string;
-      arrowParentheses: string;
-      bracketSameLine: boolean;
-      quoteProperties: string;
-    };
-  };
-}
-
 const { tmpRepo, write, cleanup } = structFixtures('migrate-');
 afterEach(cleanup);
 
@@ -192,33 +173,25 @@ describe('emitted templates are formatter-canonical (upgrade idempotence)', () =
     expect(raw).toMatch(/^\s*"\/\/\w/m);
   });
 
-  // The canonical form only stops the drift while devkit's own formatter and the Biome preset it
-  // still ships to consumers agree. Nothing else couples them: raising biome/base's lineWidth
-  // without .oxfmtrc.json would make every consumer's hook rewrite the template again.
-  it('keeps devkit’s Oxfmt contract and the shipped consumer Biome preset in agreement', () => {
+  // The canonical form holds only while devkit's own formatter and the consumer Oxfmt starter agree;
+  // a printWidth change in one alone makes every consumer's hook rewrite the template again.
+  it('keeps devkit’s Oxfmt contract and the shipped consumer starter in agreement', () => {
     const oxfmt = readJson<OxfmtContract>(join(packageDir(), '.oxfmtrc.json'));
-    // SAFETY: biome/base.jsonc is devkit's own committed preset, and the two field accesses below
-    // are the only ones read — a missing key surfaces as an undefined mismatch, failing this test.
-    const biome = JSON.parse(
-      readFileSync(join(packageDir(), 'biome', 'base.jsonc'), 'utf8')
-        .split('\n')
-        .filter((l) => !l.trimStart().startsWith('//'))
-        .join('\n'),
-    ) as BiomePreset;
-    const fmt = biome.formatter;
-    const js = biome.javascript.formatter;
+    const starter = readJson<OxfmtContract>(join(packageDir(), 'oxc', 'oxfmtrc.starter.json'));
 
-    expect(oxfmt?.printWidth).toBe(fmt.lineWidth);
-    expect(oxfmt?.tabWidth).toBe(fmt.indentWidth);
-    expect(oxfmt?.useTabs).toBe(fmt.indentStyle === 'tab');
-    expect(oxfmt?.bracketSpacing).toBe(fmt.bracketSpacing);
-    expect(oxfmt?.singleQuote).toBe(js.quoteStyle === 'single');
-    expect(oxfmt?.jsxSingleQuote).toBe(js.jsxQuoteStyle === 'single');
-    expect(oxfmt?.semi).toBe(js.semicolons === 'always');
-    expect(oxfmt?.arrowParens).toBe(js.arrowParentheses);
-    expect(oxfmt?.bracketSameLine).toBe(js.bracketSameLine);
-    expect(oxfmt?.quoteProps).toBe('as-needed');
-    expect(js.quoteProperties).toBe('asNeeded');
+    expect(starter).toMatchObject({
+      printWidth: oxfmt?.printWidth,
+      tabWidth: oxfmt?.tabWidth,
+      useTabs: oxfmt?.useTabs,
+      bracketSpacing: oxfmt?.bracketSpacing,
+      singleQuote: oxfmt?.singleQuote,
+      jsxSingleQuote: oxfmt?.jsxSingleQuote,
+      semi: oxfmt?.semi,
+      arrowParens: oxfmt?.arrowParens,
+      bracketSameLine: oxfmt?.bracketSameLine,
+      quoteProps: oxfmt?.quoteProps,
+    });
+    expect(oxfmt?.printWidth).toBe(100);
   });
 });
 

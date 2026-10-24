@@ -9,7 +9,7 @@ A versioned developer toolkit that keeps agent instructions, project conventions
 | Surface | Purpose | Delivered as |
 | --- | --- | --- |
 | Agent skills and reviewers | Repeatable security, performance, correctness, testing, conventions, and workflow guidance | `skills/` and `agents/`, copied by `devkit init` or sync commands |
-| Shared configuration | Biome and strict TypeScript presets for common stacks | Stable package export paths |
+| Shared configuration | Oxfmt/Oxlint starter configs and strict TypeScript presets for common stacks | Written by `devkit init`; TypeScript via stable package export paths |
 | Portable gate engine | Decision, review, duplication, structure, size, fan-out, Sentry, and advisory gates | `guard-*` command-line tools |
 | Repository setup | Stack detection, idempotent installation, upgrades, diagnostics, and cleanup | The `devkit` CLI |
 | Oxc + anti-slop | Exact Oxlint/Oxfmt pins, 15 vendored rules, 2 Devkit extensions, and incremental debt adoption | Opt-in managed capability |
@@ -41,9 +41,6 @@ When optional project hooks are selected for Codex, open `/hooks` once to review
 Extend the stable, extension-free package exports:
 
 ```jsonc
-// biome.jsonc
-{ "extends": ["@norvalbv/devkit/biome/base"] }
-
 // tsconfig.json
 { "extends": "@norvalbv/devkit/tsconfig/base" }
 ```

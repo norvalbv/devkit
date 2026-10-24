@@ -30,10 +30,9 @@ function monorepo(pkgName = 'webapp') {
   return { root, pkg, rel: `services/${pkgName}` };
 }
 
-// A react-app package selection (no biome/tsconfig — the package owns its own).
+// A react-app package selection (no tsconfig — the package owns its own).
 const PKG_SELECTION = {
   ...defaultSelection(),
-  biome: false,
   tsconfig: false,
   structure: true,
 };

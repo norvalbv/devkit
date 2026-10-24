@@ -52,7 +52,7 @@ is unset, treat all staged source files as in scope.
 <workflow>
 
 ## 1. Read if needed for detailed rules:
-- The repo's naming + folder-structure config (e.g. `biome.jsonc`, `eslint.config.mjs`) for the
+- The repo's naming + folder-structure config (e.g. `.oxlintrc.json`, `eslint.config.mjs`) for the
   conventions a staged file must follow.
 
 # Provider projections install this skill under `.agents` (Codex), `.claude`, or `.cursor`.

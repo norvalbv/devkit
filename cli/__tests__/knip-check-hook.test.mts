@@ -379,15 +379,26 @@ describe.skipIf(!CAN_SHIM)('lint-check.sh — package-manager resolution (sc-105
     expect(r.stderr).toContain("'pnpm run lint:structure' shows the repo-wide view");
   });
 
-  it('biome configured but bun absent: the bun-rendered biome step is skipped, not a bogus failure', () => {
-    // The biome lines are rendered verbatim by the formatter-identity descriptor and still invoke
-    // `bun run`; without bun that is exit 127, which must not be reported as lint errors.
-    const dir = lintRepo({}, { 'biome.json': '{}' });
+  it('Oxfmt configured but bun absent: the Oxfmt check still runs and a clean file is not a failure', () => {
+    const dir = lintRepo({}, { '.oxfmtrc.json': '{}' });
     mkdirSync(join(dir, 'node_modules', '.bin'), { recursive: true });
-    writeFileSync(join(dir, 'node_modules', '.bin', 'biome'), '#!/bin/sh\nexit 0\n');
-    chmodSync(join(dir, 'node_modules', '.bin', 'biome'), 0o755);
+    writeFileSync(join(dir, 'node_modules', '.bin', 'oxfmt'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(dir, 'node_modules', '.bin', 'oxfmt'), 0o755);
     const r = run(dir, { hook: LINT_HOOK, path: shimPath({ pms: { npm: fakePm('npm') } }) });
     expect(r.status).toBe(0);
     expect(r.stderr).toBe('');
+  });
+
+  it('Oxfmt findings still block when no package manager resolves (the check precedes that guard)', () => {
+    const dir = lintRepo({}, { '.oxfmtrc.json': '{}' });
+    mkdirSync(join(dir, 'node_modules', '.bin'), { recursive: true });
+    writeFileSync(
+      join(dir, 'node_modules', '.bin', 'oxfmt'),
+      '#!/bin/sh\necho UNFORMATTED\nexit 1\n',
+    );
+    chmodSync(join(dir, 'node_modules', '.bin', 'oxfmt'), 0o755);
+    const r = run(dir, { hook: LINT_HOOK, path: shimPath({ pms: {} }) });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('Oxfmt format errors detected');
   });
 });

@@ -1,16 +1,8 @@
 /** The ours-extends-theirs lint configs an overlay writes beside the repo's own (git-ignored). The
  * eslint caps never widen what the repo lints or loosen its rules (overlay-self-heal). */
 
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { packageDir } from '../fs-helpers.mts';
 import {
   ESLINT_OVERLAY_FILE,
   LEGACY_ESLINT_OVERLAY_MARKER,
@@ -149,37 +141,5 @@ export function writeEslintOverlay(cwd: string, force: boolean, dryRun: boolean)
     return true;
   }
   console.log(`  ✓ wrote ${ESLINT_OVERLAY_FILE} (extends ./${repo} + size caps)`);
-  return true;
-}
-
-export function writeBiomeOverlay(cwd: string, stack: string, force: boolean, dryRun: boolean) {
-  if (!existsSync(join(cwd, 'biome.jsonc')) && !existsSync(join(cwd, 'biome.json'))) {
-    console.log('  • no repo biome config — skipping biome overlay');
-    return false;
-  }
-  const repoBiome = existsSync(join(cwd, 'biome.jsonc')) ? './biome.jsonc' : './biome.json';
-  const variant = ['electron', 'react-app', 'next'].includes(stack) ? 'react' : 'base';
-  if (dryRun) {
-    console.log('  [dry-run] vendor biome base + write biome.devkit.jsonc (extends repo biome)');
-    return true;
-  }
-  // Vendor devkit's biome bases so the overlay can extend them by relative path (no package).
-  const destDir = join(cwd, '.devkit', 'biome');
-  mkdirSync(destDir, { recursive: true });
-  for (const f of readdirSync(join(packageDir(), 'biome'))) {
-    copyFileSync(join(packageDir(), 'biome', f), join(destDir, f));
-  }
-  const content = `${JSON.stringify(
-    { extends: [repoBiome, `./.devkit/biome/${variant}.jsonc`] },
-    null,
-    2,
-  )}\n`;
-  const dest = join(cwd, 'biome.devkit.jsonc');
-  if (existsSync(dest) && !force) {
-    console.log('  • biome.devkit.jsonc exists (use --force to refresh)');
-    return true;
-  }
-  writeFileSync(dest, content);
-  console.log(`  ✓ wrote biome.devkit.jsonc (extends ${repoBiome} + devkit ${variant})`);
   return true;
 }

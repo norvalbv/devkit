@@ -27,7 +27,7 @@ describe('e2e: devkit init', () => {
     // On-disk artifacts (primary signal).
     for (const rel of [
       'guard.config.json',
-      'biome.jsonc',
+      '.oxfmtrc.json',
       'tsconfig.json',
       '.husky/pre-commit',
       '.devkit/config.json',

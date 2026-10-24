@@ -29,7 +29,6 @@ export function packageDir() {
 /** What the build mirrors verbatim into dist/. Lives here, not scripts/, because the ship preflight
  * needs it and scripts/ never ships; scripts/shipped-assets.mjs re-exports it. */
 export const PACKAGED_ROOT_DIRS: readonly string[] = [
-  'biome',
   'tsconfig',
   'oxc',
   'templates',

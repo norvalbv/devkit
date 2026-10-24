@@ -1,5 +1,5 @@
 // @ts-nocheck — emitted config: imports eslint-plugin-project-structure (peer-installed in THIS repo)
-// + devkit's structure engine. ESLint configs aren't type-checked. Biome owns code/style; this governs
+// + devkit's structure engine. ESLint configs aren't type-checked. Oxc owns code/style; this governs
 // folder/file PLACEMENT only. File/function SIZE is the guard-size ratchet's job (guard.config.json).
 //
 // THE UNIVERSAL SHIM — identical in every repo, regardless of "stack". It encodes NO topology. The

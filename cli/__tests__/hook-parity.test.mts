@@ -59,7 +59,6 @@ function seedRoot(hookContent?: string): string {
 // remedy, the formatter's bin dir and overlay's two lint slots leaves the three identical.
 describe('one gate-body renderer for every install mode', () => {
   const SEL = {
-    biome: true,
     antiSlop: true,
     structureCmd: 'guard-structure gate',
     guards: ['size', 'dup', 'coverage', 'comments', 'decisions', 'review', 'sentry', 'ui-evidence'],
@@ -72,7 +71,7 @@ describe('one gate-body renderer for every install mode', () => {
       .filter((chunk) => chunk !== BIN_DIRS[binDir].open);
   const lintSlot = (chunk: string) => chunk.startsWith('# devkit lint overlay');
   // Overlay's format step probes the repo's own Oxfmt config too, so it is a named slot as well.
-  const fmtSlot = (chunk: string) => chunk.startsWith('# devkit:biome-format');
+  const fmtSlot = (chunk: string) => chunk.startsWith('# devkit:format');
 
   it.each(['', 'packages/a b'])('differs only by bin dir and named slots (pkgRel %j)', (pkgRel) => {
     const pkg = body(buildGuardBlock(SEL, pkgRel), 'package');
@@ -86,7 +85,6 @@ describe('one gate-body renderer for every install mode', () => {
     expect(overlay.filter((c) => !lintSlot(c) && !fmtSlot(c))).toEqual(
       pkg.filter((c) => !fmtSlot(c)),
     );
-    expect(hook.includes('"node_modules/.bin/biome" format --write')).toBe(!pkgRel);
     expect(hook.includes('"node_modules/.bin/oxfmt" --no-error-on-unmatched-pattern --write')).toBe(
       !pkgRel,
     );
@@ -158,12 +156,6 @@ describe('selfHostHookParity', () => {
     // repo that cannot supply devkit's package.json bin map still reaches its hook-wiring checks.
     expect(parity.expectedBlock).toBe('');
   });
-
-  it('honours the caller’s recorded components rather than a bare default selection', () => {
-    const root = seedRoot(buildSelfHostHook(HOOK_SEL, '', ROOT));
-    expect(selfHostHookParity(root).status).toBe('ok');
-    expect(selfHostHookParity(root, { components: { biome: false } }).status).toBe('stale');
-  });
 });
 
 describe('isHookGeneratorPath', () => {
@@ -212,36 +204,13 @@ describe('isHookGeneratorPath', () => {
   });
 });
 
-// The recorded selection is a generator INPUT, so it must be read from the same snapshot as the
-// hook. Mixing an index hook with a worktree config lets a staged selection change read as parity.
-describe('selfHostHookParity — staged source consistency', () => {
-  it('builds the expected block from the STAGED config, not the worktree copy', () => {
-    const root = mkdtempSync(join(tmpdir(), 'devkit-hook-parity-git-'));
-    cleanup.push(root);
-    const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
-    git('init', '-q', '-b', 'main');
-    git('config', 'user.email', 'test@example.com');
-    git('config', 'user.name', 'Test');
-    copyFileSync(join(ROOT, 'package.json'), join(root, 'package.json'));
-    mkdirSync(join(root, '.devkit'), { recursive: true });
-    mkdirSync(join(root, '.husky'), { recursive: true });
-    writeFileSync(join(root, '.devkit', 'config.json'), JSON.stringify({ components: {} }));
-    writeFileSync(join(root, HOOK_REL), buildSelfHostHook(HOOK_SEL, '', ROOT));
-    git('add', '-A');
-
-    expect(selfHostHookParity(root, { source: 'staged' }).status).toBe('ok');
-
-    // A worktree-only selection change must not move the staged verdict; staging it must.
-    writeFileSync(
-      join(root, '.devkit', 'config.json'),
-      JSON.stringify({ components: { biome: false } }),
-    );
-    expect(selfHostHookParity(root, { source: 'staged' }).status).toBe('ok');
-    expect(selfHostHookParity(root, { source: 'worktree' }).status).toBe('stale');
-    git('add', '-A');
-    expect(selfHostHookParity(root, { source: 'staged' }).status).toBe('stale');
-  });
-});
+/** Move guard-review's bin: package.json feeds the self-host hook's source paths, so it drifts. */
+function driftPackageJson(root: string) {
+  const path = join(root, 'package.json');
+  const pkg = JSON.parse(readFileSync(path, 'utf8'));
+  pkg.bin['guard-review'] = './dist/gate-engine/review/moved.mjs';
+  writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
+}
 
 function seedGitRoot() {
   const root = mkdtempSync(join(tmpdir(), 'devkit-hook-parity-judge-'));
@@ -265,23 +234,9 @@ describe('judgeHookParity — attribution edge cases', () => {
   // stale hook as "pre-existing drift".
   it('blames a staged DELETION of a generator input', () => {
     const { root, git } = seedGitRoot();
-    // Commit a consistent pair: the hook generated for biome:false, and the config recording it.
-    const noBiome = {
-      ...selfHostSelection({ biome: false }),
-      structureCmd: SELF_HOST_STRUCTURE_CMD,
-      extras: SELF_HOST_EXTRAS,
-    };
-    writeFileSync(
-      join(root, '.devkit', 'config.json'),
-      JSON.stringify({ components: { biome: false } }),
-    );
-    writeFileSync(join(root, HOOK_REL), buildSelfHostHook(noBiome, '', ROOT));
-    git('add', '-A');
-    git('commit', '-qm', 'biome off');
-    expect(judgeHookParity(root).parity?.status).toBe('ok');
-
-    // Deleting the config reverts the selection to the default, so the committed hook is now stale
-    // — and the deletion is what caused it.
+    // A staged generator-input deletion rides beside an edit that stales the hook; both are blamed.
+    driftPackageJson(root);
+    git('add', 'package.json');
     git('rm', '-q', '.devkit/config.json');
     const verdict = judgeHookParity(root);
     expect(verdict.parity?.status).toBe('stale');
@@ -330,16 +285,14 @@ describe('judgeHookParity — attribution edge cases', () => {
   // generator input that differs between them compares two different trees.
   it('stands down rather than judging when a generator input is only partly staged', () => {
     const { root, git } = seedGitRoot();
-    writeFileSync(
-      join(root, '.devkit', 'config.json'),
-      JSON.stringify({ components: { biome: false } }),
-    );
+    const original = readFileSync(join(root, 'package.json'), 'utf8');
+    driftPackageJson(root);
     git('add', '-A');
     // Now diverge index from worktree on the same generator input.
-    writeFileSync(join(root, '.devkit', 'config.json'), JSON.stringify({ components: {} }));
+    writeFileSync(join(root, 'package.json'), original);
     const verdict = judgeHookParity(root);
     expect(verdict.code).toBe(0);
-    expect(verdict.inert).toContain('.devkit/config.json');
+    expect(verdict.inert).toContain('package.json');
   });
 });
 
@@ -416,17 +369,14 @@ describe('judgeHookParity — isolation and degraded inputs', () => {
     const sibling = join(root, '..', `${basename(root)}-sibling`);
     cleanup.push(sibling);
     git('worktree', 'add', '-q', '--detach', sibling);
-    // Stage a REAL generator-input change in the SIBLING only. Its hook is HEAD's, built for the
-    // default selection, so recording biome:false there is genuine drift the sibling caused.
-    writeFileSync(
-      join(sibling, '.devkit', 'config.json'),
-      JSON.stringify({ components: { biome: false } }),
-    );
+    // Stage a REAL generator-input change in the SIBLING only: its hook is HEAD's, so moving a guard
+    // bin there is genuine drift the sibling caused.
+    driftPackageJson(sibling);
     execFileSync('git', ['add', '-A'], { cwd: sibling, encoding: 'utf8' });
 
     const theirs = judgeHookParity(sibling);
     expect(theirs.parity?.status).toBe('stale');
-    expect(theirs.blamed).toContain('.devkit/config.json');
+    expect(theirs.blamed).toContain('package.json');
 
     // The original worktree staged nothing and must be entirely unaffected.
     const mine = judgeHookParity(root);
@@ -487,10 +437,7 @@ describe('hook-parity --gate as the hook actually spawns it', () => {
 
   it('exits 1 when a staged generator input drifted the hook', () => {
     const { root, git } = seedGitRoot();
-    writeFileSync(
-      join(root, '.devkit', 'config.json'),
-      JSON.stringify({ components: { biome: false } }),
-    );
+    driftPackageJson(root);
     git('add', '-A');
     const result = spawnGate(root);
     expect(result.status).toBe(1);

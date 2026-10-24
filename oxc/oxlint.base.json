@@ -1,4 +1,10 @@
 {
+  "plugins": ["eslint", "typescript", "oxc", "react"],
+  "categories": {
+    "correctness": "deny",
+    "perf": "deny",
+    "suspicious": "deny"
+  },
   "overrides": [
     {
       "files": [".devkit/anti-slop/probe.ts", "**/devkit-anti-slop-integration-probe.ts"],
@@ -7,5 +13,7 @@
       }
     }
   ],
-  "rules": {}
+  "rules": {
+    "react/rules-of-hooks": "deny"
+  }
 }

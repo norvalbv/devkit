@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { overlayInstall } from '../../../../gate-engine/overlay-mode.mts';
 import { waitForPath } from '../../../__tests__/_helpers.mts';
+import { digest } from '../../fs-helpers.mts';
 import {
   checkOxcCapability,
   OVERLAY_ENTRY_REL,
@@ -247,6 +248,37 @@ describe('Oxc capability lifecycle', () => {
     expect(existsSync(join(root, '.oxlintrc.json'))).toBe(true);
     expect(existsSync(join(root, '.oxfmtrc.json'))).toBe(false);
     expect(existsSync(join(root, '.devkit/oxc'))).toBe(false);
+  });
+
+  // The refresh rewrites a root config before the manifest records its new digest; a failure in
+  // between must restore the old bytes, or the file reads as consumer-edited and never refreshes.
+  it('restores a refreshed starter when the sync fails before its manifest write', () => {
+    const root = tempRoot();
+    syncOxcCapability(root);
+    const manifestPath = join(root, '.devkit/oxc/manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    writeFileSync(join(root, '.oxfmtrc.json'), '{}\n');
+    manifest.configs.oxfmt.createdDigest = digest('{}\n');
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    const realRenameSync = fs.renameSync;
+    // SAFETY: same (from, to) signature as renameSync; every other rename is delegated unchanged.
+    fs.renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
+      if (String(to) === manifestPath) throw new Error('manifest write failed');
+      return realRenameSync(from, to);
+    }) as typeof fs.renameSync;
+    syncBuiltinESMExports();
+    try {
+      expect(() => syncOxcCapability(root, { refreshStarters: true })).toThrow(
+        'manifest write failed',
+      );
+    } finally {
+      fs.renameSync = realRenameSync;
+      syncBuiltinESMExports();
+    }
+
+    expect(readFileSync(join(root, '.oxfmtrc.json'), 'utf8')).toBe('{}\n');
+    syncOxcCapability(root, { refreshStarters: true });
+    expect(readFileSync(join(root, '.oxfmtrc.json'), 'utf8')).not.toBe('{}\n');
   });
 
   it('fails safely when more than one config for a tool exists', () => {

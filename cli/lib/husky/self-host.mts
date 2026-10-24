@@ -41,7 +41,7 @@ import {
   FORMAT_TOOL_SETUP,
 } from './format-fragment.mts';
 
-// Structure-lint and the hard Biome lint/assist gate fold into the deterministic orchestrator via
+// Structure-lint and the hard Oxlint gate fold into the deterministic orchestrator via
 // `--extra`. Self-host-only for formatting: its SCOPE (proven allowlist) and hard FAILURE POLICY.
 export const SELF_HOST_STRUCTURE_CMD = 'bun run lint:structure';
 // Extras follow guard.config.example.json's //extraGates contract. A node extra reads the index
@@ -142,8 +142,8 @@ type SelfHostHookInput = Selection & {
 // covered by `[a-z-]+`. The formatter bin gets its own exact rewrite below, because
 // the package bin-dir line is stripped here and `$__dk_package_bin_dir` would expand to ''.
 const PACKAGE_GUARD_RE = /"\$__dk_package_bin_dir\/(guard-[a-z-]+)"/g;
-// Devkit formats with Oxfmt unconditionally, so the consumer's config detection is replaced
-// outright rather than left to resolve — no dead biome arm reaches Devkit's own hook.
+// Devkit formats with its own pinned Oxfmt unconditionally, so the consumer's config detection is
+// replaced outright rather than left to resolve — no dead arm reaches Devkit's own hook.
 const SELF_HOST_TOOL_SETUP = `    FMT_TOOL=Oxfmt; FMT_BIN=node_modules/.bin/oxfmt
     __dk_fmt_run() { xargs -0 node_modules/.bin/oxfmt --threads 1 --write; }`;
 // Swapping the WHOLE report branch (not appending `|| exit 1`) also drops the 127 message, the
@@ -157,7 +157,7 @@ ${shipRehearsalHint('            ')}
 // broad extension-only filter would let Oxfmt rewrite evidence, fixtures, vendored sources, or
 // generated output that the adopted 558-file parity experiment never selected.
 const SELF_HOST_FORMAT_FILTER =
-  "grep -E '^((cli|gate-engine)/.*\\.(tsx?|jsx?|css|jsonc?|mjs|mts)|(tsconfig|biome)/.*\\.jsonc?|skills/.*\\.mjs|templates/.*\\.mjs|\\.co-occurrence-allowlist\\.json|\\.fallowrc\\.jsonc|\\.oxfmtrc\\.json|biome\\.jsonc|eslint\\.config\\.mjs|guard\\.config(\\.example)?\\.json|package\\.json|search-code\\.config\\.json|tsconfig(\\.build)?\\.json|vitest(\\.e2e)?\\.config\\.mjs|vitest\\.setup\\.mjs)$'";
+  "grep -E '^((cli|gate-engine)/.*\\.(tsx?|jsx?|css|jsonc?|mjs|mts)|(tsconfig|oxc)/.*\\.jsonc?|skills/.*\\.mjs|templates/.*\\.mjs|\\.co-occurrence-allowlist\\.json|\\.fallowrc\\.jsonc|\\.oxfmtrc\\.json|eslint\\.config\\.mjs|guard\\.config(\\.example)?\\.json|package\\.json|search-code\\.config\\.json|tsconfig(\\.build)?\\.json|vitest(\\.e2e)?\\.config\\.mjs|vitest\\.setup\\.mjs)$'";
 // The `./dist/<...>.mjs` → `<...>.mts` transform pieces (hoisted — useTopLevelRegex).
 const DIST_PREFIX_RE = /^\.\/dist\//;
 const MJS_EXT_RE = /\.mjs$/;
@@ -237,7 +237,9 @@ export function selfHostSelection(recorded?: Partial<Selection>): Selection {
 function definedOnly(recorded: Partial<Selection> | undefined): Partial<Selection> {
   if (!recorded) return {};
   return Object.fromEntries(
-    Object.entries(recorded).filter(([key, value]) => key !== 'oxc' && value !== undefined),
+    Object.entries(recorded).filter(
+      ([key, value]) => key !== 'oxc' && key !== 'biome' && value !== undefined,
+    ),
   ) as Partial<Selection>;
 }
 

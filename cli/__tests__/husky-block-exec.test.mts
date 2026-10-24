@@ -40,7 +40,7 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
   it('package mode blocks when the pinned local bin is missing instead of using a global decoy', () => {
     const r = runHook(
       {},
-      { biome: false, guards: ['size'] },
+      { guards: ['size'] },
       {
         missingLocalBins: ['guard-deterministic'],
       },
@@ -64,7 +64,7 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     (builder) => {
       const r = runHook(
         {},
-        { biome: false, guards: ['review'], antiSlop: true },
+        { guards: ['review'], antiSlop: true },
         { builder, realDeterministic: true, dirPrefix: 'dk hook exec with spaces ' },
       );
       expect(r.status).toBe(1);
@@ -232,7 +232,6 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     const r = runHook(
       { DET_RC: '0' },
       {
-        biome: false,
         guards: ALL_GUARDS,
         structureCmd: 'guard-structure gate',
       },
@@ -287,7 +286,7 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
   it.each(['package', 'standalone', 'overlay'])(
     '%s comments-only selection still emits the deterministic orchestrator',
     (builder) => {
-      const r = runHook({ DET_RC: '1' }, { biome: false, guards: ['comments'] }, { builder });
+      const r = runHook({ DET_RC: '1' }, { guards: ['comments'] }, { builder });
       expect(r.status).toBe(1);
       expect(r.calls).toContain('guard-deterministic');
     },
@@ -444,15 +443,15 @@ describe('format re-stage step (real git)', () => {
     execFileSync('git', ['config', 'user.email', 'a@b.c'], { cwd: repo });
     execFileSync('git', ['config', 'user.name', 'a'], { cwd: repo });
     writeFileSync(join(repo, '.gitignore'), 'dist\n');
-    // The step runs biome only where a biome CONFIG exists, so the default fixture is a repo that
-    // genuinely formats with biome.
-    writeFileSync(join(repo, 'biome.jsonc'), '{}\n');
-    execFileSync('git', ['add', '.gitignore', 'biome.jsonc'], { cwd: repo });
+    // The step formats only where an Oxfmt CONFIG exists, so the default fixture is a repo that
+    // genuinely formats with Oxfmt.
+    writeFileSync(join(repo, '.oxfmtrc.json'), '{}\n');
+    execFileSync('git', ['add', '.gitignore', '.oxfmtrc.json'], { cwd: repo });
     execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: repo });
     return repo;
   }
 
-  function runInRepo(repo, { biome = '#!/bin/sh\nexit 0\n' } = {}) {
+  function runInRepo(repo, { devkit = '#!/bin/sh\nexit 0\n' } = {}) {
     const home = mkdtempSync(join(tmpdir(), 'dk-hook-git-home-'));
     homes.push(home);
     const bin = join(home, '.bun', 'bin');
@@ -461,12 +460,12 @@ describe('format re-stage step (real git)', () => {
     mkdirSync(packageBin, { recursive: true });
     writeFileSync(join(bin, 'bun'), '#!/bin/sh\nprintf \'%s\\n\' "$PWD/node_modules/.bin"\n');
     chmodSync(join(bin, 'bun'), 0o755);
-    if (biome !== null) {
-      writeFileSync(join(packageBin, 'biome'), biome);
-      chmodSync(join(packageBin, 'biome'), 0o755);
+    if (devkit !== null) {
+      writeFileSync(join(packageBin, 'devkit'), devkit);
+      chmodSync(join(packageBin, 'devkit'), 0o755);
     }
     const hookPath = join(home, 'pre-commit');
-    writeFileSync(hookPath, buildFullHook({ biome: true, guards: [] }));
+    writeFileSync(hookPath, buildFullHook({ guards: [] }));
     try {
       const stdout = execFileSync('sh', ['-e', hookPath], {
         cwd: repo,
@@ -512,15 +511,15 @@ describe('format re-stage step (real git)', () => {
 
     // The opt-out the config gate restores: a repo that never asked devkit to rewrite its bytes
     // must not have them rewritten, and must be told the step stood down rather than staying silent.
-    it('formats nothing and says so when the repo has no biome config', () => {
+    it('formats nothing and says so when the repo has no Oxfmt config', () => {
       const repo = initRepo();
-      rmSync(join(repo, 'biome.jsonc'));
-      execFileSync('git', ['rm', '-q', '--cached', 'biome.jsonc'], { cwd: repo });
+      rmSync(join(repo, '.oxfmtrc.json'));
+      execFileSync('git', ['rm', '-q', '--cached', '.oxfmtrc.json'], { cwd: repo });
       stageFile(repo, 'a.mts');
-      const r = runInRepo(repo, { biome: ARGV_STUB });
+      const r = runInRepo(repo, { devkit: ARGV_STUB });
       expect(r.status, r.stdout).toBe(0);
-      expect(r.stdout).toContain('🎨 No biome config here');
-      expect(existsSync(join(repo, 'argv.log'))).toBe(false); // biome was never invoked
+      expect(r.stdout).toContain('🎨 No formatter config here');
+      expect(existsSync(join(repo, 'argv.log'))).toBe(false); // the formatter was never invoked
     });
 
     it('reports that nothing matched when no staged path is formattable', () => {
@@ -528,7 +527,7 @@ describe('format re-stage step (real git)', () => {
       stageFile(repo, 'notes.txt', 'hello\n');
       const r = runInRepo(repo);
       expect(r.status).toBe(0);
-      expect(r.stdout).toContain('🎨 biome: no staged formattable path');
+      expect(r.stdout).toContain('🎨 oxfmt: no staged formattable path');
     });
 
     it('names the paths it skipped when every eligible one carries unstaged edits', () => {
@@ -553,7 +552,7 @@ describe('format re-stage step (real git)', () => {
       const r = runInRepo(repo);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('dirty.mts');
-      expect(r.stdout).toContain('🎨 biome formatted and re-staged 1 staged file(s).');
+      expect(r.stdout).toContain('🎨 oxfmt formatted and re-staged 1 staged file(s).');
     });
 
     // `echo | xargs` splits on whitespace: the formatter gets two paths that do not exist and
@@ -561,7 +560,7 @@ describe('format re-stage step (real git)', () => {
     it('passes a staged path containing a space as ONE argument, and still re-stages it', () => {
       const repo = initRepo();
       stageFile(repo, 'my file.mts');
-      const r = runInRepo(repo, { biome: ARGV_STUB });
+      const r = runInRepo(repo, { devkit: ARGV_STUB });
       expect(r.status, r.stdout).toBe(0);
       expect(argvOf(repo)).toContain('ARG[my file.mts]');
       expect(argvOf(repo)).not.toContain('ARG[my]');
@@ -573,9 +572,9 @@ describe('format re-stage step (real git)', () => {
     it('formats a staged path with non-ASCII characters, which git quotes by default', () => {
       const repo = initRepo();
       stageFile(repo, 'café.mts');
-      const r = runInRepo(repo, { biome: ARGV_STUB });
+      const r = runInRepo(repo, { devkit: ARGV_STUB });
       expect(r.status, r.stdout).toBe(0);
-      expect(r.stdout).toContain('🎨 biome formatted and re-staged 1 staged file(s).');
+      expect(r.stdout).toContain('🎨 oxfmt formatted and re-staged 1 staged file(s).');
       expect(argvOf(repo)).toContain('ARG[café.mts]');
     });
 
@@ -585,15 +584,26 @@ describe('format re-stage step (real git)', () => {
       stageFile(repo, 'b.cts');
       const r = runInRepo(repo);
       expect(r.status).toBe(0);
-      expect(r.stdout).toContain('🎨 biome formatted and re-staged 2 staged file(s).');
+      expect(r.stdout).toContain('🎨 oxfmt formatted and re-staged 2 staged file(s).');
     });
 
-    it('reports a missing biome with the install remedy and lets the commit continue', () => {
+    it('reports a missing devkit bin and lets the commit continue', () => {
       const repo = initRepo();
       stageFile(repo, 'a.mts');
-      const r = runInRepo(repo, { biome: null });
+      const r = runInRepo(repo, { devkit: null });
       expect(r.status).toBe(0); // best-effort: a formatter outage is never a commit outage
-      expect(r.stdout).toContain('biome is missing or cannot start at');
+      expect(r.stdout).toContain('Found the oxfmt config but');
+      expect(r.stdout).toContain('devkit is missing');
+      expect(r.stdout).toContain('staged files left as authored');
+    });
+
+    // A bin that exists but cannot start (here: a missing interpreter) reaches xargs' 127.
+    it('reports a devkit bin that cannot start with the install remedy and lets the commit continue', () => {
+      const repo = initRepo();
+      stageFile(repo, 'a.mts');
+      const r = runInRepo(repo, { devkit: '#!/nonexistent/interpreter\n' });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('oxfmt is missing or cannot start at');
       expect(r.stdout).toContain("Install this repo's dependencies");
       expect(r.stdout).not.toContain('doctor --fix');
       expect(r.stdout).toContain('left UNFORMATTED');
@@ -604,11 +614,11 @@ describe('format re-stage step (real git)', () => {
     it("reports a failing Oxfmt without blocking the commit, and does not misattribute xargs' code", () => {
       const repo = initRepo();
       stageFile(repo, 'a.mts');
-      const r = runInRepo(repo, { biome: '#!/bin/sh\nexit 3\n' });
+      const r = runInRepo(repo, { devkit: '#!/bin/sh\nexit 3\n' });
       expect(r.status).toBe(0);
-      expect(r.stdout).toContain('🎨 biome failed over 1 staged file(s)');
+      expect(r.stdout).toContain('🎨 oxfmt failed over 1 staged file(s)');
       expect(r.stdout).toContain('may be UNFORMATTED');
-      expect(r.stdout).not.toContain('biome exited 3');
+      expect(r.stdout).not.toContain('oxfmt exited 3');
     });
   });
 });
@@ -616,10 +626,10 @@ describe('format re-stage step (real git)', () => {
 describe('assembled hook — shell/OS variants', () => {
   it.runIf(hasDash)('dash (Debian/Ubuntu /bin/sh): det-gate blocking + AI ordering hold', () => {
     const opts = { shell: '/bin/dash' };
-    const fail = runHook({ DET_RC: '1' }, { biome: false, guards: ALL_GUARDS }, opts);
+    const fail = runHook({ DET_RC: '1' }, { guards: ALL_GUARDS }, opts);
     expect(fail.status).toBe(1);
     expect(fail.calls).not.toContain('guard-decisions');
-    const clean = runHook({ DET_RC: '0' }, { biome: false, guards: ALL_GUARDS }, opts);
+    const clean = runHook({ DET_RC: '0' }, { guards: ALL_GUARDS }, opts);
     expect(clean.status).toBe(0);
     expect(clean.calls).toContain('guard-review');
   });
@@ -628,7 +638,7 @@ describe('assembled hook — shell/OS variants', () => {
     // devkit itself lives under "Personal and learning/" — the harness dir gets a space too.
     const r = runHook(
       { DET_RC: '0' },
-      { biome: false, guards: ALL_GUARDS },
+      { guards: ALL_GUARDS },
       {
         dirPrefix: 'dk hook exec-',
       },
@@ -644,7 +654,7 @@ describe('assembled hook — shell/OS variants', () => {
 // These run the ASSEMBLED hook inside a real temp git repo so attempt identity and tree correlation
 // are both exercised.
 describe('commit-terminal telemetry (real temp git repo)', () => {
-  function runHookInRepo(env = {}, selection = { biome: false, guards: ALL_GUARDS }) {
+  function runHookInRepo(env = {}, selection = { guards: ALL_GUARDS }) {
     const home = mkdtempSync(join(tmpdir(), 'dk-hook-terminal-'));
     homes.push(home);
     const repo = join(home, 'consumer-repo');
@@ -773,7 +783,7 @@ describe('commit-terminal telemetry (real temp git repo)', () => {
   });
 
   it('does not leave a handoff when no commit-msg judge is selected', () => {
-    const r = runHookInRepo({}, { biome: false, guards: ['size'] });
+    const r = runHookInRepo({}, { guards: ['size'] });
     expect(r.status).toBe(0);
     expect(r.commitState).toBeNull();
   });
@@ -800,7 +810,7 @@ describe('commit-terminal telemetry (real temp git repo)', () => {
 // ui-evidence reminds about the FINAL staged set, so every judge that can demand an edit runs first.
 // commit-msg's sentry replays this verdict from cache (check-sentry tests).
 describe('ship: sentry is judged before the ui-evidence reminder', () => {
-  const SHIP = { biome: false, guards: ['review', 'sentry', 'ui-evidence'] };
+  const SHIP = { guards: ['review', 'sentry', 'ui-evidence'] };
 
   it.each(['package', 'standalone', 'overlay'])(
     '%s: review → sentry on the ship message → ui-evidence',
@@ -831,7 +841,7 @@ describe('ship: sentry is judged before the ui-evidence reminder', () => {
   });
 
   it('sentry not selected → pre-commit never calls it, even on a ship', () => {
-    const r = runHook({}, { biome: false, guards: ['review', 'ui-evidence'] }, { shipMsg: true });
+    const r = runHook({}, { guards: ['review', 'ui-evidence'] }, { shipMsg: true });
     expect(r.status).toBe(0);
     expect(r.calls).not.toContain('guard-sentry');
   });
@@ -912,7 +922,7 @@ describe('ship: sentry is judged before the ui-evidence reminder', () => {
 // sc-3020: cheap blocking staged gates run before the paid AI guards; review keeps its baselines
 // after them (fallow-gate-owned-by-fallow, 2026-09-28 note).
 describe('overlay staged gates run before the AI guards (sc-3020)', () => {
-  const REVIEWED = { biome: false, guards: ['comments', 'decisions', 'review'] };
+  const REVIEWED = { guards: ['comments', 'decisions', 'review'] };
   // sc-2753: comments rides guard-deterministic, which already runs before fallow.
   const AI_CALLS = ['guard-decisions', 'guard-review'];
   // The overlay harness stubs `node` to log as `baseline`.
@@ -965,15 +975,16 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
     );
   });
 
-  it('a failing biome overlay in review mode still exits 1, through the finalizer', () => {
+  it('a failing eslint baseline in review mode still exits 1, after the reviewer ran', () => {
     const r = runHook(
-      { BIOME_RC: '1', DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'review' },
+      { BASELINE_RC: '1', DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'review' },
       REVIEWED,
-      overlay({ fallow: false, biomeOverlay: true }),
+      overlay({ fallow: false, eslintOverlay: true }),
     );
     expect(r.status).toBe(1);
-    expect(r.calls.indexOf('biome')).toBeGreaterThan(r.calls.indexOf('guard-review --gate'));
-    expect(r.stdout).toContain('✗ review: failed gates: biome-overlay (findings above).');
+    expect(r.calls.search(/^baseline \S+ eslint /m)).toBeGreaterThan(
+      r.calls.indexOf('guard-review --gate'),
+    );
   });
 
   it('a passing fallow audit runs first, then every AI guard', () => {
@@ -985,22 +996,18 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
   });
 
   it('the deterministic orchestrator still runs before fallow, and its failure skips fallow', () => {
-    const passing = runHook({}, { biome: false, guards: ['size', 'review'] }, overlay());
+    const passing = runHook({}, { guards: ['size', 'review'] }, overlay());
     expect(passing.calls.indexOf('guard-deterministic')).toBeLessThan(
       passing.calls.indexOf('fallow audit'),
     );
-    const failing = runHook(
-      { DET_RC: '1' },
-      { biome: false, guards: ['size', 'review'] },
-      overlay(),
-    );
+    const failing = runHook({ DET_RC: '1' }, { guards: ['size', 'review'] }, overlay());
     expect(failing.status).toBe(1);
     expect(failing.calls).not.toContain('fallow');
     expect(failing.calls).not.toContain('guard-review');
   });
 
   it('blocks before the AI guards when no deterministic guard is selected (helpers still defined)', () => {
-    const r = runHook({ FALLOW_RC: '1' }, { biome: false, guards: ['review'] }, overlay());
+    const r = runHook({ FALLOW_RC: '1' }, { guards: ['review'] }, overlay());
     expect(r.status).toBe(1);
     expect(r.calls).toContain('fallow audit');
     expect(aiCalls(r.calls)).not.toContain('guard-review');
@@ -1123,14 +1130,13 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
 // sc-2695: an overlay lint block names ship's --dry-gates rehearsal from its OWN failure arm (the
 // shell banner attributes nothing), and only when a new ship exported the command.
 describe('overlay lint blocks name the ship --dry-gates rehearsal (sc-2695)', () => {
-  const REVIEWED = { biome: false, guards: ['comments', 'decisions', 'review'] };
+  const REVIEWED = { guards: ['comments', 'decisions', 'review'] };
   const CMD = "devkit ship feat/x 'add thing' --dry-gates --base main -- src/staged.ts";
   const LEAD = "Ship's exact staging, no judges:";
   const overlay = (extra = {}) => ({ builder: 'overlay', fallow: false, staged: true, ...extra });
   // A plain commit replays its gate log on stdout at exit; a ship keeps the hook's own stderr.
   const ARMS = [
     ['eslint', { ESLINT_RC: '1' }, { eslintOverlay: true }],
-    ['biome', { BIOME_RC: '1' }, { biomeOverlay: true }],
     ['fallow', { FALLOW_RC: '1' }, { fallow: true }],
   ];
 
@@ -1164,16 +1170,16 @@ describe('overlay lint blocks name the ship --dry-gates rehearsal (sc-2695)', ()
     const r = runHook(
       {
         ESLINT_RC: '1',
-        BIOME_RC: '1',
+        FALLOW_RC: '1',
         DEVKIT_RUN_MODE: 'dry-gates',
         DEVKIT_REVIEW_GUARDS: 'comments',
       },
       REVIEWED,
-      overlay({ eslintOverlay: true, biomeOverlay: true }),
+      overlay({ eslintOverlay: true, fallow: true }),
     );
     expect(r.status).toBe(1);
     expect(aiCalls(r.calls)).not.toContain('guard-review');
-    expect(r.stdout).toContain('failed gates: eslint-overlay biome-overlay (findings above).');
+    expect(r.stdout).toContain('failed gates: eslint-overlay fallow (findings above).');
   });
 
   it('an exported-but-empty command (the helper failed) prints no dangling lead', () => {
@@ -1254,7 +1260,7 @@ describe('overlay lint blocks name the ship --dry-gates rehearsal (sc-2695)', ()
 
 // Package and standalone hooks carry the staged audit; it blocks only on a finding.
 describe.each(['package', 'standalone'])('staged fallow gate (%s hook)', (builder) => {
-  const SEL = { biome: false, guards: ['review'], fallow: true };
+  const SEL = { guards: ['review'], fallow: true };
   const run = (env = {}, opts = {}) =>
     runHook(env, SEL, { builder, fallow: true, staged: true, ...opts });
 
@@ -1342,7 +1348,7 @@ describe.each(['package', 'standalone'])('staged fallow gate (%s hook)', (builde
 // Twenty lines, so default detection pairs an edited move as `R`, which a plain ACM list drops.
 const LEGACY_SOURCE = Array.from({ length: 20 }, (_, i) => `export const v${i} = ${i};\n`).join('');
 
-// A repo with one committed source per path, eslint/biome overlay configs and argv-logging stubs in
+// A repo with one committed source per path, the eslint overlay config and an argv-logging stub in
 // `pkg` (the dir the hook runs from), so a rename can be staged against a real HEAD.
 function renameRepo(committed: string[], pkg = '') {
   const home = mkdtempSync(join(tmpdir(), 'dk-overlay-rename-'));
@@ -1350,9 +1356,7 @@ function renameRepo(committed: string[], pkg = '') {
   const cwd = join(home, pkg);
   mkdirSync(join(cwd, 'node_modules', '.bin'), { recursive: true });
   writeFileSync(join(cwd, 'eslint.config.devkit.mjs'), 'export default [];\n');
-  writeFileSync(join(cwd, 'biome.devkit.jsonc'), '{}\n');
   writeStub(join(cwd, 'node_modules', '.bin', 'eslint'), 'eslint', 'ESLINT_RC');
-  writeStub(join(cwd, 'node_modules', '.bin', 'biome'), 'biome', 'BIOME_RC');
   writeFileSync(join(home, '.gitignore'), 'node_modules/\ncalls.log\n');
   for (const path of committed) {
     mkdirSync(join(home, path, '..'), { recursive: true });
@@ -1375,7 +1379,7 @@ function runOverlayStep(home: string, cwd: string, env: NodeJS.ProcessEnv = {}) 
 }
 
 describe('overlay staged lint and renames (sc-4670)', () => {
-  it('an edited rename reaches eslint and biome at its new path, and a failure blocks', () => {
+  it('an edited rename reaches eslint at its new path, and a failure blocks', () => {
     const { home, cwd, git } = renameRepo(['src/old.ts']);
     git('mv', 'src/old.ts', 'src/new.ts');
     appendFileSync(join(home, 'src', 'new.ts'), 'export const edited = 1;\n');
@@ -1384,7 +1388,6 @@ describe('overlay staged lint and renames (sc-4670)', () => {
     const passing = runOverlayStep(home, cwd);
     expect(passing.status, passing.stderr).toBe(0);
     expect(passing.calls).toContain('eslint -c eslint.config.devkit.mjs src/new.ts');
-    expect(passing.calls).toContain('biome check --config-path biome.devkit.jsonc src/new.ts');
     expect(passing.calls).not.toContain('old.ts');
 
     const failing = runOverlayStep(home, cwd, { ESLINT_RC: '1' });
@@ -1393,12 +1396,12 @@ describe('overlay staged lint and renames (sc-4670)', () => {
   });
 
   // A consumer's diff.renames=false would otherwise report the move as delete + add and lint it.
-  it.each(['true', 'false'])('an exact move runs neither tool (diff.renames=%s)', (renames) => {
+  it.each(['true', 'false'])('an exact move is not linted (diff.renames=%s)', (renames) => {
     const { home, cwd, git } = renameRepo(['src/old.ts']);
     git('config', 'diff.renames', renames);
     git('mv', 'src/old.ts', 'src/moved.ts');
 
-    const r = runOverlayStep(home, cwd, { ESLINT_RC: '1', BIOME_RC: '1' });
+    const r = runOverlayStep(home, cwd, { ESLINT_RC: '1' });
     expect(r.status, r.stderr).toBe(0);
     expect(r.calls).toBe('');
   });

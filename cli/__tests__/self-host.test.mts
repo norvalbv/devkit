@@ -165,19 +165,17 @@ ${FORMAT_TOOL_SETUP}
     expect(out).not.toContain('$__dk_package_bin_dir');
   });
 
-  // sc-2524: a consumer hook runs biome only where a biome CONFIG exists; self-host pins Oxfmt, so
-  // neither the biome invocation nor the config probe survives into devkit's own hook.
-  it('gates the consumer biome step on a biome config, and pins Oxfmt in self-host', () => {
-    const hook = buildFullHook({ biome: true, guards: [] });
-    expect(hook).toContain('if [ ! -f biome.json ] && [ ! -f biome.jsonc ]; then');
-    expect(hook).toContain('"$__dk_package_bin_dir/biome" format --write');
+  // A consumer hook runs devkit's Oxfmt only where an Oxfmt CONFIG exists; self-host pins its own
+  // Oxfmt, so neither the devkit invocation nor the config probe survives into devkit's own hook.
+  it('gates the consumer Oxfmt step on an Oxfmt config, and pins Oxfmt in self-host', () => {
+    const hook = buildFullHook({ guards: [] });
+    expect(hook).toContain('if [ -f .oxfmtrc.json ] || [ -f .oxfmtrc.jsonc ]');
+    expect(hook).toContain('"$__dk_package_bin_dir/devkit" oxc fmt');
     expect(hook).not.toContain('node_modules/.bin/oxfmt');
     const selfHost = buildSelfHostHook(HOOK_SEL, '', ROOT);
     expect(selfHost).toContain('node_modules/.bin/oxfmt --threads 1 --write');
-    // The self-host FILTER legitimately names biome.jsonc (devkit formats its own preset files);
-    // what must not survive is a biome INVOCATION or the consumer's config probe.
-    expect(selfHost).not.toContain('format --write');
-    expect(selfHost).not.toContain('-f biome.json');
+    expect(selfHost).not.toContain('oxc fmt');
+    expect(selfHost).not.toContain('-f .oxfmtrc.jsonc');
   });
 });
 
@@ -300,7 +298,7 @@ describe('buildSelfHostHook', () => {
     writeFileSync(join(root, 'cli', 'partial.mts'), 'const partial={working:true}\n');
 
     const fragment = buildSelfHostHook(HOOK_SEL, '', ROOT).match(
-      /# devkit:biome-format[\s\S]*?# \/devkit:biome-format/,
+      /# devkit:format[\s\S]*?# \/devkit:format/,
     )?.[0];
     expect(fragment).toBeDefined();
     execFileSync('sh', ['-c', fragment ?? 'exit 1'], { cwd: root });
@@ -360,7 +358,7 @@ describe('buildSelfHostHook', () => {
     writeFileSync(join(root, 'cli', 'sample.mts'), 'const value={answer:42}\n');
     execFileSync('git', ['add', 'cli/sample.mts'], { cwd: root });
     const fragment = buildSelfHostHook(HOOK_SEL, '', ROOT).match(
-      /# devkit:biome-format[\s\S]*?# \/devkit:biome-format/,
+      /# devkit:format[\s\S]*?# \/devkit:format/,
     )?.[0];
     expect(fragment).toBeDefined();
     const env = { ...process.env, DEVKIT_SHIP_DRY_GATES_CMD: cmd ?? '' };
@@ -513,7 +511,7 @@ describe('buildSelfHostHook', () => {
   // call is `|| true`, so a leak would fail SILENTLY and kill the advisory in every installed repo.
   it('never leaks the devkit-relative advisory emitter into a consumer hook, which would fail silently there', () => {
     const consumerHooks = [
-      buildFullHook({ biome: true, guards: ['review', 'decisions'] }),
+      buildFullHook({ guards: ['review', 'decisions'] }),
       buildFullHook({ guards: ['review', 'decisions'] }, '', 'global-optional'),
       // The overlay with fallow ON is the closest a consumer gets: it runs fallow inline too, but
       // through the BLOCKING wrapper, which needs no emitter because its findings stop the run.

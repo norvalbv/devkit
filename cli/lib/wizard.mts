@@ -410,7 +410,6 @@ function summarize(
       'overlay — everything git-ignored, nothing committed:',
       `✓ guards${g}`,
       '✓ local hook → chains to the repo’s own',
-      `${on('biome')} biome overlay (extends the repo, staged files)`,
       `${on('structure')} structure lint · ${on('searchCode')} ${SEARCHCODE_OPTION.label}`,
       `${on('skills')} skills · ${on('agents')} agents → ${surfaces} (skipping anything git tracks)`,
       `${on('agentHooks')} agent hooks → ${surfaces} provider settings (tracked files preserved)`,

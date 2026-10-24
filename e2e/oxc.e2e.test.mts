@@ -20,7 +20,6 @@ const INIT_ARGS = [
   'generic',
   '--yes',
   '--standalone',
-  '--no-biome',
   '--no-tsconfig',
   '--no-skills',
   '--no-agents',

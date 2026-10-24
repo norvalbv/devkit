@@ -203,7 +203,6 @@ describe('init --yes (all recommended)', () => {
     expect(r.status).toBe(0);
     for (const f of [
       'guard.config.json',
-      'biome.jsonc',
       'tsconfig.json',
       '.husky/pre-commit',
       '.devkit/config.json',
@@ -213,7 +212,7 @@ describe('init --yes (all recommended)', () => {
     expect(existsSync(join(root, 'eslint.config.mjs'))).toBe(false);
     const cfg = config(root);
     expect(cfg.stack).toBe('generic');
-    expect(cfg.components.biome).toBe(true);
+    expect(cfg.components.biome).toBeUndefined();
     expect(cfg.components.guards).toEqual([
       'size',
       'fanout',
@@ -268,7 +267,6 @@ describe('init --stack react-app (structure ungated)', () => {
       'eslint.config.mjs',
       '.devkit/structure/exempt.mjs',
       'guard.config.json',
-      'biome.jsonc',
       'tsconfig.json',
     ]) {
       expect(existsSync(join(root, f)), `${f} should exist`).toBe(true);
@@ -425,30 +423,6 @@ describe('init — zero consumer deps (config-driven structure)', () => {
 });
 
 describe('init — per-component flag selection', () => {
-  it('--no-biome → no biome.jsonc, no biome devDep, no biome husky step', () => {
-    const root = tmpRepo();
-    devkit(root, 'init', '--stack', 'generic', '--yes', '--no-biome');
-    expect(existsSync(join(root, 'biome.jsonc'))).toBe(false);
-    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-    expect(pkg.devDependencies['@biomejs/biome']).toBeUndefined();
-    expect(pkg.scripts.lint).toBeUndefined();
-    const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    expect(hook).not.toContain('biome format');
-    expect(config(root).components.biome).toBe(false);
-  });
-
-  it('--no-biome keeps the Electron structure preset without creating biome.jsonc', () => {
-    const root = tmpRepo();
-    devkit(root, 'init', '--stack', 'electron', '--yes', '--no-biome');
-
-    expect(existsSync(join(root, 'biome.jsonc'))).toBe(false);
-    expect(existsSync(join(root, 'eslint.config.mjs'))).toBe(true);
-    expect(existsSync(join(root, 'tsconfig.json'))).toBe(true);
-    expect(existsSync(join(root, 'guard.config.json'))).toBe(true);
-    expect(config(root).components.biome).toBe(false);
-    expect(config(root).components.structure).toBe(true);
-  });
-
   it('--guards fanout,size → the deterministic orchestrator + the recorded subset, no AI guard', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'fanout,size');
@@ -491,32 +465,12 @@ describe('init — removal (deselected + present)', () => {
     expect(pkg.devDependencies['@babel/preset-typescript']).toBeUndefined();
   });
 
-  it('biome present then deselected with --remove-deselected → biome.jsonc gone, others intact', () => {
-    const root = tmpRepo();
-    devkit(root, 'init', '--stack', 'generic', '--yes');
-    expect(existsSync(join(root, 'biome.jsonc'))).toBe(true);
-
-    devkit(root, 'init', '--stack', 'generic', '--yes', '--no-biome', '--remove-deselected');
-    expect(existsSync(join(root, 'biome.jsonc'))).toBe(false);
-    // Untouched components survive.
-    expect(existsSync(join(root, 'tsconfig.json'))).toBe(true);
-    expect(existsSync(join(root, '.husky/pre-commit'))).toBe(true);
-    expect(existsSync(join(root, 'guard.config.json'))).toBe(true);
-    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-    expect(pkg.devDependencies['@biomejs/biome']).toBeUndefined();
-    expect(pkg.scripts.format).toBeUndefined();
-    const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    expect(hook).not.toContain('biome format');
-    expect(hook).toContain('$__dk_package_bin_dir/guard-deterministic'); // guards intact
-    expect(config(root).components.biome).toBe(false);
-  });
-
   it('WITHOUT --remove-deselected a deselected-but-present component is left in place', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes');
-    // No --remove-deselected: removal is opt-in. biome.jsonc stays even though deselected.
-    devkit(root, 'init', '--stack', 'generic', '--yes', '--no-biome');
-    expect(existsSync(join(root, 'biome.jsonc'))).toBe(true);
+    // No --remove-deselected: removal is opt-in. tsconfig.json stays even though deselected.
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--no-tsconfig');
+    expect(existsSync(join(root, 'tsconfig.json'))).toBe(true);
   });
 
   it('narrowing the guard subset records the new set (orchestrator re-reads it)', () => {
@@ -579,7 +533,7 @@ describe('doctor — selection-aware', () => {
     );
   });
 
-  it('component-lib biome extends react is OK, not drift (stack-aware expected extends, 2a)', () => {
+  it('component-lib doctor reports the structure-lint line as OK', () => {
     const root = tmpRepo({
       name: 'fx',
       version: '0',
@@ -590,7 +544,6 @@ describe('doctor — selection-aware', () => {
     devkit(root, 'init', '--stack', 'component-lib', '--yes');
     const r = devkit(root, 'doctor');
     expect(r.status).toBe(0);
-    expect(r.stdout).toMatch(/biome\.jsonc: OK — extends @norvalbv\/devkit\/biome\/react/);
     expect(r.stdout).toMatch(/structure-lint: OK — runs `guard-structure staged`/);
   });
 
@@ -638,20 +591,12 @@ describe('doctor — selection-aware', () => {
     expect(readFileSync(hookPath, 'utf8')).toContain('$__dk_package_bin_dir/guard-deterministic');
   });
 
-  it('does NOT flag biome missing when biome was deselected', () => {
-    const root = tmpRepo();
-    devkit(root, 'init', '--stack', 'generic', '--yes', '--no-biome');
-    const r = devkit(root, 'doctor');
-    expect(r.status).toBe(0);
-    expect(r.stdout).not.toMatch(/biome\.jsonc/);
-  });
-
   it('only checks the selected guards in the husky block', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'fanout,size');
     const r = devkit(root, 'doctor');
     expect(r.status).toBe(0);
-    expect(r.stdout).toMatch(/pre-commit: OK — block order: biome-format → deterministic\n/);
+    expect(r.stdout).toMatch(/pre-commit: OK — block order: format → deterministic\n/);
   });
 
   // The order printed is the installed hook's, not the recorded selection's: ui-evidence recorded
@@ -669,7 +614,7 @@ describe('doctor — selection-aware', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'sentry');
     expect(devkit(root, 'doctor').stdout).toContain(
-      'pre-commit: OK — block order: biome-format → guard-sentry-prewarm',
+      'pre-commit: OK — block order: format → guard-sentry-prewarm',
     );
   });
 
@@ -678,7 +623,7 @@ describe('doctor — selection-aware', () => {
     devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'ui-evidence,review,size');
     const { stdout } = devkit(root, 'doctor');
     expect(stdout).toContain(
-      'pre-commit: OK — block order: biome-format → deterministic → guard-review → guard-ui-evidence',
+      'pre-commit: OK — block order: format → deterministic → guard-review → guard-ui-evidence',
     );
     expect(stdout).toContain('commit-msg: OK — block order: guard-completeness');
   });
@@ -686,10 +631,10 @@ describe('doctor — selection-aware', () => {
   it('reports invalid JSON in a managed config as drift (not a silent pass)', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes');
-    writeFileSync(join(root, 'biome.jsonc'), '{ "extends": [ }'); // malformed
+    writeFileSync(join(root, 'tsconfig.json'), '{ "extends": [ }'); // malformed
     const r = devkit(root, 'doctor');
     expect(r.status).toBe(1);
-    expect(r.stdout).toMatch(/biome\.jsonc.*invalid JSON/s);
+    expect(r.stdout).toMatch(/tsconfig\.json.*invalid JSON/s);
   });
 
   it('checks every selected provider-native agent projection', () => {
@@ -799,12 +744,11 @@ describe('doctor collectResults dispatch', () => {
     const root = tmpRepo();
     const cfg = {
       standalone: false,
-      components: { biome: true, tsconfig: false, skills: false, husky: false, guards: [] },
+      components: { tsconfig: true, skills: false, husky: false, guards: [] },
     };
     const { results } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
     const n = names(results);
-    expect(n).toContain('biome.jsonc');
-    expect(n).not.toContain('tsconfig.json');
+    expect(n).toContain('tsconfig.json');
     expect(n).not.toContain('skills');
     expect(n).not.toContain('.husky/pre-commit');
     expect(n).toContain('devkit pin'); // non-standalone always checks the pin
@@ -833,7 +777,7 @@ describe('doctor collectResults dispatch', () => {
 
   it('skips the pin check in standalone mode', async () => {
     const root = tmpRepo();
-    const cfg = { standalone: true, components: { biome: false, guards: [] } };
+    const cfg = { standalone: true, components: { guards: [] } };
     const { results } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
     expect(names(results)).not.toContain('devkit pin');
   });
@@ -845,7 +789,6 @@ describe('doctor collectResults dispatch', () => {
         skills: true,
         agentTargets: ['cursor'],
         husky: false,
-        biome: false,
         guards: [],
       },
     };
@@ -874,7 +817,7 @@ describe('doctor collectResults dispatch', () => {
       stack: 'component-lib',
       standalone: false,
       configOverrides: ['tsconfig.json'],
-      components: { tsconfig: true, biome: false, husky: false, guards: [] },
+      components: { tsconfig: true, husky: false, guards: [] },
     };
     const { results } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
     const ts = results.find((r) => r.name === 'tsconfig.json');
@@ -891,7 +834,7 @@ describe('doctor collectResults dispatch', () => {
     const cfg = {
       stack: 'component-lib',
       standalone: false,
-      components: { tsconfig: true, biome: false, husky: false, guards: [] },
+      components: { tsconfig: true, husky: false, guards: [] },
     };
     const { results } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
     const ts = results.find((r) => r.name === 'tsconfig.json');
@@ -906,7 +849,7 @@ describe('doctor collectResults dispatch', () => {
       stack: 'component-lib',
       standalone: false,
       configOverrides: ['tsconfig.json'],
-      components: { tsconfig: true, biome: false, husky: false, guards: [] },
+      components: { tsconfig: true, husky: false, guards: [] },
     };
     const { results } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
     const ts = results.find((r) => r.name === 'tsconfig.json');
