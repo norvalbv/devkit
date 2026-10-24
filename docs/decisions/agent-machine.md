@@ -36,3 +36,4 @@ created: 2026-10-23
 **Scope:** cli/lib/machine/**,cli/commands/machine/**
 **Source:** manual
 **Evidence-change:** The owner rejected web-only light mode as not emulating Grok Bot: agents must QA Chrome, Electron or any app on their own computer. A probe on this Mac measured a desktop container per slot inside Docker Desktop's one VM at under 2 s to ready and about 330 MB with Chromium, and drove Chromium and an Electron 45 Linux app over CDP and xdotool while ffmpeg recorded the screen. Rejected (a)'s grounds no longer hold: memory pressure is admitted per up, file events are not needed because the app stays on the host, and frink's Linux build already runs under X.
+- 2026-10-24 — devkit machine attach <pr> puts a capture recorded after the ship into that open PR (axes qavis-advisory-gate and ship-pr-evidence-block). run's success line, the help text and the using-devkit skill name it.
