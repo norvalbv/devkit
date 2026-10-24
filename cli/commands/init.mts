@@ -968,13 +968,13 @@ async function run(args: string[], cwd: string): Promise<number> {
     selection = selfHostSelection(recorded?.components);
     disabledGuards = recorded?.components?.disabledGuards;
   } else if (interactive) {
-    const installed = detectInstalled(cwd);
     const result = await runWizard({
       detectedStack,
       detectedMode,
       structureAvailable: STRUCTURE_STACKS.has(detectedStack),
-      installed,
+      installed: detectInstalled(cwd),
       existingReview: recorded?.review,
+      recorded: recorded?.components,
     });
     if (!result) return 0; // cancelled — nothing written
     ({ mode, stack, remove, review } = result);

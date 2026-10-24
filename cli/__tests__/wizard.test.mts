@@ -4,12 +4,13 @@
  * Claude without DESELECTing Cursor left both on. It's now a single SELECT — "Claude only" maps to
  * exactly ['claude'], and the apply layer must then write nothing under .cursor/.codex/.agents.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const SURFACE_Q = 'Sync skills/agents/hooks to which agent surface(s)?';
 const answers = {};
+const offered = {};
 vi.mock('@clack/prompts', () => ({
   intro: () => {},
   outro: () => {},
@@ -17,12 +18,15 @@ vi.mock('@clack/prompts', () => ({
   cancel: () => {},
   isCancel: () => false,
   select: async ({ message }) => answers[message],
-  multiselect: async ({ message }) => answers[message],
+  multiselect: async ({ message, initialValues }) => {
+    offered[message] = initialValues;
+    return answers[message];
+  },
   confirm: async ({ message }) => answers[message],
 }));
 
 // Static imports (after the hoisted vi.mock) so the heavy init.mjs graph loads once, not per test.
-import { applyInit } from '../commands/init.mts';
+import init, { applyInit } from '../commands/init.mts';
 import { runWizard } from '../lib/wizard.mts';
 import { tmpRepos } from './_helpers.mts';
 
@@ -163,5 +167,24 @@ describe('wizard agent-surface selection', () => {
       guards: [],
       decisionsDir: 'docs/decisions',
     });
+  });
+
+  it('devkit init hands the recorded guards to the wizard pre-check', async () => {
+    // The wiring between init and runWizard: without it a re-run re-enables a declined review.
+    const root = tmpRepo();
+    mkdirSync(join(root, '.devkit'));
+    const components = { husky: true, guards: ['size', 'sentry'], disabledGuards: ['review'] };
+    writeFileSync(join(root, '.devkit', 'config.json'), JSON.stringify({ components }));
+    setAnswers('claude');
+    Object.assign(answers, { 'Select components to install': ['husky'], 'Apply?': false });
+    const isTTY = process.stdout.isTTY;
+    process.stdout.isTTY = true;
+    try {
+      expect(await init(['--stack', 'generic'], root)).toBe(0);
+    } finally {
+      process.stdout.isTTY = isTTY;
+    }
+    expect(offered['Select gate guards']).toContain('sentry');
+    expect(offered['Select gate guards']).not.toContain('review');
   });
 });

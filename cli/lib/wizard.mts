@@ -15,12 +15,13 @@ import {
   COMPONENTS,
   CONFIG_DRIVEN_STRUCTURE,
   DEFAULT_REVIEW_DECISIONS_DIR,
+  GUARD_IDS,
   GUARD_OPTIONS,
   OPTIONAL_COMPONENTS,
-  RECOMMENDED_GUARD_IDS,
   REVIEWABLE_GUARD_IDS,
   type ReviewProfile,
   type Selection,
+  WIZARD_GUARD_IDS,
 } from './components.mts';
 
 // The wizard builds its selection incrementally by component id — a mix of the known Selection
@@ -123,6 +124,27 @@ const BASE_DRIFT_OPTION = {
 // selection.lineGrowth (it's a guard.config.json knob, not a husky guard fragment).
 const LINE_GROWTH_ID = 'line-growth';
 
+// The guard answers a previous init recorded in .devkit/config.json `components`.
+interface RecordedGuards {
+  guards?: string[];
+  disabledGuards?: string[];
+  lineGrowth?: boolean;
+  husky?: boolean;
+}
+
+// A re-run keeps what the repo recorded: a recorded guard stays on, a declined one stays off, and a
+// wizard default the repo was never asked about (fresh, --yes-inited, newly bundled) is pre-checked.
+function guardInitialValues(recorded?: RecordedGuards): string[] {
+  const guards = GUARD_IDS.filter(
+    (guard) =>
+      recorded?.guards?.includes(guard) ||
+      (WIZARD_GUARD_IDS.includes(guard) && !recorded?.disabledGuards?.includes(guard)),
+  );
+  // A husky-off run records lineGrowth false without ever showing this box, so that is no decline.
+  const declinedLineGrowth = recorded?.husky && recorded.lineGrowth === false;
+  return declinedLineGrowth ? guards : [...guards, LINE_GROWTH_ID];
+}
+
 // Abort the wizard the moment clack reports a cancel (Ctrl-C / Esc). A TS type guard, so a
 // non-cancelled value narrows to its real type after `if (bail(x)) return null`.
 function bail(value: unknown): value is symbol {
@@ -178,6 +200,8 @@ interface RunWizardOpts {
   installed: Set<string>;
   /** persisted review policy fields that the wizard does not expose */
   existingReview?: Partial<ReviewProfile>;
+  /** the recorded `components` block on a re-run; seeds the guards pre-check */
+  recorded?: RecordedGuards;
 }
 
 // The plan the wizard hands back to init (which normalises `selection` into a full Selection). The
@@ -198,6 +222,7 @@ export async function runWizard({
   structureAvailable,
   installed,
   existingReview,
+  recorded,
 }: RunWizardOpts): Promise<WizardResult | null> {
   intro('◆ devkit setup');
 
@@ -314,7 +339,7 @@ export async function runWizard({
           hint: 'cap files at 500 lines — current giants grandfathered, new growth blocked (needs size)',
         },
       ],
-      initialValues: [...RECOMMENDED_GUARD_IDS, LINE_GROWTH_ID],
+      initialValues: guardInitialValues(recorded),
       required: false,
     });
     if (bail(guards)) return null;

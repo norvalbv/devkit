@@ -33,6 +33,9 @@ export const RECOMMENDED_GUARD_IDS = [
  */
 export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review', 'sentry', 'coverage'];
 
+/** The interactive wizard's pre-checked guards: review joins, beside its visible model-spend hint. */
+export const WIZARD_GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review'];
+
 export function disabledGuardsFor(selected: string[], disabled: string[] = []): string[] {
   return GUARD_IDS.filter((guard) => disabled.includes(guard) && !selected.includes(guard));
 }

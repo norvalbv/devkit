@@ -41,6 +41,7 @@ vi.mock('@clack/prompts', () => ({
     message === 'Apply?' ? true : (initialValue ?? false),
 }));
 
+import { RECOMMENDED_GUARD_IDS } from '../lib/components.mts';
 import { runWizard } from '../lib/wizard.mts';
 
 const opts = (installed: Set<string>, mode = 'package') => ({
@@ -93,5 +94,49 @@ describe('wizard defaults — opt-in components on a re-run', () => {
     } finally {
       Object.assign(selectAnswers, { 'Install mode': 'package', 'Select your stack': 'generic' });
     }
+  });
+});
+
+describe('wizard defaults — guards pre-check', () => {
+  const fresh = opts(new Set());
+  const rerun = (recorded: Parameters<typeof runWizard>[0]['recorded']) =>
+    runWizard({ ...opts(new Set(['skills', 'agents', 'husky', 'guards'])), recorded });
+
+  it('pre-checks review on a fresh install, but never sentry or coverage', async () => {
+    // The model-spend hint sits beside review here; --yes / non-TTY keep it off (apply-init tests).
+    const result = await runWizard(fresh);
+    expect(result?.selection.guards).toEqual([...RECOMMENDED_GUARD_IDS, 'review']);
+    expect(result?.selection.lineGrowth).toBe(true);
+  });
+
+  it('keeps a declined review off on a re-run', async () => {
+    const result = await rerun({ guards: [...RECOMMENDED_GUARD_IDS], disabledGuards: ['review'] });
+    expect(result?.selection.guards).not.toContain('review');
+  });
+
+  it('keeps an opted-in sentry on a re-run and drops a retired guard id', async () => {
+    const result = await rerun({ guards: ['size', 'sentry', 'retired-gate'], disabledGuards: [] });
+    expect(result?.selection.guards).toContain('sentry');
+    // The wizard selection is not normalised downstream, so an id no longer bundled must not leak.
+    expect(result?.selection.guards).not.toContain('retired-gate');
+  });
+
+  it('pre-checks review for a --yes-inited repo that was never asked about it', async () => {
+    const result = await rerun({ guards: [...RECOMMENDED_GUARD_IDS], disabledGuards: [] });
+    expect(result?.selection.guards).toContain('review');
+  });
+
+  it('keeps a declined line-growth block off on a re-run', async () => {
+    const result = await rerun({
+      guards: [...RECOMMENDED_GUARD_IDS],
+      husky: true,
+      lineGrowth: false,
+    });
+    expect(result?.selection.lineGrowth).toBe(false);
+  });
+
+  it('pre-checks line-growth when a husky-off run recorded false without showing the box', async () => {
+    const result = await rerun({ guards: [], husky: false, lineGrowth: false });
+    expect(result?.selection.lineGrowth).toBe(true);
   });
 });
