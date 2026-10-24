@@ -19,3 +19,4 @@ created: 2026-10-23
 **Revisit-when:** A flow that matters needs native OS surfaces (dialogs, menus, keychain) captured for real, an Electron consumer ships a slot-aware boot recipe, the host gains enough memory to run a microVM per agent, or a slot collision is observed despite the lease.
 **Scope:** cli/lib/machine/**,cli/commands/machine/**
 **Source:** manual
+- 2026-10-24 — devkit ship now attaches a worktree's passing capture to its PR (axis ship-pr-evidence-block, QA capture section): only a capture whose working-tree hash matches the shipped commit at every path the PR changes, and only to one PR. The help text and skill say so.

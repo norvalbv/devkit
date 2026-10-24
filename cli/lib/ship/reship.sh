@@ -1193,7 +1193,7 @@ if [ "$UPDATE_PR_BODY" -eq 1 ]; then
     # The commit landed, so its evidence still belongs on the PR; the suggested re-run carries it.
     # Released first, as on the success path: a long capture must not block a same-branch --pr.
     rewrite_publish_lock_release
-    [[ "${PR_URL##*/}" =~ ^[0-9]+$ ]] && publish_evidence_block "$WT" "${PR_URL##*/}" "$REPO" "$SHIP_COMMIT"
+    [[ "${PR_URL##*/}" =~ ^[0-9]+$ ]] && publish_evidence_block "$WT" "${PR_URL##*/}" "$REPO" "$SHIP_COMMIT" "$ROOT"
     [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "${PR_NUM:-}" pr-body-publication-failed
     exit "$BODY_UPDATE_STATUS"
   fi
@@ -1207,7 +1207,7 @@ if [ -n "$PR_URL" ]; then
   READY_STATUS=0
   reship_mark_ready "${PR_NUM:-}" || READY_STATUS=1
   echo "$PR_URL"
-  if [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then publish_evidence_block "$WT" "$PR_NUM" "$REPO" "$SHIP_COMMIT"; fi
+  if [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then publish_evidence_block "$WT" "$PR_NUM" "$REPO" "$SHIP_COMMIT" "$ROOT"; fi
   # The wait comes after the ready flip so it observes the check set that flip triggers — but a
   # FAILED flip skips it: the operator has an actionable remedy above, and burying it under up to two
   # hours of polling on a PR that is in the wrong state helps nobody.
