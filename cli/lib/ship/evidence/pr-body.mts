@@ -2,9 +2,11 @@
 // so the upsert re-reads after writing and refuses once the PR head is no longer the evidence head.
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
-import { upsertEvidenceBlock } from './block.mts';
+import { replaceKeepingQa } from './media.mts';
 
 const GH_TIMEOUT_MS = 60_000;
+/** Uploads of a few MB each can take a while on a slow link; this bounds one `--attach` call. */
+const ATTACH_TIMEOUT_MS = 300_000;
 const ATTEMPTS = 3;
 
 const pullSchema = z.object({
@@ -26,12 +28,27 @@ export function readPull(repo: string, pr: string): PullState {
   return pullSchema.parse(JSON.parse(json));
 }
 
-function writeBody(repo: string, pr: string, body: string): void {
+export function writeBody(repo: string, pr: string, body: string): void {
   execFileSync('gh', ['pr', 'edit', pr, '--repo', repo, '--body-file', '-'], {
     input: body,
     timeout: GH_TIMEOUT_MS,
     stdio: ['pipe', 'ignore', 'pipe'],
   });
+}
+
+/** One body write from `<dir>/body.md` that uploads `files` (names inside `dir`). gh 2.102 resolves
+ * a `![…](./<file>)` ref from its working directory, so it runs in `dir` and rewrites each in place. */
+export function writeBodyAttaching(repo: string, pr: string, dir: string, files: string[]): void {
+  const attach = files.flatMap((file) => ['--attach', file]);
+  try {
+    execFileSync('gh', ['pr', 'edit', pr, '--repo', repo, '--body-file', 'body.md', ...attach], {
+      cwd: dir,
+      timeout: ATTACH_TIMEOUT_MS,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+  } catch {
+    // A partial failure still writes the body; the caller settles from what GitHub holds.
+  }
 }
 
 /** Upsert `block` while the PR head is still `head`; a lost concurrent write is retried, bounded. */
@@ -44,7 +61,7 @@ export function publishEvidenceBlock(
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     const pull = readPull(repo, pr);
     if (pull.headRefOid !== head) return 'head-moved';
-    const next = upsertEvidenceBlock(pull.body, block);
+    const next = replaceKeepingQa(pull.body, block);
     if (next === pull.body) return 'unchanged';
     writeBody(repo, pr, next);
     if (readPull(repo, pr).body.trimEnd() === next.trimEnd()) return 'written';

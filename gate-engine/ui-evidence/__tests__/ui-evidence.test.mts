@@ -195,6 +195,18 @@ describe('guard-ui-evidence CLI', () => {
     expect(judgeCalls(dir)).toBe(0);
   });
 
+  it('names `devkit machine` instead of screenshots when the repo declares a machine recipe', () => {
+    const config = JSON.stringify({
+      machine: { command: ['bunx', 'next', 'dev', '-p', '{port}'] },
+    });
+    const dir = stagedRepo({ 'src/Card.tsx': 'x', 'guard.config.json': config });
+    const r = runGate(dir, 'feat: card');
+    expect(r.stderr).toContain(
+      '📸 ui-evidence: Record it working with `devkit machine up` + `run <flow>`',
+    );
+    expect(r.stderr).not.toContain('Add before (base branch)');
+  });
+
   it('a plain git commit (no ship message) speaks exactly as ship does', () => {
     const atShip = runGate(stagedRepo({ 'src/Card.tsx': 'x' }), 'feat: card');
     const atCommit = runGate(stagedRepo({ 'src/Card.tsx': 'x' }), null);

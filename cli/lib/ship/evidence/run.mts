@@ -23,6 +23,7 @@ import {
 import { type EvidenceConfig, expandCommand, readEvidenceConfig } from './config.mts';
 import { type EvidenceOutcome, inconclusive, notRun, outcomeFromRegression } from './outcome.mts';
 import { publishEvidenceBlock, readPull } from './pr-body.mts';
+import { publishMedia } from './publish-media.mts';
 import { buildRedCommit, classifyChange, prBase, treeOf } from './red-ref.mts';
 
 const REPORT = '.devkit-evidence-report.json';
@@ -181,6 +182,7 @@ async function main(argv: string[]): Promise<void> {
     pr: { type: 'string' },
     head: { type: 'string' },
     failed: { type: 'string' },
+    source: { type: 'string' },
   } as const;
   const { values } = parseArgs({ args: rest, options, strict: true });
   if (command === 'body') {
@@ -189,7 +191,13 @@ async function main(argv: string[]): Promise<void> {
     process.stdout.write(carryEvidenceBlock(caller, current));
     return;
   }
-  if (command !== 'publish') throw new Error('usage: run.mts budget <dir> | publish … | body …');
+  if (command === 'publish-media') {
+    const [source, repo] = [required(values, 'source'), required(values, 'repo')];
+    publishMedia({ source, repo, pr: required(values, 'pr'), head: required(values, 'head') });
+    return;
+  }
+  if (command !== 'publish')
+    throw new Error('usage: run.mts budget <dir> | publish … | publish-media … | body …');
   await publish({
     cwd: required(values, 'cwd'),
     repo: required(values, 'repo'),
