@@ -19,7 +19,7 @@ import {
   warnIfFolded,
   whyHook,
 } from './decision-format.mts';
-import { noteTextWithRelation } from './recall/note-relations.mts';
+import { noteTextWithRelation, validateTargetSupersedes } from './recall/note-relations.mts';
 import { effectiveScope } from './recall/retrieval.mts';
 
 export interface DecisionPaths {
@@ -335,6 +335,7 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
     );
   }
   const gap = trailing.length ? span.slice(span.replace(TRAILING_WS_RE, '').length) : '\n';
+  validateTargetSupersedes(options.supersedes, before, slug);
   const body = `${before}\n\n${renderTarget(date, options)}${gap}${source.slice(end)}`;
   writeFileAtomic(file, renderDecision({ slug, created: workingParsed.fm.created || date }, body));
   regenerateIndex(paths);

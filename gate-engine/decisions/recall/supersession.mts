@@ -26,6 +26,8 @@ import { sections } from './markdown.mts';
 const SUPERSEDES_ID_RE = /^(?:([\w-]+)#)?((?:target|entry):\d{4}-\d{2}-\d{2}(?:~\d+)?)$/;
 const TARGET_SECTION_RE = /^## Target · (\d{4}-\d{2}-\d{2})/;
 const LEGACY_SECTION_RE = /^## (\d{4}-\d{2}-\d{2}) /;
+// Prose committed before the write path validated Target ids; history is immutable, so it stays.
+const KNOWN_MALFORMED_SUPERSEDES = new Set(['oxc-toolchain-migration#target:2026-09-03']);
 
 /** A parsed `**Supersedes:**` value: which axis it names (null = the declaring block's own) and
  * which block id within it. */
@@ -93,7 +95,7 @@ export function allTargetBlocks(body: string): TargetBlock[] {
 /** Every id (modern or legacy) that names a real block in this axis — existence only, for
  * resolving a pointer. A legacy block never DECLARES Supersedes itself (the field postdates that
  * schema), but stays a valid REFERENT for a modern block elsewhere that names one. */
-function axisEntryIds(body: string): Set<string> {
+export function axisEntryIds(body: string): Set<string> {
   const ids = new Set<string>();
   // Mints ids identically to allTargetBlocks, suffix included — if the two disagreed, a perfectly
   // valid reference to a same-day block would read as dangling and drift would cry wolf.
@@ -124,6 +126,36 @@ export interface Supersession {
   multipleLive: { slug: string; ids: string[] }[];
 }
 
+/** The declared edges across every axis body, plus the declarations that resolve to nothing. */
+interface Edges {
+  /** "targetSlug#targetId" -> the id of the block naming it (bare within one axis, `slug#id` across). */
+  reverseEdge: Map<string, string>;
+  unresolved: { slug: string; raw: string }[];
+  /** Axes with at least one declaration that RESOLVES — the only ones opted into single-live. */
+  declaring: Set<string>;
+}
+
+function resolveEdges(bodies: Map<string, string>): Edges {
+  const edges: Edges = { reverseEdge: new Map(), unresolved: [], declaring: new Set() };
+  for (const [slug, body] of bodies) {
+    for (const block of allTargetBlocks(body)) {
+      if (!block.supersedes) continue;
+      const ref = parseSupersedesId(block.supersedes);
+      const targetSlug = ref?.slug ?? slug;
+      const targetBody = ref ? bodies.get(targetSlug) : undefined;
+      if (!ref || !targetBody || !axisEntryIds(targetBody).has(ref.id)) {
+        if (!ref && KNOWN_MALFORMED_SUPERSEDES.has(`${slug}#${block.id}`)) continue;
+        edges.unresolved.push({ slug, raw: block.supersedes });
+        continue;
+      }
+      const supersedingId = targetSlug === slug ? block.id : `${slug}#${block.id}`;
+      edges.reverseEdge.set(`${targetSlug}#${ref.id}`, supersedingId);
+      edges.declaring.add(slug);
+    }
+  }
+  return edges;
+}
+
 /**
  * Read every axis file fresh and resolve every declared Supersedes edge.
  *
@@ -146,26 +178,7 @@ export function resolveSupersession(decisionsDir?: string | null): Supersession 
     ]),
   );
 
-  // "targetSlug#targetId" -> the id of the block that names it, qualified per the same convention
-  // Supersedes itself uses (bare within one axis, `slug#id` across axes).
-  const reverseEdge = new Map<string, string>();
-  const unresolved: { slug: string; raw: string }[] = [];
-
-  for (const [slug, body] of bodies) {
-    for (const block of allTargetBlocks(body)) {
-      if (!block.supersedes) continue;
-      const ref = parseSupersedesId(block.supersedes);
-      const targetSlug = ref?.slug ?? slug;
-      const targetBody = ref ? bodies.get(targetSlug) : undefined;
-      if (!ref || !targetBody || !axisEntryIds(targetBody).has(ref.id)) {
-        unresolved.push({ slug, raw: block.supersedes });
-        continue;
-      }
-      const supersedingId = targetSlug === slug ? block.id : `${slug}#${block.id}`;
-      reverseEdge.set(`${targetSlug}#${ref.id}`, supersedingId);
-    }
-  }
-
+  const { reverseEdge, unresolved, declaring } = resolveEdges(bodies);
   const supersededBy = new Map<string, string | null>();
   const multipleLive: { slug: string; ids: string[] }[] = [];
   for (const [slug, body] of bodies) {
@@ -178,8 +191,9 @@ export function resolveSupersession(decisionsDir?: string | null): Supersession 
     // the last block is current. Flagging them all would report 5 of 5 multi-Target axes on this
     // corpus, i.e. a 100% false-positive rate, which is how a check gets switched off. Partial
     // adoption (some blocks declare, one is left dangling) IS a real inconsistency and still reports.
-    const declares = blocks.some((b) => b.supersedes);
-    if (declares && live.length > 1) multipleLive.push({ slug, ids: live.map((b) => b.id) });
+    // Only a RESOLVING declaration opts in: an unresolvable one is reported by resolveEdges, once.
+    if (declaring.has(slug) && live.length > 1)
+      multipleLive.push({ slug, ids: live.map((b) => b.id) });
   }
 
   return { supersededBy, unresolved, multipleLive };

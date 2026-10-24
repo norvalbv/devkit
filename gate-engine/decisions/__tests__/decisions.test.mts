@@ -224,6 +224,11 @@ describe('pure helpers', () => {
       visionFit: 'f',
     });
     expect(without).not.toContain('**Supersedes:**');
+    // A whitespace-only value is no pointer: it must not leave a hollow field on an append-only record.
+    const blank = { context: 'c', ruling: 'r', consequences: 'v', tradeoff: 't', visionFit: 'f' };
+    expect(renderTarget('2026-05-29', { ...blank, supersedes: '   ' })).not.toContain(
+      '**Supersedes:**',
+    );
   });
 
   // currentTarget's contract stays "last block wins" — unchanged by Supersedes. Its generic

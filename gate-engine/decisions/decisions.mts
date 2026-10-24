@@ -73,7 +73,7 @@ import {
 import { warnNearestAxes } from './dedupe.mts';
 import { runDrift } from './drift.mts';
 import { assertFullNotJson, printFull, printRanked, renderSpine } from './recall/full-print.mts';
-import { noteTextWithRelation } from './recall/note-relations.mts';
+import { noteTextWithRelation, validateTargetSupersedes } from './recall/note-relations.mts';
 import { type RankResult, rankAxes as rankAxesIn, reindexAll } from './recall/retrieval.mts';
 
 export {
@@ -188,8 +188,9 @@ function addTarget(slug: string, o: AddOptions, p: Paths) {
   const date = today();
   let fm: Record<string, string>;
   let body: string;
-  if (exists) {
-    const parsed = parseDecision(readFileSync(file, 'utf8'));
+  const parsed = exists ? parseDecision(readFileSync(file, 'utf8')) : null;
+  validateTargetSupersedes(o.supersedes, parsed?.body ?? '', slug);
+  if (parsed) {
     // Re-target guard: a Target moves only on an evidence-state change, never on impl pain. Trimmed
     // so the CLI cannot write a hollow field that integrity/checks.mts would then flag as missing.
     if (currentTarget(parsed.body) && !o.evidenceChange?.trim()) {

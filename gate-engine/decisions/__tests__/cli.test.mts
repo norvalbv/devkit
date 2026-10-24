@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -459,6 +459,92 @@ describe('guard-decisions amend --note --supersedes (via cli.mts, the real bin)'
     expect(r.status, r.stderr).toBe(0);
     expect(r.stderr).toContain('omits --supersedes');
     expect(file()).not.toContain('**Amends:**');
+  });
+});
+
+// The Target half of --supersedes: a pointer drift would reject is refused before anything is written,
+// so a prose value can no longer reach an append-only record where nobody can repair it.
+describe('guard-decisions add/amend --target --supersedes (via cli.mts, the real bin)', () => {
+  const file = () => readFileSync(join(dir, 'my-axis.md'), 'utf8');
+  const addTarget = (...extra: string[]) =>
+    run(['add', 'my-axis', '--target', ...reqFlags('my-axis'), ...extra]);
+
+  it.each([
+    ['prose', 'the 2026-07-01 note on this axis', 'is not a Target id'],
+    ['the block being written', 'target:2026-07-26', 'names no Target on this axis'],
+  ])('refuses %s on a new axis and writes nothing', (_label, id, message) => {
+    const r = addTarget('--new', '--supersedes', id);
+    expectRefusal(r);
+    expect(r.stderr).toContain(message);
+    expect(existsSync(join(dir, 'my-axis.md'))).toBe(false);
+  });
+
+  it('accepts a re-target naming the earlier same-day block, and drift resolves it', () => {
+    expect(addTarget('--new').status).toBe(0);
+    const r = addTarget('--evidence-change', 'new data', '--supersedes', 'target:2026-07-26');
+    expect(r.status, r.stderr).toBe(0);
+    expect(file()).toContain('**Supersedes:** target:2026-07-26');
+    expect(run(['drift']).stderr).not.toContain('Supersedes');
+  });
+
+  it('refuses a same-axis id that names no block and leaves the record unchanged', () => {
+    expect(addTarget('--new').status).toBe(0);
+    const before = file();
+    const r = addTarget(
+      '--evidence-change',
+      'new data',
+      '--supersedes',
+      'my-axis#target:1999-01-01',
+    );
+    expectRefusal(r);
+    expect(r.stderr).toContain('names no Target on this axis');
+    expect(file()).toBe(before);
+  });
+
+  it('amend --target refuses prose on a draft Target and leaves it unchanged', () => {
+    execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'pipe' });
+    expect(addTarget('--new').status).toBe(0);
+    const before = file();
+    const r = run([
+      'amend',
+      'my-axis',
+      '--target',
+      ...reqFlags('my-axis'),
+      '--supersedes',
+      'prose',
+    ]);
+    expectRefusal(r);
+    expect(r.stderr).toContain('is not a Target id');
+    expect(file()).toBe(before);
+  });
+
+  // amend validates against the history BEFORE the draft: passing the whole body would let the
+  // draft name itself, and drift would then read the live ruling as superseded by itself.
+  it('amend --target refuses the draft naming itself but accepts an earlier block', () => {
+    execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'pipe' });
+    expect(addTarget('--new').status).toBe(0);
+    expect(addTarget('--evidence-change', 'new data').status).toBe(0);
+    const amend = (id: string) =>
+      run([
+        'amend',
+        'my-axis',
+        '--target',
+        ...reqFlags('my-axis'),
+        '--evidence-change',
+        'v2',
+        '--supersedes',
+        id,
+      ]);
+
+    const before = file();
+    const self = amend('target:2026-07-26~2');
+    expectRefusal(self);
+    expect(self.stderr).toContain('names no Target on this axis');
+    expect(file()).toBe(before);
+
+    expect(amend('target:2026-07-26').status).toBe(0);
+    expect(file()).toContain('**Supersedes:** target:2026-07-26');
+    expect(run(['drift']).stderr).not.toContain('Supersedes');
   });
 });
 

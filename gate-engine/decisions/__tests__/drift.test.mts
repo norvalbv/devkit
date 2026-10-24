@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { findDrift, findPartialDrift, repoFiles, runDrift } from '../drift.mts';
 import { resolveSupersession } from '../recall/supersession.mts';
@@ -275,7 +276,48 @@ describe('decision drift (Supersedes resolution)', () => {
     ]);
     expect(runDrift(root, decisions)).toBe(1);
   });
+
+  // Three Targets where only the middle one declares Supersedes, with the given value.
+  const threeBlocks = (slug: string, middle: string) =>
+    supersedingTarget(slug, '2026-08-15', 'first') +
+    laterTarget('2026-09-03', `**Supersedes:** ${middle}\n`) +
+    laterTarget('2026-10-02');
+
+  // An unresolvable pointer is ONE fault: it is reported as unresolved, and does not also opt the
+  // axis into single-live semantics, which would report the same fault a second time.
+  it.each([
+    ['prose', 'the 2026-08-23 note on this axis'],
+    ['a well-shaped id naming no block', 'target:1999-01-01'],
+  ])('a Supersedes that does not resolve (%s) is reported once, not as ambiguity', (_l, value) => {
+    writeFileSync(join(decisions, 'amended.md'), threeBlocks('amended', value));
+    const { unresolved, multipleLive } = resolveSupersession(decisions);
+    expect(unresolved).toEqual([{ slug: 'amended', raw: value }]);
+    expect(multipleLive).toEqual([]);
+  });
+
+  it('the one known malformed historical pointer is excepted only while it stays unparseable', () => {
+    const slug = 'oxc-toolchain-migration';
+    writeFileSync(join(decisions, `${slug}.md`), threeBlocks(slug, 'the 2026-08-23 sc-1964 note'));
+    expect(resolveSupersession(decisions)).toMatchObject({ unresolved: [], multipleLive: [] });
+
+    writeFileSync(join(decisions, `${slug}.md`), threeBlocks(slug, 'target:1999-01-01'));
+    expect(resolveSupersession(decisions).unresolved).toEqual([{ slug, raw: 'target:1999-01-01' }]);
+  });
+
+  // The fixture above shares the exception's key, so only the real record proves the key matches it.
+  it('the real oxc-toolchain-migration record draws no supersession finding', () => {
+    const real = fileURLToPath(new URL('../../../docs/decisions', import.meta.url));
+    const { unresolved, multipleLive } = resolveSupersession(real);
+    const oxc = (f: { slug: string }) => f.slug === 'oxc-toolchain-migration';
+    expect(existsSync(join(real, 'oxc-toolchain-migration.md'))).toBe(true);
+    expect([...unresolved, ...multipleLive].filter(oxc)).toEqual([]);
+  });
 });
+
+/** A further Target block (no frontmatter) to append after supersedingTarget. */
+const laterTarget = (date: string, extra = '') =>
+  `\n## Target · ${date} — r${date}\n\n**Context:** c\n**Ruling:** r${date}\n` +
+  `**Consequences:**\n- Positive: p\n- Negative: n\n${extra}**Source:** manual\n`;
 
 // Scope globs are always authored repo-root-relative with forward slashes. A filesystem walk yields
 // OS-native separators, so without normalization every scoped axis misreports as drifted on Windows.
