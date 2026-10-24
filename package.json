@@ -98,9 +98,11 @@
     "es-module-lexer": "^2.1.0",
     "eslint": "^10.5.0",
     "eslint-plugin-project-structure": "^3.14.3",
+    "get-port": "7.2.0",
     "mdast-util-from-markdown": "^2.0.3",
     "oxfmt": "0.63.0",
     "oxlint": "1.78.0",
+    "playwright-core": "1.63.0",
     "ts-morph": "^28.0.0",
     "unbash": "^4.0.11",
     "zod": "4.5.4"

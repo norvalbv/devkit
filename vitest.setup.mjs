@@ -279,6 +279,9 @@ export function hermeticPath(pathValue, binNames, shimDir) {
     mkdtempSync(path.join(os.tmpdir(), 'devkit-test-home-'));
   process.env.DEVKIT_SUITE_HOME_PID = String(process.pid);
   process.env.DEVKIT_SUITE_HOME = home;
+  // Playwright finds its downloaded browsers under the home dir, so keep the developer's cache.
+  const cache = process.platform === 'darwin' ? 'Library/Caches' : '.cache';
+  process.env.PLAYWRIGHT_BROWSERS_PATH ??= path.join(os.userInfo().homedir, cache, 'ms-playwright');
   process.env.HOME = home;
   process.env.USERPROFILE = home;
   delete process.env.XDG_CONFIG_HOME;
