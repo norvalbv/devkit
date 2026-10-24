@@ -37,3 +37,4 @@ created: 2026-10-21
 **Scope:** cli/lib/follow-up/**,cli/commands/follow-up/**
 **Source:** collab · sc-7789
 **Evidence-change:** The measurements above (owner-wait, child start rate after merge, partial parents, sibling overlap and conflict, chain depth) and the v70/v71 lanes cost, none of which existed when the 2026-10-21 Target was recorded.
+- 2026-10-24 — devkit follow-up file is agent-routed from the using-devkit skill, so an agent in any session files the follow-ups this Target allows with the record lines. start stays Flow-only: meta.unroutedSubcommands declares it and the command-skill routing test fails if any skill names its invocation.
