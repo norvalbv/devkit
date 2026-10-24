@@ -578,6 +578,18 @@ describe('format re-stage step (real git)', () => {
       expect(argvOf(repo)).toContain('ARG[café.mts]');
     });
 
+    it.each([' lead.mts', 'tab\tname.mts', `it's "q".mts`])(
+      'formats and re-stages %j as one argument',
+      (name) => {
+        const repo = initRepo();
+        stageFile(repo, name);
+        const r = runInRepo(repo, { devkit: ARGV_STUB });
+        expect(r.status, r.stdout).toBe(0);
+        expect(r.stdout).toContain('🎨 oxfmt formatted and re-staged 1 staged file(s).');
+        expect(argvOf(repo)).toContain(`ARG[${name}]\n`);
+      },
+    );
+
     it('reports the formatted count on success', () => {
       const repo = initRepo();
       stageFile(repo, 'a.mts');
