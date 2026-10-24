@@ -526,7 +526,7 @@ describe('inspectDistIntegrity — never-built sources', () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(printDistIntegrityFailure(report)).toBe(1);
     expect(errors.mock.calls.flat().join('\n')).toContain(
-      "run `bun run build`, then brief ONLY these (ordinary dist churn stays release-only): -- 'dist/cli/lib/new.sh'",
+      "run `bun run build:new` on these, which writes only them, then brief them (ordinary dist churn stays release-only): -- 'dist/cli/lib/new.sh'",
     );
     errors.mockRestore();
   });

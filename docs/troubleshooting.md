@@ -253,6 +253,9 @@ too. A feature PR may only **add** dist files (new artifacts) or **delete** them
 - **Before shipping:** `devkit ship` lists rebuilt files as `release-only drift from <commit> — leave
   them out of the brief`, where `<commit>` is the PR's merge-base (on `--pr`) or the base it ships
   onto. Brief your source, plus only the **new** dist paths the preflight names.
+- **A new dist artifact is missing or stale:** run `bun run build:new <dist paths>`. It writes only
+  those untracked files from a fresh build and refuses tracked dist, so nothing needs restoring
+  afterwards. A full `bun run build` followed by `git checkout --` can revert the new artifact too.
 - **A reviewer asks for a rebuilt dist file:** leave it out anyway. A tracked dist file that lags its
   source (the CLI dispatcher missing a new command, say) is expected until the next release, and
   briefing the rebuilt file is refused here.
