@@ -20,6 +20,7 @@ import {
   printReleaseOnlyDist,
   releaseVersion,
 } from '../lib/ship/preflight/release-only-dist.mts';
+import { shellQuote } from '../lib/ship/dist-integrity.mts';
 import { SELF_HOST_EXTRAS } from '../lib/husky/self-host.mts';
 import { scopedTargets } from '../../gate-engine/decisions/scoped-targets.mts';
 import { loadReviewerTargetsBlocks } from '../../gate-engine/review/evidence/targets-block.mts';
@@ -766,18 +767,18 @@ describe('--ship-staged: the self-host hook runs CI’s check from the ship work
 
 describe('gate.yml enforces it on every PR', () => {
   /** The step's own `run:` block, so this exercises exactly what CI executes. */
-  function gateStep(): string {
+  function gateStep(script = preflightScript): string {
     const text = readFileSync(gateWorkflow, 'utf8');
     const step = /- name: Release-only dist[^\n]*\n([\s\S]*?)\n\n/.exec(text)?.[1];
     expect(step, 'gate.yml must carry the release-only dist step').toBeDefined();
     expect(step).toContain("if: github.event_name == 'pull_request'");
     const run = /run: \|\n([\s\S]*)$/.exec(step!)?.[1];
     expect(run).toBeDefined();
-    return run!.replaceAll('cli/lib/ship/dist-integrity.mts', preflightScript);
+    return run!.replaceAll('cli/lib/ship/dist-integrity.mts', shellQuote(script));
   }
 
   /** A PR branch `head` forked from main, plus an unrelated later main commit (the PR's base tip). */
-  function pullRequest(branch: string, change: (root: string) => void) {
+  function pullRequest(branch: string, change: (root: string) => void, script = preflightScript) {
     const { base: fork, root } = repo();
     git(root, 'switch', '-q', '-c', branch);
     change(root);
@@ -793,7 +794,7 @@ describe('gate.yml enforces it on every PR', () => {
     const baseTip = git(root, 'rev-parse', 'HEAD');
     git(root, 'switch', '-q', '--detach', head);
     expect(git(root, 'merge-base', baseTip, head)).toBe(fork);
-    return testSpawnSync('/bin/bash', ['-c', gateStep()], {
+    return testSpawnSync('/bin/bash', ['-c', gateStep(script)], {
       cwd: root,
       encoding: 'utf8',
       env: { ...process.env, ...GIT_ENV, DIST_BASE: baseTip, DIST_HEAD: head, DIST_BRANCH: branch },
@@ -817,6 +818,21 @@ describe('gate.yml enforces it on every PR', () => {
       write(root, 'cli/new.mts', 'export {};\n');
       write(root, 'dist/cli/new.mjs', 'export {};\n');
     });
+
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it('runs the step from a checkout whose path contains a space', () => {
+    const script = join(mkTmp('devkit space-'), 'dist-integrity.mts');
+    symlinkSync(preflightScript, script);
+    const result = pullRequest(
+      'feat/x',
+      (root) => {
+        write(root, 'cli/new.mts', 'export {};\n');
+        write(root, 'dist/cli/new.mjs', 'export {};\n');
+      },
+      script,
+    );
 
     expect(result.status, result.stderr).toBe(0);
   });
