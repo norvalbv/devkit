@@ -4,10 +4,13 @@ import { z } from 'zod';
 // extendedglob reads a bare mid-word `#` as a glob operator.
 const SHELL_SAFE_WORD_RE = /^[\w@%+=:,./-]+$/;
 
+/** POSIX single-quoted, always: for a word that must be quoted, or a list quoted uniformly. */
+export const shellQuote = (word: string): string => `'${word.replaceAll("'", "'\\''")}'`;
+
 /** One shell word for a pasteable command: a plain word stays byte-identical, anything else is
- * single-quoted. Shared by blockingNote, the ship digest and the diff-evidence hint. */
+ * single-quoted. */
 export const shellWord = (word: string): string =>
-  SHELL_SAFE_WORD_RE.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
+  SHELL_SAFE_WORD_RE.test(word) ? word : shellQuote(word);
 
 /** The rationale a printed waive command carries; waive rejects it unedited, by design. */
 export const WAIVE_RATIONALE_PLACEHOLDER = 'why this finding is waived';

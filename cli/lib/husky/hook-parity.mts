@@ -183,6 +183,7 @@ export const HOOK_GENERATOR_FILES = [
   'cli/lib/ship/redact-secrets.mts',
   'gate-engine/deterministic/recheck.mts',
   'gate-engine/judge/judge-isolation.mts',
+  'gate-engine/review/valve/shell-word.mts',
 ] as const;
 /** Directory prefixes with the same effect. */
 export const HOOK_GENERATOR_PREFIXES = ['cli/lib/husky/'] as const;
