@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import type { Attribution } from '../../baseline-status/attribution.mts';
 import type { UnknownReason } from '../../baseline-status/gh.mts';
 import { classifyChecksFailure, type ExecFailure } from './classify.mts';
+import { requiredSetPoller } from './required.mts';
 import { recordCiEvent } from './telemetry.mts';
 
 /** The five states gh collapses `state` into. Ordered for stable rendering, not by severity. */
@@ -115,7 +116,7 @@ export function summarise(rows: CheckRow[]): Summary {
     failures: rows.filter((r) => r.bucket === 'fail'),
     pending: rows.filter((r) => r.bucket === 'pending'),
     cancelled: rows.filter((r) => r.bucket === 'cancel'),
-    terminal: counts.pending === 0,
+    terminal: counts.pending === 0 || counts.fail > 0, // a red check cannot turn green
     outcome,
   };
 }
@@ -148,7 +149,9 @@ const linked = (rows: CheckRow[]): string =>
 
 /** The one machine-readable line. A caller branches on this, never on ship's exit code. */
 export function verdictLine(result: WaitCiResult, pr: string): string {
-  const head = `${VERDICT_PREFIX}${result.outcome} pr=${pr}${result.required ? ' scope=required' : ''}`;
+  const contexts =
+    result.requiredContexts === undefined ? '' : ` required-contexts=${result.requiredContexts}`;
+  const head = `${VERDICT_PREFIX}${result.outcome} pr=${pr}${result.required ? ' scope=required' : ''}${contexts}`;
   switch (result.outcome) {
     case 'failed':
       return `${head} failing=${linked(result.failures)}${result.attribution ? ` ${result.attribution.line}` : ''}`;
@@ -229,6 +232,8 @@ export interface WaitCiResult {
   unavailableMessage?: string;
   /** Narrowed to branch-protection required checks: only those that have REPORTED (cli/cli#8855). */
   required?: boolean;
+  /** How many contexts the base requires, once read; 0 means the base requires none. */
+  requiredContexts?: number;
   /** On `failed` only: which failures the base already had. */
   attribution?: Attribution;
 }
@@ -411,18 +416,28 @@ function flagValue(argv: string[], name: string): string | undefined {
   return i === -1 ? undefined : argv[i + 1];
 }
 
+function unknownAttribution(reason: string): Attribution {
+  return {
+    token: 'unknown',
+    inherited: null,
+    fresh: null,
+    line: `attribution=unknown reason=${reason}`,
+  };
+}
+
 /** Loaded lazily, so a broken import can never cost the verdict line of any outcome. */
-async function attribute(pr: string, failures: CheckRow[]): Promise<Attribution> {
+async function attribute(
+  pr: string,
+  failures: CheckRow[],
+  pending: CheckRow[],
+): Promise<Attribution> {
+  // A red that ended the wait early leaves a run unfinished: no summary yet, and more red to come.
+  if (pending.length > 0) return unknownAttribution('run-in-progress');
   try {
     const { attributeFailures } = await import('../../baseline-status/attribution.mts');
     return attributeFailures({ cwd: process.cwd(), pr, failures });
   } catch {
-    return {
-      token: 'unknown',
-      inherited: null,
-      fresh: null,
-      line: 'attribution=unknown reason=attribution-error',
-    };
+    return unknownAttribution('attribution-error');
   }
 }
 
@@ -444,13 +459,17 @@ async function main(argv: string[]): Promise<number> {
   const settleGraceMs =
     positiveInt(process.env.DEVKIT_WAIT_CI_SETTLE_MS) ?? DEFAULT_SETTLE_GRACE_MS;
   const required = argv.includes('--required');
+  const [cwd, exec] = [process.cwd(), defaultExec(DEFAULT_EXEC_TIMEOUT_MS)];
+  const checks = ghChecksPoller({ pr, repo, cwd, required, exec });
+  const narrowed = required ? requiredSetPoller(checks, { pr, repo, cwd, exec }) : null;
   const result = await waitForChecks({
-    poll: ghChecksPoller({ pr, repo, cwd: process.cwd(), required }),
+    poll: narrowed?.poll ?? checks,
     timeoutMs: seconds * 1000,
     intervalMs,
     settleGraceMs,
-  }).then((r) => ({ ...r, required }));
-  if (result.outcome === 'failed') result.attribution = await attribute(pr, result.failures);
+  }).then((r) => ({ ...r, required, requiredContexts: narrowed?.contexts()?.length }));
+  if (result.outcome === 'failed')
+    result.attribution = await attribute(pr, result.failures, result.pending);
   console.error(verdictLine(result, pr));
   recordCiEvent(result, pr);
   // Without --strict the ship already succeeded and this process never speaks for it.

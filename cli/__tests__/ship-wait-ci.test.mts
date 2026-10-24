@@ -122,6 +122,8 @@ describe('ship-branch.sh — --wait-ci', () => {
     // ALL checks, never --required: an unprotected branch reports an EMPTY required set, which
     // would render a red PR green.
     expect(calls[checked]).not.toContain('--required');
+    // The required-set reads belong to --wait-ci-required alone.
+    expect(calls.filter((l) => l.includes('baseRefName'))).toEqual([]);
     expect(r.stderr).toContain('ship: ci-outcome=passed pr=42');
   });
 
@@ -145,6 +147,18 @@ describe('ship-branch.sh — --wait-ci', () => {
     // unaffected by it.
     expect(r.stdout).not.toContain('ci-outcome=');
     expect(r.stdout).not.toContain('ci: ');
+  });
+
+  it('ends red while another check still runs, and does not attribute an unfinished run', () => {
+    const log = argvLog();
+    const redAndRunning =
+      '[{"bucket":"fail","name":"gate","state":"FAILURE","link":"https://x/1","workflow":"gate"},' +
+      '{"bucket":"pending","name":"e2e","state":"IN_PROGRESS","link":"","workflow":"e2e"}]';
+    const { r } = ship(['feat/early-red', 't', '--wait-ci', 'note.txt'], log, redAndRunning);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain(
+      'ci-outcome=failed pr=42 failing=gate:https://x/1 attribution=unknown reason=run-in-progress',
+    );
   });
 
   it('announces that the PR is open before it starts waiting', () => {
@@ -409,6 +423,7 @@ describe('--wait-ci-required', () => {
   const unprotectedStub = (log: string) =>
     ghStub(
       `printf '%s\\n' "$*" >> '${log}'
+      case " $* " in *" baseRefName "*) echo main; exit 0 ;; esac
       case "$2" in
         checks)
           case " $* " in *" --required "*) echo "no required checks reported on the 'x' branch" >&2; exit 1 ;; esac
@@ -470,7 +485,11 @@ describe('--wait-ci-required', () => {
     );
     expect(r.status, r.stderr).toBe(0);
     expect(lines(log).find((l) => l.startsWith('pr checks'))).toContain('--required');
-    expect(r.stderr).toContain('ship: ci-outcome=no-checks pr=42 scope=required checks=0');
+    // The set read ran: ghStub answers `gh api` with an empty set, i.e. an unprotected base.
+    expect(lines(log).some((l) => l.includes('--json baseRefName'))).toBe(true);
+    expect(r.stderr).toContain(
+      'ship: ci-outcome=no-checks pr=42 scope=required required-contexts=0 checks=0',
+    );
     expect(r.stderr).not.toContain('ci-outcome=passed');
   });
 
@@ -497,12 +516,23 @@ describe('--wait-ci-required', () => {
         cwd: dir,
         input: 'body\n',
         encoding: 'utf8',
-        env: { ...process.env, ...env, GH_CHECKS_JSON: GREEN, ...FAST },
+        env: {
+          ...process.env,
+          ...env,
+          GH_CHECKS_JSON: GREEN,
+          GH_REQUIRED_CONTEXTS: 'gate',
+          ...FAST,
+        },
       },
     );
     expect(r.status, r.stderr).toBe(0);
     expect(readFileSync(ghLog, 'utf8')).toMatch(/^pr checks 7 .*--required$/m);
-    expect(r.stderr).toContain('ship: ci-outcome=passed pr=7 scope=required checks=1');
+    expect(readFileSync(ghLog, 'utf8')).toMatch(
+      /^api --paginate repos\/acme\/app\/rules\/branches\/main /m,
+    );
+    expect(r.stderr).toContain(
+      'ship: ci-outcome=passed pr=7 scope=required required-contexts=1 checks=1',
+    );
   });
 });
 
