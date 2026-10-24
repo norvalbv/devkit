@@ -50,6 +50,25 @@ function repoWith(files: Record<string, string>, { oxfmtBin = true } = {}) {
   return { repo, git };
 }
 
+const FORMATTED_4 =
+  'export const a = 1;\nexport const b = 2;\nexport const c = 3;\nexport const d = 4;\n';
+
+/** Commits `from` with `body`, then stages `git mv from to`, optionally rewriting `to` first. */
+function stageRename(
+  { repo, git }: ReturnType<typeof repoWith>,
+  from: string,
+  to: string,
+  body: string,
+  edited?: string,
+) {
+  writeFileSync(join(repo, from), body);
+  git('add', from);
+  git('commit', '-qm', 'base');
+  git('mv', from, to);
+  if (edited !== undefined) writeFileSync(join(repo, to), edited);
+  git('add', to);
+}
+
 function runStep(repo: string, { biome = false, env = {}, shell = 'sh' } = {}) {
   const hook = join(repo, '..', `${repo.split('/').pop()}-pre-commit`);
   dirs.push(hook);
@@ -90,6 +109,42 @@ describe('overlay format step — real git and the real oxfmt binary', () => {
     expect(r.status, r.stdout).toBe(0);
     expect(r.stdout).toContain('🎨 oxfmt formatted and re-staged 2 staged file(s).');
     expect(git('show', ':src/a.ts')).toBe('const a = { b: 1 };\n');
+  });
+
+  // A small edit keeps git's rename status (R0xx), which an ACM filter alone drops.
+  it('formats and re-stages a renamed file with a small unformatted edit under its new path', () => {
+    const r0 = repoWith({ '.oxfmtrc.json': '{}\n' });
+    r0.git('commit', '-qm', 'config');
+    stageRename(r0, 'old.ts', 'ren.ts', FORMATTED_4, FORMATTED_4.replace('d = 4;', 'd  =  {x:4}'));
+    expect(r0.git('diff', '--cached', '--name-status')).toMatch(/^R\d+\told\.ts\tren\.ts$/m);
+    const r = runStep(r0.repo);
+    expect(r.status, r.stdout).toBe(0);
+    expect(r.stdout).toContain('🎨 oxfmt formatted and re-staged 1 staged file(s).');
+    expect(r0.git('show', ':ren.ts')).toBe(FORMATTED_4.replace('d = 4;', 'd = { x: 4 };'));
+  });
+
+  // Reformatting an exact move would turn its R100 into a delete plus an add for the later gates.
+  it('leaves a pure rename of an unformatted file byte-identical and still a rename', () => {
+    const r0 = repoWith({ '.oxfmtrc.json': '{}\n' });
+    r0.git('commit', '-qm', 'config');
+    stageRename(r0, 'legacy.ts', 'moved.ts', UNFORMATTED);
+    const r = runStep(r0.repo);
+    expect(r.status, r.stdout).toBe(0);
+    expect(r.stdout).toContain('🎨 oxfmt: no staged formattable path');
+    expect(r0.git('show', ':moved.ts')).toBe(UNFORMATTED);
+    expect(r0.git('diff', '--cached', '--name-status')).toBe('R100\tlegacy.ts\tmoved.ts\n');
+  });
+
+  // With rename detection off in the consumer's config, an exact move would list as a new file.
+  it('leaves a pure rename untouched when the repo sets diff.renames=false', () => {
+    const r0 = repoWith({ '.oxfmtrc.json': '{}\n' });
+    r0.git('commit', '-qm', 'config');
+    r0.git('config', 'diff.renames', 'false');
+    stageRename(r0, 'legacy.ts', 'moved.ts', UNFORMATTED);
+    const r = runStep(r0.repo);
+    expect(r.status, r.stdout).toBe(0);
+    expect(r.stdout).toContain('🎨 oxfmt: no staged formattable path');
+    expect(r0.git('show', ':moved.ts')).toBe(UNFORMATTED);
   });
 
   // Linux CI runs hooks under dash; an if/elif chain that defines a function per arm must parse there.

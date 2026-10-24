@@ -579,6 +579,32 @@ describe('format re-stage step (real git)', () => {
       expect(argvOf(repo)).toContain('ARG[café.mts]');
     });
 
+    // A small edit keeps git's rename status (R0xx), which an ACM filter alone drops.
+    it('formats a renamed file with a small edit under its new path', () => {
+      const repo = initRepo();
+      const body = 'export const a = 1;\nexport const b = 2;\nexport const c = 3;\n';
+      stageFile(repo, 'old.mts', `${body}export const d = 4;\n`);
+      execFileSync('git', ['commit', '-qm', 'base'], { cwd: repo });
+      execFileSync('git', ['mv', 'old.mts', 'ren.mts'], { cwd: repo });
+      stageFile(repo, 'ren.mts', `${body}export const d  =  4\n`);
+      const r = runInRepo(repo, { biome: ARGV_STUB });
+      expect(r.status, r.stdout).toBe(0);
+      expect(r.stdout).toContain('🎨 biome formatted and re-staged 1 staged file(s).');
+      expect(argvOf(repo)).toContain('ARG[ren.mts]');
+      expect(argvOf(repo)).not.toContain('ARG[old.mts]');
+    });
+
+    it('leaves a pure rename to the later gates without invoking biome', () => {
+      const repo = initRepo();
+      stageFile(repo, 'legacy.mts');
+      execFileSync('git', ['commit', '-qm', 'base'], { cwd: repo });
+      execFileSync('git', ['mv', 'legacy.mts', 'moved.mts'], { cwd: repo });
+      const r = runInRepo(repo, { biome: ARGV_STUB });
+      expect(r.status, r.stdout).toBe(0);
+      expect(r.stdout).toContain('🎨 biome: no staged formattable path');
+      expect(existsSync(join(repo, 'argv.log'))).toBe(false);
+    });
+
     it('reports the formatted count on success', () => {
       const repo = initRepo();
       stageFile(repo, 'a.mts');

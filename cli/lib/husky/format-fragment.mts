@@ -154,7 +154,9 @@ export const formatFragment = (binDir: string, chain?: StepFormatter[]) => `# de
 # body — self-host replaces the setup outright, and an unreachable arm must not survive into it.
 __dk_format_staged() {
 ${chain ? renderToolChain(chain, binDir) : renderToolSetup(CONSUMER_FORMATTER, binDir)}
-STAGED_FMT=$(git diff --cached --name-only -z --diff-filter=ACM | tr '\\0' '\\n' | ${FORMAT_EXTENSION_FILTER} || true)
+# -M100%: an edited rename lists as A under its new path; an exact move stays R, skipped so its
+# bytes, and the rename the later gates key on, are left untouched.
+STAGED_FMT=$(git diff --cached --name-only -z -M100% --diff-filter=ACM | tr '\\0' '\\n' | ${FORMAT_EXTENSION_FILTER} || true)
 if [ -z "$STAGED_FMT" ]; then
     echo "🎨 $FMT_TOOL: no staged formattable path — nothing to format."
 else
