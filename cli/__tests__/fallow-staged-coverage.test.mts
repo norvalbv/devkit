@@ -1,6 +1,7 @@
 /**
  * The staged fallow gate scores CRAP from the repo's coverage artifact, against the real fallow
- * binary: a commit gets the verdict `devkit ship` gets on the same tree and artifact.
+ * binary: a commit gets the verdict `devkit ship` gets on the same tree and artifact. It also blocks
+ * introduced duplication, which fallow rates `warn` and exits 0 on.
  */
 import {
   mkdirSync,
@@ -183,7 +184,7 @@ describe.skipIf(!hasFallow)('staged fallow gate — measured CRAP at commit', ()
 
     expect(gate.status).toBe(0);
     expect(gate.out).toContain(HINT);
-    expect(gate.out).toContain('No issues in 1 changed file');
+    expect(gate.out).toContain('fallow passed the staged diff');
   });
 
   it('says nothing about coverage in a repo that has no artifact', () => {
@@ -193,5 +194,71 @@ describe.skipIf(!hasFallow)('staged fallow gate — measured CRAP at commit', ()
 
     expect(gate.status).toBe(0);
     expect(gate.out).not.toContain(HINT);
+  });
+});
+
+const DUPLICATION = 'the staged diff introduces duplication';
+// Long enough to clear fallow's default clone floor (50 tokens, 5 lines).
+const body = (name: string) => `export function ${name}(x) {
+  let total = 0;
+  for (let i = 0; i < x.length; i++) {
+    if (x[i] > 10) { total += x[i] * 2; } else { total -= x[i]; }
+    if (total > 1000) { total = total / 3; }
+    console.log('step', i, total, x[i]);
+  }
+  return total;
+}
+`;
+
+/** A committed `a.js`, then `files` staged on top; no coverage artifact and no guard-coverage. */
+function stagedRepo(files: Record<string, string>): Fixture {
+  const [top, bin, tmp] = ['fallow-dup-', 'fallow-dup-bin-', 'fallow-dup-tmp-'].map((prefix) =>
+    realpathSync(mkdtempSync(join(tmpdir(), prefix))),
+  );
+  dirs.push(top, bin, tmp);
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: top, env: GIT_ENV });
+  writeFileSync(join(top, 'package.json'), '{"name":"x","version":"1.0.0","type":"module"}\n');
+  // Every file is an entry, so an unused file or export can never be what blocks.
+  writeFileSync(join(top, '.fallowrc.json'), '{"entry":["*.js"]}\n');
+  writeFileSync(join(top, 'a.js'), body('a'));
+  git('init', '-q', '-b', 'main');
+  git('add', '-A');
+  git('-c', 'user.email=a@b.c', '-c', 'user.name=a', 'commit', '-qm', 'base');
+  for (const [file, text] of Object.entries(files)) writeFileSync(join(top, file), text);
+  git('add', '-A');
+  return { top, cwd: top, report: '', bin, tmp };
+}
+
+describe.skipIf(!hasFallow)('staged fallow gate — introduced duplication', () => {
+  it('blocks a duplication-only staged set that fallow alone lets through', () => {
+    const f = stagedRepo({ 'c.js': body('c') });
+    const diff = execFileSync('git', ['diff', '--cached'], { cwd: f.top, env: GIT_ENV });
+    const unaided = spawnSync('fallow', ['audit', '--diff-stdin'], {
+      cwd: f.cwd,
+      encoding: 'utf8',
+      input: diff,
+      env: BASE_ENV,
+    });
+
+    const gate = runGate(f);
+
+    expect(unaided.status).toBe(0);
+    expect(gate.status).toBe(1);
+    expect(gate.out).toContain(DUPLICATION);
+    expect(gate.out).toContain('c.js');
+  });
+
+  it('lets an intended copy through once it carries the suppression the block line names', () => {
+    const gate = runGate(
+      stagedRepo({ 'c.js': `// fallow-ignore-next-line code-duplication\n${body('c')}` }),
+    );
+    expect(gate.out).not.toContain(DUPLICATION);
+    expect(gate.status).toBe(0);
+  });
+
+  it('lets a staged set with no new clone through', () => {
+    const gate = runGate(stagedRepo({ 'b.js': 'export const b = () => 1;\n' }));
+    expect(gate.out).not.toContain(DUPLICATION);
+    expect(gate.status).toBe(0);
   });
 });

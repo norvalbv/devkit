@@ -56,18 +56,21 @@ interface FragmentRun {
 }
 
 // Stubs log to calls.log and exit with the named env knob, so ordering is read off the log.
-export function writeStub(path, name, rcVar) {
+export function writeStub(path, name, rcVar, output = '') {
   writeFileSync(
     path,
-    `#!/bin/sh\necho "${name} $*" >> "$HOME/calls.log"\ncat >/dev/null\nexit \${${rcVar}:-0}\n`,
+    `#!/bin/sh\necho "${name} $*" >> "$HOME/calls.log"\ncat >/dev/null\n${output}exit \${${rcVar}:-0}\n`,
   );
   chmodSync(path, 0o755);
 }
 
+// fallow's JSON pass prints FALLOW_JSON; its human re-run prints a marker the tests can find.
+const FALLOW_OUTPUT = `case " $* " in *" --format json "*) printf '%s' "\${FALLOW_JSON:-}" ;; *) echo "fallow human report" ;; esac\n`;
+
 // Overlay staged-gate fixtures. fallow is global ($HOME/.bun/bin, first on the hook's PATH), where a
 // consumer's `command -v fallow` finds it; eslint is the repo-local bin the overlay step requires.
 function stageOverlayFixtures(home, { bin, packageBin, pkgRel, fallow, staged, eslintOverlay }) {
-  if (fallow) writeStub(join(bin, 'fallow'), 'fallow', 'FALLOW_RC');
+  if (fallow) writeStub(join(bin, 'fallow'), 'fallow', 'FALLOW_RC', FALLOW_OUTPUT);
   if (eslintOverlay) {
     // A string is the overlay config's own content; `true` is an empty config.
     const content = eslintOverlay === true ? 'export default [];\n' : eslintOverlay;

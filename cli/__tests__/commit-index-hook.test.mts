@@ -45,13 +45,15 @@ interface GateView {
   stagedSet: string[];
 }
 
-// A stand-in `fallow`: records the paths of the diff it was handed on stdin and the GIT_* names in
-// its environment, exits FALLOW_RC.
+// A stand-in `fallow`: its JSON pass records the paths of the diff on stdin and the GIT_* names in
+// its environment, passes, and exits FALLOW_RC.
 const STUB_FALLOW = `#!/bin/sh
 [ "$1" = audit ] || exit 0
+case " $* " in *" --format json "*) ;; *) cat >/dev/null; exit 0 ;; esac
 paths=$(sed -n 's|^+++ b/||p' | sort | tr '\\n' ' ')
 names=$(env | sed -n 's/^\\(GIT_[A-Z_]*\\)=.*/\\1/p' | sort | tr '\\n' ' ')
 printf '{"fallowDiff":"%s","gitEnv":"%s"}\\n' "$paths" "$names" >> "$STUB_OUT"
+printf '{"verdict":"pass"}'
 exit \${FALLOW_RC:-0}
 `;
 
