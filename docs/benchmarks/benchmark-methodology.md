@@ -138,9 +138,10 @@ runs telemetry-off, or hits an archive error keeps only `diff_sha256` and stays 
 
 1. **Fail → fix**: collector correlates consecutive ship attempts; next attempt's diff touches the
    flagged lines → gold candidate, zero human steps.
-2. **Fail → waive**: `guard-review waive <reviewer>[:<lens>] "<rationale>"` unblocks the ship,
+2. **Fail → waive**: `guard-review waive <reviewer>[:<lens>] <fp> --kind <kind> "<rationale>"` unblocks the ship,
    records the event (lens `disposition: 'waived'` already exists; the command + rationale capture
-   don't) → decoy candidate with the rationale as its note. Also closes the honesty gap where a
+   don't) → decoy candidate with the rationale as its note, for `false-positive` and unclassified
+   waivers only. Also closes the honesty gap where a
    bypass is invisible to the benchmark.
 3. **Pass → external bot fails it**: dashboard `pr_comments` ∩ `commit_review_scope` → recall-miss
    candidates via `mine-bots.mts`; the human's thread resolution (fixed vs rebutted) is the label.

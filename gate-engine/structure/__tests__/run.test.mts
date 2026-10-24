@@ -12,7 +12,7 @@ import {
   runStagedStructureGate,
   runStructureGate,
 } from '../run.mts';
-import { withUncompiledWalls } from '../verdict.mts';
+import { withStructureConfigGaps } from '../verdict.mts';
 
 const DEVKIT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -94,6 +94,8 @@ describe('guard-structure gate — zero consumer deps', () => {
       const result = await runStructureGate(root);
       expect(result.code).toBe(2);
       expect(result.text).toContain('structure.walls declares 2 import wall(s)');
+      // The bundled parser loads from devkit's own install, so no parser gap rides along.
+      expect(result.text).not.toContain('TypeScript source parser unavailable');
     });
 
     it('a placement violation still blocks, and the walls notice rides along', async () => {
@@ -108,7 +110,7 @@ describe('guard-structure gate — zero consumer deps', () => {
     it('a config that turns unreadable after the legs ran keeps their violation (code 1)', () => {
       const root = repo('{ not json');
       const found = { code: 1 as const, errorCount: 2, text: 'src/bad-name.ts' };
-      const result = withUncompiledWalls(root, found);
+      const result = withStructureConfigGaps(root, found);
       expect(result.code).toBe(1);
       expect(result.errorCount).toBe(2);
       expect(result.text).toContain('did NOT run');
@@ -118,6 +120,75 @@ describe('guard-structure gate — zero consumer deps', () => {
       const root = repo({ scanRoots: ['src'], structure: { trees: [lib], walls: [] } });
       write(root, 'src/Button.ts');
       expect((await runStructureGate(root)).code).toBe(0);
+    });
+  });
+
+  // A present-but-malformed structure block resolves to empty lists, so it must surface by name.
+  describe('malformed structure config', () => {
+    const lib = {
+      name: 'lib',
+      root: 'src',
+      sourceExtensions: ['ts'],
+      grammar: { files: ['{pascal}'] },
+    };
+    const wall = { pattern: 'src/**', allowImportsFrom: ['src/**'] };
+
+    it.each([
+      ['walls a string', { trees: [lib], walls: 'cli/**' }, 'structure.walls', 'received string'],
+      ['walls an object', { trees: [lib], walls: {} }, 'structure.walls', 'received object'],
+      ['walls null', { trees: [lib], walls: null }, 'structure.walls', 'received null'],
+      ['trees a string', { trees: 'src' }, 'structure.trees', 'received string'],
+      ['structure a string', 'x', 'structure:', 'received string'],
+      ['structure an array', [], 'structure:', 'received array'],
+    ])('%s → could-not-run naming the field and type', async (_, structure, field, type) => {
+      const root = repo({ scanRoots: ['src'], structure });
+      write(root, 'src/Button.ts');
+      const result = await runStructureGate(root);
+      expect(result.code).toBe(2);
+      expect(result.text).toContain(`guard.config.json ${field}`);
+      expect(result.text).toContain(type);
+    });
+
+    it('staged: malformed walls with nothing relevant staged is could-not-run, not clean', async () => {
+      const root = repo({ scanRoots: ['src'], structure: { trees: [lib], walls: 'cli/**' } });
+      write(root, 'src/Button.ts');
+      write(root, 'README.md');
+      initializeGit(root);
+      execFileSync('git', ['add', '--', 'README.md'], { cwd: root });
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(2);
+      expect(result.text).toContain('structure.walls');
+      expect(result.text).toContain('received string');
+    });
+
+    it('a placement violation still blocks, and the malformed notice rides along', async () => {
+      const root = repo({ scanRoots: ['src'], structure: { trees: [lib], walls: 'cli/**' } });
+      write(root, 'src/bad-name.ts');
+      const result = await runStructureGate(root);
+      expect(result.code).toBe(1);
+      expect(result.text).toContain('bad-name.ts');
+      expect(result.text).toContain('structure.walls');
+    });
+
+    it('names malformed trees beside the uncompiled-walls notice', async () => {
+      const root = repo({ scanRoots: ['src'], structure: { trees: 'src', walls: [wall] } });
+      write(root, 'src/Button.ts');
+      const result = await runStructureGate(root);
+      expect(result.code).toBe(2);
+      expect(result.text).toContain('guard.config.json structure.trees');
+      expect(result.text).toContain('NOT enforced');
+    });
+
+    it('an absent walls key stays clean', async () => {
+      const root = repo({ scanRoots: ['src'], structure: { trees: [lib] } });
+      write(root, 'src/Button.ts');
+      expect(await runStructureGate(root)).toMatchObject({ code: 0 });
+    });
+
+    it('a null structure block reads as absent, not malformed', async () => {
+      const root = repo({ scanRoots: ['src'], structure: null });
+      write(root, 'src/Button.ts');
+      expect((await runStructureGate(root)).text).not.toContain('guard.config.json structure');
     });
   });
 
@@ -477,6 +548,23 @@ if (names.some((f) => String(f).includes('Bad'))) { console.log('PRESET-VIOLATIO
     expect(result.code).toBe(1);
     expect(presetCalls(root)).toEqual([['src/Bad.ts']]);
   });
+
+  // A non-object tree entry has no root, so the electron path dropped it behind a clean preset leg.
+  it.each([
+    ['trees a string', 'cli', 'structure.trees:'],
+    ['a tree entry a string', ['cli'], 'structure.trees.0:'],
+  ])(
+    '%s on an electron stack is could-not-run, not a preset-only clean',
+    async (_, trees, field) => {
+      const root = electronRepo({ config: { scanRoots: ['src'], structure: { trees } } });
+      stage(root, 'src/Good.ts');
+      for (const result of [await runStagedStructureGate(root), await runStructureGate(root)]) {
+        expect(result.code).toBe(2);
+        expect(result.text).toContain(`guard.config.json ${field}`);
+        expect(result.text).toContain('received string');
+      }
+    },
+  );
 
   it('runs the grammar leg on a staged grammar-root file and never hands it to the preset', async () => {
     const root = electronRepo();

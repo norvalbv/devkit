@@ -7,7 +7,7 @@
  *   devkit doctor [--fix]
  *   devkit review [--target <path>] [--base <ref>]
  *   devkit sync-skills [--dry-run]
- *   devkit sync-hooks [--only <a.sh,b.mjs>] [--targets <claude,cursor>] [--dry-run] [--force]
+ *   devkit sync-hooks [--targets <claude,cursor>] [--dry-run] [--force]
  *   devkit sync-hook-runner [--dry-run]
  *   devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes]   (maintainer-only)
  *   devkit --version
@@ -46,6 +46,7 @@ const COMMANDS = {
     review: () => import('./commands/review.mjs'),
     'guard-branch': () => import('./commands/guard-branch.mjs'),
     'base-status': () => import('./commands/base-drift/base-status.mjs'),
+    'follow-up': () => import('./commands/follow-up/follow-up.mjs'),
     'coverage-run': () => import('./commands/coverage/run.mjs'),
     'coverage-diff': () => import('./commands/coverage/diff.mjs'),
     'test-report-run': () => import('./commands/baseline/test-report-run.mjs'),
@@ -69,7 +70,7 @@ const GIT_COMMANDS = new Set([
     'init',
     'sync-hook-runner',
 ]);
-const OVERLAY_HOME_COMMANDS = new Set(['doctor', 'clean', 'upgrade']);
+const OVERLAY_HOME_COMMANDS = new Set(['doctor', 'clean', 'upgrade', 'init']);
 /**
  * Top-level help, derived from every command's `meta.summary` (single source of truth). Each meta
  * is loaded in its own try/catch so one command module that throws at import can't take the whole
@@ -133,9 +134,8 @@ async function main() {
     if (GIT_COMMANDS.has(cmd))
         assertGit(cmd); // friendly throw on missing git → main().catch prints it
     // sc-4157: through a linked worktree's overlay links these would half-change the home's overlay.
-    const retarget = OVERLAY_HOME_COMMANDS.has(cmd) || (cmd === 'init' && cmdArgs.includes('--overlay'));
-    const cwd = retarget
-        ? (await import('./lib/husky/overlay/overlay-home.mjs')).overlayCommandCwd(process.cwd())
+    const cwd = OVERLAY_HOME_COMMANDS.has(cmd)
+        ? (await import('./lib/husky/overlay/copied-overlay.mjs')).overlayCommandCwd(process.cwd(), cmd === 'clean')
         : process.cwd();
     const code = await mod.default(cmdArgs, cwd);
     process.exit(code ?? 0);

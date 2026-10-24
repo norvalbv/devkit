@@ -23,9 +23,19 @@ set -euo pipefail
 # on a real verdict for a `git commit`. Scoping here is essential: a failing staged set must never
 # block the `git reset` / `git restore --staged` commands that can make it recoverable.
 
+INPUT="$(cat)"
 ROOT="${CLAUDE_PROJECT_DIR:-}"
 if [ -z "$ROOT" ]; then
   ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+fi
+# A payload cwd inside a linked worktree of ROOT's repository wins: that worktree's index is the one
+# its `git commit` commits. The same checkout, or an unrelated repository, keeps ROOT.
+CWD="$(printf '%s' "$INPUT" | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+if [ -n "$CWD" ] &&
+  { read -r CDUP; read -r TOP; read -r COMMON; } < <(git -C "$CWD" rev-parse --show-cdup --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null) &&
+  { read -r ROOT_TOP; read -r ROOT_COMMON; } < <(git -C "$ROOT" rev-parse --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null) &&
+  [ "$TOP" != "$ROOT_TOP" ] && [ "$COMMON" = "$ROOT_COMMON" ]; then
+  ROOT="$(cd "$CWD/$CDUP" && pwd)" || exit 0
 fi
 cd "$ROOT" 2>/dev/null || exit 0
 
@@ -46,7 +56,7 @@ command -v node >/dev/null 2>&1 || exit 0
 # the gate under-fires rather than stranding an agent. Every classification error must land on that
 # side — see [[fallow-gate-owned-by-fallow]].
 SCOPE="$(
-  node -e '
+  printf '%s' "$INPUT" | node -e '
 const fs = require("node:fs");
 let payload;
 try { payload = JSON.parse(fs.readFileSync(0, "utf8")); } catch { process.exit(0); }

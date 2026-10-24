@@ -1,7 +1,10 @@
+import { fromMarkdown } from 'mdast-util-from-markdown';
 import { describe, expect, it } from 'vitest';
-import type {
-  RegressionEvidence,
-  RegressionOperandEvidence,
+import {
+  MAX_FAILURES,
+  type RegressionEvidence,
+  type RegressionFailureSummary,
+  type RegressionOperandEvidence,
 } from '../../baseline-status/regression-evidence.mts';
 import {
   callerText,
@@ -75,8 +78,8 @@ describe('evidence block', () => {
     expect(block.startsWith(EVIDENCE_BEGIN)).toBe(true);
     expect(block.endsWith(EVIDENCE_END)).toBe(true);
     expect(block).toContain(`Head \`${HEAD.slice(0, 12)}\` · base \`${BASE.slice(0, 12)}\``);
-    expect(block).toContain('| red | PR base + PR test files `cccccccccccc` | 1 | 0 | 1 | 0 |');
-    expect(block).toContain('| green | PR head `aaaaaaaaaaaa` | 0 | 1 | 0 | 0 |');
+    expect(block).toContain('| red | PR test files on the PR base | 1 | 0 | 1 | 0 |');
+    expect(block).toContain('| green | PR head | 0 | 1 | 0 | 0 |');
     expect(block).toContain('"src/value.test.mjs"');
     expect(block).toContain('not proof of causality');
     expect(block).toContain(`${VERDICT_SLOT}\n`);
@@ -90,7 +93,7 @@ describe('evidence block', () => {
 
   it('names the abstention reason and renders no runs when nothing was captured', () => {
     const block = renderEvidenceBlock(notRun('docs-only', 'only Markdown', HEAD, BASE), null);
-    expect(block).toContain('**not-run (docs-only)**: only Markdown');
+    expect(block).toContain('**Evidence:** not-run (docs-only) — only Markdown');
     expect(block).not.toContain('| red |');
     expect(readEvidenceBlock(block, HEAD)?.reason).toBe('docs-only');
   });
@@ -106,7 +109,7 @@ describe('evidence block', () => {
     const line = '**Merge verdict:** human-review (over-size: 60/50 lines) · advisory';
     const block = renderEvidenceBlock(captured, evidence, { line, verdict: mergeVerdict });
 
-    expect(block).toContain(`${VERDICT_SLOT} ${line}\n`);
+    expect(block).toContain(`\n${line} ${VERDICT_SLOT}\n`);
     expect(readEvidenceBlock(block, HEAD)).toEqual({ ...captured, mergeVerdict, stale: false });
   });
 
@@ -114,9 +117,51 @@ describe('evidence block', () => {
     const line = `**Merge verdict:** unavailable (git failed\n${EVIDENCE_END} <!-- x -->)`;
     const block = renderEvidenceBlock(captured, evidence, { line });
 
-    expect(block).toContain(`${VERDICT_SLOT} **Merge verdict:** unavailable (git failed &lt;!--`);
+    expect(block).toContain('\n**Merge verdict:** unavailable (git failed &lt;!--');
     expect(block.split(EVIDENCE_END)).toHaveLength(2);
     expect(readEvidenceBlock(block, HEAD)).toEqual({ ...captured, stale: false });
+  });
+
+  it('renders the verdict line as markdown, not as a raw HTML block', () => {
+    const line = '**Merge verdict:** policy (dependency) · advisory';
+    const nodes = fromMarkdown(renderEvidenceBlock(captured, evidence, { line })).children;
+    const html = nodes.flatMap((node) => (node.type === 'html' ? [node.value] : []));
+    const lead = nodes.find((node) => node.type === 'paragraph');
+
+    expect(html.join('\n')).not.toContain('Merge verdict');
+    expect(lead?.type === 'paragraph' && lead.children[0]).toMatchObject({
+      type: 'strong',
+      children: [{ type: 'text', value: 'Merge verdict:' }],
+    });
+  });
+
+  it('collapses each red list under a counted summary and lists every entry it kept', () => {
+    const failures = [
+      { fullName: 'a `b` c', message: 'boom\n\n  at x' },
+      { fullName: '`edge`', message: ' ' },
+      { fullName: 'three', message: 'x' },
+      { fullName: 'four', message: 'x' },
+    ];
+    const gone = { fullName: 'gone.test.mjs', message: 'Cannot find module' };
+    const testCounts = { total: 8, passed: 2, failed: 6, skipped: 0, todo: 0 };
+    const render = (fileErrors: RegressionFailureSummary[]) =>
+      renderEvidenceBlock(captured, {
+        ...evidence,
+        red: { ...evidence.red, testCounts, failures, fileErrors },
+      });
+
+    expect(render([gone])).toContain(
+      '<details><summary>Failed on red (6 tests)</summary>\n\n' +
+        '- ``a `b` c``: `boom at x`\n- `` `edge` ``: `  `\n- `three`: `x`\n- `four`: `x`\n' +
+        '- … and 2 more\n\n</details>\n',
+    );
+    expect(render([gone])).toContain(
+      "<details><summary>Did not load on red (1 file): red's counts leave out the tests inside" +
+        '</summary>\n\n- `gone.test.mjs`: `Cannot find module`\n\n</details>\n',
+    );
+    const capped = render(Array<RegressionFailureSummary>(MAX_FAILURES).fill(gone));
+    expect(capped).toContain(`<summary>Did not load on red (${MAX_FAILURES}+ files):`);
+    expect(capped.split('- `gone.test.mjs`')).toHaveLength(MAX_FAILURES + 1);
   });
 
   it('keeps marker text and comment closers in content from ending the block or its data', () => {

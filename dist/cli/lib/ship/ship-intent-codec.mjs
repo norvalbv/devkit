@@ -236,6 +236,7 @@ export function emitFields(intent) {
         intent.createdAt,
         intent.generation,
         intent.sourceAttemptId ?? '',
+        intent.noStack ? '1' : '0',
         String(intent.links.length),
         ...intent.links,
         Buffer.from(intent.bodyB64, 'base64'),

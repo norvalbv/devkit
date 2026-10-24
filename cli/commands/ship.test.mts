@@ -156,6 +156,7 @@ describe('devkit ship machine-wide queue wiring (sc-3785)', () => {
   it.each([
     ['--pr with --from-branch', ['feat/q', 't', '--pr', '--from-branch']],
     ['--pr with --draft', ['feat/q', 't', '--pr', '--draft']],
+    ['--pr with --no-stack', ['feat/q', 't', '--pr', '--no-stack']],
     ['--ready without --pr', ['feat/q', 't', '--ready', 'a.txt']],
   ])('rejects %s before ever joining the queue', async (_l, args) => {
     const test = harness();

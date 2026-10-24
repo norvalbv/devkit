@@ -948,8 +948,9 @@ async function run(args: string[], cwd: string): Promise<number> {
   if (!flags.dryRun) assertRunnerMayWrite(cwd);
   if (!flags.dryRun) assertRunsFromSource(cwd, 'init');
   const detectedStack = flags.stack ?? detectStack(cwd);
-  // Mode: --overlay / --standalone seed it; the wizard asks (so the interactive flow exposes it).
-  const detectedMode = flags.overlay ? 'overlay' : flags.standalone ? 'standalone' : 'package';
+  const recorded = readJson(join(cwd, '.devkit', 'config.json')) as DevkitConfig | null;
+  // Mode: --overlay / --standalone, else a recorded overlay, seed it; the wizard asks.
+  const detectedMode = initFlags.initMode(flags, recorded);
   const interactive = !flags.yes && process.stdout.isTTY && !flags.dryRun;
 
   let stack = detectedStack;
@@ -986,7 +987,6 @@ async function run(args: string[], cwd: string): Promise<number> {
   const selfHost = isDevkitRepo(cwd);
   if (selfHost) {
     mode = 'self-host';
-    const recorded = readJson(join(cwd, '.devkit', 'config.json')) as DevkitConfig | null;
     selection = selfHostSelection(recorded?.components);
     disabledGuards = recorded?.components?.disabledGuards;
   } else if (interactive) {
@@ -996,8 +996,7 @@ async function run(args: string[], cwd: string): Promise<number> {
       detectedMode,
       structureAvailable: STRUCTURE_STACKS.has(detectedStack),
       installed,
-      existingReview: (readJson(join(cwd, '.devkit', 'config.json')) as DevkitConfig | null)
-        ?.review,
+      existingReview: recorded?.review,
     });
     if (!result) return 0; // cancelled — nothing written
     ({ mode, stack, remove, review } = result);
@@ -1009,6 +1008,7 @@ async function run(args: string[], cwd: string): Promise<number> {
     ({ selection, disabledGuards, undecided } = initFlags.resolveFlagSelection(cwd, args, flags));
   }
 
+  initFlags.assertKeepsRecordedOverlay(recorded, mode);
   if (mode === 'overlay') selection = applyOverlayConstraints(selection, stack);
   if (!selfHost && !interactive) {
     const reviewPlan = reviewPlanFromFlags(flags, selection);

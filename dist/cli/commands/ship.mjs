@@ -33,10 +33,12 @@ export const POSITIONAL_REJECTED_FLAGS = [
     '--with-reviewers',
     '--from-branch',
     '--draft',
+    '--no-stack',
     '--ready',
     '--wait-ci',
     '--wait-ci-timeout',
     '--wait-ci-required',
+    '--wait-ci-strict',
 ];
 export const meta = {
     name: 'ship',
@@ -55,7 +57,7 @@ export const meta = {
     help: `devkit ship — commit <path...> onto a new branch + open a PR without moving HEAD.
 
 Usage:
-  devkit ship <branch> "<title>" [--dry-gates [--with-reviewers]] [--base <b>] [--from-branch] [--body "<text>"] [--body-file <f>] [--draft] [--link <d>]... [--] <path...>
+  devkit ship <branch> "<title>" [--dry-gates [--with-reviewers]] [--base <b>] [--from-branch] [--body "<text>"] [--body-file <f>] [--draft] [--no-stack] [--link <d>]... [--] <path...>
   devkit ship --pr <branch> "<title>" [--ready] [--body "<text>"] [--link <d>]... [--] <path...>
   devkit ship --resume <branch> [--body-file <f>] [--] <extra-path...>
   devkit ship --queue
@@ -89,8 +91,9 @@ Usage:
                       working-tree dirt remains untouched. Explicit paths stay the default because
                       dirty-file ownership cannot be inferred safely in a shared checkout. Not valid
                       with --pr; resume remembers the committed-source mode and frozen path set.
-  --body "<text>"     Commit + PR body, inline (no temp file). Wins over stdin; omit it to read the
-                      commit body from stdin (a pipe or here-doc) or to leave the body empty.
+  --body "<text>"     Commit + PR body, inline (no temp file). Wins over stdin; --body "" is an
+                      explicit empty body (with --pr it clears the description). Omit it to read
+                      the commit body from stdin (a pipe or here-doc) or to leave the body empty.
   --body-file <f>     Commit + PR body read from a file. The recorded invocation stores the file's
                       CONTENT, and --resume replays those bytes — a later edit to <f> is NOT picked
                       up until you re-pass --body-file on the resume (--resume warns when <f> and
@@ -116,6 +119,14 @@ Usage:
                       { "ship": { "command": "devkit ship", "extraArgs": ["--draft"] } } — the
                       "command" key is required, or extraArgs is ignored. The guard drops --draft
                       from its --pr suggestions, where it does not apply.
+  --no-stack          Do not join the new PR to its base PR's GitHub stack. By default, when the
+                      base branch has an open PR that targets the default branch or tops a stack,
+                      ship registers the new PR on it as a GitHub native stack (Stacks REST API via
+                      gh api; no extension needed) and prints \`ship: stacked #N on #M\`. Stacked
+                      PRs merge bottom-up, merging one also merges the PRs below it, and they cannot
+                      use per-PR auto-merge. Best-effort: a refusal prints why and the exact
+                      command to retry by hand, and never fails the ship. New ships only; recorded
+                      for --resume like --draft, and usable in extraArgs the same way.
   --ready             With --pr only: after the re-push lands, mark the PR ready for review — the
                       end of an open-draft → iterate → mark-ready loop. Runs last, so a failure here
                       never costs the pushed commit; it reports the exact \`gh pr ready\` to re-run.
@@ -132,8 +143,9 @@ Usage:
                       summaries of the PR run and of the run on the commit CI merged it onto. "new"
                       means not failing on that base run, so a flake reads as new; unknown names a
                       reason= or counts unsure= files whose test names cannot settle it.
-                      The verdict NEVER reaches the exit code: a red PR is not a failed ship, and an
-                      agent reading non-zero would retry --resume against a record the push deleted.
+                      The verdict NEVER reaches the exit code (unless --wait-ci-strict): a red PR is
+                      not a failed ship, and an agent reading non-zero would retry --resume against a
+                      record the push deleted.
                       Grep the line, or read the ship_ci telemetry row. Valid for a new ship and for
                       --pr. NOT replayed by --resume: it observes a PR that already exists rather
                       than describing what shipped, so re-request it on the retry.
@@ -143,6 +155,11 @@ Usage:
                       that has not started yet is invisible. A branch without protection, or whose
                       required checks have not reported, therefore ends in no-checks — never passed.
                       The verdict line carries \`scope=required\`. NOT replayed by --resume.
+  --wait-ci-strict    With --wait-ci only: exit 5 unless the verdict is passed — failed, cancelled,
+                      no-checks, timed-out, unavailable and not-run all exit 5, as does a crashed
+                      wait. Exit 5 means the PR is open (or SHIP_DRY_RUN committed) and CI is not
+                      known green: do NOT --resume. For \`devkit ship … --wait-ci --wait-ci-strict &&
+                      <merge>\`. NOT replayed by --resume.
   --wait-ci-timeout <s>  Bound for --wait-ci, 60..7200, default 900. The floor exists because below
                       it a "this repo has no checks" verdict is unreachable and would surface as a
                       timeout instead. A terminal result is confirmed over ~30s before it is
@@ -206,7 +223,8 @@ Judge models:
 
 Exits 0 on PR opened, committed under SHIP_DRY_RUN, or a passing --dry-gates rehearsal; 1 on any
 preflight/git/gh/gate error. A --wait-ci verdict never changes that — a red or timed-out CI still
-exits 0, because the PR opened. The one exception is a SIGNAL during the wait: ship exits 130/143
+exits 0, because the PR opened — unless --wait-ci-strict, which exits 5 on any verdict but passed
+(an exit 1 above still wins). The other exception is a SIGNAL during the wait: ship exits 130/143
 even though the PR is open, so the wait announces the PR URL before it starts. A commit
 that lands but fails to push KEEPS the branch; an identical retry verifies and resumes that commit.
 A commit that never lands auto-deletes the empty branch.
@@ -304,6 +322,7 @@ function routeFlagsOf(args, valueFlags) {
         if (arg === '--pr' ||
             arg === '--from-branch' ||
             arg === '--draft' ||
+            arg === '--no-stack' ||
             arg === '--ready' ||
             arg === '--dry-gates')
             routeFlags.add(arg);
@@ -320,6 +339,10 @@ function dispatchRejection(args, routeFlags) {
         return [
             '--draft applies to a NEW ship (opening the PR); a --pr re-push targets a PR that already exists.',
             '  To convert that PR back to a draft: gh pr ready --undo <branch>',
+        ];
+    if (routeFlags.has('--pr') && routeFlags.has('--no-stack'))
+        return [
+            '--no-stack applies to a NEW ship (stacking happens when the PR opens); a --pr re-push targets a PR that already exists.',
         ];
     // A new ship is ready-for-review already. `--resume` is exempt: it takes its mode from the RECORD,
     // so a recorded reship legitimately carries no --pr here and reship.sh accepts its --ready.

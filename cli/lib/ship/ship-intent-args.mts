@@ -16,6 +16,7 @@ export function parseArgs(argv: string[]) {
     if (
       a === '--update-pr-body' ||
       a === '--draft' ||
+      a === '--no-stack' ||
       a === '--resumed' ||
       a === '--merge-paths' ||
       a === '--keep-body-file'

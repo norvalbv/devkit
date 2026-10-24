@@ -17,14 +17,13 @@ import {
   symlinkSync,
   unlinkSync,
 } from 'node:fs';
-import { dirname, isAbsolute, join, matchesGlob, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, matchesGlob, resolve } from 'node:path';
 import {
   FIXED_GATE_INPUTS,
   type GateInput,
   readableGateInputs,
 } from '../../../../gate-engine/deterministic/gate-inputs.mts';
 import { overlayConfigured } from '../../../../gate-engine/overlay-mode.mts';
-import { detectGitRoot } from '../../detect-git-root.mts';
 import { gitOut, isInside, isInsideResolved, sameDir } from '../../doctor/hooks-path.mts';
 import { DEVKIT_CACHE_IGNORES, LEGACY_GITIGNORE_LINES } from '../../install/gitignore-cache.mts';
 import { shQuote } from '../../ship/redact-secrets.mts';
@@ -172,7 +171,7 @@ export function hasOwnOverlay(root: string): boolean {
 
 /** Does `root` declare an overlay install of its own — a real `.devkit/config.json`, hook or not? A
  * config that does not parse throws, so ship fails closed rather than gating as package mode. */
-const declaresOverlay = (root: string) =>
+export const declaresOverlay = (root: string) =>
   !isLink(join(root, '.devkit')) &&
   isRealFile(join(root, '.devkit', 'config.json')) &&
   overlayConfigured(root);
@@ -184,14 +183,19 @@ export const ownsOverlayConfig = (wt: string, pkgRel: string) => {
   return isRealFile(config) && isInsideResolved(realpathSync(wt), realpathSync(config));
 };
 
+/** The worktree devkit's absolute core.hooksPath names, whether or not its hook still exists. */
+export function namedHome(gitRoot: string): string | null {
+  const value = gitOut(gitRoot, ['config', '--get', 'core.hooksPath']);
+  return isAbsolute(value) && isOverlayHooksValue(value, gitRoot)
+    ? dirname(dirname(value.replace(/\/+$/, '')))
+    : null;
+}
+
 /** The one home resolver (ship's via overlay-root.mts): the worktree an absolute hooksPath names,
  * else the first non-bare worktree that `owns` an overlay. */
 export function overlayHome(gitRoot: string, owns = hasOwnOverlay): string | null {
-  const value = gitOut(gitRoot, ['config', '--get', 'core.hooksPath']);
-  if (isAbsolute(value) && isOverlayHooksValue(value, gitRoot)) {
-    const home = dirname(dirname(value.replace(/\/+$/, '')));
-    if (owns(home)) return home;
-  }
+  const home = namedHome(gitRoot);
+  if (home && owns(home)) return home;
   return worktrees(gitRoot).find((wt) => !wt.bare && owns(wt.path))?.path ?? null;
 }
 
@@ -200,12 +204,6 @@ export function overlayHome(gitRoot: string, owns = hasOwnOverlay): string | nul
 export const OVERLAY_HOME_SH = `git worktree list --porcelain 2>/dev/null |
     awk '/^worktree /{w=substr($0,10)} /^bare$/{w=""} /^$/{if(w!="")print w; w=""}' |
     while IFS= read -r __dk_w; do [ -x "$__dk_w/${LOCAL_HOOKS}/pre-commit" ] && { printf '%s\\n' "$__dk_w"; break; }; done`;
-
-/** Ship's overlay root: `root` itself when it declares its own overlay, else the home. Found by config,
- * not hook, so ship fails closed on a missing hook instead of gating as package mode. */
-export function shipOverlayRoot(root: string): string | null {
-  return declaresOverlay(root) ? root : overlayHome(root, declaresOverlay);
-}
 
 // A concurrent repair may have linked it first: that link is the one we wanted, not a failure.
 const link = (src: string, dst: string) => {
@@ -437,11 +435,13 @@ function projectedTest(root: string, pkgRel: string): string {
         __dk_owed ${d}/"\${__dk_p##*/}" && return 1
     done`;
   });
+  const config = shQuote(`${pkgDevkit(pkgRel)}/config.json`);
   return `__dk_has() { [ -e "$1" ] || [ -L "$1" ]; }
 # Owed: the home holds $1 and this worktree lacks it, or holds a link where a branch copy belongs ($2).
 __dk_owed() { __dk_has "$__dk_home/$1" && { ! __dk_has "$1" || { [ -n "\${2:-}" ] && [ -L "$1" ]; }; }; }
 __dk_projected() {
     for __dk_p in ${shWords(devkitDirs(pkgRel))}; do [ -L "$__dk_p" ] && return 1; done
+    [ -f ${config} ] && [ ! -L ${config} ] && return 1  # a copied .devkit: sync-worktree names it
     for __dk_p in ${rels('clone')}; do __dk_owed "$__dk_p" && return 1; done
     for __dk_p in ${rels('branch')}; do __dk_owed "$__dk_p" 1 && return 1; done
 ${[...globs, ...children].join('\n')}
@@ -459,20 +459,4 @@ if [ "$__dk_home" != "$(pwd -P)" ]; then
 ${projectedTest(root, pkgRel).replace(/^(?=.)/gm, '    ')}
     __dk_projected || "$__dk_package_bin_dir/devkit" sync-worktree --home "$__dk_home"${pkg} || exit 1
 fi`;
-}
-
-/** Where an overlay-owning command runs: the home, when `cwd` only borrows its overlay through links. */
-export function overlayCommandCwd(cwd: string): string {
-  try {
-    // Own only when config.json itself is real: a real dir can hold a LINKED config (merged in).
-    const own = !lstatSync(join(cwd, '.devkit')).isSymbolicLink();
-    if (own && lstatSync(join(cwd, '.devkit', 'config.json')).isFile()) return cwd;
-  } catch {
-    // no own .devkit — fall through to the home
-  }
-  const { gitRoot } = detectGitRoot(cwd);
-  const home = overlayHome(gitRoot);
-  if (!home || sameDir(home, gitRoot)) return cwd;
-  console.error(`devkit: this worktree borrows the overlay at ${home} — running there`);
-  return join(home, relative(gitRoot, cwd));
 }

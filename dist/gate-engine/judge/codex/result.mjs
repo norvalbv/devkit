@@ -134,7 +134,7 @@ export function parseModelSpec(spec) {
 }
 /** The workspace confinement for this judge, or null when it runs read-only or unconfined. */
 const confinedWorkspace = (parts, workspace) => parts.readOnly ? null : (workspace ?? null);
-// Claude judges cannot run tests (BASE_TOOLS); codex judges have a shell, so they are told instead.
+// Claude judges cannot run tests (JUDGE_READ_TOOLS); codex judges have a shell and are told instead.
 export const NO_TEST_RUNS = 'Do not run tests, test runners or package-manager scripts (bun run, npm run); review by reading. Test execution belongs to the pre-push suite.';
 function repoRootNotice(repoRoot) {
     return `The repository under review is ${repoRoot}. Run every command from there (cd into it first); paths in this task are relative to it. Its working tree is read-only to you except .claude/. ${NO_TEST_RUNS}\n\n`;

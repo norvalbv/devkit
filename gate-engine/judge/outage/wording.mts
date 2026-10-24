@@ -39,8 +39,13 @@ export function unavailableMessage(
     return `${prefix} unavailable — \`${bin}\` is not installed or not on PATH — judgement skipped`;
   if (outage.kind === 'unauthenticated')
     return `${prefix} unavailable — \`${bin}\` is not authenticated — judgement skipped`;
-  if (outage.kind === 'model-unavailable')
-    return `${prefix} unavailable — the account's plan does not serve this model — judgement skipped`;
+  if (outage.kind === 'model-unavailable') {
+    const why =
+      judgeProviderOfBin(bin) === 'codex'
+        ? "the account's plan does not serve this model"
+        : 'the model may not exist or the account cannot use it';
+    return `${prefix} unavailable — ${why} — judgement skipped`;
+  }
   if (outage.kind === 'rate-limited') {
     // The word a six-day lock must never carry is "transient"; the fact it must carry is WHEN.
     const resets =
@@ -54,7 +59,14 @@ export function unavailableMessage(
 }
 
 /** The outage causes whose remedies differ; every other classified kind shares the generic one. */
-export type RemedyCause = 'timeout' | 'rate-limited' | 'absent' | 'model-unavailable' | 'outage';
+export const REMEDY_CAUSES = [
+  'timeout',
+  'rate-limited',
+  'absent',
+  'model-unavailable',
+  'outage',
+] as const;
+export type RemedyCause = (typeof REMEDY_CAUSES)[number];
 
 /** ONE outage→cause mapper for every fail-closed gate (sc-2769), so no gate keeps a private copy. */
 export function remedyCause(outage?: JudgeOutage): RemedyCause {
@@ -99,12 +111,19 @@ export function strictRemedy(cause: RemedyCause, bin = 'claude', resetsAt?: numb
       return `${install} Otherwise ${familyOverrideRemedy(bin)}`;
     return `${install} If the other judge CLI is installed, you can instead ${familyOverrideRemedy(bin, false)}`;
   }
-  if (cause === 'model-unavailable')
+  if (cause === 'model-unavailable') {
+    // Only codex has a preflight that lists the models the account serves.
+    if (judgeProviderOfBin(bin) !== 'codex')
+      return (
+        `\`${bin}\` refused the configured model: it may not exist or the account cannot use it. ` +
+        `Set that role's model env to a model the account serves, or ${familyOverrideRemedy(bin, true)}`
+      );
     return (
       `\`${bin}\` refused the configured model: the account's plan does not serve it, so ` +
       're-running cannot succeed. The ship preflight names the role and the models the account ' +
       `does serve; set that role's model env to one of them, or ${familyOverrideRemedy(bin, true)}`
     );
+  }
   // Every binary reaching this arm ran (only ENOENT reads as absent), so doctor's bind cannot apply.
   return (
     `check \`${bin}\` CLI auth/quota, then re-run devkit ship. If the account stays dark longer ` +

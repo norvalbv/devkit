@@ -263,6 +263,63 @@ describe('reconcile — author pass-through', () => {
   });
 });
 
+describe('reconcile — waiver kind', () => {
+  const LENS = 'state-transitions';
+  const fp = fingerprint('correctness-reviewer', LENS, 'D');
+  type StoredEntry = { rationale: string; by: string; kind?: string; baseSha?: string };
+  const seed = (cwd: string, entry: StoredEntry) => {
+    mkdirSync(join(cwd, '.devkit'), { recursive: true });
+    writeFileSync(join(cwd, '.devkit/correctness-overrides.json'), JSON.stringify({ [fp]: entry }));
+  };
+  const run = (cwd: string, env: NodeJS.ProcessEnv = {}) =>
+    reconcile(cwd, 'correctness-reviewer', [LENS], 'D', NOW, env);
+
+  it.each([
+    ['deferred', 'deferred'],
+    [undefined, null],
+    ['constructor', null],
+    ['false positive', null],
+  ])('a stored kind of %s reads as %s and the entry still suppresses', (kind, expected) => {
+    const cwd = repo();
+    seed(cwd, { rationale: 'writer holds a lock', by: 'cli', kind });
+    const r = run(cwd);
+    expect(r.blocking).toEqual([]);
+    expect(r.suppressed[0].kind).toBe(expected);
+  });
+
+  it('an env rationale change on a CLI entry resets its kind, since the old class may not hold', () => {
+    const cwd = repo();
+    seed(cwd, { rationale: 'cli rationale', by: 'cli', kind: 'deferred' });
+    const r = run(cwd, { [`OVERRIDE_${fp}_RATIONALE`]: 'a different env rationale' });
+    expect(r.suppressed[0].kind).toBeNull();
+    expect(loadOverrides(cwd)[fp].kind).toBeUndefined();
+  });
+
+  it('a base-only restatement keeps the stored kind', () => {
+    const cwd = repo();
+    execFileSync('git', ['init', '-q'], { cwd });
+    const commit = (m: string) =>
+      execFileSync(
+        'git',
+        ['-c', 'user.email=d@e.test', '-c', 'user.name=D', 'commit', '--allow-empty', '-qm', m],
+        { cwd },
+      );
+    commit('one');
+    seed(cwd, {
+      rationale: 'one stable rationale',
+      by: 'cli',
+      kind: 'pre-existing',
+      baseSha: 'f'.repeat(40),
+    });
+    commit('two');
+    resetReviewBaseContext();
+    run(cwd, { [`OVERRIDE_${fp}_RATIONALE`]: 'one stable rationale' });
+    resetReviewBaseContext();
+    expect(loadOverrides(cwd)[fp]).toMatchObject({ kind: 'pre-existing', by: 'cli' });
+    expect(loadOverrides(cwd)[fp].baseSha).not.toBe('f'.repeat(40));
+  });
+});
+
 // fingerprint hashes diffCacheIdentity(diff): a waiver recorded pre-fix must survive the
 // purely-sentry-additive restage the sentry gate demands, and void on anything more.
 describe('fingerprint across a sentry-additive restage', () => {

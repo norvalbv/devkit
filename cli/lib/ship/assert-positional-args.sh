@@ -23,7 +23,7 @@ ship_assert_positional_args() {
   local usage=$3 arg
   for arg in "$1" "$2"; do
     case "$arg" in
-      --base|--link|--body|--body-file|--pr|--resume|--dry-gates|--with-reviewers|--from-branch|--draft|--ready|--wait-ci|--wait-ci-timeout|--wait-ci-required)
+      --base|--link|--body|--body-file|--pr|--resume|--dry-gates|--with-reviewers|--from-branch|--draft|--no-stack|--ready|--wait-ci|--wait-ci-timeout|--wait-ci-required|--wait-ci-strict)
         {
           echo "<branch> and \"<title>\" must come FIRST, before any flag — got '$arg' in a positional slot."
           echo "  $usage"

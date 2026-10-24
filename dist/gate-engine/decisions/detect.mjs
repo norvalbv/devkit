@@ -51,7 +51,7 @@ export function decisionFileRe(decisionsRel) {
  * The (label, contributing-file) pairs that drive each smell — the file that *causes* the smell, not
  * the whole diff. A per-session seen-set keyed on these pairs re-arms only on a genuinely new
  * decision (a never-seen pair), so a growing single-decision footprint never re-nags. For dep-change
- * the "path" is the changed dependency NAME, so two distinct dep decisions yield distinct pairs and a
+ * the `dep` is the changed dependency NAME, so two distinct dep decisions yield distinct pairs and a
  * second unrelated bump is not collapsed into the first.
  *
  * @param entries Pure renames/copies (status R/C) must already be excluded by the caller (move noise).
@@ -68,8 +68,8 @@ export function smellSources(entries, boundaries = []) {
     const sources = [];
     for (const e of real)
         if (PKG_RE.test(e.path))
-            for (const name of e.depKeys ?? (e.depChanged ? [e.path] : []))
-                sources.push({ label: 'dep-change', path: name });
+            for (const dep of e.depKeys ?? [])
+                sources.push({ label: 'dep-change', path: e.path, dep });
     const boundariesHit = boundaries.filter((b) => real.some((e) => e.path.startsWith(b)));
     if (boundariesHit.length >= 2)
         for (const e of real)
@@ -162,13 +162,7 @@ export function gatherEntries(cwd, mode = 'cached') {
         const file = parts[parts.length - 1];
         const c = counts.get(file) ?? { added: 0, deleted: 0 };
         const depKeys = PKG_RE.test(file) ? readDepChangedKeys(cwd, file, mode) : [];
-        entries.push({
-            status,
-            path: file,
-            ...c,
-            depChanged: depKeys.length > 0,
-            depKeys,
-        });
+        entries.push({ status, path: file, ...c, depKeys });
     }
     return entries;
 }
@@ -199,14 +193,11 @@ function segmentMatches(segment, smellPaths) {
 export function buildDetectJudgeInput(fullDiff, entries, boundaries = []) {
     const smellPaths = new Set();
     for (const s of smellSources(entries, boundaries))
-        if (s.label !== 'dep-change')
-            smellPaths.add(s.path); // dep-change "path" is a dep NAME, not a file
+        smellPaths.add(s.path);
     const adds = entries.filter((e) => e.status === 'A');
     for (const e of entries) {
         if (LOCKFILE_RE.test(e.path))
             continue; // lockfile churn is never evidence (mirrors smellSources)
-        if (PKG_RE.test(e.path) && (e.depChanged || (e.depKeys?.length ?? 0) > 0))
-            smellPaths.add(e.path);
         // A module-replace smell points at the ADDED file; ONLY its same-basename/different-dir
         // deletion counterpart is evidence (mirrors the smellSources predicate — an unrelated big
         // deletion must not eat the evidence budget unless it is itself a legacy-deletion smell,
@@ -336,7 +327,7 @@ async function runGate() {
             header: '## RECORDED TARGETS (current rulings matching changed files)',
             skipHeader: '## RECORDED TARGETS — NONE',
             skipNote: 'No scoped Target matches. Judge the diff without assuming prior approval.',
-        }, 4096))
+        }, 8192))
             .catch(() => '## RECORDED TARGETS — UNAVAILABLE\nDecision log could not be read. Judge the diff without assuming prior approval.');
         // Target context has its own budget so it cannot displace diff evidence.
         const key = verdictKey('detect', input, targets);
@@ -396,6 +387,10 @@ async function runGate() {
         finish(reportGateInfraFailure('decisions', 'decision-gate', e, cwd, s ? 3 : 2, { strict: s }));
     }
 }
+// One `scan --files` line. The file column stays a path so the Stop hook can match its edit ledger.
+export function scanLine(s) {
+    return [s.label, s.path, ...(s.dep ? [s.dep] : [])].join('\t');
+}
 function runScan(args) {
     const cwd = process.cwd();
     // Reason: two independent decision-gate CLIs (alignment flip-flop vs architectural smell); the resolve-scan-exit shape rhymes but each scans a different thing; sharing would add the cross-engine dependency the engines avoid
@@ -404,11 +399,9 @@ function runScan(args) {
         const cfg = resolveGuardConfig(cwd);
         const entries = gatherEntries(cwd, args.includes('--working') ? 'working' : 'cached');
         if (args.includes('--files')) {
-            // (label, contributing-file) pairs for the Stop-hook seen-set — sorted+deduped so membership
-            // (grep -vxF) is stable: re-arm keys on a never-seen pair, not on the cumulative set changing.
-            const pairs = [
-                ...new Set(smellSources(entries, cfg.boundaries).map((s) => `${s.label}\t${s.path}`)),
-            ].sort();
+            // label\tfile[\tdep] lines for the Stop-hook seen-set — sorted+deduped so membership (grep -vxF)
+            // is stable: re-arm keys on a never-seen line, not on the cumulative set changing.
+            const pairs = [...new Set(smellSources(entries, cfg.boundaries).map(scanLine))].sort();
             if (pairs.length)
                 console.log(pairs.join('\n'));
         }

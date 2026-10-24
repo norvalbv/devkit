@@ -21,6 +21,8 @@ export interface ShipIntent {
   updatePrBody: boolean;
   /** `--draft`: open the PR as a draft. New-ship only; a reship's PR already exists. */
   draft: boolean;
+  /** `--no-stack`: skip registering a GitHub stack. New-ship only, like draft. */
+  noStack: boolean;
   bodyB64: string;
   repo: string;
   createdAt: string;
@@ -44,6 +46,7 @@ export interface StoredIntent {
   paths?: string[];
   updatePrBody?: boolean;
   draft?: boolean;
+  noStack?: boolean;
   bodyB64?: string;
   repo?: string;
   createdAt?: string;
@@ -340,6 +343,7 @@ export function emitFields(intent: ShipIntent): void {
     intent.createdAt,
     intent.generation,
     intent.sourceAttemptId ?? '',
+    intent.noStack ? '1' : '0',
     String(intent.links.length),
     ...intent.links,
     Buffer.from(intent.bodyB64, 'base64'),

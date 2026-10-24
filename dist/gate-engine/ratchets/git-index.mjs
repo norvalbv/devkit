@@ -6,7 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { lstatSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { readGitPaths } from './git-paths.mjs';
-import { commitIndexEnv, commitIndexKind } from './commit-index.mjs';
+import { commitIndexEnv, commitIndexKind, commitIndexTree } from './commit-index.mjs';
 const INDEX_LOCK_RETRY = new Int32Array(new SharedArrayBuffer(4));
 // For a read that stands down on failure (null/false/''): stdout carries the answer, and git's
 // stderr is dropped rather than inherited, or a non-git cwd dumps git's usage text into every log.
@@ -310,17 +310,7 @@ export function gitPrefix(root) {
 }
 /** Freeze the pending index into one immutable tree object without changing the index or worktree. */
 export function indexTreeRef(root) {
-    try {
-        return execFileSync('git', ['write-tree'], {
-            cwd: root,
-            env: commitIndexEnv(root),
-            encoding: 'utf8',
-            stdio: QUIET_STDIO,
-        }).trim();
-    }
-    catch {
-        return null;
-    }
+    return commitIndexTree(root).tree;
 }
 /** Read a CWD-relative UTF-8 blob from a Git tree. Missing paths or refs return null. */
 export function treeTextAtRef(root, ref, relativePath) {

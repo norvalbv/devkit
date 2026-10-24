@@ -28,7 +28,7 @@ describe('ship — guard-review waive store projection', () => {
     });
     dropWorktree(git, r.stderr);
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).toMatch(/\.devkit\/correctness-overrides\.json .*gitignored cache/);
+    expect(r.stderr).toMatch(/\.devkit\/correctness-overrides\.json .*ignored by git/);
     const log = readFileSync(join(dir, '.devkit/last-ship-gates-feat-waive-store.log'), 'utf8');
     expect(log).toMatch(/WAIVE_SEEN/);
     expect(log).not.toMatch(/WAIVE_MISSING/);

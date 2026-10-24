@@ -109,7 +109,7 @@ ${PATH_SETUP}
 // Emit the deterministic orchestrator only when it has something to run: a selected
 // deterministic guard / anti-slop component (the bin re-reads the selection from
 // .devkit/config.json at commit time), or a structure command joined via --structure.
-function wantsDeterministic(selection: HookSelection): boolean {
+export function wantsDeterministic(selection: HookSelection): boolean {
   if (selection.antiSlop || selection.structureCmd) return true;
   // decisions arms the orchestrator's decision-checks gate, which runs Checks linked to Targets.
   return [...DETERMINISTIC_GUARD_IDS, 'decisions'].some((id) => selection.guards?.includes(id));
@@ -179,7 +179,8 @@ export function buildFullHook(selection: HookSelection, pkgRel = '', binDir: Bin
 // is the repo's own, so its absence is a visible skip line, never a silent one.
 // `--relative` makes `git diff` emit paths relative to the CURRENT dir, so this works whether
 // the hook runs at the repo root or cd'd into a monorepo package (eslint/biome + their configs
-// are then resolved package-locally).
+// are then resolved package-locally). `-M100%` lists an edited rename as an add at its new path;
+// an exact move stays `R` and is skipped, so a pure `git mv` never blocks on debt it did not add.
 const overlayLintStep = (
   tool: string,
   label: string,
@@ -188,7 +189,7 @@ const overlayLintStep = (
   run: string,
   failHint = '',
 ) =>
-  `DK_STAGED=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(${exts})$' || true)
+  `DK_STAGED=$(git diff --cached --name-only --relative -M100% --diff-filter=ACM | grep -E '\\.(${exts})$' || true)
 if [ -n "$DK_STAGED" ] && [ -f ${config} ]; then
     if [ -x node_modules/.bin/${tool} ]; then
         echo "${label}"
@@ -240,6 +241,8 @@ fi`;
 /** Under the global husky shim (cli/lib/overlay-global-hook.mts) an overlay hook stops before its
  * chain: husky's _/h runs the repo's own hook itself, so chaining would run it twice. */
 export const GATES_ONLY_STOP = '[ -n "${DEVKIT_VIA_HUSKY_INIT:-}" ] && exit 0';
+/** Every pass-through carries this line; the overlay sync uses it to tell devkit's wrappers apart. */
+export const PASSTHROUGH_MARKER = '# devkit overlay pass-through';
 
 // Review is diagnostic: its merge-base baselines exit on a finding, so they stay AFTER the guards
 // and a lint finding never hides the reviewer's report.
@@ -327,7 +330,7 @@ export function chainWord(target: string): string {
  */
 export function buildPassthroughHook(chainScript: string, gitRuns = false): string {
   return `${HOOK_PREAMBLE}
-# devkit overlay pass-through — git now runs this dir, so we forward to the repo's own hook
+${PASSTHROUGH_MARKER} — git now runs this dir, so we forward to the repo's own hook
 # unchanged (devkit adds nothing to it).
 ${GATES_ONLY_STOP}
 ${chainExec(chainScript, gitRuns)}

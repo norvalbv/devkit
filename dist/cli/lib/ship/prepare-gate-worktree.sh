@@ -363,21 +363,6 @@ gate_dependency_preflight_tool() {
   printf '%s\n' "$tool"
 }
 
-gate_dependency_install_remedy() {
-  local wt=$1
-  if [ -f "$wt/bun.lock" ] || [ -f "$wt/bun.lockb" ]; then
-    printf '%s\n' 'bun install --frozen-lockfile'
-  elif [ -f "$wt/pnpm-lock.yaml" ]; then
-    printf '%s\n' 'pnpm install --frozen-lockfile'
-  elif [ -f "$wt/yarn.lock" ]; then
-    printf '%s\n' 'yarn install --immutable'
-  elif [ -f "$wt/package-lock.json" ] || [ -f "$wt/npm-shrinkwrap.json" ]; then
-    printf '%s\n' 'npm ci'
-  else
-    printf '%s\n' 'install dependencies with this repo'\''s package manager'
-  fi
-}
-
 # Pick the first available install that satisfies the BASE package.json in the ephemeral worktree.
 # "Populated" is only a fast preference: a real but stale install can miss a dependency added by the
 # base after that checkout last installed. Try the linked root first, then the main worktree fallback.
@@ -425,7 +410,7 @@ gate_node_modules_source() {
     packages=${rejection#*$'\t'}
     echo "  - $path (missing: $packages)" >&2
   done
-  remedy=$(gate_dependency_install_remedy "$wt")
+  remedy=$(node "$tool" --remedy "$wt")
   echo "run \`$remedy\` in the checkout, then retry the same ship command." >&2
   return 2
 }

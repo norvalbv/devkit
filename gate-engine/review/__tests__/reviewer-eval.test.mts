@@ -17,6 +17,7 @@ import {
   summarize,
   validateRow,
 } from '../eval/reviewers/bench.mts';
+import { RETRYABLE } from '../eval/reviewers/progress.mts';
 import { domainExclusivityDrop } from '../overrides.mts';
 
 const APISEC = BENCH_REVIEWERS.find((r) => r.name === 'api-security-reviewer');
@@ -468,6 +469,38 @@ describe('runRow end-to-end (fake judge, real fixture + gate)', () => {
     expect(res.execution.complete).toBe(false);
     expect(res.firstVerdict).toBeNull();
     expect(res.okFinal).toBe(false);
+  });
+
+  it.each([
+    'timeout',
+    'rate-limited',
+    'unauthenticated',
+    'absent',
+    'model-unavailable',
+    'transient',
+  ])('a first-pass %s outage is labelled outage, whatever the reason wording', async (kind) => {
+    const exec = vi.fn(async (opts) => {
+      opts.onOutage({ kind, permanent: kind !== 'transient' });
+      return null;
+    });
+    const res = await runRow(decoyRow(), { model: 'sonnet', cascade: true, exec });
+    expect(res.finalStatus).toBe('inconclusive');
+    expect(res.subcause).toBe('outage');
+    expect(RETRYABLE.has(res.subcause)).toBe(true);
+    expect(res.okFinal).toBe(false);
+  });
+
+  it('an escalation outage is labelled outage', async () => {
+    const exec = vi.fn(async (opts) => {
+      if (!opts.label.endsWith(':escalate'))
+        return fakeJudge({ first: { out: 'VERDICT: FAIL — sqli', artifact: failArtifact } })(opts);
+      opts.onOutage({ kind: 'model-unavailable', permanent: true, model: 'opus' });
+      return null;
+    });
+    const res = await runRow(goldRow(), { model: 'sonnet', cascade: true, exec });
+    expect(res.finalStatus).toBe('inconclusive');
+    expect(res.subcause).toBe('outage');
+    expect(exec).toHaveBeenCalledTimes(2);
   });
 
   it('cascade-off short-circuits the escalation: one live call, synthetic final FAIL', async () => {

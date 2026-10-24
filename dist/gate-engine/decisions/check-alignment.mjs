@@ -45,7 +45,7 @@ import { matchesRepoGlob } from '../../skills/_devkit/review-roots.mjs';
 import { envFlag, resolveFromCwd, resolveGuardConfig } from '../config.mjs';
 import { emitCacheHit } from '../judge/gate-events.mjs';
 import { judgeBinForModel } from '../judge/codex/result.mjs';
-import { JUDGE_ISOLATION } from '../judge/judge-isolation.mjs';
+import { JUDGE_ISOLATION, JUDGE_READ_TOOLS } from '../judge/judge-isolation.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
 import { execJudge, remedyCause, strictRemedy } from '../judge/run-judge.mjs';
 import { resolveEscalationModel, resolveReviewModel } from '../review/reviewers.mjs';
@@ -59,9 +59,6 @@ const ALIGN_RE = { CONTRADICT: /\bCONTRADICT\b/, ALIGN: /\bALIGN\b/, UNCLEAR: /\
 // Tolerates markdown dressing (bold/bullet/heading) around the line — a judge that formats its
 // verdict must not silently fall through to the ambiguous-word fallback and lose a block.
 const VERDICT_LINE_RE = /^[\s*#>-]*VERDICT:\s*\**\s*(ALIGN|CONTRADICT|UNCLEAR)\b/gim;
-// Read-only investigation surface for the judge. `git diff` (pattern-scoped Bash) is how it reads
-// STAGED hunks — worktree Reads alone would miss partial staging.
-const JUDGE_TOOLS = 'Read,Grep,Glob,Bash(git diff:*)';
 // Staged names are root-relative while cwd may be a subdirectory; a filename is never a glob.
 const topLiteral = (file) => `:(top,literal)${file}`;
 // One uninterrupted 240s budget for either alignment pass. The old 120s haiku cap killed 9/288
@@ -137,6 +134,7 @@ export function loadScopedTargets(dir) {
             continue;
         out.push({
             slug: f.slice(0, -3),
+            date: t.date,
             ruling: t.ruling,
             vision: t.fields['vision-fit'] ?? t.fields.context ?? '',
             scopeGlobs: scope
@@ -157,7 +155,7 @@ export function loadScopedTargets(dir) {
 function runJudge(cwd, model, prompt, stdinText, timeout, onOutage) {
     return execJudge({
         label: 'decision-alignment',
-        args: ['-p', prompt, '--model', model, ...JUDGE_ISOLATION, '--allowedTools', JUDGE_TOOLS],
+        args: ['-p', prompt, '--model', model, ...JUDGE_ISOLATION, '--allowedTools', JUDGE_READ_TOOLS],
         input: stdinText,
         timeout,
         cwd,

@@ -133,6 +133,28 @@ export function parsePermissionDenials(raw: string | null | undefined): string[]
   return envelope.success ? envelope.data.permission_denials.map(deniedLine) : null;
 }
 
+const modelRefusalSchema = z.object({
+  type: z.literal('result'),
+  is_error: z.literal(true),
+  terminal_reason: z.literal('api_error'),
+  api_error_status: z.literal(404),
+  result: z.string(),
+});
+
+/** The CLI's own sentence when the API 404s the requested model, else null. Only an API-error
+ *  envelope is read, so model-authored text never reaches outage telemetry. */
+export function claudeModelRefusal(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const envelope = modelRefusalSchema.safeParse(json);
+  return envelope.success ? envelope.data.result : null;
+}
+
 /** The spawn facts a denial record needs: where the sidecar goes and who is listening. */
 export interface DenialSink {
   label: string;

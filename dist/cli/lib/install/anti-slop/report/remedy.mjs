@@ -1,7 +1,9 @@
 /** What a blocked anti-slop run tells its author to do next (sc-3469). Hints never go in a rule
  * message: the diagnostic is part of the baseline fingerprint (see oxc-toolchain-migration). */
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { ANTI_SLOP_BASELINE_REL } from '../constants.mjs';
-import { formatSources, relocationKey, relocationRemedy } from '../relocations.mjs';
+import { classifyRelocations, formatSources, relocationKey, relocationRemedy, } from '../relocations.mjs';
 /** Acceptance route with a committed baseline. No one-run bypass: CI's `check --base` would still
  * fail the PR, while an override is durable and visible in the diff. */
 export const ACCEPT_VIA_OVERRIDE = "to accept it deliberately, change the rule's severity or add a path-scoped override in the repository Oxlint config (a reviewer sees it in the diff; anti-slop has no one-run bypass)";
@@ -17,6 +19,10 @@ const RULE_REMEDIES = new Map([
         'anti-slop/require-safety-comment-for-type-assertion',
         'require-safety-comment-for-type-assertion: if the value comes from I/O (JSON.parse, env, argv, a file or network body), decode it where it enters with a schema (e.g. zod `Schema.safeParse(JSON.parse(text))`) instead of casting; otherwise state the invariant on a `// SAFETY:` line directly above the assertion',
     ],
+    [
+        'anti-slop/no-conditional-empty-object-spread',
+        "no-conditional-empty-object-spread: in plain JavaScript, build the object in separate statements and set the field in an `if`. In TypeScript, declare a named `type` with the field optional (`x?: T`), bind `const out: Owner = { ... }`, set the field in an `if`, and make `Owner` the function's return type (or drop the annotation so it infers); a `Record<string, unknown>` or inline object-type binding, or returning the binding from a function still typed `Record<string, unknown>`, trips no-unsafe-dictionary-type and no-known-value-widening",
+    ],
 ]);
 /** One hint per distinct rule, then the acceptance route this install mode actually supports. */
 export function antiSlopRemedyLines(ruleIds, overlay) {
@@ -28,34 +34,34 @@ export function antiSlopRemedyLines(ruleIds, overlay) {
 }
 /** Names the move route when new findings repeat debt baselined under another file. A check
  * without Git evidence cannot tell a move from new code, so the line states both outcomes. */
-export function relocationHint(errors, baseline, overlay, baseRef) {
-    const entriesByKey = new Map();
-    for (const entry of baseline.entries) {
-        const key = relocationKey(entry);
-        entriesByKey.set(key, [...(entriesByKey.get(key) ?? []), entry]);
+export function relocationHint(errors, baseline, overlay, baseRef, cwd) {
+    const baselinedCredit = new Map();
+    const ordered = [...baseline.entries].sort((a, b) => a.file.localeCompare(b.file) || a.fingerprint.localeCompare(b.fingerprint));
+    for (const { file, fingerprint, count, ...identity } of ordered) {
+        const key = relocationKey(identity);
+        const credit = { source: file, fingerprint, count };
+        baselinedCredit.set(key, [...(baselinedCredit.get(key) ?? []), credit]);
     }
-    let matched = 0;
-    const sources = [];
-    for (const group of errors) {
-        const entries = entriesByKey.get(relocationKey(group)) ?? [];
-        const elsewhere = entries.filter((entry) => entry.file !== group.file);
-        const units = elsewhere.reduce((sum, entry) => sum + entry.count, 0);
-        if (units === 0)
-            continue;
-        matched += Math.min(group.additionalCount, units);
-        sources.push(...elsewhere.map((entry) => entry.file));
-    }
+    const { relocated } = classifyRelocations(errors, baselinedCredit);
+    const matched = relocated.reduce((sum, group) => sum + group.relocatedCount, 0);
     if (matched === 0)
         return [];
+    const sources = relocated.flatMap((group) => group.from.map((credit) => credit.source));
     const stage = overlay ? '' : `, then stage ${ANTI_SLOP_BASELINE_REL}`;
+    const renamedAway = cwd !== undefined && sources.every((source) => !existsSync(join(cwd, source)));
     return [
         `anti-slop: ${matched} of these finding(s) are identical (rule and source line) to debt already baselined in ${formatSources(sources)}. If you moved this code from there, do not rewrite it: delete it there, git add both files, run \`${relocationRemedy(baseRef)}\`${stage}. New or copied code is not a move: fix it as below`,
+        ...(renamedAway
+            ? [
+                `anti-slop: ${formatSources(sources)} no longer exists; if it was renamed to this file, run \`devkit anti-slop adopt-renames\` for a staged rename or \`devkit anti-slop adopt-renames --base <a commit before the rename>\` for a committed one${stage}`,
+            ]
+            : []),
     ];
 }
 /** Everything a new-finding FAIL prints after its verdict line: the move route, then the hints. */
-export function antiSlopFailRemedy(errors, baseline, overlay, baseRef) {
+export function antiSlopFailRemedy(errors, baseline, overlay, baseRef, cwd) {
     return [
-        ...relocationHint(errors, baseline, overlay, baseRef),
+        ...relocationHint(errors, baseline, overlay, baseRef, cwd),
         ...antiSlopRemedyLines(errors.map((group) => group.ruleId), overlay),
     ];
 }

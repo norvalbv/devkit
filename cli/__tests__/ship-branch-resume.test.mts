@@ -10,7 +10,7 @@ import {
   dirs,
   GIT_ENV,
   installHook,
-  LEAKING_HOOK,
+  COUNTING_HOOK,
   localBranchExists,
   manifestOf,
   publishEnvFor,
@@ -18,7 +18,8 @@ import {
   scriptPath,
   seedBaseRepo,
   seedShipRepoLocalRemote,
-  REAPED_15S_BANNER,
+  installPostCommitHang,
+  POST_COMMIT_CEILING_BANNER,
 } from './_ship-branch-fixture.mts';
 
 /** createPreservedCommit leaves note.txt UNTRACKED in $ROOT, and git refuses a checkout/merge that
@@ -55,9 +56,11 @@ describe('ship-branch.sh — resume when the base moved', () => {
   // would refuse before the resume checks are reached.
   it('resumes and publishes when origin/<base> advances between the timeout and the retry', () => {
     const { dir, env, git, bare, studioTip } = seedBaseRepo();
-    installHook(dir, LEAKING_HOOK); // only the SHIP's commit may leak, not the seed's
+    installHook(dir, COUNTING_HOOK); // only the SHIP's commit may count, not the seed's
     const { hookCount, publishEnv } = publishEnvFor(dir, env);
     const argv = [scriptPath, 'feat/base-advance', 'ship it', '--base', 'studio', '--', 'note.txt'];
+
+    installPostCommitHang(dir);
 
     const first = spawnSync('/bin/bash', argv, {
       cwd: dir,
@@ -69,7 +72,7 @@ describe('ship-branch.sh — resume when the base moved', () => {
     expect(first.status, first.stderr).toBe(124);
     // Pair every 124 with OUR banner: testSpawnSync's linger reap also returns 124, so an
     // unpaired status assertion cannot say which supervisor fired.
-    expect(first.stderr).toMatch(REAPED_15S_BANNER);
+    expect(first.stderr).toMatch(POST_COMMIT_CEILING_BANNER);
     const preserved = git(['rev-parse', 'feat/base-advance']).trim();
     expect(git(['rev-parse', 'refs/devkit/ship-receipts/feat/base-advance']).trim()).toBe(
       preserved,
@@ -77,7 +80,7 @@ describe('ship-branch.sh — resume when the base moved', () => {
     expect(remoteBranchExists(bare, 'feat/base-advance')).toBe(false);
 
     // A parallel agent merges into the PR base. Push from a throwaway clone so the bare advances
-    // without touching this checkout (a clone carries no core.hooksPath, so the leaking hook is inert).
+    // without touching this checkout (a clone carries no core.hooksPath, so the hooks are inert).
     const clone = mkdtempSync(join(tmpdir(), 'shipbaseadv-'));
     dirs.push(clone);
     const cgit = (a) =>
@@ -130,11 +133,13 @@ describe('ship-branch.sh — resume when the base moved', () => {
   // BASE is pinned from HEAD (:144), so a sibling agent's commit between attempts moves it with no
   // --base involved. The commonest form of the defect, and one an earlier draft of the fix missed.
   it('resumes after the shared checkout’s HEAD advances between the timeout and the retry', () => {
-    const { dir, env, git, bare } = seedShipRepoLocalRemote({ hookBody: LEAKING_HOOK });
+    const { dir, env, git, bare } = seedShipRepoLocalRemote({ hookBody: COUNTING_HOOK });
     const { hookCount, publishEnv } = publishEnvFor(dir, env);
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
     const baseBefore = git(['rev-parse', 'HEAD']).trim();
     const argv = [scriptPath, 'feat/head-advance', 'ship it', '--', 'note.txt'];
+
+    installPostCommitHang(dir);
 
     const first = spawnSync('/bin/bash', argv, {
       cwd: dir,
@@ -144,7 +149,7 @@ describe('ship-branch.sh — resume when the base moved', () => {
     });
 
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(REAPED_15S_BANNER);
+    expect(first.stderr).toMatch(POST_COMMIT_CEILING_BANNER);
     const preserved = git(['rev-parse', 'feat/head-advance']).trim();
     expect(git(['rev-parse', 'refs/devkit/ship-receipts/feat/head-advance']).trim()).toBe(
       preserved,
@@ -330,11 +335,13 @@ describe('ship-branch.sh — resume refusals that name their own cause', () => {
   // $ROOT is not — the old reason blamed the operator for a rewrite the gates performed.
   it('names the drifted path when a gate formatter rewrote and re-staged a shipped file', () => {
     const { dir, env, git, bare } = seedShipRepoLocalRemote({
-      hookBody: `echo run >> "$TEST_HOOK_COUNT"\nprintf 'formatted\\n' > note.txt\ngit add -f -- note.txt\nsleep 30 &`,
+      hookBody: `echo run >> "$TEST_HOOK_COUNT"\nprintf 'formatted\\n' > note.txt\ngit add -f -- note.txt`,
     });
     const { hookCount, publishEnv } = publishEnvFor(dir, env);
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
     const argv = [scriptPath, 'feat/formatter-drift', 'ship it', '--', 'note.txt'];
+
+    installPostCommitHang(dir);
 
     const first = spawnSync('/bin/bash', argv, {
       cwd: dir,
@@ -344,7 +351,7 @@ describe('ship-branch.sh — resume refusals that name their own cause', () => {
     });
 
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(REAPED_15S_BANNER);
+    expect(first.stderr).toMatch(POST_COMMIT_CEILING_BANNER);
     const preserved = git(['rev-parse', 'feat/formatter-drift']).trim();
     expect(git(['show', `${preserved}:note.txt`])).toBe('formatted\n'); // the hook's bytes were committed
     expect(readFileSync(join(dir, 'note.txt'), 'utf8')).toBe('hi\n'); // $ROOT was never formatted
@@ -385,11 +392,13 @@ describe('ship-branch.sh — resume refusals that name their own cause', () => {
     const files = ['a', 'b', 'c', 'd', 'e', 'f'].map((n) => `${n}.txt`);
     const rewrite = files.map((f) => `printf 'formatted\\n' > ${f}\ngit add -f -- ${f}`).join('\n');
     const { dir, env, git } = seedShipRepoLocalRemote({
-      hookBody: `echo run >> "$TEST_HOOK_COUNT"\n${rewrite}\nsleep 30 &`,
+      hookBody: `echo run >> "$TEST_HOOK_COUNT"\n${rewrite}`,
     });
     const { publishEnv } = publishEnvFor(dir, env);
     for (const f of files) writeFileSync(join(dir, f), 'hi\n');
     const argv = [scriptPath, 'feat/wide-drift', 'ship it', '--', ...files];
+
+    installPostCommitHang(dir);
 
     const first = spawnSync('/bin/bash', argv, {
       cwd: dir,
@@ -398,7 +407,7 @@ describe('ship-branch.sh — resume refusals that name their own cause', () => {
       env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
     });
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(REAPED_15S_BANNER);
+    expect(first.stderr).toMatch(POST_COMMIT_CEILING_BANNER);
 
     const refused = spawnSync('/bin/bash', argv, {
       cwd: dir,
@@ -450,6 +459,29 @@ describe('ship-branch.sh — resume refusals that name their own cause', () => {
     expect(retry.stderr).toContain('gate receipt verified');
     expect(remoteBranchExists(bare, 'feat/no-body-retry')).toBe(true);
   });
+
+  it.each([
+    ['--body', ''],
+    ['--body-file', 'empty.md'],
+  ])(
+    'keeps the generic message reason for an explicit empty %s, never blaming stdin',
+    (flag, value) => {
+      const { dir, env, git } = seedShipRepoLocalRemote();
+      const { publishEnv } = publishEnvFor(dir, env);
+      preserveWithReceipt(dir, env, git, 'feat/explicit-empty');
+      writeFileSync(join(dir, 'empty.md'), '');
+
+      const r = spawnSync(
+        '/bin/bash',
+        [scriptPath, 'feat/explicit-empty', 'ship it', flag, value, '--', 'note.txt'],
+        { cwd: dir, input: '', encoding: 'utf8', env: publishEnv },
+      );
+
+      expect(r.status, r.stderr).toBe(1);
+      expect(r.stderr).toContain('its commit message differs from this ship title/body');
+      expect(r.stderr).not.toContain('re-supply it with --body');
+    },
+  );
 
   // An empty body plus a bodied commit ALSO describes a changed title, where --body would be the same
   // misdiagnosis inverted. The title must match before the body can be called the sole cause.

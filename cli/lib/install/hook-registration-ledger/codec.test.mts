@@ -238,7 +238,7 @@ describe('hook registration ownership ledger parser limits', () => {
     const ids = Object.values(HOOK_REGISTRATIONS)
       .flat()
       .map(({ registrationId }) => registrationId);
-    expect(ids).toHaveLength(19); // +base-drift:session-start, +base-drift:pre-edit, +anti-slop:preflight, +comments:preflight
+    expect(ids).toHaveLength(21); // +base-drift:session-start, +base-drift:pre-edit, +anti-slop:preflight, +comments:preflight, +prior-art-gate:pre-edit, +prior-art-gate:pre-bash
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) expect(id).toMatch(/^[a-z0-9][a-z0-9._:-]*$/);
   });

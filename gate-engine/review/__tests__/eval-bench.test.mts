@@ -24,7 +24,7 @@ import {
   completenessBaselineEligibility,
   completenessCaseCheckpointIdentity,
   completenessCaseInputHash,
-  completenessFixtureCapabilityFingerprint,
+  completenessFixtureCapabilityFingerprint as fingerprintWithRepoConfig,
   completenessMatcherInputHash,
   completenessReviewerCheckpointIdentity,
   completenessSlotKey,
@@ -36,7 +36,7 @@ import {
   type MatcherCheckpointValue,
   materializeCompletenessFixture,
   type ReviewerCheckpointValue,
-  runCase,
+  runCase as runCaseWithRepoConfig,
   runIndependentMatcherAudit,
   reusableCaseCheckpoint,
   reusableCaseCheckpointForRow,
@@ -122,6 +122,18 @@ const REVIEWER_TRANSCRIPT = [
   'ISSUES: 0 critical, 1 important, 1 low',
   'VERDICT: FAIL — help menu registration missing',
 ].join('\n');
+
+// runCase defaults to this repo's own guard.config.json; its judge pins must not reach fixtures
+// that are written for the default models.
+const DEFAULT_CONFIG = resolveGuardConfigJson(null);
+function runCase(
+  row: CompletenessCase,
+  options: Parameters<typeof runCaseWithRepoConfig>[1] = {},
+): Promise<CaseResult> {
+  return runCaseWithRepoConfig(row, { consumerConfig: DEFAULT_CONFIG, ...options });
+}
+const completenessFixtureCapabilityFingerprint = (row: CompletenessCase): string =>
+  fingerprintWithRepoConfig(row, undefined, DEFAULT_CONFIG);
 
 function asJson<T>(value: T): JsonValue {
   const serialized = JSON.stringify(value);

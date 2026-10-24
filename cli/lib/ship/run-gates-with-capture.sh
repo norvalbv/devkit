@@ -34,6 +34,7 @@ run_gates_with_capture() {
   shift 5
   [ "${1:-}" = "--" ] && shift
   local cmd=("$@")
+  RUN_GATES_REAPED=0 # global: commit-with-gate-capture.sh records it on ship_result
   local archive_log=${DEVKIT_GATE_ARCHIVE_LOG:-}
   # The capture tees to $log plus the OPTIONAL telemetry archive. $log is load-bearing (a gate whose
   # output we could not persist fails the run, below); the archive is best-effort and must never fail
@@ -147,6 +148,13 @@ run_gates_with_capture() {
       rc=$rewait_rc
     fi
   fi
+  # Git judged every hook by its exit status, so a ship's clean leader landed a gated commit; the
+  # fail-closed cleanup and log checks below still apply. Review keeps the 124.
+  [ ! -e "$capture_dir/reaped" ] || reaped=1
+  if [ "$reaped" -eq 1 ] && [ "$rc" -eq 124 ] && [ "$label" = ship ]; then
+    rc=0
+    RUN_GATES_REAPED=1
+  fi
 
   # The ownership token exists in this parent before target launch. A fresh supervisor can adopt
   # and clean the target tree even when the original supervisor was itself killed or crashed.
@@ -200,13 +208,14 @@ run_gates_with_capture() {
   if declare -F review_gate_finished >/dev/null 2>&1; then
     review_gate_finished "$supervisor_pid"
   fi
-  [ ! -e "$capture_dir/reaped" ] || reaped=1
   rm -rf -- "$capture_dir"
   if [ "$rc" -eq 0 ] && { [ "$tee_status" -ne 0 ] || [ "$capture_failed" -ne 0 ]; }; then
     echo "$label: could not persist gate output to $log" >&2
     rc=1
   fi
   set -e
+  [ "$rc" -ne 0 ] || [ "$RUN_GATES_REAPED" -ne 1 ] ||
+    echo "✓ ship: the gate chain passed; a process it started outlived it and was reaped after $((SECONDS - gate_started))s." >&2
 
   # 124 is the supervisor's status for two causes: the expiry ceiling, or a command that exited 0 while a
   # process it started was still running and had to be reaped. The supervisor marks the second in the
@@ -218,7 +227,6 @@ run_gates_with_capture() {
       if [ "$reaped" -eq 1 ]; then
         echo "⏱  $label: the gate chain exited cleanly, but a process it started outlived it and was reaped after $((SECONDS - gate_started))s (exit 124) — NOT the ${secs}s ceiling."
         echo "   Last stage started: ${last_stage:-unknown stage}"
-        [ "$label" != ship ] || echo "   The commit may already have landed."
         echo "   Raising SHIP_COMMIT_TIMEOUT will not help."
       else
         echo "⏱  $label: gate chain hit the ${secs}s ceiling (exit $rc) DURING: ${last_stage:-unknown stage}"

@@ -62,7 +62,7 @@ function seedRepository(): {
   for (const linked of [
     'cli/lib/husky/overlay/overlay-root.mts',
     'cli/lib/husky/pre-push/failing-test-files.mts',
-    'gate-engine/coverage/dependencies.mts',
+    'gate-engine/coverage/dependencies.mts', // imported by the copied dependency-preflight.mts
   ]) {
     mkdirSync(dirname(join(root, linked)), { recursive: true });
     symlinkSync(join(REPO_ROOT, linked), join(root, linked));
@@ -442,9 +442,14 @@ describe('pre-push failure attribution', () => {
   });
 });
 
-/** Write a vitest results cache into the fixture, `ageSeconds` old (negative = newer than the push). */
-function seedResultsCache(root: string, entries: [string, boolean][], ageSeconds = -60): string {
-  const cacheDir = join(root, 'node_modules/.vite/vitest/fixture');
+/** Write a vitest results cache under `dir`, `ageSeconds` old (negative = newer than the push). */
+function seedResultsCache(
+  root: string,
+  entries: [string, boolean][],
+  ageSeconds = -60,
+  dir = '.devkit/vitest-cache',
+): string {
+  const cacheDir = join(root, dir, 'vitest/fixture');
   mkdirSync(cacheDir, { recursive: true });
   const path = join(cacheDir, 'results.json');
   const results = entries.map(([key, failed]) => [key, { duration: 1, failed }]);
@@ -528,17 +533,30 @@ describe('pre-push failing-file list', () => {
     expect(existsSync(log)).toBe(false);
   });
 
-  it('says nothing when node_modules is a link to an install other checkouts share', () => {
+  it('says nothing when this checkout has no cache yet, even if the shared install has one', () => {
     const { fakeBin, input, log, logPath, root } = seedFailingSuite();
-    seedResultsCache(root, [['parallel:a.test.mts', true]]);
-    const shared = join(root, 'shared-install');
-    execFileSync('mv', [join(root, 'node_modules'), shared]);
-    symlinkSync(shared, join(root, 'node_modules'));
+    seedResultsCache(root, [['parallel:a.test.mts', true]], -60, 'node_modules/.vite');
     const result = runPrePush(root, fakeBin, logPath, input);
 
     expect(result.status).toBe(7);
     expect(result.stderr).not.toContain('Failing test files');
     expect(existsSync(log)).toBe(false);
+  });
+
+  it('names its own failures when node_modules is a link to an install other checkouts share', () => {
+    const { fakeBin, input, log, logPath, root } = seedFailingSuite();
+    seedResultsCache(root, [['parallel:a.test.mts', true]]);
+    const shared = join(root, 'shared-install');
+    execFileSync('mv', [join(root, 'node_modules'), shared]);
+    symlinkSync(shared, join(root, 'node_modules'));
+    // Another checkout's fresh run, written where vitest's default cacheDir would put it.
+    seedResultsCache(root, [['parallel:b.test.mts', true]], -60, 'node_modules/.vite');
+    const result = runPrePush(root, fakeBin, logPath, input);
+
+    expect(result.status).toBe(7);
+    expect(result.stderr).toContain('  a.test.mts');
+    expect(result.stderr).not.toContain('b.test.mts');
+    expect(readFileSync(log, 'utf8').trimEnd().split('\n').at(-1)).toBe('a.test.mts');
   });
 
   it('says nothing after a typecheck failure or when turned off', () => {

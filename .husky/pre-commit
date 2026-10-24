@@ -395,7 +395,7 @@ if [ -n "$comp_pid" ]; then
     fi
 fi
 if [ "$rrc" -eq 1 ]; then
-    echo "   A reviewer FAILED (escalation-confirmed). Fix the findings above, then re-run."
+    echo "   guard-review blocked the commit — each reason and its remedy are printed above; fix any reviewer findings, then re-run."
     __dk_comp_observed
     __dk_block_ai guard-review
 elif [ "$rrc" -eq 3 ]; then

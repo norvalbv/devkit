@@ -63,6 +63,7 @@ const COMMANDS: Record<string, CommandLoader> = {
   review: () => import('./commands/review.mts'),
   'guard-branch': () => import('./commands/guard-branch.mts'),
   'base-status': () => import('./commands/base-drift/base-status.mts'),
+  'follow-up': () => import('./commands/follow-up/follow-up.mts'),
   'coverage-run': () => import('./commands/coverage/run.mts'),
   'coverage-diff': () => import('./commands/coverage/diff.mts'),
   'test-report-run': () => import('./commands/baseline/test-report-run.mts'),
@@ -88,7 +89,7 @@ const GIT_COMMANDS = new Set([
   'sync-hook-runner',
 ]);
 
-const OVERLAY_HOME_COMMANDS = new Set(['doctor', 'clean', 'upgrade']);
+const OVERLAY_HOME_COMMANDS = new Set(['doctor', 'clean', 'upgrade', 'init']);
 
 /**
  * Top-level help, derived from every command's `meta.summary` (single source of truth). Each meta
@@ -159,10 +160,11 @@ async function main() {
   if (GIT_COMMANDS.has(cmd)) assertGit(cmd); // friendly throw on missing git → main().catch prints it
 
   // sc-4157: through a linked worktree's overlay links these would half-change the home's overlay.
-  const retarget =
-    OVERLAY_HOME_COMMANDS.has(cmd) || (cmd === 'init' && cmdArgs.includes('--overlay'));
-  const cwd = retarget
-    ? (await import('./lib/husky/overlay/overlay-home.mts')).overlayCommandCwd(process.cwd())
+  const cwd = OVERLAY_HOME_COMMANDS.has(cmd)
+    ? (await import('./lib/husky/overlay/copied-overlay.mts')).overlayCommandCwd(
+        process.cwd(),
+        cmd === 'clean',
+      )
     : process.cwd();
   const code = await mod.default(cmdArgs, cwd);
   process.exit(code ?? 0);

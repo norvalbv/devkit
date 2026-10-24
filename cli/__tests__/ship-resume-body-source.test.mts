@@ -1,12 +1,14 @@
 /** sc-3411 — a --resume banner names the body that will ship; an override sized as the record
  *  looked exactly like the stale-body failure. */
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import {
+  breakHook,
   dropWorktree,
+  fixHook,
   installHook,
   reshipScript,
   scriptPath,
@@ -136,18 +138,6 @@ describe('ship --resume banner: body source (new-ship)', () => {
   });
 });
 
-/** Remove the hook runner so the hook-source preflight refuses before any worktree exists. */
-function breakHook(s) {
-  mkdirSync(join(s.dir, 'src'), { recursive: true });
-  writeFileSync(join(s.dir, 'src/big.ts'), 'export const a = 1;\n');
-  rmSync(join(s.dir, '.husky/_'), { recursive: true, force: true });
-}
-
-function fixHook(s) {
-  mkdirSync(join(s.dir, '.husky/_'), { recursive: true });
-  installHook(s.dir, 'exit 0');
-}
-
 /** Block a reship once on the hook-source preflight, then fix the cause. */
 function seedBlockedReship(argv, input) {
   const s = seedReshipRepo();
@@ -175,6 +165,19 @@ describe('ship --resume banner: body source + PR effect (reship --pr)', () => {
       const line = banner(r.stderr);
       expect(line).toContain('(--pr)');
       expect(line).toContain('body 15 bytes (from --body-file fixed.md, overriding recorded 7)');
+      expect(line).toContain('commit + PR body');
+    } finally {
+      dropWorktree(s.git, r.stderr);
+    }
+  });
+
+  it('an explicit empty --body on the resume reaches reship and clears the PR body', () => {
+    const s = seedBlockedReship([], 'pr body\n');
+    const r = run(scriptPath, s, ['--resume', 'pr-open', '--body', '']);
+    try {
+      expect(r.status, r.stderr).toBe(0);
+      const line = banner(r.stderr);
+      expect(line).toContain('body 0 bytes (from --body, overriding recorded 7)');
       expect(line).toContain('commit + PR body');
     } finally {
       dropWorktree(s.git, r.stderr);

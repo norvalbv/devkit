@@ -1378,8 +1378,9 @@ describe('runDeterministic — local re-check hint on failure', () => {
     }
     // A gate that passed gets no line.
     expect(out).not.toMatch(/guard-fanout:/);
-    expect(out).toMatch(/guard-size: env -- node .*size-disable\.m[jt]s gate/);
-    expect(out).toMatch(/guard-dup: env -- node .*matcher\.m[jt]s scan --new --changed --gate/);
+    // A devkit checkout path with a space or apostrophe prints the module single-quoted.
+    expect(out).toMatch(/guard-size: env -- node .*size-disable\.m[jt]s'? gate/);
+    expect(out).toMatch(/guard-dup: env -- node .*matcher\.m[jt]s'? scan --new --changed --gate/);
   });
 
   it('keeps the grepped failure line byte-identical and ahead of the hint', () => {
@@ -1402,7 +1403,7 @@ describe('runDeterministic — local re-check hint on failure', () => {
     const d = repo([], true);
     expect(runDeterministic(d, { exec: mkExec({ index: 1 }) })).toBe(1);
     const out = errOut(err);
-    expect(out).toMatch(/guard-anti-slop: env -- node .*index\.m[jt]s anti-slop check --staged/);
+    expect(out).toMatch(/guard-anti-slop: env -- node .*index\.m[jt]s'? anti-slop check --staged/);
     expect(out).toContain('devkit anti-slop check --staged');
   });
 
