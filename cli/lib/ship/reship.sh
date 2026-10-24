@@ -231,8 +231,10 @@ REPO=$(printf '%s\n' "$ORIGIN_URL" | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.g
 
 REWRITE=0
 PR_MERGE_BASE=
+NOTES_MODE=""   # a rewrite re-judges the whole change, so its reviewer notes replace the old ones
 if [ -n "$BASE_FLAG" ]; then
   REWRITE=1
+  NOTES_MODE=replace
   BASE_REF=${BASE_FLAG#origin/}
   [ -n "$BASE_REF" ] || { echo "--base requires a branch" >&2; exit 1; }
   # Git reports old-PR scope in repository-canonical form. Normalize the harmless spelling Git
@@ -1195,7 +1197,10 @@ if [ "$UPDATE_PR_BODY" -eq 1 ]; then
     # The commit landed, so its evidence still belongs on the PR; the suggested re-run carries it.
     # Released first, as on the success path: a long capture must not block a same-branch --pr.
     rewrite_publish_lock_release
-    [[ "${PR_URL##*/}" =~ ^[0-9]+$ ]] && publish_evidence_block "$WT" "${PR_URL##*/}" "$REPO" "$SHIP_COMMIT" "$ROOT"
+    if [[ "${PR_URL##*/}" =~ ^[0-9]+$ ]]; then
+      publish_reviewer_notes "${PR_URL##*/}" "$REPO" "$SHIP_COMMIT" "$NOTES_MODE"
+      publish_evidence_block "$WT" "${PR_URL##*/}" "$REPO" "$SHIP_COMMIT" "$ROOT"
+    fi
     [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "${PR_NUM:-}" pr-body-publication-failed
     exit "$BODY_UPDATE_STATUS"
   fi
@@ -1209,7 +1214,10 @@ if [ -n "$PR_URL" ]; then
   READY_STATUS=0
   reship_mark_ready "${PR_NUM:-}" || READY_STATUS=1
   echo "$PR_URL"
-  if [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then publish_evidence_block "$WT" "$PR_NUM" "$REPO" "$SHIP_COMMIT" "$ROOT"; fi
+  if [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then
+    publish_reviewer_notes "$PR_NUM" "$REPO" "$SHIP_COMMIT" "$NOTES_MODE"
+    publish_evidence_block "$WT" "$PR_NUM" "$REPO" "$SHIP_COMMIT" "$ROOT"
+  fi
   # The wait comes after the ready flip so it observes the check set that flip triggers — but a
   # FAILED flip skips it: the operator has an actionable remedy above, and burying it under up to two
   # hours of polling on a PR that is in the wrong state helps nobody.
