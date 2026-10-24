@@ -76,8 +76,12 @@ export function normalizeLineEndings(raw: string): string {
 // leading dressing class is guarded so it can never consume a line terminator: multiline `^`
 // matches immediately after a bare `\r`, so an unguarded `[\s*#>-]*` swallows the `\n` of a CRLF
 // and every consumer that slices on `.index` gets a fragment ending in a dangling `\r`.
-export const VERDICT_LINE_RE =
-  /^(?:(?![\r\n])[\s*#>\-\p{Extended_Pictographic}\u{FE0F}\u{200D}])*VERDICT:\s*\**\s*(PASS|FAIL)\b\**[ \t]*(?:[—–:-]+[ \t]*)?(.*)$/gimu;
+export const VERDICT_DRESSING = /(?:(?![\r\n])[\s*#>\-\p{Extended_Pictographic}\u{FE0F}\u{200D}])*/u
+  .source;
+export const VERDICT_LINE_RE = new RegExp(
+  String.raw`^${VERDICT_DRESSING}VERDICT:\s*\**\s*(PASS|FAIL)\b\**[ \t]*(?:[—–:-]+[ \t]*)?(.*)$`,
+  'gimu',
+);
 
 export function parseReviewVerdict(raw: string): ReviewVerdict {
   const lines = [...String(raw).matchAll(VERDICT_LINE_RE)];
