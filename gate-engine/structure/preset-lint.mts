@@ -86,8 +86,8 @@ function parseResults(stdout: string): ParsedResult[] | null {
   }
 }
 
-/** One `eslint --format json` run. Exit 1 that names no error, or output that is not ESLint's json,
- * still blocks: a failed lint is never read as a clean one. */
+/** One `eslint --format json` run. An exit 1 whose output names no error or is not ESLint's json
+ * still blocks; exit 0 is clean whatever it printed, as eslint's own exit code says. */
 function presetJson(cwd: string, args: string[], input?: string): PresetRun {
   const exit = spawnPreset(cwd, args, input);
   if ('code' in exit) return { failed: exit };
