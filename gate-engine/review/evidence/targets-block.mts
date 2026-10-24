@@ -7,14 +7,12 @@
  * contract, so the shape must never fork.
  */
 
-import { execFileSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { resolveFromCwd, resolveGuardConfig } from '../../config.mts';
 import { currentTarget, parseDecision } from '../../decisions/decision-format.mts';
 import { type GoverningTarget, scopedTargets } from '../../decisions/scoped-targets.mts';
 import { hasChecklist, type ReviewerSelection } from '../reviewers.mts';
-import { headFile, indexFile } from './staged-git.mts';
+import { dirInRepo, headFile, indexFile } from './staged-git.mts';
 
 /** One governing Target (scope-match or semantic) as returned by `scopedTargets`. */
 export interface TargetBlock {
@@ -104,17 +102,11 @@ const rulingOf = (markdown: string | null): string | null =>
  */
 export function stagedTargetChanges(files: string[], cwd: string): string[] {
   const dir = resolveFromCwd(resolveGuardConfig(cwd), 'decisionsDir');
-  if (dir == null) return [];
-  let prefix: string;
-  try {
-    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8' });
-    prefix = path.relative(realpathSync(top.trim()), realpathSync(dir)).split(path.sep).join('/');
-  } catch {
-    return [];
-  }
+  const log = dir == null ? null : dirInRepo(dir, cwd);
+  if (!log) return [];
   const changed: string[] = [];
   for (const file of files) {
-    if (path.posix.dirname(file) !== (prefix || '.') || !file.endsWith('.md')) continue;
+    if (path.posix.dirname(file) !== log.rel || !file.endsWith('.md')) continue;
     const slug = path.posix.basename(file, '.md');
     if (slug === 'INDEX') continue;
     try {
