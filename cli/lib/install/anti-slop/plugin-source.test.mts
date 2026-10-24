@@ -16,8 +16,12 @@ function pkgWith(files: string[]): string {
   return pkg;
 }
 
-const SOURCE = ['anti-slop/src/index.ts', 'anti-slop/src/rules/a.ts'];
-const BUILT = ['dist/anti-slop/src/index.js', 'dist/anti-slop/src/rules/a.js'];
+const SOURCE = ['anti-slop/UPSTREAM.md', 'anti-slop/src/index.ts', 'anti-slop/src/rules/a.ts'];
+const BUILT = [
+  'dist/anti-slop/UPSTREAM.md',
+  'dist/anti-slop/src/index.js',
+  'dist/anti-slop/src/rules/a.js',
+];
 
 afterEach(() => {
   for (const pkg of roots.splice(0)) rmSync(pkg, { recursive: true, force: true });
@@ -42,6 +46,15 @@ describe('antiSlopPluginSource', () => {
 
   it('falls back to .ts when source gained a module the dist build lacks', () => {
     const pkg = pkgWith([...SOURCE, 'anti-slop/src/rules/b.ts', ...BUILT]);
+    expect(antiSlopPluginSource(pkg)).toEqual({
+      root: join(pkg, 'anti-slop/src'),
+      entry: './plugin/index.ts',
+    });
+  });
+
+  it('falls back to .ts when the dist build was made for another upstream pin', () => {
+    const pkg = pkgWith([...SOURCE, ...BUILT]);
+    writeFileSync(join(pkg, 'anti-slop/UPSTREAM.md'), '- Commit: `new`\n');
     expect(antiSlopPluginSource(pkg)).toEqual({
       root: join(pkg, 'anti-slop/src'),
       entry: './plugin/index.ts',

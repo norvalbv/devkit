@@ -42,8 +42,8 @@ function huskyRepo({ runner = true } = {}): string {
   return root;
 }
 
-async function runnerCheck(root: string, cfg: object = HUSKY_CFG) {
-  const { results } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
+async function runnerCheck(root: string) {
+  const { results } = await collectResults(root, HUSKY_CFG, { name: 'config.json', status: 'OK' });
   const result = results.find((r) => r.name === CHECK);
   if (!result) throw new Error(`no "${CHECK}" result — check is not wired into collectResults`);
   return result;

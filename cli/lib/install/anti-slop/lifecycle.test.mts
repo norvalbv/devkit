@@ -49,7 +49,7 @@ describe('anti-slop capability lifecycle', () => {
     const manifest = JSON.parse(readFileSync(join(cwd, '.devkit/anti-slop/manifest.json'), 'utf8'));
     expect(manifest).toMatchObject({
       schemaVersion: 1,
-      upstreamCommit: '446268e5d15baa968eaec669ff65358d36ae6259',
+      upstreamCommit: 'e8c4880471b23ab7f216fba7b27d173a6ef07d4c',
       pluginApiVersion: '1.78.0',
     });
     expect(manifest.ruleIds).toHaveLength(17);

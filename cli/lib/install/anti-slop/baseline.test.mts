@@ -5,9 +5,11 @@ import {
   baselineIncreases,
   compareBaseline,
   migrateBaselineRenames,
+  parseBaseline,
   pruneBaseline,
   removedBaselineMigrationReceipts,
 } from './baseline.mts';
+import { ANTI_SLOP_UPSTREAM } from './constants.mts';
 import { type FindingGroup, formatGroupSites } from './diagnostics.mts';
 
 const group = (
@@ -27,7 +29,22 @@ const group = (
   locations: Array.from({ length: count }, (_, index) => ({ line: index + 1, column: 1 })),
 });
 
+/** Consumer baselines written before the v0.1.2 re-pin carry this stamp and must keep parsing. */
+const FIRST_PIN = '446268e5d15baa968eaec669ff65358d36ae6259';
+
 describe('anti-slop shrink-only baseline', () => {
+  it('reads a baseline written under the first vendored pin and restamps it to the current one', () => {
+    const json = JSON.stringify({ schemaVersion: 1, upstreamCommit: FIRST_PIN, entries: [] });
+    expect(parseBaseline(json).upstreamCommit).toBe(ANTI_SLOP_UPSTREAM);
+  });
+
+  it('still rejects an unknown pin, and a known pin that is not a plain string', () => {
+    for (const upstreamCommit of ['f'.repeat(40), [FIRST_PIN], null]) {
+      const json = JSON.stringify({ schemaVersion: 1, upstreamCommit, entries: [] });
+      expect(() => parseBaseline(json)).toThrow(/invalid or stale/u);
+    }
+  });
+
   it('keeps finding sites out of the committed baseline', () => {
     const [entry] = baselineFromGroups([group('a', 2)]).entries;
     expect(Object.keys(entry ?? {}).sort()).toEqual([

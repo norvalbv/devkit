@@ -4,7 +4,11 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { writeFileAtomic } from '../../atomic-write.mts';
-import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_UPSTREAM } from './constants.mts';
+import {
+  ANTI_SLOP_BASELINE_REL,
+  ANTI_SLOP_PRIOR_UPSTREAMS,
+  ANTI_SLOP_UPSTREAM,
+} from './constants.mts';
 import type { FindingGroup } from './diagnostics.mts';
 
 export interface BaselineEntry {
@@ -114,7 +118,9 @@ export function parseBaseline(json: string, source = ANTI_SLOP_BASELINE_REL): An
   const baseline = value as Partial<AntiSlopBaseline>;
   if (
     baseline.schemaVersion !== 1 ||
-    baseline.upstreamCommit !== ANTI_SLOP_UPSTREAM ||
+    ![ANTI_SLOP_UPSTREAM, ...ANTI_SLOP_PRIOR_UPSTREAMS].some(
+      (pin) => pin === baseline.upstreamCommit,
+    ) ||
     (baseline.migrationReceipts !== undefined &&
       (!Array.isArray(baseline.migrationReceipts) ||
         !baseline.migrationReceipts.every(
@@ -135,7 +141,7 @@ export function parseBaseline(json: string, source = ANTI_SLOP_BASELINE_REL): An
   );
   const parsed: AntiSlopBaseline = {
     schemaVersion: 1,
-    upstreamCommit: baseline.upstreamCommit,
+    upstreamCommit: ANTI_SLOP_UPSTREAM,
     entries: sorted,
   };
   if (migrationReceipts.length > 0) parsed.migrationReceipts = migrationReceipts;
