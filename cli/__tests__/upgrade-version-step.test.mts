@@ -5,7 +5,7 @@
  * their module boundaries — only `upgrade.mts` imports doctor/init/migrate-config, so wholesale-mocking them
  * is safe — so this exercises upgrade's OWN control flow without a network install or a real reconcile.
  *
- * Pure decisions (cmpSemver / needsRerun) are unit-tested in update.test.mts; this locks the WIRING:
+ * Pure decisions (needsRerun) are unit-tested in update.test.mts; this locks the WIRING:
  * a future edit that drops the needsRerun gate (returning NEEDS_RERUN unconditionally, the pre-fix
  * behaviour that caused the exit-10 loop) must turn the continue-path test red.
  */
@@ -20,7 +20,7 @@ const V = JSON.parse(
   readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8'),
 ).version as string;
 
-// Keep cmpSemver / needsRerun / repinPackageJson REAL; stub the network (fetchLatestTag) and the
+// Keep needsRerun / repinPackageJson REAL; stub the network (fetchLatestTag) and the
 // install (default `update`, which must NOT touch the repo — so any re-pin we observe is upgrade's).
 vi.mock('../commands/update.mts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../commands/update.mts')>()),

@@ -60,11 +60,11 @@ vi.mock('../lib/install/install-fallow.mts', async (importOriginal) => ({
   installFallow: () => ({ ok: true, method: 'bun', message: 'installed fallow@2.89.0 via bun' }),
 }));
 
-// For the overlay-upgrade suite below: keep cmpSemver / needsRerun / repoUrl REAL, but stub the
+// For the overlay-upgrade suite below: keep needsRerun / repoUrl REAL, but stub the
 // network (fetchLatestTag) and the install (default `update`, which for an overlay runs a global
 // `bun add -g` — it must NOT touch the machine's global CLI from a test). applyInit + doctor stay REAL
 // so the re-sync is actually exercised. No existing overlay test calls update/fetchLatestTag, so this
-// module-wide mock is inert for them (doctor imports only the real cmpSemver).
+// module-wide mock is inert for them.
 vi.mock('../commands/update.mts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../commands/update.mts')>()),
   default: vi.fn(async () => 0),

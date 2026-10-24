@@ -5,7 +5,9 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { z } from 'zod';
 import { primaryCheckout } from './co-occurrence/index-refresh.mts';
+import { cmpSemver, devkitVersion } from './devkit-version.mts';
 import { gitPrefix } from './ratchets/git-index.mts';
 
 /** `.devkit/config.json` sets `overlay: true`; a missing or unparseable config throws. */
@@ -35,4 +37,33 @@ export function overlayInstall(root: string): boolean {
   // config.json, so it answers from the primary checkout.
   const primary = primaryCheckout(root);
   return primary !== null && configuredOverlay(join(primary, gitPrefix(root))) === true;
+}
+
+const RELEASE = /^\d+\.\d+\.\d+$/;
+/** The overlay pin init writes: `devkitRef: "v<semver>"`; a branch or SHA ref does not parse. */
+const OverlayPin = z.object({
+  overlay: z.literal(true),
+  devkitRef: z.string().regex(/^v\d+\.\d+\.\d+$/),
+});
+
+/**
+ * An overlay's gates run the global devkit, not the `devkitRef` it pins. When that global is OLDER,
+ * print why and return true; a newer global, a branch/SHA pin or an unreadable config proceed.
+ */
+export function reportOlderOverlayRunner(root: string, running = devkitVersion()): boolean {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(join(root, '.devkit', 'config.json'), 'utf8'));
+  } catch {
+    return false; // no or malformed config: selectedIds already decides what that run means
+  }
+  const parsed = OverlayPin.safeParse(raw);
+  if (!parsed.success || !RELEASE.test(running)) return false;
+  const pinned = parsed.data.devkitRef.slice(1);
+  if (cmpSemver(running, pinned) >= 0) return false;
+  console.error(
+    `✗ devkit: global devkit ${running} is running these gates, but this overlay pins v${pinned} (devkitRef in .devkit/config.json) — older gate code would judge this commit.`,
+  );
+  console.error(`   Run: bun add -g @norvalbv/devkit#v${pinned}, then devkit doctor --fix`);
+  return true;
 }

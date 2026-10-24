@@ -19,6 +19,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { cmpSemver } from '../../gate-engine/devkit-version.mts';
 import { applyOverlayConstraints, normalizeSelection, type Selection } from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { detectStack } from '../lib/detect-stack.mts';
@@ -44,7 +45,7 @@ import { resyncOverlayAgentSurfaces } from '../lib/overlay.mts';
 import doctor from './doctor.mts';
 import { applyInit } from './init.mts';
 import { computeMigration } from './migrate-config.mts';
-import update, { cmpSemver, DEP, fetchLatestTag, needsRerun, repinPackageJson } from './update.mts';
+import update, { DEP, fetchLatestTag, needsRerun, repinPackageJson } from './update.mts';
 
 export const meta = {
   name: 'upgrade',

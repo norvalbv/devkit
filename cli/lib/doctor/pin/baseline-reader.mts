@@ -8,7 +8,7 @@ import {
   legacyDevkitBaselines,
   reportRatchetBaselineMigration,
 } from '../../../../gate-engine/ratchets/baseline-paths.mts';
-import { cmpSemver } from '../../../commands/update.mts';
+import { cmpSemver } from '../../../../gate-engine/devkit-version.mts';
 import { detectGitRoot } from '../../detect-git-root.mts';
 import { type CheckResult, check } from '../check-result.mts';
 import { installedAt, type RunnerConfig, readConfig } from './runner-identity.mts';

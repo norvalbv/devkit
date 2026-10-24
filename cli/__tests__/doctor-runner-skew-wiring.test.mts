@@ -129,6 +129,17 @@ describe('doctor --fix hands off before it repairs', () => {
     pinOverlay(root, 'v0.0.1');
     expect(await doctorRun([], root)).toBe(0);
   });
+
+  it('a NEWER overlay global gets an advisory that leaves the exit code alone', async () => {
+    const inSync = await doctorRun([], skewedRepo({ overlay: true, devkitRef: `v${RUNNING}` }));
+    expect(printed()).not.toMatch(/devkit runner:/);
+    const code = await doctorRun([], skewedRepo({ overlay: true, devkitRef: 'v0.0.1' }));
+    expect(printed()).toContain(
+      `global devkit ${RUNNING} is newer than this overlay's devkitRef v0.0.1`,
+    );
+    expect(printed()).toContain('Run `devkit upgrade` to re-sync the pin.');
+    expect(code).toBe(inSync);
+  });
 });
 
 const OVERLAY_CFG = { stack: 'generic', overlay: true, components: { agentTargets: [] } };
