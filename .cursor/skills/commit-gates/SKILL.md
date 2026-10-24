@@ -225,8 +225,9 @@ is in force:
 claude family bound by devkit doctor --fix (codex binary was unresolvable). Explicit edits and GUARD_* envs win; delete these four keys to return to package defaults.
 ```
 
-Unsetting alone leaves that bind in place: delete that key plus `model`, `escalationModel`, `correctnessModel` and
-`correctnessChunkLoc` by hand, commit, then `devkit ship --resume <branch>`. Any other value there is
+Unsetting alone leaves that bind in place: delete that key, its `//judgeFamilyBound` record, and
+`model`, `escalationModel`, `correctnessModel` and `correctnessChunkLoc` by hand, commit, then
+`devkit ship --resume <branch>`. Any other value there is
 an operator's note, and those keys are operator-owned — leave them.
 
 A remedy naming both (`` `codex` or `claude` ``) means one judge spans both families and either may be

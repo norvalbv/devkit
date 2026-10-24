@@ -4,6 +4,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { claudeFamilyKeyLine } from '../../gate-engine/judge/outage/family-override.mts';
 import {
   FANOUT_BASELINE,
   LINES_BASELINE,
@@ -26,8 +27,8 @@ import {
 } from '../lib/doctor/extends-checks.mts';
 import {
   checkGuardConfig,
+  familyBindRequested,
   judgeGuardsOf,
-  CODEX_RUNTIME_CHECK,
   SEARCH_INDEX_CHECK,
 } from '../lib/doctor/guard-config-checks.mts';
 import { bindClaudeFamily } from '../lib/doctor/judge/judge-family.mts';
@@ -198,6 +199,10 @@ function selectionFlags(sel: Partial<Selection>): string[] {
   return flags;
 }
 
+/** --fix runs for any gating finding, and for an advisory one only when --fix can repair it. */
+export const fixRequested = (results: CheckResult[]): boolean =>
+  results.some((r) => r.status !== 'OK' && (!r.advisory || r.fixable));
+
 // --fix repairs only fixable findings, preserves tuned config content, and never refreezes.
 // Missing files/hooks use init with the recorded selection and install mode.
 // Reason: flat repair orchestration: independent sequential `if (this kind drifted) repair it` steps (extends-repair loop, init re-run, sync-skills, recreate-missing-baseline) with near-zero nesting; high branch COUNT, each a trivial guarded fixup. Splitting scatters the deliberate repair ordering.
@@ -220,12 +225,11 @@ function applyFix(
     }
   }
 
-  // A fixable codex-runtime DRIFT means the bind preconditions held at check time (claude
-  // resolves, no explicit review.* keys) — bindClaudeFamily re-verifies them before writing.
-  const codexRow = results.find((r) => r.name === CODEX_RUNTIME_CHECK);
-  if (codexRow?.fixable && codexRow.status !== 'OK' && bindClaudeFamily(cwd)) {
+  // A fixable codex-runtime or family-pin row means the bind (or refresh) preconditions held at
+  // check time — bindClaudeFamily re-verifies them before writing.
+  if (familyBindRequested(results) && bindClaudeFamily(cwd)) {
     console.log(
-      '  ✓ bound the claude judge family (haiku/opus/sonnet, chunking off) into guard.config.json',
+      `  ✓ wrote the claude judge family into guard.config.json (set: ${claudeFamilyKeyLine()}; operator-edited keys kept) — commit it`,
     );
   }
 
@@ -475,7 +479,7 @@ export default async function run(args: string[], cwd: string): Promise<number> 
   printPriorArtAdvisoryHealth(cwd, sel);
 
   const drifted = results.some((r) => r.status !== 'OK' && !r.advisory); // see CheckResult.advisory
-  if (fix && drifted) {
+  if (fix && fixRequested(results)) {
     applyFix(cwd, results, sel, cfg.stack ?? 'generic', Boolean(cfg.standalone));
     console.log('\n--fix applied. Re-run `devkit doctor` to confirm.');
   }

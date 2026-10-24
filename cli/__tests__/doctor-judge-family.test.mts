@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { resolveGuardConfig } from '../../gate-engine/config.mts';
 import {
   claudeFamilyEnvLine,
@@ -12,6 +13,9 @@ import {
   judgeEnvUnsetLine,
 } from '../../gate-engine/judge/outage/family-override.mts';
 import { resolveChunkCap } from '../../gate-engine/review/lens/chunk-tasks.mts';
+import { fixRequested } from '../commands/doctor.mts';
+import { check } from '../lib/doctor/check-result.mts';
+import { checkGuardConfig, familyBindRequested } from '../lib/doctor/guard-config-checks.mts';
 import {
   bindClaudeFamily,
   binResolvable,
@@ -22,6 +26,7 @@ import {
   explicitFamilyKeys,
   FAMILY_PROVENANCE_KEY,
   FAMILY_PROVENANCE_TEXT,
+  FAMILY_RECORD_KEY,
   familyStaleResult,
   recordedJudgeGuards,
   requiredJudgeProviders,
@@ -112,6 +117,7 @@ type FixtureConfig = Omit<typeof TEMPLATE_CONFIG, 'review'> & {
       correctnessModel: string;
       correctnessChunkLoc: number;
       '//judgeFamily': string;
+      '//judgeFamilyBound': unknown;
     }>;
 };
 
@@ -453,5 +459,198 @@ describe('familyStaleResult', () => {
     });
     process.env.PATH = binDir('claude', 'codex');
     expect(familyStaleResult(repo)).toBeNull();
+  });
+});
+
+// A value no CLAUDE_FAMILY_SET will ever hold, so these cases survive the set moving on.
+const RETIRED = 'claude-retired-1';
+const configText = (repo: string): string => readFileSync(join(repo, 'guard.config.json'), 'utf8');
+const FamilyValues = z.object({
+  model: z.string(),
+  escalationModel: z.string(),
+  correctnessModel: z.string(),
+  correctnessChunkLoc: z.number(),
+});
+const RecordedFile = z.object({ review: z.object({ [FAMILY_RECORD_KEY]: FamilyValues }) });
+const recordIn = (repo: string): z.infer<typeof FamilyValues> =>
+  RecordedFile.parse(JSON.parse(configText(repo))).review[FAMILY_RECORD_KEY];
+
+/** A bind written by an older devkit: review.model holds RETIRED in both the file and the record. */
+function staleBindRepo(patch: Partial<FixtureConfig['review']> = {}): string {
+  return repoWith({
+    ...TEMPLATE_CONFIG,
+    review: {
+      ...TEMPLATE_CONFIG.review,
+      '//judgeFamily': FAMILY_PROVENANCE_TEXT,
+      ...CLAUDE_FAMILY_SET,
+      model: RETIRED,
+      '//judgeFamilyBound': { ...CLAUDE_FAMILY_SET, model: RETIRED },
+      ...patch,
+    },
+  });
+}
+
+describe('a doctor bind the family set has moved past', () => {
+  it('a fresh bind records the values it wrote', () => {
+    const repo = repoWith(TEMPLATE_CONFIG);
+    process.env.PATH = binDir('claude');
+    expect(bindClaudeFamily(repo)).toBe(true);
+    expect(recordIn(repo)).toEqual(CLAUDE_FAMILY_SET);
+  });
+
+  it('codex absent → advisory, fixable DRIFT naming each stale key bound → current', () => {
+    process.env.PATH = binDir('claude');
+    const r = familyStaleResult(staleBindRepo());
+    expect(r).toMatchObject({ status: 'DRIFT', advisory: true, fixable: true });
+    expect(r?.detail).toContain(`review.model ${RETIRED} → ${CLAUDE_FAMILY_SET.model}`);
+    expect(r?.detail).not.toContain('escalationModel');
+  });
+
+  it('--fix rewrites only the stale key; marker, siblings and an operator edit survive', () => {
+    const repo = staleBindRepo({ escalationModel: 'my-pin' });
+    process.env.PATH = binDir('claude');
+    const before = configText(repo);
+    expect(bindClaudeFamily(repo)).toBe(true);
+    // Byte-level: the stale value and its record entry change, nothing else moves or goes.
+    const retired = `"model": "${RETIRED}"`;
+    expect(configText(repo)).toBe(
+      before.replaceAll(retired, `"model": "${CLAUDE_FAMILY_SET.model}"`),
+    );
+    expect(recordIn(repo)).toEqual(CLAUDE_FAMILY_SET);
+    expect(familyStaleResult(repo)).toBeNull();
+  });
+
+  it('an operator edit under the marker is never stale and never rewritten', () => {
+    const repo = staleBindRepo({ model: 'my-pin' });
+    process.env.PATH = binDir('claude');
+    const before = configText(repo);
+    expect(familyStaleResult(repo)).toBeNull();
+    expect(bindClaudeFamily(repo)).toBe(false);
+    expect(configText(repo)).toBe(before);
+  });
+
+  it.each<[string, Partial<FixtureConfig['review']>]>([
+    ['no marker', { '//judgeFamily': undefined }],
+    ['an operator note as marker', { '//judgeFamily': 'operator note' }],
+    ['no record (a bind from before records existed)', { '//judgeFamilyBound': undefined }],
+    ['an array record', { '//judgeFamilyBound': [RETIRED] }],
+    ['a string record', { '//judgeFamilyBound': RETIRED }],
+    [
+      'a key absent from both file and record',
+      { model: undefined, '//judgeFamilyBound': { ...CLAUDE_FAMILY_SET, model: undefined } },
+    ],
+  ])('%s → no row, no write', (_label, patch) => {
+    const repo = staleBindRepo(patch);
+    process.env.PATH = binDir('claude');
+    const before = configText(repo);
+    expect(familyStaleResult(repo)).toBeNull();
+    expect(bindClaudeFamily(repo)).toBe(false);
+    expect(configText(repo)).toBe(before);
+  });
+
+  it('an active model env keeps the row but refuses the rewrite', () => {
+    const repo = staleBindRepo();
+    process.env.PATH = binDir('claude');
+    process.env.GUARD_REVIEW_MODEL = 'sonnet';
+    expect(familyStaleResult(repo)?.fixable).toBe(false);
+    expect(bindClaudeFamily(repo)).toBe(false);
+  });
+
+  // Two stale keys, one numeric: catches a refresh that names or rewrites only the first key.
+  it('every stale key is named and rewritten, numeric chunk cap included', () => {
+    const chunk = 999_999;
+    const repo = staleBindRepo({
+      correctnessChunkLoc: chunk,
+      '//judgeFamilyBound': { ...CLAUDE_FAMILY_SET, model: RETIRED, correctnessChunkLoc: chunk },
+    });
+    process.env.PATH = binDir('claude');
+    const r = familyStaleResult(repo);
+    expect(r?.detail).toContain(`review.model ${RETIRED} → ${CLAUDE_FAMILY_SET.model}`);
+    expect(r?.detail).toContain(
+      `review.correctnessChunkLoc ${chunk} → ${CLAUDE_FAMILY_SET.correctnessChunkLoc}`,
+    );
+    const before = configText(repo);
+    expect(bindClaudeFamily(repo)).toBe(true);
+    const expected = before
+      .replaceAll(`"model": "${RETIRED}"`, `"model": "${CLAUDE_FAMILY_SET.model}"`)
+      .replaceAll(
+        `"correctnessChunkLoc": ${chunk}`,
+        `"correctnessChunkLoc": ${CLAUDE_FAMILY_SET.correctnessChunkLoc}`,
+      );
+    expect(configText(repo)).toBe(expected);
+  });
+
+  // JSON.parse makes "__proto__" an own key; an [[Set]]-based merge (Object.assign) would drop it.
+  it('a refresh keeps a sibling key named __proto__ instead of losing it from the file', () => {
+    const repo = staleBindRepo();
+    const withProto = configText(repo).replace(
+      '"review": {',
+      '"review": {\n    "__proto__": "kept",',
+    );
+    writeFileSync(join(repo, 'guard.config.json'), withProto);
+    process.env.PATH = binDir('claude');
+    expect(bindClaudeFamily(repo)).toBe(true);
+    const current = `"model": "${CLAUDE_FAMILY_SET.model}"`;
+    expect(configText(repo)).toBe(withProto.replaceAll(`"model": "${RETIRED}"`, current));
+  });
+
+  it('a held lockfile makes the refresh lose cleanly too', () => {
+    const repo = staleBindRepo();
+    process.env.PATH = binDir('claude');
+    writeFileSync(join(repo, 'guard.config.json.devkit-lock'), '');
+    const before = configText(repo);
+    expect(bindClaudeFamily(repo)).toBe(false);
+    expect(configText(repo)).toBe(before);
+  });
+
+  it('codex resolving keeps the outlived advice instead of a rewrite offer', () => {
+    process.env.PATH = binDir('claude', 'codex');
+    const r = familyStaleResult(staleBindRepo());
+    expect(r?.detail).toContain('outlived');
+    expect(r?.fixable).toBe(false);
+  });
+
+  it('an orphan record left after deleting only the marker does not block a fresh bind', () => {
+    const repo = repoWith({
+      ...TEMPLATE_CONFIG,
+      review: { ...TEMPLATE_CONFIG.review, '//judgeFamilyBound': { model: RETIRED } },
+    });
+    process.env.PATH = binDir('claude');
+    expect(claudeBindable(repo)).toBe(true);
+    expect(bindClaudeFamily(repo)).toBe(true);
+    expect(recordIn(repo)).toEqual(CLAUDE_FAMILY_SET);
+  });
+});
+
+// Each layer passing alone proves nothing if the row never reaches the --fix trigger.
+describe('a stale bind reaches doctor --fix through checkGuardConfig', () => {
+  const reviewOnly = { review: true, sentry: false };
+  it('the checked row requests both --fix and the bind', async () => {
+    process.env.PATH = binDir('claude');
+    const results = await checkGuardConfig(staleBindRepo(), false, false, reviewOnly);
+    expect(familyBindRequested(results)).toBe(true);
+    expect(fixRequested(results)).toBe(true);
+  });
+
+  it('an operator-owned value requests neither', async () => {
+    process.env.PATH = binDir('claude');
+    const results = await checkGuardConfig(
+      staleBindRepo({ model: 'my-pin' }),
+      false,
+      false,
+      reviewOnly,
+    );
+    expect(familyBindRequested(results)).toBe(false);
+    expect(fixRequested(results)).toBe(false);
+  });
+});
+
+describe('fixRequested', () => {
+  it('runs --fix for an advisory only when --fix can repair it', () => {
+    const advisory = (fixable: boolean) => check('x', 'DRIFT', 'd', '', fixable, true);
+    expect(fixRequested([advisory(true)])).toBe(true);
+    expect(fixRequested([advisory(false)])).toBe(false);
+    expect(fixRequested([check('x', 'DRIFT', 'd')])).toBe(true);
+    expect(fixRequested([check('x', 'OK', 'd', '', true, true)])).toBe(false);
   });
 });

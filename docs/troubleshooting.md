@@ -296,8 +296,9 @@ claude family bound by devkit doctor --fix (codex binary was unresolvable). Expl
 ```
 
 then a doctor bind put the claude family there, and unsetting alone leaves it in force. Delete
-that key and the four keys it names (`model`, `escalationModel`, `correctnessModel`,
-`correctnessChunkLoc`) by hand, then commit the file, because a ship reads it from the base commit.
+that key, its `//judgeFamilyBound` record, and the four keys it names (`model`, `escalationModel`,
+`correctnessModel`, `correctnessChunkLoc`) by hand, then commit the file, because a ship reads it
+from the base commit.
 Leave the file alone if the marker is absent or holds your own note: those keys are yours. Then
 `devkit ship --resume <branch>`. This is also the way back once a codex outage clears.
 

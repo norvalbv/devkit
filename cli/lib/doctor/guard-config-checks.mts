@@ -288,6 +288,11 @@ export async function checkGuardConfig(
 
 export const CODEX_RUNTIME_CHECK = 'codex judge runtime';
 
+const BIND_ROWS = new Set([CODEX_RUNTIME_CHECK, FAMILY_STALE_CHECK]);
+/** A fixable row asking `doctor --fix` to bind, or refresh, the claude family. */
+export const familyBindRequested = (rs: CheckResult[]): boolean =>
+  rs.some((r) => r.fixable && r.status !== 'OK' && BIND_ROWS.has(r.name));
+
 /**
  * DRIFT when the RESOLVED judge models (env > guard.config.json > defaults — the same resolvers
  * the gate uses, so no second copy of the precedence) route judges to the codex CLI but no codex
@@ -396,9 +401,9 @@ export async function adviseCodexRuntime(cwd: string, sel: { guards?: string[] }
   for (const row of results.filter((r) => ADVISED.has(r.name))) {
     console.log(`  ⚠ ${row.name}: ${row.detail}`);
     if (row.remediation) console.log(`      → ${row.remediation}`);
-    if (row.name === CODEX_RUNTIME_CHECK && row.fixable)
+    if (row.fixable)
       console.log(
-        '      → automatic family binding is package-mode only — in this mode, set the four review.* keys by hand',
+        '      → automatic family binding is package-mode only — in this mode, edit the named review.* keys by hand',
       );
   }
 }
