@@ -24,6 +24,7 @@
  */
 
 import { sections } from './markdown.mts';
+import { axisEntryIds, parseSupersedesId } from './supersession.mts';
 
 /** A dated note bullet: `- <date> — <text>`. Shared with retrieval.mts so both read notes alike. */
 export const NOTE_LINE_RE = /^-\s+(\d{4}-\d{2}-\d{2})\s+—\s+(.+)$/;
@@ -272,4 +273,26 @@ export function noteTextWithRelation(
       `--supersedes "${raw}" names no note on this axis. See \`guard-decisions show <slug>\` for its note ids.`,
     );
   return `**Amends:** ${raw} — ${text}`;
+}
+
+/** The `--target` half of the same verb: `**Supersedes:**` must name a real block, checked at write
+ * time against the axis history BEFORE the Target being written, so it can never name itself. */
+export function validateTargetSupersedes(
+  supersedes: string | undefined,
+  body: string,
+  slug: string,
+): void {
+  const raw = supersedes?.trim();
+  if (!raw) return;
+  const ref = parseSupersedesId(raw);
+  if (!ref)
+    throw new Error(
+      `--supersedes "${raw}" is not a Target id. Pass target:<date> (add ~N for the Nth Target ` +
+        'that day), entry:<date> for a legacy block, or <slug>#target:<date> across axes. ' +
+        '`guard-decisions show <slug>` lists them.',
+    );
+  if ((!ref.slug || ref.slug === slug) && !axisEntryIds(body).has(ref.id))
+    throw new Error(
+      `--supersedes "${raw}" names no Target on this axis. See \`guard-decisions show <slug>\` for its block ids.`,
+    );
 }
