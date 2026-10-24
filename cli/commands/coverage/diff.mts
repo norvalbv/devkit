@@ -40,8 +40,10 @@ Usage:
 
   --base <ref>   Compare against the merge-base of HEAD and <ref> (a branch, tag or SHA).
                  Default: $DEVKIT_BASE_REF, then origin/HEAD, then origin/main, then origin/master.
-  --min <pct>    Exit 1 when the added-line coverage is below <pct> (0-100). Without it the
-                 command only reports.
+  --min <pct>    Exit 1 when the added-line coverage is below <pct> (0-100), or when source
+                 changed and ${COVERAGE_FILE} measured no files at all. With changed files
+                 unmeasured, it says it judged measured lines only, or was not applied when none
+                 were measured. Without it the command only reports.
 
 Reads ${COVERAGE_FILE} as \`devkit coverage-run\` left it; it never runs tests. Added lines are
 committed, staged and unstaged changes since the merge-base, plus untracked source files. A line
@@ -57,8 +59,8 @@ exact to the paths a ship stages.
 Use this when a brief asks for coverage of "the new diff": whole-file percentages on a large
 existing file mostly measure code the change never touched.
 
-Exit codes: 0 report printed; 1 below --min, the configured diff-scope gate would fail, or the
-artifact is absent or malformed; 2 usage error, no base could be resolved, or git could not read
+Exit codes: 0 report printed; 1 below --min, --min over an artifact that measured no files, the
+configured diff-scope gate would fail, or the artifact is absent or malformed; 2 usage error, no base could be resolved, or git could not read
 the diff.`,
 };
 
@@ -174,6 +176,7 @@ function gateVerdict(
   added: Map<string, Set<number>>,
   rows: Row[],
   notMeasured: string[],
+  empty: boolean,
   bound: boolean,
   stale: string[],
 ): { pass: boolean; reason: string } | null {
@@ -185,6 +188,7 @@ function gateVerdict(
   if (![...added.keys()].some(gated)) {
     return { pass: true, reason: 'no added lines in production source' };
   }
+  if (empty) return { pass: false, reason: `${COVERAGE_FILE} measured no files` };
   if (!bound) return { pass: false, reason: 'artifact provenance unknown' };
   if (stale.length) {
     return { pass: false, reason: `the artifact predates ${stale.length} changed file(s)` };
@@ -199,6 +203,20 @@ function gateVerdict(
 }
 
 const pct = (covered: number, total: number): string => `${((covered / total) * 100).toFixed(1)}%`;
+
+/** --min over unmeasured changed files: says how the floor was judged; true when it fails. */
+function unmeasuredMin(min: number, total: number, unmeasured: number, empty: boolean): boolean {
+  if (empty) {
+    console.error(`🚫 --min ${min}% not applied — ${COVERAGE_FILE} measured no files.`);
+    console.error(
+      "   An empty report verifies nothing. Check the runner's coverage include, then re-run `devkit coverage-run`.",
+    );
+    return true;
+  }
+  const how = total ? 'judged on measured lines only' : 'not applied: no measured added lines';
+  console.error(`--min ${min}% ${how} (${unmeasured} unmeasured files listed above).`);
+  return false;
+}
 
 function listCapped(paths: string[]): string[] {
   const lines = paths.slice(0, MAX_LISTED).map((p) => `     ${p}`);
@@ -310,7 +328,8 @@ export default function coverageDiff(args: string[], cwd: string): number {
     for (const l of listCapped(stale)) console.log(l);
   }
 
-  const verdict = gateVerdict(cwd, gated, added, rows, notMeasured, bound !== null, stale);
+  const empty = Object.keys(cov).length === 0;
+  const verdict = gateVerdict(cwd, gated, added, rows, notMeasured, empty, bound !== null, stale);
   if (verdict?.pass) console.log(`✓ Coverage gate (scope "diff") would pass — ${verdict.reason}.`);
   else if (verdict) {
     console.error(`🚫 Coverage gate (scope "diff") would FAIL if this ships — ${verdict.reason}.`);
@@ -320,5 +339,9 @@ export default function coverageDiff(args: string[], cwd: string): number {
   if (belowMin) {
     console.error(`🚫 Added-line coverage ${pct(covered, total)} is below --min ${opts.min}%.`);
   }
-  return belowMin || verdict?.pass === false ? 1 : 0;
+  const unmeasuredFails =
+    opts.min !== undefined &&
+    notMeasured.length > 0 &&
+    unmeasuredMin(opts.min, total, notMeasured.length, empty);
+  return belowMin || unmeasuredFails || verdict?.pass === false ? 1 : 0;
 }
