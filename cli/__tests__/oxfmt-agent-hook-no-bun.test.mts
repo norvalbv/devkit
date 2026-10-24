@@ -125,10 +125,13 @@ describe.skipIf(!NO_SYSTEM_BUN)('Oxfmt agent-hook steps without bun', () => {
 });
 
 describe.skipIf(!NO_SYSTEM_BUN || systemHas('node'))('Oxfmt agent-hook steps without node', () => {
-  it("lint-check stands down when the real launcher's node shebang has no node", () => {
+  it('lint-check stands down when the launcher it reached cannot find node', () => {
     const root = oxfmtRepo(0);
-    write(root, 'node_modules/.bin/oxfmt', '#!/usr/bin/env node\nprocess.exit(1);\n', 0o755);
+    // A pnpm-style sh shim: it records that the step reached it, then execs node, which is absent.
+    const shim = '#!/bin/sh\necho "$@" > oxfmt-args.txt\nexec node "$0.js" "$@"\n';
+    write(root, 'node_modules/.bin/oxfmt', shim, 0o755);
     const r = runHook(LINT_HOOK, root, {}, pathWithout(root, { node: false }));
+    expect(readFileSync(join(root, 'oxfmt-args.txt'), 'utf8')).toContain('--check');
     expect(r.status).toBe(0);
   });
 });
