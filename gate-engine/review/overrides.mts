@@ -5,8 +5,8 @@
  * Reviewer.model). A 0.80-precision HARD block would false-block ~1-in-5 clean commits and get
  * disabled. Warn-only doesn't help — the commit still lands and the external bots still comment,
  * which is exactly what this reviewer exists to pre-empt. So a FAIL BLOCKS, but each finding can be
- * overridden with a stated rationale: a real bug can't be honestly waived (so it gets fixed →
- * pre-empted), a false positive is waived with a recorded reason (→ no friction, and the rationale
+ * overridden with a rationale and a kind: a real defect is waived only as deferred, pre-existing
+ * or accepted, a false positive with a recorded reason (→ no friction, and the rationale
  * is the signal to sharpen the reviewer later). Same shape as the dup-detection allowlist.
  *
  * A finding's FINGERPRINT = sha12(reviewer + failed-lens + sha256(diffCacheIdentity(the staged
@@ -24,25 +24,22 @@
  */
 
 import { createHash } from 'node:crypto';
-import {
-  mkdirSync,
-  readFileSync,
-  readlinkSync,
-  realpathSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { z } from 'zod';
 import { CORRECTNESS_OVERRIDES_FILE as OVERRIDES_FILE } from '../deterministic/gate-inputs.mts';
 import { diffCacheIdentity } from '../judge/diff-focus.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
+import { withProcessLock } from '../judge/process/process-lock.mts';
 import type { VerdictMeta } from '../judge/verdict-store.mts';
 import { reviewBaseContext, shortSha } from './evidence/base-context.mts';
-import { UNSAFE_TEXT_RE, waiveCommand } from './valve/shell-word.mts';
+import {
+  parseWaiverKind,
+  UNSAFE_TEXT_RE,
+  type WaiverKind,
+  waiveCommand,
+} from './valve/shell-word.mts';
 import {
   conventionWaiverLenses,
   parseConventionFindingCandidates,
@@ -79,6 +76,8 @@ export interface OverrideEntry {
    * prove one — a waiver stamped with the waiving agent's own HEAD would be the very false alibi
    * this field exists to prevent (sc-2480). */
   baseSha?: string;
+  /** Set by the waive CLI only; absent on env/file entries and on entries older than the field. */
+  kind?: WaiverKind | null;
 }
 
 /** Stable per-finding fingerprint: reviewer + failed lens + the reviewed diff's CACHE IDENTITY
@@ -187,53 +186,13 @@ function overridesLockTarget(cwd: string): string {
   }
 }
 
-/**
- * Cross-PROCESS exclusive lock around any load→mutate→persist of the store: a `guard-review
- * waive` CLI and a concurrent gate run's `reconcile` (env-channel write-through) would otherwise
- * both read the same snapshot and the second `persist` would silently drop the first's entry.
- * In-process overlap is impossible — every caller's RMW is fully synchronous — so a file lock is
- * the whole story. `wx` creation is the atomicity; a lock older than 30 s is a crashed process,
- * stolen ATOMICALLY via rename-to-unique (exactly one stealer wins; the loser retries against the
- * winner's fresh lock and gets the retry error). fn runs inside try/finally — the lock never
- * outlives the call.
- */
+/** The overrides lock directory; a `.lock` file there is an older devkit's format and blocks nothing. */
+export const overridesLockDir = (cwd: string): string => `${overridesLockTarget(cwd)}.mutex.lock`;
+
+/** Every load→mutate→persist of the store runs under this one cross-process lock (waive vs a gate's
+ * reconcile would otherwise drop an entry). A live holder is waited on, never stolen. */
 export function withOverridesLock<T>(cwd: string, fn: () => T): T {
-  const lockPath = `${overridesLockTarget(cwd)}.lock`;
-  mkdirSync(path.dirname(lockPath), { recursive: true });
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      writeFileSync(lockPath, `${process.pid}\n`, { flag: 'wx' });
-    } catch (e) {
-      if ((e as { code?: string }).code !== 'EEXIST') throw e;
-      let stale = false;
-      try {
-        stale = Date.now() - statSync(lockPath).mtimeMs > 30_000;
-      } catch {
-        continue; // lock vanished between EEXIST and stat — retry the wx create
-      }
-      if (stale) {
-        try {
-          const aside = `${lockPath}.stale.${process.pid}`;
-          renameSync(lockPath, aside);
-          unlinkSync(aside);
-        } catch {
-          /* another process stole it first — fall through to retry */
-        }
-        continue;
-      }
-      throw new Error('another guard-review process holds the overrides lock — retry in a moment');
-    }
-    try {
-      return fn();
-    } finally {
-      try {
-        unlinkSync(lockPath);
-      } catch {
-        /* already gone */
-      }
-    }
-  }
-  throw new Error('could not acquire the overrides lock');
+  return withProcessLock(overridesLockDir(cwd), fn, { label: 'overrides' });
 }
 
 /** Reconciliation of one reviewer's failed lenses against the override store + env. */
@@ -246,6 +205,8 @@ export interface RecordedWaiver {
   /** Who recorded it (git identity), when the entry carries one — only the `waive` CLI populates
    * this today. Absent (never `null`) so older env/file entries round-trip unchanged. */
   author?: string;
+  /** The stored kind, or null when the entry has none (env/file channel, older entries). */
+  kind: WaiverKind | null;
 }
 
 export interface Reconciliation {
@@ -287,6 +248,8 @@ export function reconcile(
           rationale: envRationale,
           at: now,
           by: 'env',
+          // A new rationale may no longer fit the old kind, and the env channel cannot state one.
+          kind: undefined,
           ...(baseSha ? { baseSha } : { baseSha: undefined }),
         };
         changed = true;
@@ -307,6 +270,7 @@ export function reconcile(
           ...(typeof entry.author === 'string' && entry.author.trim()
             ? { author: entry.author.trim() }
             : {}),
+          kind: parseWaiverKind(entry.kind),
         });
       else blocking.push({ lens, fp });
     }
@@ -327,6 +291,7 @@ export function reconcile(
       recorded_at: now,
       by: 'env',
       base_sha: baseSha,
+      kind: null,
     });
   return result;
 }

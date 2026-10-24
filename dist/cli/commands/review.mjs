@@ -32,6 +32,10 @@ coverage/ artifact; review never produces one. An absent artifact, or one that p
 source, is reported as NOT MEASURED on the final line instead of failing the review — \`devkit ship\`
 and commits still block on it, so run \`devkit coverage-run\` in the target before shipping.
 
+Shared git-ignored gate inputs the target lacks (the search index, an untracked guard.config.json)
+are copied from the repository's main worktree, as \`devkit ship\` links them. A deterministic gate
+that still opts out (no search index anywhere, say) is named on the final line as "did NOT run".
+
 WARNING: target-controlled hooks and package scripts execute. Review trusted targets only.
 
 Output streams for the whole run, not just the gates: setup and teardown emit a

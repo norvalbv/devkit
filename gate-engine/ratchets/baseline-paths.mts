@@ -50,9 +50,10 @@ const LEGACY_BY_CANONICAL = new Map<string, string>(
 function discardRetiredCopy(root: string, canonical: string, stage: boolean): void {
   const legacy = LEGACY_BY_CANONICAL.get(canonical);
   if (!legacy) return;
-  // Overlay installs promise not to dirty the tree they land in, and `.git/info/exclude` cannot
-  // hide a deletion: a TRACKED retired copy is the consumer's committed state, so leave it.
-  if (overlayInstall(root) && indexTracksBaseline(root, legacy)) return;
+  // Overlay leaves a TRACKED retired copy (`.git/info/exclude` cannot hide a deletion) and one
+  // reached through a link into another checkout: neither is this checkout's to delete.
+  if (overlayInstall(root) && (indexTracksBaseline(root, legacy) || leavesCheckout(root, legacy)))
+    return;
   rmSync(join(root, legacy), { force: true });
   if (stage) stageBaseline(root, legacy);
 }
@@ -189,13 +190,17 @@ function resolvedTarget(path: string): string {
 
 const isSymlink = (path: string) => lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink();
 
+/** Does `rel` resolve, through any link, to a path outside this checkout? */
+function leavesCheckout(root: string, rel: string): boolean {
+  const out = relative(realpathSync(root), resolvedTarget(join(root, rel)));
+  return out === '..' || out.startsWith(`..${sep}`) || isAbsolute(out);
+}
+
 /** An overlay freeze writes only this checkout's baselines: exit 2 when a link carries one elsewhere. */
 export function refuseFreezeThroughLink(root: string, bin: string, canonicals: string[]): void {
   if (!overlayInstall(root)) return;
-  const home = realpathSync(root);
   for (const canonical of canonicals) {
-    const rel = relative(home, resolvedTarget(join(root, canonical)));
-    if (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) continue;
+    if (!leavesCheckout(root, canonical)) continue;
     const parts = canonical.split('/');
     const prefixes = parts.map((_, i) => parts.slice(0, i + 1).join('/'));
     const link = prefixes.find((prefix) => isSymlink(join(root, prefix))) ?? canonical;

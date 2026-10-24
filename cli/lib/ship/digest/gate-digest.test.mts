@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { blockingFields } from '../../../../gate-engine/review/evidence/items.mts';
+import { STICKY_RULING } from '../../../../gate-engine/review/evidence/base-context.mts';
 import { blockingNote } from '../../../../gate-engine/review/overrides.mts';
 import { DETAIL_CHARS } from './fields.mts';
 import { type GateEvent, readShipEvents, render, summarise } from './gate-digest.mts';
@@ -284,6 +285,19 @@ describe('render', () => {
     );
     expect(unknown).not.toContain('did NOT block');
     expect(unknown).toContain('review:correctness');
+
+    // A signal stopped the chain: which gate would have blocked is just as unknowable.
+    const interrupted = render(
+      summarise(
+        [
+          reviewFail('correctness', 'a real block'),
+          ev({ type: 'ship_result', blocked_gate: 'interrupted', exit_code: 143 }),
+        ],
+        SHIP,
+      ),
+    );
+    expect(interrupted).not.toContain('did NOT block');
+    expect(interrupted).toContain('review:correctness');
 
     const noResult = render(summarise([reviewFail('correctness', 'dry-gates rehearsal')], SHIP));
     expect(noResult).not.toContain('did NOT block');
@@ -639,7 +653,7 @@ describe('unverified verdicts (sc-3175)', () => {
     );
     expect(text).toContain('Gate findings this run (1)');
     expect(text).toContain(
-      '· completeness — cached PASS judged an earlier diff — this diff was not re-judged',
+      `· completeness — cached PASS judged an earlier diff — this diff was not re-judged (${STICKY_RULING})`,
     );
     expect(text).toContain('✓ 1 verdict(s) served from cache');
   });
@@ -878,7 +892,7 @@ describe('a reviewer blocking on several fingerprints (sc-3212)', () => {
     expect(text).toContain('Gate findings this run (1 gate(s) / 3 finding(s))');
     for (const { lens, fp } of THREE) {
       expect(text).toContain(
-        `✗ review:correctness-reviewer — BLOCKED this run: ${lens} [${fp}] — fix it, or: guard-review waive correctness-reviewer:${lens} ${fp} "why this is not a real defect"`,
+        `✗ review:correctness-reviewer — BLOCKED this run: ${lens} [${fp}] — fix it, or: guard-review waive correctness-reviewer:${lens} ${fp} --kind 'false-positive|deferred|pre-existing|accepted' "why this finding is waived"`,
       );
     }
   });
@@ -888,7 +902,7 @@ describe('a reviewer blocking on several fingerprints (sc-3212)', () => {
     const lens = "docs/it's here.ts@CLAUDE.md:12";
     const blocking = [{ lens, fp: '0123456789ab' }];
     const note = blockingNote('correctness-reviewer', blocking, base);
-    const command = /guard-review waive .*"why this is not a real defect"/.exec(note)?.[0];
+    const command = /guard-review waive .*"why this finding is waived"/.exec(note)?.[0];
     expect(command).toContain('--base 5c8482e8fa4e');
     const fields = blockingFields({ blocking: [{ ...blocking[0], base: '5c8482e8fa4e' }] });
     const text = render(

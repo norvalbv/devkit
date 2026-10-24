@@ -172,6 +172,37 @@ describe('private native source census', () => {
       fx.cleanup();
     }
   });
+  it('never puts the index copy, which names private source paths, in the shared tmpdir', () => {
+    const fx = fixture();
+    const saved = process.env.TMPDIR;
+    process.env.TMPDIR = path.join(fx.repo, 'missing-tmp');
+    try {
+      const report = censusSource(JSON.stringify(fx.manifest), 'case-001', fx.repo);
+      expect(report.tasks).toHaveLength(4);
+    } finally {
+      if (saved === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = saved;
+      fx.cleanup();
+    }
+  });
+  it('hashes the same real index its diff reads, even under a commit-index carrier for that repo', () => {
+    const fx = fixture();
+    const gitDir = path.join(fx.repo, '.git');
+    const alternate = path.join(gitDir, 'alt-index');
+    const git = (args: string[], env = process.env) =>
+      execFileSync('git', args, { cwd: fx.repo, encoding: 'utf8', env }).trim();
+    git(['read-tree', 'HEAD'], { ...process.env, GIT_INDEX_FILE: alternate });
+    process.env.DEVKIT_COMMIT_INDEX_FILE = alternate;
+    process.env.DEVKIT_COMMIT_GIT_DIR = gitDir;
+    try {
+      const report = censusSource(JSON.stringify(fx.manifest), 'case-001', fx.repo);
+      expect(report.facts.stagedTreeSha).toBe(git(['write-tree']));
+    } finally {
+      delete process.env.DEVKIT_COMMIT_INDEX_FILE;
+      delete process.env.DEVKIT_COMMIT_GIT_DIR;
+      fx.cleanup();
+    }
+  });
   it('computes the staged tree while another process holds the index lock', () => {
     const fx = fixture();
     try {
@@ -181,7 +212,9 @@ describe('private native source census', () => {
       const report = censusSource(JSON.stringify(fx.manifest), 'case-001', fx.repo);
       expect(report.tasks).toHaveLength(4);
       expect(readFileSync(path.join(gitDir, 'index')).equals(index)).toBe(true);
-      expect(readdirSync(gitDir).filter((name) => name.startsWith('census-index-'))).toEqual([]);
+      expect(readdirSync(gitDir).filter((name) => name.startsWith('devkit-tree-index-'))).toEqual(
+        [],
+      );
     } finally {
       fx.cleanup();
     }
@@ -197,7 +230,9 @@ describe('private native source census', () => {
       const report = censusSource(JSON.stringify(fx.manifest), 'case-001', linked);
       expect(report.facts.stagedTreeSha).toBe(git('write-tree').trim());
       const gitDir = git('rev-parse', '--absolute-git-dir').trim();
-      expect(readdirSync(gitDir).filter((name) => name.startsWith('census-index-'))).toEqual([]);
+      expect(readdirSync(gitDir).filter((name) => name.startsWith('devkit-tree-index-'))).toEqual(
+        [],
+      );
     } finally {
       rmSync(linked, { recursive: true, force: true });
       fx.cleanup();

@@ -11,6 +11,8 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
+import { UNHANDLED_REPORTER } from '../../../gate-engine/coverage/failures.mts';
+import { UNHANDLED_NAME } from '../../../gate-engine/coverage/unhandled-reporter.mts';
 import { resolveVitest, runVitest } from '../../../gate-engine/coverage/vitest-cli.mts';
 import { writeFileAtomic } from '../atomic-write.mts';
 
@@ -60,6 +62,9 @@ export interface TestReportSummary {
   files: Record<string, FileOutcome>;
   /** Test names for failed files only. Absent from artifacts written before per-test answers. */
   tests?: Record<string, FileTests>;
+  /** Distinct errors vitest raised outside any test, which `testsPassed` ignores. Absent from older
+   * artifacts and from a run whose record was unreadable. */
+  unhandled?: number;
   /** Entries resolving outside the repo root — nested-run leakage, dropped rather than reported. */
   droppedForeignPaths: number;
 }
@@ -221,6 +226,19 @@ export function summarise(
   };
 }
 
+/** Distinct `file + message` errors the unhandled reporter recorded: 0 when it wrote nothing (it writes
+ * only on an error), undefined when its record is unreadable. */
+export function countUnhandled(file: string): number | undefined {
+  if (!existsSync(file)) return 0;
+  try {
+    const entries = z.array(z.object({ file: z.string().nullable(), message: z.string() }));
+    const parsed = entries.parse(JSON.parse(readFileSync(file, 'utf8')));
+    return new Set(parsed.map((e) => `${e.file}\0${e.message}`)).size;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Run the suite with a machine-readable reporter and write this run's two artifacts.
  */
@@ -254,6 +272,7 @@ export async function produceTestReport(cwd = process.cwd(), argv: string[] = []
       '--reporter=default',
       '--reporter=github-actions',
       '--reporter=json',
+      `--reporter=${UNHANDLED_REPORTER}`,
       `--outputFile.json=${relative(cwd, reportPath)}`,
       ...argv,
     ],
@@ -272,10 +291,10 @@ export async function produceTestReport(cwd = process.cwd(), argv: string[] = []
     // SAFETY: unverified at this point BY DESIGN — assertVitestReport below is what admits it.
     const parsed = JSON.parse(readFileSync(reportPath, 'utf8')) as VitestJsonReport;
     const report = assertVitestReport(parsed);
-    writeFileAtomic(
-      join(runDir, SUMMARY_NAME),
-      `${JSON.stringify(summarise(report, cwd), null, 2)}\n`,
-    );
+    const summary = summarise(report, cwd);
+    const unhandled = countUnhandled(join(runDir, UNHANDLED_NAME));
+    if (unhandled !== undefined) summary.unhandled = unhandled;
+    writeFileAtomic(join(runDir, SUMMARY_NAME), `${JSON.stringify(summary, null, 2)}\n`);
   } catch (e) {
     console.error(`⚠️  could not summarise the test report: ${e instanceof Error ? e.message : e}`);
     rmSync(runDir, { recursive: true, force: true });

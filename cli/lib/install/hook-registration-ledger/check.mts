@@ -5,10 +5,13 @@ import { type HookInstallScope, hookRegistrationDestination } from './codec.mts'
 import {
   adoptExactLegacy,
   type HookRegistrationOptions,
+  handlerLocation,
   ledgerOf,
+  otherClaudeSettings,
   providerDocument,
   retiredElsewhere,
   stripReclaimedCommands,
+  unrecognisedFallowGates,
 } from './install-support.mts';
 import { reconcileLegacyHookCommands } from './legacy-commands.mts';
 import {
@@ -16,8 +19,10 @@ import {
   projectHookRegistrations,
   readHookRegistrationLedger,
 } from './lifecycle.mts';
+import { dataRecord } from './plain-data.mts';
 
-/** Doctor's read-only view of hook registrations. `advisories` are findings devkit must not repair. */
+/** Doctor's read-only view of hook registrations. `advisories` are findings devkit must not repair,
+ * so they never make `ok` false: an unrecognised fallow-gate.sh spelling is reported, never deleted. */
 export function checkHookRegistrations(
   root: string,
   componentIds: string[],
@@ -43,11 +48,19 @@ export function checkHookRegistrations(
     const legacy = reconcileLegacyHookCommands(ledger?.entries ?? [], provider, rel);
     if (stripReclaimedCommands(document, provider).changed)
       missing.push(`${provider}:retired-registration`);
-    const elsewhere = retiredElsewhere(root, provider, scope);
+    const other = otherClaudeSettings(root, provider, scope);
+    const elsewhere = retiredElsewhere(root, provider, scope, other);
     if (elsewhere)
       (elsewhere.repairable ? missing : advisories).push(
         `${provider}:retired-registration:${elsewhere.rel}`,
       );
+    for (const file of [{ rel, document }, other]) {
+      if (!file) continue;
+      for (const handler of unrecognisedFallowGates(dataRecord(file.document), provider))
+        advisories.push(
+          `${provider}:unrecognised-fallow-gate ${handlerLocation(file.rel, handler)}: ${handler.command}`,
+        );
+    }
     if (legacy.ledgerChanged) missing.push(`${provider}:superseded-registration`);
     const effectiveLedger = legacyOwnedComponentIds?.length
       ? ledgerOf(

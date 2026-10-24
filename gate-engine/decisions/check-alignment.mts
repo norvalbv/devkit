@@ -40,6 +40,7 @@
  * judges THAT repo's staged changes against THAT repo's decision log.
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -51,6 +52,9 @@ import { JUDGE_ISOLATION, JUDGE_READ_TOOLS } from '../judge/judge-isolation.mts'
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import type { JudgeOutage } from '../judge/outage/classify.mts';
 import { execJudge, remedyCause, strictRemedy } from '../judge/run-judge.mts';
+import { commitIndexEnv, commitIndexTree } from '../ratchets/commit-index.mts';
+import { treeBlobsAtRef } from '../ratchets/tree-blobs.mts';
+import { dirInRepo } from '../review/evidence/staged-git.mts';
 import { resolveEscalationModel, resolveReviewModel } from '../review/reviewers.mts';
 import { currentTarget, effectiveScope, parseDecision } from './decisions.mts';
 import { depthPass } from './depth/depth-pass.mts';
@@ -65,6 +69,7 @@ type GuardConfig = ReturnType<typeof resolveGuardConfig>;
 // An axis whose CURRENT Target declares a Scope — the unit the alignment cascade judges.
 interface ScopedTarget {
   slug: string;
+  date: string;
   ruling: string;
   vision: string;
   scopeGlobs: string[];
@@ -153,20 +158,98 @@ export function gateExit(verdict: string | null): number {
  * rescope — it deliberately stops at the first note bullet — and this gate would keep judging a
  * glob that no longer matches anything, i.e. the drifted-and-silently-unenforced state `drift`
  * exists to catch.
+ *
+ * `from: 'index'` is for commit-time gates: an unstaged or untracked draft Target is not authority.
  */
-export function loadScopedTargets(dir?: string | null): ScopedTarget[] {
+export function loadScopedTargets(
+  dir?: string | null,
+  from: DecisionSource = 'worktree',
+): ScopedTarget[] {
   const target = dir ?? resolveFromCwd(resolveGuardConfig(process.cwd()), 'decisionsDir');
-  if (!target || !existsSync(target)) return [];
+  return target ? parseScopedTargets(decisionTexts(target, from)) : [];
+}
+
+export type DecisionSource = 'index' | 'worktree';
+
+let indexFallbackWarned = false;
+
+/** Decision markdown by slug, sorted: the commit index when it tracks the log, else the worktree. */
+export function decisionTexts(
+  dir: string,
+  from: DecisionSource,
+  cwd = process.cwd(),
+): Map<string, string> {
+  return (from === 'index' && indexDecisionTexts(dir, cwd)) || worktreeDecisionTexts(dir);
+}
+
+function worktreeDecisionTexts(dir: string): Map<string, string> {
+  const texts = new Map<string, string>();
+  if (!existsSync(dir)) return texts;
+  for (const f of readdirSync(dir).sort()) {
+    if (f.endsWith('.md') && f !== 'INDEX.md')
+      texts.set(f.slice(0, -3), readFileSync(path.join(dir, f), 'utf8'));
+  }
+  return texts;
+}
+
+// Null means read the worktree: outside git or the toplevel, a log the index does not track, or a
+// git failure (narrated once). The two sources are never mixed in one run.
+function indexDecisionTexts(dir: string, cwd: string): Map<string, string> | null {
+  const log = dirInRepo(dir, cwd);
+  if (!log) return null;
+  const frozen = commitIndexTree(log.top);
+  if (frozen.tree === null) return warnIndexFallback(frozen.error);
+  const files = indexRecordPaths(log.top, frozen.tree, log.rel);
+  if (!files) return warnIndexFallback('the log could not be listed');
+  if (!files.length) return null;
+  const blobs = treeBlobsAtRef(log.top, frozen.tree, files);
+  if (!blobs) return warnIndexFallback('a record could not be read');
+  const texts = new Map<string, string>();
+  for (const file of [...blobs.keys()].sort()) {
+    const bytes = blobs.get(file);
+    if (bytes && path.posix.dirname(file) === log.rel)
+      texts.set(path.posix.basename(file, '.md'), bytes.toString('utf8'));
+  }
+  return texts.size ? texts : null;
+}
+
+function warnIndexFallback(reason: string): null {
+  if (!indexFallbackWarned)
+    console.error(
+      `decisions: could not read the decision log from the commit index (${reason}); reading the working tree`,
+    );
+  indexFallbackWarned = true;
+  return null;
+}
+
+// The log's direct `*.md` entries in `tree`. Non-recursive, so a repo-root log never reads every blob.
+function indexRecordPaths(top: string, tree: string, rel: string): string[] | null {
+  try {
+    const out = execFileSync(
+      'git',
+      ['ls-tree', '-z', '--name-only', tree, '--', rel === '.' ? '.' : `${rel}/`],
+      { cwd: top, env: commitIndexEnv(top), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    return out
+      .split('\0')
+      .filter((f) => f.endsWith('.md') && path.posix.basename(f) !== 'INDEX.md');
+  } catch {
+    return null;
+  }
+}
+
+/** Every text whose current section resolves to a Scope, as a ScopedTarget. */
+export function parseScopedTargets(texts: Map<string, string>): ScopedTarget[] {
   const out: ScopedTarget[] = [];
-  for (const f of readdirSync(target)) {
-    if (!f.endsWith('.md') || f === 'INDEX.md') continue;
-    const body = parseDecision(readFileSync(path.join(target, f), 'utf8')).body;
+  for (const [slug, text] of texts) {
+    const body = parseDecision(text).body;
     const t = currentTarget(body);
     if (!t) continue;
     const scope = effectiveScope(body);
     if (!scope) continue;
     out.push({
-      slug: f.slice(0, -3),
+      slug,
+      date: t.date,
       ruling: t.ruling,
       vision: t.fields['vision-fit'] ?? t.fields.context ?? '',
       scopeGlobs: scope
@@ -286,7 +369,7 @@ export function judge(
 function alignmentPass(cwd: string, cfg: GuardConfig, changed: string[]): void {
   const strict = envFlag('AI_STRICT');
   const dir = resolveFromCwd(cfg, 'decisionsDir');
-  for (const t of loadScopedTargets(dir)) {
+  for (const t of loadScopedTargets(dir, 'index')) {
     const matched = changed.filter((f) => matchScope([f], t.scopeGlobs));
     if (matched.length === 0) continue;
     // An earned ALIGN is cached on (target, exact staged bytes in its scope): a ship retry

@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   utimesSync,
   writeFileSync,
@@ -10,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { psProcessStart } from '../../gate-engine/judge/process/identity.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 import { bodyUpdateRepo, dirs, GIT_ENV, reshipScript } from './_ship-branch-fixture.mts';
 
@@ -29,10 +31,10 @@ describe('reship.sh — the rewrite publication lock', () => {
   const commonDir = (dir: string) =>
     sh(`git -C '${dir}' rev-parse --path-format=absolute --git-common-dir`);
   const lockOf = (dir: string, branch = 'feat/pr') =>
-    join(commonDir(dir), 'devkit/reship-publish', `${sh('git hash-object --stdin', branch)}.lock`);
+    join(commonDir(dir), 'devkit/reship-publish', `${sh('git hash-object --stdin', branch)}.mutex`);
 
-  // A holder the reclaim arms must treat as LIVE: a real process plus the same pid:lstart-digest
-  // stamp reship.sh writes, so neither the dead-pid nor the recycled-pid arm can take it over.
+  // A LIVE holder in the nonce format reship writes, aged past the old one-minute age reap, so a
+  // block it causes also proves that no age-based reclaim remains.
   const holders: number[] = [];
   afterEach(() => {
     for (const pid of holders.splice(0)) {
@@ -47,10 +49,9 @@ describe('reship.sh — the rewrite publication lock', () => {
     if (pid === undefined) throw new Error('could not spawn the live lock holder');
     holders.push(pid);
     mkdirSync(lock, { recursive: true });
-    writeFileSync(
-      join(lock, 'holder'),
-      `${pid}:${sh(`ps -o lstart= -p ${pid} | git hash-object --stdin`)}:0`,
-    );
+    writeFileSync(join(lock, 'live-nonce'), `${pid}\nps:${psProcessStart(pid)}`);
+    const aged = new Date(Date.now() - 300_000);
+    utimesSync(lock, aged, aged);
   };
 
   const reship = (dir: string, env: Record<string, string>, body: string) =>
@@ -72,7 +73,7 @@ describe('reship.sh — the rewrite publication lock', () => {
     // real `ps -o lstart=` digest can equal — so a recycled pid cannot revive this holder.
     const lock = lockOf(dir);
     mkdirSync(lock, { recursive: true });
-    writeFileSync(join(lock, 'holder'), '999999:not-a-live-identity:0');
+    writeFileSync(join(lock, 'dead-nonce'), '999999\nps:not-a-live-identity');
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
 
     const r = reship(dir, env, 'reclaimed');
@@ -86,22 +87,24 @@ describe('reship.sh — the rewrite publication lock', () => {
     expect(readFileSync(ghBody, 'utf8')).toBe('reclaimed');
   });
 
-  it('reclaims a holder-less publish lock once it is older than the acquire grace', () => {
+  it('neither waits on nor touches a lock left in the pre-nonce holder format', () => {
     const { bare, dir, env, g, ghBody } = bodyUpdateRepo();
     const before = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
-    // A holder-less lock leaves no pid to prove dead, so age is the only self-heal; without it
-    // every later publisher spends the full acquire wait and refuses, forever.
-    const lock = lockOf(dir);
-    mkdirSync(lock, { recursive: true });
+    // The nonce lock reads a `holder` file as no holder and never reaps it, so the old path is
+    // left inert rather than inherited.
+    const legacy = lockOf(dir).replace(/\.mutex$/, '.lock');
+    mkdirSync(legacy, { recursive: true });
+    writeFileSync(join(legacy, 'holder'), '999999:not-a-live-identity:0');
     const aged = new Date(Date.now() - 300_000);
-    utimesSync(lock, aged, aged);
+    utimesSync(legacy, aged, aged);
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
 
     const r = reship(dir, env, 'aged');
 
     expect(r.status, r.stderr).toBe(0);
     expect(r.stderr).not.toContain('another publisher still owns');
-    expect(existsSync(lock)).toBe(false);
+    expect(readFileSync(join(legacy, 'holder'), 'utf8')).toBe('999999:not-a-live-identity:0');
+    expect(existsSync(lockOf(dir))).toBe(false);
     expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).not.toBe(before);
     expect(readFileSync(ghBody, 'utf8')).toBe('aged');
   });
@@ -118,6 +121,8 @@ describe('reship.sh — the rewrite publication lock', () => {
     expect(r.status, r.stderr).toBe(0);
     expect(readFileSync(ghBody, 'utf8')).toBe('taken over');
     expect(existsSync(lock), 'a foreign holder must survive this run releasing').toBe(true);
+    // Only the foreign file is left: the release removed exactly this run's own nonce file.
+    expect(readdirSync(lock)).toEqual(['holder']);
     expect(readFileSync(join(lock, 'holder'), 'utf8')).toContain(':held');
   });
 

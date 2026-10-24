@@ -159,6 +159,8 @@ export function selectionFromFlags(flags: InitFlags, recorded?: Partial<Selectio
   return sel;
 }
 
+type RecordedMode = { overlay?: boolean } | null;
+
 interface RecordedInitConfig {
   stack?: string;
   overlay?: boolean;
@@ -236,4 +238,19 @@ export function recoverInterruptedCapabilitySelection(
     selection.antiSlop = true;
   }
   return selection;
+}
+
+/** --overlay / --standalone pick the mode; with neither, a recorded overlay install keeps its own. */
+export function initMode(flags: Pick<InitFlags, 'overlay' | 'standalone'>, recorded: RecordedMode) {
+  if (flags.overlay || (!flags.standalone && recorded?.overlay)) return 'overlay';
+  return flags.standalone ? 'standalone' : 'package';
+}
+
+/** Refuse before any write: re-initialising an overlay in another mode edits committed files. */
+export function assertKeepsRecordedOverlay(recorded: RecordedMode, mode: string): void {
+  if (recorded?.overlay && mode !== 'overlay') {
+    throw new Error(
+      `this repo has an overlay (local-only) install, and a ${mode} init would edit committed files. Keep it with \`devkit init --overlay\`, or remove it first with \`devkit clean\`.`,
+    );
+  }
 }

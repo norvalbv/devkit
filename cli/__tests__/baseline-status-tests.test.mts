@@ -132,6 +132,16 @@ describe('parseSummary — test names are optional evidence', () => {
     expect(parsed.tests).toBeUndefined();
     expect(parsed.files).toEqual(files);
   });
+
+  it('keeps a whole outside-test error count and drops any other value, which reads unrecorded', () => {
+    /** What a foreign or hand-edited artifact might hold in place of a count. */
+    type RawCount = number | string | null;
+    const read = (unhandled: RawCount) =>
+      parseSummary(JSON.stringify({ ...base, files, unhandled }), 'l').unhandled;
+    expect(read(0)).toBe(0);
+    expect(read(2)).toBe(2);
+    for (const bad of [-1, 1.5, '1', null]) expect(read(bad)).toBeUndefined();
+  });
 });
 
 describe('testVerdict — positive evidence or unknown', () => {

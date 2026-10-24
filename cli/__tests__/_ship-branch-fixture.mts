@@ -9,6 +9,7 @@ import {
   hasAnyCommand,
   testSpawnSync as spawnSync,
 } from './_helpers.mts';
+import { readIntent } from '../lib/ship/ship-intent.mts';
 
 export const scriptPath = fileURLToPath(new URL('../lib/ship/ship-branch.sh', import.meta.url));
 export const reshipScript = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
@@ -117,6 +118,13 @@ export function seedShipRepo({ hookBody = 'exit 0', origin = 'git@github.com:acm
   writeFileSync(join(dir, '.husky/_/pre-commit'), `#!/bin/sh\n${hookBody}\n`);
   chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
   return { dir, env, git };
+}
+
+/** The ship intent recorded for `branch`, with its body decoded; throws when none was recorded. */
+export function recorded(dir: string, branch: string) {
+  const r = readIntent(dir, branch);
+  if (!('intent' in r)) throw new Error(`no intent recorded: ${r.reason}`);
+  return { ...r.intent, body: Buffer.from(r.intent.bodyB64, 'base64').toString() };
 }
 
 export function dropWorktree(git, stderr) {
@@ -296,21 +304,38 @@ export function seedReshipRepo() {
   return { ...seeded, bare };
 }
 
-/** The hook exits 0 but leaks a pipe-holding child, so git lands the commit and the gate supervisor
- *  then returns 124 while reaping that descendant — the Story #1550 state, verbatim. */
-export const LEAKING_HOOK = 'echo run >> "$TEST_HOOK_COUNT"\nsleep 30 &';
+/** A pre-commit that records each run; pair it with installPostCommitHang for a post-commit 124. */
+export const COUNTING_HOOK = 'echo run >> "$TEST_HOOK_COUNT"';
 
-/** Ship's banner when a leaking hook's child is reaped under SHIP_COMMIT_TIMEOUT=15: it proves the
- *  124 came from our supervisor, not from spawnSync's own deadline. */
-export const REAPED_15S_BANNER =
-  /exited cleanly, .*reaped after \d+s \(exit 124\) — NOT the 15s ceiling/;
+/** git lands the commit, then hangs in post-commit until SHIP_COMMIT_TIMEOUT=15 fires: a 124 after
+ *  the commit (the Story #1550 state). Only under ship, so a test's own commits never hang. */
+export function installPostCommitHang(dir) {
+  const hook = join(dir, '.husky/_/post-commit');
+  writeFileSync(hook, '#!/bin/sh\n[ "${DEVKIT_SHIP:-}" != 1 ] || sleep 30\n');
+  chmodSync(hook, 0o755);
+}
 
-/** Swap the hook in AFTER seeding: a seeder's own commits would run LEAKING_HOOK with TEST_HOOK_COUNT
- *  unset, and the failed append fails the commit. */
+/** Ship's own ceiling banner: it proves the 124 came from our supervisor, not spawnSync's deadline. */
+export const POST_COMMIT_CEILING_BANNER = /gate chain hit the 15s ceiling \(exit 124\)/;
+
+/** Swap the hook in AFTER seeding: a seeder's own commits would run COUNTING_HOOK with
+ *  TEST_HOOK_COUNT unset, and the failed append fails the commit. */
 export function installHook(dir, body) {
   const hook = join(dir, '.husky/_/pre-commit');
   writeFileSync(hook, `#!/bin/sh\n${body}\n`);
   chmodSync(hook, 0o755);
+}
+
+/** Remove the hook runner so the hook-source preflight refuses before any worktree exists. */
+export function breakHook(s) {
+  mkdirSync(join(s.dir, 'src'), { recursive: true });
+  writeFileSync(join(s.dir, 'src/big.ts'), 'export const a = 1;\n');
+  rmSync(join(s.dir, '.husky/_'), { recursive: true, force: true });
+}
+
+export function fixHook(s) {
+  mkdirSync(join(s.dir, '.husky/_'), { recursive: true });
+  installHook(s.dir, 'exit 0');
 }
 
 /** ghStub on PATH + a hook-run ledger. Publishing tests need both. */
@@ -348,6 +373,14 @@ export function localBranchExists(git, br) {
 
 export function manifestOf(dir) {
   return JSON.parse(readFileSync(join(dir, '.devkit/reconcile-manifest.json'), 'utf8'));
+}
+
+/** The sha a ref names in a bare remote. */
+export function bareSha(bare, ref) {
+  return execFileSync('git', ['-C', bare, 'rev-parse', ref], {
+    env: { ...process.env, ...GIT_ENV },
+    encoding: 'utf8',
+  }).trim();
 }
 
 export function remoteBranchExists(bare, br) {

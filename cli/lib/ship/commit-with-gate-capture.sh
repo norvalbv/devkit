@@ -34,9 +34,9 @@
 # must always read as that reviewer's rejection, never as a timeout.
 #
 # Portability: hang protection is unconditional and needs no coreutils — node plus /bin/ps, both of
-# which ship already requires. Exit codes the caller can now see: 124 (the ceiling, or a leaked group
-# that outlived a CLEAN leader), 129/130/131/143 (a signal forwarded to the gate), 137 (the supervisor
-# itself was SIGKILLed — NOT a ceiling).
+# which ship already requires. Exit codes the caller can now see: 124 (the ceiling; a leaked group
+# that outlived a CLEAN leader reads 0 and sets RUN_GATES_REAPED), 129/130/131/143 (a signal forwarded
+# to the gate), 137 (the supervisor itself was SIGKILLed — NOT a ceiling).
 #
 # A shell word a reader can paste: bare when nothing in it is special to a shell, else single-quoted.
 _ship_sh_word() {
@@ -213,12 +213,9 @@ SHIP_HOOK_WRAPPER
     export DEVKIT_SHIP_REAL_HOOKS_DIR="$real_hooks_dir"
   fi
 
-  # gc.auto=0: this commit is the one ship-owned git call that can trip auto-gc, and it fires at the
-  # END of a multi-minute gate chain in a repo that may hold dozens of worktrees. Auto-gc cannot
-  # delete a minutes-old object under git's default pruneExpire, so this is hygiene rather than the
-  # sc-1420 fix — it just keeps ship from starting repository maintenance at its most fragile moment.
-  # APPEND the overlay flag below; assigning here would confine gc.auto=0 to overlay installs only.
-  local hookcfg=(-c gc.auto=0 -c core.hooksPath="$ship_hook_rel")
+  # maintenance.auto=false: commit would spawn a detached `maintenance run --auto` that the supervisor
+  # reaps into a 124; gc.auto=0 covers git < 2.29, which runs `gc --auto` directly.
+  local hookcfg=(-c gc.auto=0 -c maintenance.auto=false -c core.hooksPath="$ship_hook_rel")
 
   # sc-1442: the composed message exists BEFORE `git commit` runs — hand it to the pre-commit
   # reviewers as ADVISORY intent via a temp file (NEVER .git/COMMIT_EDITMSG: at pre-commit that
@@ -331,11 +328,14 @@ SHIP_HOOK_WRAPPER
   # (the per-gate/per-reviewer events carry the precise cause). Chain order is deterministic →
   # decisions → review, and each hook step is `|| exit`, so exactly one gate blocks; grep in that
   # order attributes it.
-  local blocked_json timed_out shell_gate
+  local blocked_json timed_out shell_gate reaped_json=false
+  [ "${RUN_GATES_REAPED:-0}" != 1 ] || reaped_json=true
   if [ -n "$blocked_override" ]; then blocked_json=$blocked_override; timed_out=false
   elif [ "$hook_setup_failed" -eq 1 ]; then blocked_json='"hook_setup"'; timed_out=false
   elif [ "$rc" -eq 0 ]; then blocked_json=null; timed_out=false
   elif [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then blocked_json='"timeout"'; timed_out=true
+  # The statuses gate-signal-handoff.sh forwards: the operator or a supervisor stopped the chain.
+  elif [ "$rc" -eq 129 ] || [ "$rc" -eq 130 ] || [ "$rc" -eq 131 ] || [ "$rc" -eq 143 ]; then blocked_json='"interrupted"'; timed_out=false
   # NOT a blocked gate: every gate PASSED and `git commit` then died on its finalize ref-update
   # because something moved the ship worktree's HEAD mid-commit. Must be tested BEFORE the gate
   # greps below — a fail-OPEN gate line (`guard-review: … INCONCLUSIVE`, exit 2, chain continues)
@@ -352,15 +352,19 @@ SHIP_HOOK_WRAPPER
   # Whole lines only (a finding may quote one); LC_ALL=C because BSD sed aborts on invalid UTF-8.
   elif shell_gate=$(LC_ALL=C sed -n 's/^✗ staged gate blocked: \([a-z-]*\) (its report is above)$/\1/p' "$log" 2>/dev/null | tail -n 1) &&
     [ -n "$shell_gate" ]; then blocked_json="\"$shell_gate\""; timed_out=false
-  elif grep -q 'decision smells:' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
+  elif grep -qE 'decision smells:|^ *guard-decisions: (judge unavailable|unexpected exit)' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
   elif grep -q 'guard-comments: .* need a decision' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
-  elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
+  # Completeness and the fail-closed judge lines block the review family too (its gate_result family).
+  # Anchored like the hook prints them, so a finding that quotes one cannot claim the block.
+  elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)|^ *(Confirmed completeness gap|guard-review( completeness)?: (judge unavailable|unexpected exit))' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
   else blocked_json='"unknown"'; timed_out=false
   fi
+  # The caller names this token as its terminal cause, but only where it exits on this status.
+  SHIP_BLOCKED_GATE=${blocked_json//\"/}
   if [ "$ship_dry_gates" -eq 0 ]; then
-    printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s"%s,"exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
+    printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s"%s,"exit_code":%d,"timed_out":%s,"reaped":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
       "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
-      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$(devkit_parent_session_json)" "$rc" "$timed_out" "$blocked_json" \
+      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$(devkit_parent_session_json)" "$rc" "$timed_out" "$reaped_json" "$blocked_json" \
       "$(( $(date +%s) - dur_start ))" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
   fi

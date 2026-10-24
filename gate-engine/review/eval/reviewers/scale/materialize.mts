@@ -10,8 +10,6 @@
  * mid-run. The raw patch file is additionally removed once the apply loop is done with it.
  */
 import {
-  chmodSync,
-  copyFileSync,
   existsSync,
   lstatSync,
   mkdtempSync,
@@ -27,6 +25,7 @@ import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { managedPath } from '../../../../critique/immutable-file.mts';
+import { COMMIT_INDEX_FILE_VAR, withIndexCopy } from '../../../../ratchets/commit-index.mts';
 import { assertDiffSha256 } from './labels.mts';
 
 /** Private, mode-0700 home for materialized third-party checkouts and their raw patches — see
@@ -236,22 +235,17 @@ const git = (cwd: string, args: string[]): string =>
   execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
 function validateCached(o: MaterializeOpts, wt: string, base: string): void {
-  const inspect = (cwd: string, args: string[], index?: string, input?: string): string =>
-    execFileSync('git', args, {
-      cwd,
-      encoding: 'utf8',
-      maxBuffer: 64 * 1024 * 1024,
-      input,
-      env: {
-        ...process.env,
-        GIT_DIR: undefined,
-        GIT_COMMON_DIR: undefined,
-        GIT_WORK_TREE: undefined,
-        GIT_INDEX_FILE: index,
-        GIT_OPTIONAL_LOCKS: '0',
-      },
-    });
-  let scratch: string | undefined;
+  const isolated: NodeJS.ProcessEnv = {
+    ...process.env,
+    GIT_DIR: undefined,
+    GIT_COMMON_DIR: undefined,
+    GIT_WORK_TREE: undefined,
+    GIT_INDEX_FILE: undefined,
+    [COMMIT_INDEX_FILE_VAR]: undefined,
+    GIT_OPTIONAL_LOCKS: '0',
+  };
+  const inspect = (cwd: string, args: string[], env = isolated, input?: string): string =>
+    execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, input, env });
   try {
     const recordedRepo = readFileSync(path.join(wt, '.scale-probe-repo'), 'utf8').trim();
     if (realpathSync(recordedRepo) !== realpathSync(o.repo))
@@ -268,37 +262,36 @@ function validateCached(o: MaterializeOpts, wt: string, base: string): void {
       inspect(wt, ['rev-parse', '--verify', 'HEAD']).trim() !== base
     )
       throw new Error('base marker must be the full commit identity of cached HEAD');
-    scratch = mkdtempSync(path.join(wt, '.scale-identity-'));
-    chmodSync(scratch, 0o700);
-    const expectedIndex = path.join(scratch, 'expected-index');
-    inspect(wt, ['read-tree', base], expectedIndex);
-    inspect(wt, ['apply', '--cached'], expectedIndex, o.diffText);
-    const expectedTree = inspect(wt, ['write-tree'], expectedIndex).trim();
-    const capturedIndex = path.join(scratch, 'captured-index');
-    copyFileSync(
-      inspect(wt, ['rev-parse', '--path-format=absolute', '--git-path', 'index']).trim(),
-      capturedIndex,
+    withIndexCopy(
+      wt,
+      (captured, scratch) => {
+        const expected = { ...captured, GIT_INDEX_FILE: path.join(scratch, 'expected-index') };
+        inspect(wt, ['read-tree', base], expected);
+        inspect(wt, ['apply', '--cached'], expected, o.diffText);
+        const expectedTree = inspect(wt, ['write-tree'], expected).trim();
+        if (inspect(wt, ['write-tree'], captured).trim() !== expectedTree)
+          throw new Error(
+            'cached index does not reproduce the requested diff on its recorded base',
+          );
+        const tracked = inspect(wt, ['ls-files', '-z'], captured);
+        for (const flag of ['--no-assume-unchanged', '--no-skip-worktree'])
+          inspect(wt, ['update-index', flag, '-z', '--stdin'], captured, tracked);
+        const changed = inspect(wt, ['diff-files', '--name-only', '-z'], captured)
+          .split('\0')
+          .filter(Boolean);
+        for (const name of changed)
+          if (!o.reviewAssetsRoot || !matchesProjectedAsset(o.reviewAssetsRoot, wt, name))
+            throw new Error(
+              'cached working-tree change is not an exact intended review-asset projection',
+            );
+      },
+      { base: isolated, dir: wt },
     );
-    if (inspect(wt, ['write-tree'], capturedIndex).trim() !== expectedTree)
-      throw new Error('cached index does not reproduce the requested diff on its recorded base');
-    const tracked = inspect(wt, ['ls-files', '-z'], capturedIndex);
-    for (const flag of ['--no-assume-unchanged', '--no-skip-worktree'])
-      inspect(wt, ['update-index', flag, '-z', '--stdin'], capturedIndex, tracked);
-    const changed = inspect(wt, ['diff-files', '--name-only', '-z'], capturedIndex)
-      .split('\0')
-      .filter(Boolean);
-    for (const name of changed)
-      if (!o.reviewAssetsRoot || !matchesProjectedAsset(o.reviewAssetsRoot, wt, name))
-        throw new Error(
-          'cached working-tree change is not an exact intended review-asset projection',
-        );
   } catch (cause) {
     throw new Error(
       `materialize: cached context identity validation failed for ${wt}; use a fresh research root`,
       { cause },
     );
-  } finally {
-    if (scratch) rmSync(scratch, { recursive: true, force: true });
   }
 }
 

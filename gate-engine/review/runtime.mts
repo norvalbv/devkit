@@ -41,7 +41,11 @@ export const PACKAGED_REVIEW_RUNTIME_ENTRYPOINT = 'gate-engine/review/baseline-g
 
 /** Entrypoint plus every package-local module it imports, without source/build extensions. */
 export const PACKAGED_REVIEW_RUNTIME_MODULE_STEMS: readonly string[] = Object.freeze(
-  ['gate-engine/review/baseline-fallow-paths', PACKAGED_REVIEW_RUNTIME_ENTRYPOINT].sort(),
+  [
+    'gate-engine/review/baseline/base-resolve-hook',
+    'gate-engine/review/baseline-fallow-paths',
+    PACKAGED_REVIEW_RUNTIME_ENTRYPOINT,
+  ].sort(),
 );
 
 function reviewerAssetPaths(reviewer: Reviewer): string[] {
@@ -155,10 +159,12 @@ export interface ReviewItem {
   /** The waiver rationale, capped for the event (attachItems), when `disposition` is 'waived' —
    * present so a consumer reads it off the lens directly, no join against top-level `waivers[]`. */
   rationale?: string;
+  /** The waiver's kind beside its rationale, null when the waiver has none. */
+  kind?: RecordedWaiver['kind'];
 }
 
 /** Private terminal artifact snapshot; original positions and strings never ride the event. */
-export interface ReviewCaptureItem extends Omit<ReviewItem, 'issues' | 'rationale'> {
+export interface ReviewCaptureItem extends Omit<ReviewItem, 'issues' | 'rationale' | 'kind'> {
   itemIndex: number;
   issues: string[];
 }

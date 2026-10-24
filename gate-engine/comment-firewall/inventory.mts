@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { CommentToken } from './detect.mts';
+import type { CommentToken } from './scan.mts';
 import type { PatchHunk } from './patch.mts';
 import type { CommentInventory, TouchedParagraph } from './types.mts';
 

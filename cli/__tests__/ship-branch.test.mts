@@ -21,6 +21,7 @@ import {
 import {
   addOverlay,
   buildAndRun,
+  COUNTING_HOOK,
   createPreservedCommit,
   DELETED_BRANCH_RE,
   DETACHED_RE,
@@ -34,12 +35,14 @@ import {
   GIT_ENV,
   ghStub,
   hasGh,
+  installPostCommitHang,
   localBranchExists,
   manifestOf,
   NOTE_RE,
   NOTHING_RE,
   packagedApiSecurityAgent,
   packagedApiSecurityChecklist,
+  POST_COMMIT_CEILING_BANNER,
   remoteBranchExists,
   reshipScript,
   resolve,
@@ -752,10 +755,9 @@ describe('ship-branch.sh — worktree integration', () => {
   // leader-only kill leaves the child holding the pipe. This runs on stock macOS since sc-1199
   // replaced the coreutils timeout dependency with Node + /bin/ps.
   it('bounds a hung gate: the backgrounded pipe-holder is reaped, the ship exits 124 fast (not hung)', () => {
-    // sleep 30 & → a grandchild inheriting the commit's stdout (the pipe) that outlives a kill-git-only;
-    // sleep 30 → the hook itself hangs so the test timeout fires while it is still running. Fifteen
-    // seconds leaves enough startup headroom under load while staying well below either sleep.
-    const { dir, env, git } = seedShipRepo({ hookBody: 'sleep 30 &\nsleep 30' });
+    // Both sleeps hold the commit's pipe past the 15s ceiling plus the supervisor's 20s forced cleanup,
+    // so a kill that spares the hook's group settles 1 and never prints the ceiling banner.
+    const { dir, env, git } = seedShipRepo({ hookBody: 'sleep 600 &\nsleep 600' });
     writeFileSync(join(dir, '.gitignore'), '.devkit/\n'); // recorded attempt → banner offers --resume
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/hung-gate', 't', 'note.txt'], {
@@ -766,7 +768,8 @@ describe('ship-branch.sh — worktree integration', () => {
     });
     dropWorktree(git, r.stderr);
 
-    expect(r.status, r.stderr).not.toBe(0); // bounded — the timed-out commit aborts the ship
+    expect(r.status, r.stderr).toBe(124); // bounded — the timed-out commit aborts the ship
+    expect(r.stderr).not.toMatch(/gate output drain exceeded/); // no pipe-holder outlived the reap
     // Ship's own expiry banner: the harness's linger reap also returns 124, but prints no banner.
     expect(r.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
     expect(r.stderr).toMatch(/devkit ship --resume .+ to converge/); // resume hint
@@ -774,11 +777,8 @@ describe('ship-branch.sh — worktree integration', () => {
   });
 
   it('an identical retry publishes the preserved commit after a post-commit timeout', () => {
-    const { dir, env, git, bare } = seedShipRepoLocalRemote({
-      // The hook exits successfully but leaks a pipe-holding child. Git lands the commit; the gate
-      // supervisor then returns 124 while reaping that descendant — the reported Story #1550 state.
-      hookBody: 'echo run >> "$TEST_HOOK_COUNT"\nsleep 30 &',
-    });
+    const { dir, env, git, bare } = seedShipRepoLocalRemote({ hookBody: COUNTING_HOOK });
+    installPostCommitHang(dir);
     const hookCount = join(dir, 'hook-count');
     const stubBin = ghStub('echo https://github.com/acme/app/pull/42');
     const publishEnv = {
@@ -801,6 +801,7 @@ describe('ship-branch.sh — worktree integration', () => {
     );
 
     expect(first.status, first.stderr).toBe(124);
+    expect(first.stderr).toMatch(POST_COMMIT_CEILING_BANNER);
     expect(first.stderr).toMatch(/devkit ship --resume .+ to converge/);
     expect(first.stdout).not.toContain('https://github.com/acme/app/pull/42');
     expect(localBranchExists(git, 'feat/post-commit-timeout')).toBe(true);
@@ -1078,6 +1079,32 @@ describe('ship-branch.sh — worktree integration', () => {
     dropWorktree(git, r.stderr);
     expect(r.status, r.stderr).toBe(0);
     expect(git(['show', '-s', '--format=%b', 'feat/body'])).toMatch(/BODY_INLINE_XYZ/);
+  });
+
+  it('--body "" is an explicit empty body, as under --pr: stdin is never read for it', () => {
+    const { dir, env, git } = seedShipRepo();
+    writeFileSync(join(dir, 'note.txt'), 'x\n');
+    const argv = [scriptPath, 'feat/empty', 't', '--body', '', '--', 'note.txt'];
+    const r = spawnSync('/bin/bash', argv, {
+      cwd: dir,
+      input: 'piped text\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(git(['show', '-s', '--format=%b', 'feat/empty']).trim()).toBe('');
+  });
+
+  it.each([
+    ['ship-branch.sh', scriptPath, []],
+    ['reship.sh', reshipScript, ['--pr']],
+  ])('%s refuses a trailing --body with no value', (_name, s, mode) => {
+    const { dir, env } = seedShipRepo();
+    const argv = [s, 'feat/x', 't', ...mode, 'note.txt', '--body'];
+    const r = spawnSync('/bin/bash', argv, { cwd: dir, encoding: 'utf8', env });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('--body requires text');
   });
 
   // DK-5: the worktree is cut from $BASE (default: this checkout's HEAD; --base: origin's fetched

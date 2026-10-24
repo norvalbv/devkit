@@ -55,7 +55,8 @@ export function emitMergedLensResults(splitParts, firstModel) {
             reviewer: name,
             status: merged.status,
             escalated: Boolean(merged.escalated),
-            model: merged.model ?? firstModel,
+            // A cache-replayed part carries no model and leads an all-PASS merge: fall back to the pin.
+            model: merged.model ?? parts[0].task.sel.reviewer.model ?? firstModel,
             reason: merged.reason,
             inconclusive_cause: merged.inconclusiveCause,
             mcp_degraded_cause: mcpCause,

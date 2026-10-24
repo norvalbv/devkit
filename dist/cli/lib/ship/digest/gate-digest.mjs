@@ -9,10 +9,11 @@
  * blocked: the shell settled that and published it on this ship's ship_result row, which this
  * reader consumes, so the two can never disagree.
  */
-import { blockingFindings } from './blocking.mjs';
+import { blockingFindings, judgeFinding } from './blocking.mjs';
 import { count, oneLine, textOf } from './fields.mjs';
 import { scanBackward } from './tail.mjs';
 import { readBranchHistory, renderTrend, summariseTrend } from './trend.mjs';
+import { waivedRows } from './waived.mjs';
 /** The ship_attempt row opens this attempt's span, so finding it bounds the backward read exactly. */
 const ATTEMPT = 'ship_attempt';
 /** The parallel judge's gate name — a `gate_result` row, not a fleet `review_result`. */
@@ -153,12 +154,7 @@ export function summarise(events, shipId) {
             const gate = e.gate ?? 'unknown';
             // A row without its own family IS its family — only the deterministic chain reports finer
             // than the blocked_gate vocabulary.
-            attributable.push({
-                gate,
-                family: e.family ?? gate,
-                detail: oneLine(e.detail),
-                state: 'finding',
-            });
+            attributable.push({ gate, family: e.family ?? gate, state: 'finding', ...judgeFinding(e) });
         }
         else if (e.type === 'gate_result' &&
             (e.status === 'could_not_run' || e.status === 'bypassed')) {
@@ -265,6 +261,7 @@ export function summarise(events, shipId) {
         ...firstPerGate(advisory),
         // Deduped for the same reason: pre-commit and commit-msg can both replay one stale verdict.
         ...firstPerGate(unverified),
+        ...waivedRows(mine),
         ...cached,
     ];
 }
@@ -331,7 +328,7 @@ export function render(rows, logPath = '') {
     const cached = rows.filter((r) => r.state === 'cached').length;
     const listed = [...findings, ...missing, ...unverified];
     const total = listed.reduce((n, r) => n + (r.findings ?? 1), 0);
-    const gates = new Set(listed.map((r) => `${r.state}:${r.gate}`)).size;
+    const gates = new Set(listed.map((r) => r.gate)).size;
     // Findings, not gates, are what a reader must clear: one reviewer can block on several IDs.
     const counted = gates === total ? `${total}` : `${gates} gate(s) / ${total} finding(s)`;
     const out = [`📋 Gate findings this run (${counted}):`];
@@ -370,7 +367,7 @@ export function render(rows, logPath = '') {
     if (missingOthers.length > MAX_MISSING) {
         out.push(`   … ${missingOthers.length - MAX_MISSING} more gate(s) that could not run`);
     }
-    // Uncapped: at most one row per judge survives the dedupe, and a cut one would be the silent
+    // Uncapped: one row per judge or waived ID survives the dedupe, and a cut one would be the silent
     // omission this section exists to end. The same `·` a bypass wears, because it carries that weight.
     for (const r of unverified)
         out.push(`   · ${r.gate} — ${r.detail}`);

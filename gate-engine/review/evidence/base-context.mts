@@ -298,11 +298,20 @@ export function reportAdvisories(
   ref?: string | null,
 ): void {
   if (!advisories?.length) return;
-  for (const a of advisories)
-    console.error(`guard-review: ${name} — advisory (non-blocking): ${a}`);
-  if (ref) console.error(`guard-review: ${name} — full reasoning: guard-review transcript ${ref}`);
+  printAdvisories(name, advisories, ref);
   emitAdvisoryResult(`review:${name}`, 'finding', advisories.join(' | '));
 }
+
+/** The screen half of reportAdvisories, for a caller that emits one row across several labels. */
+export function printAdvisories(label: string, advisories: string[], ref?: string | null): void {
+  for (const a of advisories)
+    console.error(`guard-review: ${label} — advisory (non-blocking): ${a}`);
+  if (ref) console.error(`guard-review: ${label} — full reasoning: guard-review transcript ${ref}`);
+}
+
+/** Why a PASS on an earlier diff stands and how to re-open it, linked so it resolves outside devkit. */
+export const STICKY_RULING =
+  'by design, devkit ruling judge-verdict-cache-scope: https://github.com/norvalbv/devkit/blob/main/docs/decisions/judge-verdict-cache-scope.md — reword the commit message to re-judge';
 
 /** A cached PASS line (`tail` = its provenance), marked and reported when it replays MCP-degraded. */
 export function printCachedPass(name: string, meta: VerdictMeta, tail: string): void {

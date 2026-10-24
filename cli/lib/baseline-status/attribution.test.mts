@@ -11,6 +11,8 @@ import {
   capped,
   classifyFile,
   compareSummaries,
+  newFailingSteps,
+  newUnhandled,
 } from './attribution.mts';
 import type { FileTests, TestReportSummary } from './produce.mts';
 
@@ -26,6 +28,7 @@ const summary = (
   testsPassed: !Object.values(files).includes('failed'),
   files,
   tests,
+  unhandled: 0,
   droppedForeignPaths: 0,
 });
 const names = (failed: string[], passed: string[] = [], truncated?: true): FileTests =>
@@ -86,15 +89,53 @@ describe('attributionToken', () => {
   const files = (fresh: string[], unsure: string[] = []) => ({ inherited: ['a'], fresh, unsure });
 
   it('claims inherited-only only when every failure is accounted for', () => {
-    expect(attributionToken(files([]), [], [])).toBe('inherited-only');
-    expect(attributionToken(files(['b']), [], [])).toBe('new');
-    expect(attributionToken(files([], ['b']), [], [])).toBe('unknown');
+    expect(attributionToken(files([]), [], [], 0)).toBe('inherited-only');
+    expect(attributionToken(files(['b']), [], [], 0)).toBe('new');
+    expect(attributionToken(files([], ['b']), [], [], 0)).toBe('unknown');
   });
 
   it('never claims inherited-only past a new failing step or an unread check', () => {
     // A PR that breaks typecheck on a base whose tests are red must not read as "not yours".
-    expect(attributionToken(files([]), ['gate › Typecheck'], [])).toBe('new');
-    expect(attributionToken(files([]), [], ['CodeRabbit'])).toBe('unknown');
+    expect(attributionToken(files([]), ['gate › Typecheck'], [], 0)).toBe('new');
+    expect(attributionToken(files([]), [], ['CodeRabbit'], 0)).toBe('unknown');
+  });
+
+  it('reads an extra outside-test error as new, and an unrecorded count as unknown', () => {
+    // vitest's json `success` ignores unhandled errors, so only this count can show one.
+    expect(attributionToken(files([]), [], [], 1)).toBe('new');
+    expect(attributionToken(files([]), [], [], null)).toBe('unknown');
+    const base = summary({ 'a.test.mts': 'failed' });
+    expect(newUnhandled({ ...base, unhandled: 2 }, { ...base, unhandled: 1 })).toBe(1);
+    expect(newUnhandled({ ...base, unhandled: 0 }, { ...base, unhandled: 3 })).toBe(0);
+    expect(newUnhandled(base, { ...base, unhandled: undefined })).toBeNull();
+  });
+});
+
+/** One failed step of matrix shard `n`: siblings share a key, so a moved failure still matches. */
+const shard = (n: number) => ({ label: `tests (${n}) › Tests`, key: 'shards › Tests' });
+const plain = (label: string) => ({ label, key: label });
+
+describe('newFailingSteps', () => {
+  it('matches an inherited failure that moved to another shard', () => {
+    expect(newFailingSteps([shard(3)], [shard(2)], 1)).toEqual([]);
+  });
+
+  it('calls a shard new when more shards fail than on the base', () => {
+    expect(newFailingSteps([shard(2), shard(3)], [shard(2)], 1)).toEqual(['tests (3) › Tests']);
+    expect(newFailingSteps([shard(3), shard(1)], [shard(2)], 1)).toEqual(['tests (1) › Tests']);
+  });
+
+  it('spends one inherited file per failing shard, so a fixed shard cannot hide a new one', () => {
+    // Base fails shards 2 and 4; the PR fixes 4, keeps 2, and shard 1 fails with no new file.
+    expect(newFailingSteps([shard(2), shard(1)], [shard(2), shard(4)], 1)).toEqual([
+      'tests (1) › Tests',
+    ]);
+  });
+
+  it('never matches a step outside a matrix by anything but its label', () => {
+    const base = [plain('gate › Tests')];
+    expect(newFailingSteps([plain('gate › Typecheck')], base, 5)).toEqual(['gate › Typecheck']);
+    expect(newFailingSteps([plain('gate › Tests')], base, 0)).toEqual([]);
   });
 });
 
@@ -149,6 +190,19 @@ const check = (name: string, link: string): CheckRow => ({
   workflow: name,
 });
 const PR_CHECK = check('gate', 'https://github.com/o/r/actions/runs/200/job/1');
+/** A run of four identical matrix shards, `failing` naming the shards whose Tests step failed. */
+const shardsView = (...failing: number[]) =>
+  JSON.stringify({
+    url: 'https://x',
+    jobs: [1, 2, 3, 4].map((n) => ({
+      name: `tests (${n})`,
+      conclusion: failing.includes(n) ? 'failure' : 'success',
+      steps: [
+        { name: 'Install', conclusion: 'success' },
+        { name: 'Tests', conclusion: failing.includes(n) ? 'failure' : 'success' },
+      ],
+    })),
+  });
 const view = (...steps: string[]) =>
   JSON.stringify({
     url: 'https://x',
@@ -235,6 +289,44 @@ describe('attributeFailures against a stubbed gh', () => {
     expect(attribute().line).toContain(
       'attribution=new inherited=1 new=0 new-failing=none new-steps=gate › Typecheck',
     );
+  });
+
+  it('reads an inherited file that hashed into another shard as inherited-only', () => {
+    const a = { 'a.test.mts': names(['x > broke']) };
+    put('summary-200.json', JSON.stringify(summary({ 'a.test.mts': 'failed' }, a, 200)));
+    put('view-100.json', shardsView(2));
+    put('view-200.json', shardsView(3));
+    expect(attribute().line).toMatch(/^attribution=inherited-only inherited=1 new=0 /);
+  });
+
+  it('calls an outside-test error new even when a moved shard explains every failing step', () => {
+    // Base fails shards 1 and 2 on two files; the PR runs both in shard 1, and shard 3 errors.
+    const both = { 'a.test.mts': names(['x > broke']), 'b.test.mts': names(['y > broke']) };
+    const failed = { 'a.test.mts': 'failed', 'b.test.mts': 'failed' } as const;
+    put('summary-100.json', JSON.stringify(summary(failed, both, 100)));
+    put('summary-200.json', JSON.stringify({ ...summary(failed, both, 200), unhandled: 1 }));
+    put('view-100.json', shardsView(1, 2));
+    put('view-200.json', shardsView(1, 3));
+    expect(attribute().line).toContain('attribution=new inherited=2 new=0 ');
+    expect(attribute().line).toContain('new-steps=none unhandled=+1 ');
+  });
+
+  it('never treats a shard that failed before any step ran as a moved shard', () => {
+    // A runner that never started reports the job with no steps, so no sibling signature matches it.
+    const a = { 'a.test.mts': names(['x > broke']) };
+    put('summary-200.json', JSON.stringify(summary({ 'a.test.mts': 'failed' }, a, 200)));
+    put('view-100.json', shardsView(2));
+    const view = JSON.parse(shardsView(2));
+    view.jobs[2] = { name: 'tests (3)', conclusion: 'failure', steps: [] };
+    put('view-200.json', JSON.stringify(view));
+    expect(attribute().line).toContain('attribution=new inherited=1 new=0 ');
+    expect(attribute().line).toContain('new-steps=tests (3) ');
+  });
+
+  it('reads a summary without an outside-test error count as unknown, never inherited', () => {
+    const { unhandled: _, ...unrecorded } = summary({ 'a.test.mts': 'failed' }, {}, 200);
+    put('summary-200.json', JSON.stringify(unrecorded));
+    expect(attribute().line).toContain(' unhandled=unrecorded ');
   });
 
   it('leaves a failing check from outside the workflow unattributed, never inherited', () => {

@@ -94,38 +94,55 @@ function scratchIndexEnv(env: NodeJS.ProcessEnv, copy: string): NodeJS.ProcessEn
   };
 }
 
+function gitOut(root: string, args: string[], env: NodeJS.ProcessEnv): string {
+  const run = runGit(root, args, env);
+  if (!run.ok) throw new Error(run.error);
+  return run.out;
+}
+
+export interface IndexCopyOptions {
+  base?: NodeJS.ProcessEnv;
+  /** Parent of the scratch dir; a caller whose index names private paths keeps it out of tmpdir. */
+  dir?: string;
+}
+
+/** Runs `run` with git env aimed at a private copy of the commit index, inside a scratch dir that is
+ * removed afterwards, so the real index is never locked or written. Throws git's own error. */
+export function withIndexCopy<T>(
+  root: string,
+  run: (env: NodeJS.ProcessEnv, scratch: string) => T,
+  { base = process.env, dir = tmpdir() }: IndexCopyOptions = {},
+): T {
+  const env = commitIndexEnv(root, base);
+  const index = resolve(root, gitOut(root, ['rev-parse', '--git-path', 'index'], env));
+  const scratch = mkdtempSync(join(dir, 'devkit-tree-index-'));
+  try {
+    const copy = join(scratch, 'index');
+    const copyEnv = scratchIndexEnv(env, copy);
+    if (existsSync(index)) copyFileSync(index, copy);
+    else gitOut(root, ['read-tree', '--empty'], copyEnv);
+    return run(copyEnv, scratch);
+  } finally {
+    try {
+      rmSync(scratch, { recursive: true, force: true });
+    } catch {
+      // A leaked scratch dir costs disk, never the verdict: commitIndexTree must never throw.
+    }
+  }
+}
+
 /** The commit index's tree, hashed from a private copy: write-tree takes its index's lock and dies
  * when it is held, so parallel gates hashing the same index raced each other. Never throws. */
 export function commitIndexTree(
   root: string,
   base: NodeJS.ProcessEnv = process.env,
+  dir?: string,
 ): CommitIndexTree {
-  const env = commitIndexEnv(root, base);
-  let temp: string | null = null;
   try {
-    const located = runGit(root, ['rev-parse', '--git-path', 'index'], env);
-    if (!located.ok) return { tree: null, error: located.error };
-    const index = resolve(root, located.out);
-    temp = mkdtempSync(join(tmpdir(), 'devkit-tree-index-'));
-    const copy = join(temp, 'index');
-    const copyEnv = scratchIndexEnv(env, copy);
-    if (existsSync(index)) copyFileSync(index, copy);
-    else {
-      const empty = runGit(root, ['read-tree', '--empty'], copyEnv);
-      if (!empty.ok) return { tree: null, error: empty.error };
-    }
-    const written = runGit(root, ['write-tree'], copyEnv);
-    if (!written.ok) return { tree: null, error: written.error };
-    return written.out ? { tree: written.out } : { tree: null, error: 'git write-tree: no tree' };
+    const tree = withIndexCopy(root, (env) => gitOut(root, ['write-tree'], env), { base, dir });
+    return tree ? { tree } : { tree: null, error: 'git write-tree: no tree' };
   } catch (error) {
-    // mkdtemp/copy only: every git failure above returns its own stderr.
     return { tree: null, error: error instanceof Error ? error.message : String(error) };
-  } finally {
-    try {
-      if (temp) rmSync(temp, { recursive: true, force: true });
-    } catch {
-      // A leaked scratch dir costs disk, never the verdict: callers rely on this never throwing.
-    }
   }
 }
 

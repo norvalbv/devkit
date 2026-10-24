@@ -84,6 +84,7 @@ BODY_FILE_PREREAD_SET=0  # --resume banner's one --body-file read: 1 = bytes kep
 UPDATE_PR_BODY=0   # explicit body flag? Refresh the existing PR too; recorded across --resume
 READY=0            # --ready marks the PR ready-for-review after the push lands
 WAIT_CI=0          # --wait-ci polls the PR's checks after the re-push is durable
+WAIT_CI_STRICT=0   # --wait-ci-strict: exit 5 unless the verdict is passed
 WAIT_CI_TIMEOUT=900
 WAIT_CI_TIMEOUT_SET=0
 while [ "$#" -gt 0 ]; do
@@ -106,7 +107,10 @@ while [ "$#" -gt 0 ]; do
       # The PR already exists here, so there is nothing to open as a draft. Name the actual remedy
       # rather than falling through to the generic unknown-flag error.
       echo "--draft applies to a NEW ship (opening the PR); this PR already exists. To convert it back to a draft: gh pr ready --undo $BR" >&2; exit 1 ;;
+    --no-stack)
+      echo "--no-stack applies to a NEW ship (stacking happens when the PR opens); this PR already exists." >&2; exit 1 ;;
     --wait-ci|--wait-ci-required) if [ "$1" = --wait-ci ]; then WAIT_CI=1; else WAIT_CI_REQUIRED=1; fi; shift ;;
+    --wait-ci-strict) WAIT_CI_STRICT=1; shift ;;
     --wait-ci-timeout)
       WAIT_CI_TIMEOUT="${2:?--wait-ci-timeout requires seconds}"; WAIT_CI_TIMEOUT_SET=1; shift 2 ;;
     --resume) echo "--resume must come FIRST: devkit ship --resume <branch> [--] <extra-path...>" >&2; exit 1 ;;
@@ -146,9 +150,9 @@ if [ "$RESUME" -eq 1 ]; then
   SI_FIELDS=()
   while IFS= read -r -d '' si_field; do SI_FIELDS+=("$si_field"); done < "$SI_OUT"
   rm -f "$SI_OUT"
-  # emitFields order as in ship-branch.sh's reader (positional, keep in lockstep); field 5 (draft)
-  # is new-ship-only and skipped here.
-  [ "${#SI_FIELDS[@]}" -ge 12 ] || { echo "recorded invocation is malformed — run the full devkit ship --pr command" >&2; exit 1; }
+  # emitFields order as in ship-branch.sh's reader (positional, keep in lockstep); fields 5 (draft)
+  # and 9 (noStack) are new-ship-only and skipped here.
+  [ "${#SI_FIELDS[@]}" -ge 13 ] || { echo "recorded invocation is malformed — run the full devkit ship --pr command" >&2; exit 1; }
   SI_MODE=${SI_FIELDS[0]}
   if [ "$SI_MODE" = "ship" ]; then
     # The blocked attempt was a NEW ship; hand over. Positive match + one-shot marker — an
@@ -163,10 +167,10 @@ if [ "$RESUME" -eq 1 ]; then
   [ "${SI_FIELDS[4]}" != "1" ] || UPDATE_PR_BODY=1
   RESUME_CREATED=${SI_FIELDS[6]}
   RESUME_GENERATION=${SI_FIELDS[7]}
-  SI_NLINKS=${SI_FIELDS[9]}
+  SI_NLINKS=${SI_FIELDS[10]}
   case "$SI_NLINKS" in *[!0-9]*|'') echo "recorded invocation is malformed (nlinks '$SI_NLINKS')" >&2; exit 1 ;; esac
-  si_i=10
-  si_body_at=$((10 + SI_NLINKS))
+  si_i=11
+  si_body_at=$((11 + SI_NLINKS))
   [ "${#SI_FIELDS[@]}" -gt $((si_body_at + 1)) ] || { echo "recorded invocation is malformed (missing body/paths)" >&2; exit 1; }
   while [ "$si_i" -lt "$si_body_at" ]; do LINK_EXTRA+=("${SI_FIELDS[$si_i]}"); si_i=$((si_i + 1)); done
   RESUME_BODY=${SI_FIELDS[$si_body_at]}
@@ -296,7 +300,7 @@ REQUIRED_SCOPE_FILE=""
 REWRITE_FETCH_ERR=""
 FINAL_SCOPE_FILE=""
 REWRITE_PUBLISH_LOCK=""
-REWRITE_PUBLISH_STAMP=""
+REWRITE_PUBLISH_NONCE=""
 REWRITE_PUBLISH_OWNED=0
 rewrite_ref_cleanup() {
   ship_resume_extras_notice # first: it reads the exit status
@@ -313,15 +317,15 @@ rewrite_ref_cleanup() {
   [ -z "$REWRITE_FETCH_ERR" ] || rm -f "$REWRITE_FETCH_ERR"
 }
 
-# Serialize a rewrite's destructive publication/bookkeeping window and every explicit PR-body
-# publication with the matching head push. Gates still run in parallel. Atomic mkdir supplies
-# exclusion; the holder PID makes a killed publisher reclaimable.
-# Keyed on the GIT COMMON DIR, not $ROOT (sc-2476): linked worktrees of one clone publish the same
-# origin/$BR, so a per-checkout lock let a paused publisher overwrite a sibling's newer PR body. Not
-# $TMPDIR either — it differs per process (sandboxed agents), which would fail open silently. The
-# branch is hashed: a sanitised name maps a/b and a-b to one lock.
+# Serialize each rewrite publication and explicit PR-body edit with its head push; gates stay
+# parallel. publish-lock.mts holds a process-lock.mts lock for THIS bash ($$) until it exits.
+
+# Keyed on the git common dir: linked worktrees publish one origin/$BR, and $TMPDIR differs per
+# process. The branch is hashed because a sanitised name maps a/b and a-b to one lock.
+REWRITE_PUBLISH_LOCK_CLI="$SCRIPT_DIR/reship/publish-lock.mts"
+[ -f "$REWRITE_PUBLISH_LOCK_CLI" ] || REWRITE_PUBLISH_LOCK_CLI="$SCRIPT_DIR/reship/publish-lock.mjs"
 rewrite_publish_lock_acquire() {
-  local lock_root holder owner owner_start current_start attempts=0
+  local lock_root rc=0
   lock_root=$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
     [ -n "$lock_root" ] || {
     echo "reship rejected: could not resolve the git common dir for the publication lock" >&2
@@ -333,49 +337,23 @@ rewrite_publish_lock_acquire() {
     echo "reship rejected: cannot create the publication lock directory $lock_root" >&2
     return 1
   }
-  REWRITE_PUBLISH_LOCK="$lock_root/$(printf '%s' "$BR" | git hash-object --stdin).lock"
-  owner_start=$(ps -o lstart= -p $$ 2>/dev/null | git hash-object --stdin)
-  REWRITE_PUBLISH_STAMP="$$:$owner_start:$(date +%s)"
-  while ! mkdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null; do
-    holder=$(cat "$REWRITE_PUBLISH_LOCK/holder" 2>/dev/null || true)
-    owner=${holder%%:*}
-    owner_start=${holder#*:}; owner_start=${owner_start%%:*}
-    current_start=""
-    if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
-      current_start=$(ps -o lstart= -p "$owner" 2>/dev/null | git hash-object --stdin)
-    fi
-    if [ -n "$holder" ] && [ "$holder" = "$(cat "$REWRITE_PUBLISH_LOCK/holder" 2>/dev/null || true)" ] && \
-       { [ -z "$current_start" ] || [ "$current_start" != "$owner_start" ]; }; then
-      rm -f "$REWRITE_PUBLISH_LOCK/holder" 2>/dev/null || true
-      rmdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null || true
-      continue
-    fi
-    # An acquirer killed between mkdir and its holder write leaves no PID to prove. Only age may
-    # reclaim that micro-window; a live but paused acquirer younger than a minute remains protected.
-    if [ -z "$holder" ] && [ -n "$(find "$REWRITE_PUBLISH_LOCK" -prune -mmin +1 -print 2>/dev/null)" ]; then
-      rmdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null || true
-      continue
-    fi
-    attempts=$((attempts + 1))
-    [ "$attempts" -lt 300 ] || {
+  # .mutex, not the old .lock: a pre-nonce `holder`-format lock left there could never be reaped.
+  REWRITE_PUBLISH_LOCK="$lock_root/$(printf '%s' "$BR" | git hash-object --stdin).mutex"
+  REWRITE_PUBLISH_NONCE=$(node "$REWRITE_PUBLISH_LOCK_CLI" acquire "$$" "$REWRITE_PUBLISH_LOCK") ||
+    rc=$?
+  case $rc in
+    0) REWRITE_PUBLISH_OWNED=1 ;;
+    75)
       echo "reship rejected: another publisher still owns origin/$BR; resume after it finishes" >&2
       return 1
-    }
-    sleep 0.1
-  done
-  printf '%s' "$REWRITE_PUBLISH_STAMP" > "$REWRITE_PUBLISH_LOCK/holder" || {
-    rmdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null || true
-    return 1
-  }
-  REWRITE_PUBLISH_OWNED=1
+      ;;
+    *) return 1 ;; # publish-lock.mts already named the cause
+  esac
 }
 
 rewrite_publish_lock_release() {
   [ "$REWRITE_PUBLISH_OWNED" -eq 1 ] || return 0
-  if [ "$(cat "$REWRITE_PUBLISH_LOCK/holder" 2>/dev/null || true)" = "$REWRITE_PUBLISH_STAMP" ]; then
-    rm -f "$REWRITE_PUBLISH_LOCK/holder" 2>/dev/null || true
-    rmdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null || true
-  fi
+  node "$REWRITE_PUBLISH_LOCK_CLI" release "$REWRITE_PUBLISH_LOCK" "$REWRITE_PUBLISH_NONCE" || true
   REWRITE_PUBLISH_OWNED=0
 }
 
@@ -788,7 +766,7 @@ fi
 if [ "$REWRITE_ALREADY_PUBLISHED" -eq 1 ] && [ -n "${SHIP_DRY_RUN:-}" ]; then
   echo "DRY: gated rewrite ${EXPECTED_REMOTE:0:7} is already on origin/$BR; skipped reconcile + the recorded PR-body update and kept its intent for a real run." >&2
   [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" dry-run-opened-no-pr
-  exit 0
+  exit "$WAIT_CI_STATUS"
 fi
 if [ "$REWRITE" -eq 1 ] && [ "${#MISSING_SCOPE[@]}" -gt 0 ] && [ "$REWRITE_ALREADY_PUBLISHED" -eq 0 ]; then
   echo "rewrite brief omits paths from the existing PR:" >&2
@@ -848,7 +826,7 @@ if git -C "$WT" diff --cached --quiet; then
   if [ "$RESUME" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ] && [ -n "${SHIP_DRY_RUN:-}" ]; then
     echo "DRY: no commit delta; skipped the recorded PR-body update and kept its intent for a real run." >&2
     [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" dry-run-opened-no-pr
-    exit 0
+    exit "$WAIT_CI_STATUS"
   fi
   # --ready is a state change on the PR, not on the push, so an empty delta does not excuse skipping
   # it. Done ONCE here rather than per exit arm below, and deliberately BEFORE the record is
@@ -909,7 +887,7 @@ if git -C "$WT" diff --cached --quiet; then
     body_receipt_delete
     rewrite_publish_lock_release
     echo "$PR_URL"
-    exit 0
+    exit "$WAIT_CI_STATUS"
   fi
   if [ "$RESUME" -eq 1 ]; then
     # Converged, not "pushed": THIS run pushed nothing — the recorded content is simply already
@@ -919,7 +897,7 @@ if git -C "$WT" diff --cached --quiet; then
     else
       echo "no changes vs origin/$BR — everything recorded is already on the remote; $SI_NOTE" >&2
     fi
-    exit 0
+    exit "$WAIT_CI_STATUS"
   fi
   if [ "$REWRITE" -eq 1 ]; then
     echo "no changes vs origin/$BASE_REF — nothing to publish as a replacement; $SI_NOTE" >&2
@@ -928,7 +906,7 @@ if git -C "$WT" diff --cached --quiet; then
   fi
   # An empty delta is normally an error — the caller asked to push something and there was nothing.
   # But if the flip above ran, the requested end state IS now reality, so the retry has converged.
-  [ "$NO_DELTA_READY" -eq 0 ] || { echo "marked the PR ready; there was nothing left to re-push" >&2; exit 0; }
+  [ "$NO_DELTA_READY" -eq 0 ] || { echo "marked the PR ready; there was nothing left to re-push" >&2; exit "$WAIT_CI_STATUS"; }
   exit 1
 fi
 
@@ -1016,7 +994,7 @@ if [ -n "${SHIP_DRY_RUN:-}" ]; then
   trap - EXIT  # keep the worktree for inspection
   echo "DRY: worktree kept at $WT. Remove with: git worktree remove --force '$WT'" >&2
   [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" dry-run-opened-no-pr
-  exit 0
+  exit "$WAIT_CI_STATUS"
 fi
 
 # An append fast-forwards. An explicit rewrite uses the exact PR-head OID captured before gates as
@@ -1255,3 +1233,4 @@ else
   [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" pr-url-unresolved
   echo "re-pushed to origin/$BR"
 fi
+exit "$WAIT_CI_STATUS"

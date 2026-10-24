@@ -1,6 +1,8 @@
 // guard-structure's verdict trichotomy (0 clean, 1 violations, 2 could-not-run) and how per-leg
 // verdicts fold into one gate result.
-import { resolveGuardConfig } from '../config.mts';
+import { z } from 'zod';
+import { CONFIG_FILENAME, type GuardConfig, resolveGuardConfig } from '../config.mts';
+import { loadSourceParser, type SourceParser } from './source-parser.mts';
 
 // Outcome of the folder-structure gate: 0 lint ran and was clean, 1 violations, 2 could not run.
 export interface StructureGateResult {
@@ -41,20 +43,47 @@ export function combineStructureResults(results: StructureGateResult[]): Structu
   return clean();
 }
 
-/** Nothing compiles structure.walls yet (sc-3148), so a declared wall rides every gate run — preset
- * leg, grammar leg or neither — as could-not-run, and can never fold into a clean 0. */
-export function withUncompiledWalls(cwd: string, result: StructureGateResult): StructureGateResult {
-  let count: number;
+// A present-but-malformed block resolves to empty lists; name it, never read it as "none declared".
+// A top-level null stays absent, as the resolver treats it; a non-object tree entry has no root.
+const structureConfigSchema = z
+  .object({ trees: z.array(z.looseObject({})).optional(), walls: z.array(z.unknown()).optional() })
+  .nullish();
+
+function malformedStructure(cfg: GuardConfig): string[] {
+  const parsed = structureConfigSchema.safeParse(cfg.structureRaw);
+  if (parsed.success) return [];
+  return parsed.error.issues.map(
+    (issue) =>
+      `${CONFIG_FILENAME} ${['structure', ...issue.path].join('.')}: ${issue.message} — nothing in it is checked`,
+  );
+}
+
+// Nothing compiles structure.walls yet, so a declared wall is could-not-run, never a clean 0.
+function uncompiledWalls(cfg: GuardConfig, loadParser: () => SourceParser): string[] {
+  const count = cfg.structure.walls.length;
+  if (!count) return [];
+  const reasons = [`structure.walls declares ${count} import wall(s) that are NOT enforced`];
+  // A parser that cannot load would leave the walls blind even once they compile, so name it too.
+  const source = loadParser();
+  if ('reason' in source) reasons.push(source.reason);
+  return reasons;
+}
+
+/** Fold every structure-config gap into a gate result — preset leg, grammar leg or neither — as
+ * could-not-run, so a config the gate could not honour never reads as a clean 0. */
+export function withStructureConfigGaps(
+  cwd: string,
+  result: StructureGateResult,
+  loadParser: () => SourceParser = loadSourceParser,
+): StructureGateResult {
+  let reasons: string[];
   try {
-    count = resolveGuardConfig(cwd).structure?.walls?.length ?? 0;
+    const cfg = resolveGuardConfig(cwd);
+    reasons = [...malformedStructure(cfg), ...uncompiledWalls(cfg, loadParser)];
   } catch (e: unknown) {
     // A config that turned unreadable after the legs ran must not erase a violation they found.
-    return combineStructureResults([
-      result,
-      couldNotRun(e instanceof Error ? e.message : String(e)),
-    ]);
+    reasons = [e instanceof Error ? e.message : String(e)];
   }
-  if (!count) return result;
-  const gap = couldNotRun(`structure.walls declares ${count} import wall(s) that are NOT enforced`);
-  return combineStructureResults([result, gap]);
+  if (!reasons.length) return result;
+  return combineStructureResults([result, ...reasons.map(couldNotRun)]);
 }

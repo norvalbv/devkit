@@ -6,6 +6,8 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, realpathSync } from 'node:fs';
+import path from 'node:path';
 import { commitIndexEnv, commitIndexTree } from '../../ratchets/commit-index.mts';
 import { normalizeRepositoryFile } from '../../../skills/_devkit/review-roots.mjs';
 
@@ -99,6 +101,35 @@ export function indexFile(cwd: string, file: string): string | null {
   const normalized = normalizeRepositoryFile(file, 'index file');
   if (!indexHasStageZero(cwd, normalized)) return null;
   return snapshotFile(cwd, `:0:${normalized}`);
+}
+
+export interface RepoDir {
+  top: string;
+  rel: string;
+}
+
+/** `dir`'s toplevel-relative path in the repo `cwd` belongs to; null when it sits outside that repo.
+ * A `dir` deleted from the worktree resolves through its nearest existing ancestor. */
+export function dirInRepo(dir: string, cwd?: string): RepoDir | null {
+  try {
+    const abs = path.resolve(dir);
+    const anchor = existingAncestor(abs);
+    const out = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: cwd ?? anchor,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const top = realpathSync(out.trim());
+    const real = path.join(realpathSync(anchor), path.relative(anchor, abs));
+    const rel = path.relative(top, real).split(path.sep).join('/') || '.';
+    return rel === '..' || rel.startsWith('../') || path.isAbsolute(rel) ? null : { top, rel };
+  } catch {
+    return null;
+  }
+}
+
+function existingAncestor(p: string): string {
+  return existsSync(p) || path.dirname(p) === p ? p : existingAncestor(path.dirname(p));
 }
 
 export function stagedFiles(cwd: string): string[] {

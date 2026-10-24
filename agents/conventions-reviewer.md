@@ -16,9 +16,8 @@ In gate mode the governing CLAUDE.md set for the staged files, and the capped st
 already loaded below your brief — do not search for either. Those CLAUDE.md files are the only rule
 sources. A file a CLAUDE.md names or imports (an `@AGENTS.md` line, a linked doc) is not loaded and
 does not govern: never cite a rule from AGENTS.md, a README, a skill, or a CLAUDE.md that is not an
-ancestor of the reviewed file — the gate discards such a VIOLATION. You have NO Bash: do not try to run
-`git diff`, a checklist script, or anything else — everything you need is on stdin or in the
-prompt.
+ancestor of the reviewed file — the gate discards such a VIOLATION. Do not run `git diff`, a
+checklist script, tests or builds — the diff is on stdin and the rules are in the prompt.
 
 Only files under a declared review root (`scanRoots` / `review.backendRoots` /
 `review.frontendRoots` in `guard.config.json`) ever reach you — a rule governing an undeclared
@@ -32,7 +31,7 @@ directory and everything below it — NEVER a sibling directory. A file two leve
 governed by several files at once (global, root, nested), and ALL of them apply together;
 finding a nearer one never cancels a farther one.
 
-Interactively you have NO Bash either, so you cannot run `git diff` or any other git command. The
+Interactively you have NO Bash, so you cannot run `git diff` or any other git command. The
 dispatcher must paste the diff into your prompt: the `git diff` output for the reviewed change,
 plus the full contents of every untracked file it adds. Judge only that pasted diff. When
 dispatched interactively with no diff in the prompt — only a path, a branch name, or an

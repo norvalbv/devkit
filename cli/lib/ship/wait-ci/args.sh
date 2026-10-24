@@ -6,6 +6,8 @@
 
 SHIP_WAIT_CI_MIN_S=60
 SHIP_WAIT_CI_MAX_S=7200
+# The caller's exit after the wait: 0, or under WAIT_CI_STRICT=1 a 5 (not passed) or a signal status.
+WAIT_CI_STATUS=0
 
 # ship_validate_wait_ci <wait-ci> <timeout> <timeout-was-set> <required> [<dry-gates>]
 ship_validate_wait_ci() {
@@ -15,6 +17,9 @@ ship_validate_wait_ci() {
   fi
   if [ "$required" -eq 1 ] && [ "$wait_ci" -eq 0 ]; then
     echo "--wait-ci-required has no effect without --wait-ci" >&2; return 1
+  fi
+  if [ "${WAIT_CI_STRICT:-0}" -eq 1 ] && [ "$wait_ci" -eq 0 ]; then
+    echo "--wait-ci-strict has no effect without --wait-ci" >&2; return 1
   fi
   if [ "$wait_ci" -eq 1 ] && [ "$dry_gates" -eq 1 ]; then
     echo "--wait-ci waits on a PR's checks, and --dry-gates never opens a PR" >&2; return 1
@@ -36,13 +41,15 @@ ship_validate_wait_ci() {
 # "did not run" from "the ship died before it could".
 ship_wait_ci_not_run() {
   echo "ship: ci-outcome=not-run pr=${1:-?} reason=$2" >&2
+  [ "${WAIT_CI_STRICT:-0}" -eq 0 ] || { WAIT_CI_STATUS=5; SHIP_END_CAUSE=ci_not_green; }
 }
 
 # ship_run_wait_ci <pr-number> <repo> <timeout> <pr-url> [<required>]
 # Runs LAST, after every artifact is durable. Announces the PR first: a signal here exits 130 through
 # the managed wrapper whatever bash does, so the abort has to be self-describing before it can happen.
+# Always returns 0 and records WAIT_CI_STATUS instead: the callers run under `set -e` with work left.
 ship_run_wait_ci() {
-  local pr=$1 repo=$2 timeout=$3 url=$4 required=${5:-0} script
+  local pr=$1 repo=$2 timeout=$3 url=$4 required=${5:-0} script req='' strict='' rc=0
   ship_queue_slot_release
   if [ -z "$pr" ]; then
     ship_wait_ci_not_run "" pr-number-unresolved
@@ -50,9 +57,13 @@ ship_run_wait_ci() {
   fi
   echo "ship: the PR is open at $url and the ship is complete; waiting on its checks (Ctrl-C is safe)" >&2
   script="$SCRIPT_DIR/wait-ci/wait.mts"; [ -f "$script" ] || script="$SCRIPT_DIR/wait-ci/wait.mjs"
-  if [ "$required" -eq 1 ]; then
-    node "$script" --pr "$pr" --repo "$repo" --timeout "$timeout" --required || true
-  else
-    node "$script" --pr "$pr" --repo "$repo" --timeout "$timeout" || true
-  fi
+  [ "$required" -eq 0 ] || req=--required
+  [ "${WAIT_CI_STRICT:-0}" -eq 0 ] || strict=--strict
+  node "$script" --pr "$pr" --repo "$repo" --timeout "$timeout" ${req:+"$req"} ${strict:+"$strict"} || rc=$?
+  [ -n "$strict" ] || return 0
+  # Only 0 and the documented 130/143 signals survive; a crash or kill must not read as another code.
+  case "$rc" in 0|130|143) ;; *) rc=5 ;; esac
+  WAIT_CI_STATUS=$rc
+  [ "$rc" -ne 5 ] || SHIP_END_CAUSE=ci_not_green
+  [ "$rc" -ne 5 ] || echo "ship: --wait-ci-strict exits 5 — the PR is open at $url; its CI is not known green. Do NOT --resume." >&2
 }

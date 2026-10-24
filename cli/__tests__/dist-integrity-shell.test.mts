@@ -435,7 +435,7 @@ describe('inspectDistIntegrity over shell edges', () => {
       'cli/lib/ship/b.sh',
     ]);
 
-    // Briefing b.sh's SOURCE makes generatedPath map dist/.../b.sh into `required` on its own, so
+    // Briefing b.sh's SOURCE makes distArtifact map dist/.../b.sh into `required` on its own, so
     // this case already blocked before sc-2522. Kept to pin that the walk did not regress it.
     expect(report.untracked).toEqual(['dist/cli/lib/ship/b.sh']);
   });

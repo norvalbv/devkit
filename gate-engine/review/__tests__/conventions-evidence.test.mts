@@ -62,7 +62,7 @@ describe('conventions evidence completeness', () => {
     expect(call.args).toContain(
       'Read,Grep,Glob,mcp__codebase__*,mcp__context7__*,mcp__autonomous_bugs__*',
     );
-    expect(call.args[1]).toContain('use Read to inspect every available in-scope staged file');
+    expect(call.args[1]).toContain('read every available in-scope staged file');
     expect(call.args[1]).toContain('must not produce a semantic FAIL');
   });
 
@@ -89,7 +89,7 @@ describe('conventions evidence completeness', () => {
     expect(exec).toHaveBeenCalledOnce();
     const [call] = exec.mock.calls[0];
     expect(call.args[1]).toContain('[TRUNCATED: CLAUDE.md');
-    expect(call.args[1]).toContain('use Read to inspect every named rule file');
+    expect(call.args[1]).toContain('read every named rule file');
     expect(call.args[1]).toContain('Never treat incomplete evidence alone as a violation');
   });
 

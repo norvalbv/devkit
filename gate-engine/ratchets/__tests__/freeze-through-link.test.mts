@@ -175,6 +175,18 @@ describe('overlay freeze through a link into another checkout', () => {
     expect(lines.files['src/legacy.ts']).toBe(90);
   });
 
+  // A retired copy reached through a link belongs to the other checkout, so the freeze keeps it.
+  it("freezes but keeps the primary's untracked retired copy behind a linked eslint/", () => {
+    const primary = seedRepo();
+    write(primary, 'eslint/baselines/size-lines.json', '{"files":{}}\n');
+    const worktree = linkedWorktree(primary);
+    link(primary, worktree, 'eslint');
+    write(worktree, 'src/legacy.ts', big(90));
+    expect(run(SIZE_BIN, worktree, 'freeze').status).toBe(0);
+    expect(bytes(primary, 'eslint/baselines/size-lines.json')).toBe('{"files":{}}\n');
+    expect(JSON.parse(bytes(worktree, LINES)).files['src/legacy.ts']).toBe(90);
+  });
+
   it('freezes in the primary checkout as before', () => {
     const primary = seedRepo();
     write(primary, 'src/legacy.ts', big(90));

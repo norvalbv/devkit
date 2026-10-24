@@ -10,7 +10,7 @@ const REVIEWER = 'correctness-reviewer';
 const LENS = 'error-and-edge-classification';
 const FP = 'ec3f343cfc74';
 const ONE_ID = [{ lens: LENS, fp: FP }];
-const WAIVE = `guard-review waive ${REVIEWER}:${LENS} ${FP} "why this is not a real defect"`;
+const WAIVE = `guard-review waive ${REVIEWER}:${LENS} ${FP} --kind 'false-positive|deferred|pre-existing|accepted' "why this finding is waived"`;
 const MANY = 'issues, each listed in the log';
 
 const ev = (o: GateEvent): GateEvent => ({ ship_id: SHIP, ...o });
