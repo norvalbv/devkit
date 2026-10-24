@@ -36,3 +36,4 @@ created: 2026-10-10
 **Scope:** cli/commands/release.mts
 **Source:** collab
 **Evidence-change:** One day of use: the local suite repeated a green CI verdict at over an hour per attempt, failed on environment-only causes twice, and the owner released with --no-verify; the owner then delegated the fix.
+- 2026-10-17 — devkit release takes --base <branch>, so it runs from a clean detached worktree at origin/<branch> (ship's --base convention: the flag wins, origin/ is stripped, a detached HEAD without it refuses). The tip check and CI read are unchanged, which ends the 'defence in depth until devkit release can run from a clean worktree' caveat. sc-5181.
