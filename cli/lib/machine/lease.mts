@@ -20,7 +20,8 @@ const MAX_SLOTS = 8;
 /** A lease no `devkit machine` command has touched for this long is reaped by the next `up`. */
 export const IDLE_MS = 30 * 60 * 1000;
 
-const leaseSchema = z.strictObject({
+// Loose, so a lease rewritten here keeps the keys another devkit version on this Mac wrote.
+const leaseSchema = z.looseObject({
   id: z.string().min(1),
   slot: z.number().int().nonnegative(),
   worktree: z.string().min(1),
@@ -28,7 +29,17 @@ const leaseSchema = z.strictObject({
   pgid: z.number().int().positive().nullable(),
   identity: z.string().nullable(),
   seeded: z.boolean(),
-  starter: z.strictObject({ pid: z.number().int().positive(), identity: z.string() }).nullable(),
+  starter: z.looseObject({ pid: z.number().int().positive(), identity: z.string() }).nullable(),
+  /** Full mode's container and the host ports of its live view and DevTools. */
+  box: z
+    .looseObject({
+      name: z.string().min(1),
+      view: z.number().int(),
+      cdp: z.number().int(),
+      password: z.string(),
+    })
+    .nullable()
+    .default(null),
   touchedAt: z.number(),
 });
 export type Lease = z.infer<typeof leaseSchema>;
@@ -89,24 +100,24 @@ export function findLease(root: string, worktree: string): Lease | undefined {
 const writeLease = (root: string, lease: Lease) =>
   writeFileAtomic(holderFile(root, lease.slot), `${JSON.stringify(lease, null, 2)}\n`);
 
-/** Stops a lease's app group; given the leader identity recorded when it started. */
-export type KillGroup = (pgid: number, identity: string | null) => void;
+/** Stops what a lease started: its app group and its box. */
+export type KillLease = (lease: Lease) => void;
 
-/** Stop a lease's process group (by the caller's `kill`) and delete its slot directory. */
-function reap(root: string, slot: number, lease: Lease | null, kill: KillGroup) {
-  if (lease?.pgid) kill(lease.pgid, lease.identity);
+/** Stop a lease's processes (by the caller's `kill`) and delete its slot directory. */
+function reap(root: string, slot: number, lease: Lease | null, kill: KillLease) {
+  if (lease) kill(lease);
   rmSync(slotDir(root, slot), { recursive: true, force: true });
 }
 
 export interface LeaseOptions {
   root: string;
-  kill: KillGroup;
+  kill: KillLease;
   now?: number;
 }
 
 /** The live leases left once abandoned ones (worktree gone, unreadable, idle past IDLE_MS) are
  * reaped, so a forgotten machine is freed by the next `up` anywhere. */
-function reclaim(root: string, now: number, kill: KillGroup): Lease[] {
+function reclaim(root: string, now: number, kill: KillLease): Lease[] {
   for (const { slot, lease } of slots(root))
     if (!lease || !existsSync(lease.worktree) || now - lease.touchedAt > IDLE_MS)
       reap(root, slot, lease, kill);
@@ -143,7 +154,7 @@ export function acquireLease(worktree: string, { root, kill, now = Date.now() }:
     const slot = lowestFree(live);
     mkdirSync(slotDir(root, slot), { recursive: true });
     const port = PORT_BASE + slot * PORTS_PER_SLOT;
-    const blank = { pgid: null, identity: null, seeded: false, starter: null };
+    const blank = { pgid: null, identity: null, seeded: false, starter: null, box: null };
     const lease: Lease = { id: randomUUID(), slot, worktree, port, ...blank, touchedAt: now };
     writeLease(root, lease);
     return { lease, fresh: true };
@@ -169,26 +180,28 @@ export function updateLease(root: string, ref: LeaseRef, patch: LeasePatch): Lea
   });
 }
 
-/** What `up` may do with a slot: start its app, or not, because it runs, another `up` is starting it,
- * or the slot was released meanwhile. */
+/** What `up` may do with a slot: start it, or not, because it runs, another `up` is starting it, or
+ * the slot was released meanwhile. */
 export type StartClaim = 'claimed' | 'running' | 'busy' | 'released';
 
-/** Under the lock, claim the right to start this slot's app. A starter that died is taken over. */
+/** Under the lock, claim the right to start this slot's app and box. A starter that died is taken
+ * over. */
 export function claimStart(
   root: string,
   ref: LeaseRef,
-  running: (pgid: number, identity: string | null) => boolean,
+  running: (lease: Lease) => boolean,
 ): StartClaim {
   return withSlotsLock(root, () => {
     const lease = readOwn(root, ref);
     if (!lease) return 'released';
-    if (lease.pgid && running(lease.pgid, lease.identity)) return 'running';
+    // A live starter comes first: what it is starting may already look up while it is not ready.
     const { starter } = lease;
     if (
       starter &&
       !processOwnerIsProvablyGone({ pid: starter.pid, processStart: starter.identity })
     )
       return 'busy';
+    if (running(lease)) return 'running';
     const me = { pid: process.pid, identity: processStartIdentity() };
     writeLease(root, { ...lease, starter: me, touchedAt: Date.now() });
     return 'claimed';
