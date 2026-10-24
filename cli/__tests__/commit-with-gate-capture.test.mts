@@ -195,6 +195,20 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     expect(existsSync(join(root, 'telemetry/gate-events.jsonl'))).toBe(false);
   });
 
+  for (const dryGates of [false, true]) {
+    it(`disables auto-maintenance for the gated commit (dry-gates=${dryGates})`, () => {
+      const probe = 'echo "MAINT_AUTO=$(git config --get maintenance.auto)" >&2\n';
+      const { root, wt, base } = fixture(true, probe);
+      // The suite's git template pins maintenance.auto=false; re-enable it so only ship's -c can disable it.
+      git(root, 'config', 'maintenance.auto', 'true');
+
+      const result = runCommit(root, wt, base, false, dryGates);
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stderr).toContain('MAINT_AUTO=false');
+    });
+  }
+
   for (const inherited of ['0', '1']) {
     it(`does not let an inherited dry-gates=${inherited} switch a reship-mode commit`, () => {
       const { root, wt, base } = fixture(true);
