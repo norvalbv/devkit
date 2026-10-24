@@ -19,10 +19,23 @@ const REAP_EVERY_MS = 250; // a liveness check can fork `ps`, so a contended wai
 
 type IsGone = (owner: { pid: number; processStart: string }) => boolean;
 
+/** The process a lock is held for: its pid plus the start identity that defeats pid reuse. */
+export interface LockOwner {
+  pid: number;
+  identity: string;
+}
+
 export interface LockOptions {
   label: string;
   waitMs?: number;
   isGone?: IsGone;
+  /** Defaults to this process. A bash caller that holds the lock across statements passes its own. */
+  owner?: LockOwner;
+}
+
+interface Attempt {
+  nonce: string;
+  owner: LockOwner;
 }
 
 /** A contended lock that stayed held past the wait. `holderPid` is null when no holder was readable. */
@@ -90,12 +103,12 @@ function removeIfEmpty(dir: string): void {
 }
 
 /** One attempt: move a directory holding our nonce file onto `dir`. Fails while `dir` is held. */
-function tryTake(dir: string, nonce: string): boolean {
+function tryTake(dir: string, { nonce, owner }: Attempt): boolean {
   // Sibling names end in `.lock` so a consumer's `.devkit/*.lock` ignore also hides crash litter.
   const staged = `${dir}.new-${nonce}.lock`;
   mkdirSync(staged, { recursive: true }); // a parent that can never exist throws here, at once
   try {
-    writeFileSync(join(staged, nonce), `${process.pid}\n${ownIdentity()}`);
+    writeFileSync(join(staged, nonce), `${owner.pid}\n${owner.identity}`);
     renameSync(staged, dir);
     return true;
   } catch (cause) {
@@ -117,8 +130,8 @@ export function reapIfDead(dir: string, isGone: IsGone = processOwnerIsProvablyG
 }
 
 /** Take the lock, or on contention reap a dead holder (first time, then every REAP_EVERY_MS). */
-function poll(dir: string, nonce: string, isGone: IsGone, reapedAt: number): number | 'taken' {
-  if (tryTake(dir, nonce)) return 'taken';
+function poll(dir: string, attempt: Attempt, isGone: IsGone, reapedAt: number): number | 'taken' {
+  if (tryTake(dir, attempt)) return 'taken';
   if (Date.now() - reapedAt < REAP_EVERY_MS) return reapedAt;
   reapIfDead(dir, isGone);
   return Date.now();
@@ -127,22 +140,33 @@ function poll(dir: string, nonce: string, isGone: IsGone, reapedAt: number): num
 const heldError = (dir: string, label: string) =>
   new LockHeldError(dir, label, readHolder(dir)?.pid ?? null);
 
-/** Run `fn` under the lock at `dir`. Throws LockHeldError rather than ever running unlocked. */
-export function withProcessLock<T>(
+/** Take the lock for `owner` and return its nonce. Throws LockHeldError rather than ever running unlocked. */
+export function acquireProcessLock(
   dir: string,
-  fn: () => T,
-  { label, waitMs = WAIT_MS, isGone = processOwnerIsProvablyGone }: LockOptions,
-): T {
-  if (held.has(dir)) throw heldError(dir, label);
-  const nonce = randomUUID();
+  { label, waitMs = WAIT_MS, isGone = processOwnerIsProvablyGone, owner }: LockOptions,
+): string {
+  const attempt = {
+    nonce: randomUUID(),
+    owner: owner ?? { pid: process.pid, identity: ownIdentity() },
+  };
   const deadline = Date.now() + waitMs;
   let reapedAt = Number.NEGATIVE_INFINITY;
-  for (let step = poll(dir, nonce, isGone, reapedAt); step !== 'taken';) {
+  for (let step = poll(dir, attempt, isGone, reapedAt); step !== 'taken';) {
     reapedAt = step;
     if (Date.now() > deadline) throw heldError(dir, label);
     sleepSync(RETRY_MS);
-    step = poll(dir, nonce, isGone, reapedAt);
+    step = poll(dir, attempt, isGone, reapedAt);
   }
+  return attempt.nonce;
+}
+
+/** Release only the acquisition `nonce` names; a lock re-taken by anyone else is untouched. */
+export const releaseProcessLock = removeHolder;
+
+/** Run `fn` under the lock at `dir`. Throws LockHeldError rather than ever running unlocked. */
+export function withProcessLock<T>(dir: string, fn: () => T, options: LockOptions): T {
+  if (held.has(dir)) throw heldError(dir, options.label);
+  const nonce = acquireProcessLock(dir, options);
   held.add(dir);
   try {
     const result = fn();
@@ -152,6 +176,6 @@ export function withProcessLock<T>(
     return result;
   } finally {
     held.delete(dir);
-    removeHolder(dir, nonce);
+    releaseProcessLock(dir, nonce);
   }
 }
