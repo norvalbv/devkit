@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadChangedSet } from '../changed-files.mts';
 
 // loadChangedSet decides WHICH files the scoped (`--changed`) dup + clone gates judge, so its
@@ -16,6 +16,16 @@ const git = (...args: string[]) =>
   execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
 
 const write = (name: string, body: string) => writeFileSync(join(repo, name), body);
+
+// Stages `<bytes>.ts` straight into the index: APFS refuses a non-UTF-8 name on disk.
+function indexNonUtf8(g: (args: string[], input?: Buffer) => Buffer, bytes: number[]): void {
+  const blob = g(['hash-object', '-w', '--stdin'], Buffer.from('x\n')).toString().trim();
+  const name = Buffer.from([...bytes, 0x2e, 0x74, 0x73]);
+  g(
+    ['update-index', '-z', '--index-info'],
+    Buffer.concat([Buffer.from(`100644 ${blob}\t`), name, Buffer.from([0])]),
+  );
+}
 
 beforeAll(() => {
   repo = mkdtempSync(join(tmpdir(), 'changed-files-'));
@@ -69,25 +79,46 @@ describe('loadChangedSet', () => {
     expect(changed.has(' edge.ts')).toBe(true);
   });
 
-  // A tracked non-UTF-8 name missing from disk shows only in the UNSTAGED list. Treating that
-  // unreadable list as empty would keep partially-staged files and widen the scoped gate.
-  it('stands down to an empty set when the unstaged list holds a non-UTF-8 name', () => {
+  // A committed non-UTF-8 name can never be on disk under APFS, so it stays in the UNSTAGED list
+  // for good. It must not empty the scope, and the partially-staged exclusion must still hold.
+  it('drops a committed non-UTF-8 name on its own, silently, keeping the scope exact', () => {
     const root = mkdtempSync(join(tmpdir(), 'changed-files-nonutf8-'));
     const g = (args: string[], input?: Buffer) =>
       execFileSync('git', args, { cwd: root, input, stdio: ['pipe', 'pipe', 'ignore'] });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       g(['init', '-q']);
-      const blob = g(['hash-object', '-w', '--stdin'], Buffer.from('x\n')).toString().trim();
-      const name = Buffer.from([0xff, 0x2e, 0x74, 0x73]);
-      g(
-        ['update-index', '-z', '--index-info'],
-        Buffer.concat([Buffer.from(`100644 ${blob}\t`), name, Buffer.from([0])]),
-      );
+      indexNonUtf8(g, [0xff]);
+      writeFileSync(join(root, 'partial.ts'), 'export const p = 1;\n');
+      g(['add', 'partial.ts']);
       g(['-c', 'user.email=t@e', '-c', 'user.name=t', 'commit', '-qm', 'base']);
       writeFileSync(join(root, 'staged.ts'), 'export const s = 1;\n');
-      g(['add', 'staged.ts']);
-      expect(loadChangedSet(root)).toEqual(new Set());
+      writeFileSync(join(root, 'partial.ts'), 'export const p = 2;\n');
+      g(['add', 'staged.ts', 'partial.ts']);
+      writeFileSync(join(root, 'partial.ts'), 'export const p = 3;\n');
+      expect(loadChangedSet(root)).toEqual(new Set(['staged.ts']));
+      expect(error).not.toHaveBeenCalled();
     } finally {
+      error.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('drops a staged non-UTF-8 name, keeps the rest, and says so once', () => {
+    const root = mkdtempSync(join(tmpdir(), 'changed-files-nonutf8-staged-'));
+    const g = (args: string[], input?: Buffer) =>
+      execFileSync('git', args, { cwd: root, input, stdio: ['pipe', 'pipe', 'ignore'] });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      g(['init', '-q']);
+      writeFileSync(join(root, 'ok.ts'), 'export const ok = 1;\n');
+      g(['add', 'ok.ts']);
+      indexNonUtf8(g, [0xfe]);
+      expect(loadChangedSet(root)).toEqual(new Set(['ok.ts']));
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(String(error.mock.calls[0]?.[0])).toContain('1 staged path(s) not valid UTF-8');
+    } finally {
+      error.mockRestore();
       rmSync(root, { recursive: true, force: true });
     }
   });
