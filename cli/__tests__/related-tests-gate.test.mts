@@ -1,9 +1,10 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  forcedTests,
   noteUnmapped,
   relatedPaths,
   runRelatedTests,
@@ -19,6 +20,7 @@ function fakeExec(status: number | null) {
 }
 
 const REACH = 'cli/__tests__/test-graph-reach.test.mts';
+const SCRUB = 'cli/__tests__/vitest-setup-env-scrub.test.mts';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -71,6 +73,34 @@ describe('relatedPaths', () => {
   });
 });
 
+describe('forcedTests', () => {
+  it('forces the env-scrub test for a top-level ship script or the setup file it binds', () => {
+    expect(forcedTests(['cli/a.mts', 'cli/lib/ship/reship.sh'])).toEqual([SCRUB]);
+    expect(forcedTests(['vitest.setup.mjs'])).toEqual([SCRUB]);
+  });
+
+  // The scrub test also reads both configs to pin that they share the setup file.
+  it('forces the env-scrub test for either vitest config it reads', () => {
+    expect(forcedTests(['vitest.config.mjs'])).toEqual([SCRUB]);
+    expect(forcedTests(['vitest.e2e.config.mjs'])).toEqual([SCRUB]);
+    expect(forcedTests(['templates/app/vitest.config.mjs'])).toEqual([]);
+  });
+
+  // The scrub test scans cli/lib/ship at the top level only, so a deeper script is not its input.
+  it('forces nothing for a nested or mirrored script, or a module', () => {
+    expect(
+      forcedTests(['cli/lib/ship/review/x.sh', 'dist/cli/lib/ship/reship.sh', 'cli/a.mts']),
+    ).toEqual([]);
+  });
+
+  it('names forced tests that exist, so a rename cannot silently select nothing', () => {
+    const root = join(import.meta.dirname, '..', '..');
+    const tests = forcedTests(['cli/lib/ship/reship.sh', 'vitest.setup.mjs']);
+    expect(tests).not.toEqual([]);
+    for (const test of tests) expect(existsSync(join(root, test)), test).toBe(true);
+  });
+});
+
 describe('runRelatedTests', () => {
   it('passes without running vitest when nothing is staged', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -97,6 +127,30 @@ describe('runRelatedTests', () => {
     const exec = fakeExec(0);
     runRelatedTests('/repo', { staged: [REACH], exec });
     expect(exec.mock.calls[0][1]).toEqual(['related', '--run', '--reporter=dot', REACH]);
+  });
+
+  it('adds the forced test once, however many ship scripts are staged and when itself staged', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exec = fakeExec(0);
+    const staged = ['cli/lib/ship/reship.sh', SCRUB, 'cli/lib/ship/b.sh'];
+    runRelatedTests('/repo', { staged, exec });
+    expect(exec.mock.calls[0][1]).toEqual([
+      'related',
+      '--run',
+      '--reporter=dot',
+      SCRUB,
+      'cli/lib/ship/b.sh',
+      'cli/lib/ship/reship.sh',
+      REACH,
+    ]);
+  });
+
+  it('runs the forced test when the setup file is staged alone', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exec = fakeExec(1);
+    expect(runRelatedTests('/repo', { staged: ['vitest.setup.mjs'], exec })).toBe(1);
+    expect(exec.mock.calls[0][1]).toEqual(['related', '--run', '--reporter=dot', SCRUB, REACH]);
+    expect(log).toHaveBeenCalledWith('related-tests: 0 staged path(s), 1 forced');
   });
 
   it('blocks when vitest is killed or cannot spawn', () => {
@@ -180,6 +234,26 @@ describe('noteUnmapped', () => {
     ]);
   });
 
+  it('does not report a forced test as not run', () => {
+    const grep = vi.fn(
+      (_root: string, _needles: string[]): Hits =>
+        new Map([['reship.sh', [SCRUB, 'cli/__tests__/reship.test.mts']]]),
+    );
+    expect(logged(['cli/lib/ship/reship.sh'], grep)).toEqual([
+      'related-tests: 1 staged path(s) have no import-graph tests — not run here, CI will:',
+      '  cli/lib/ship/reship.sh ← reship.test.mts',
+    ]);
+  });
+
+  // A nested script forces nothing, so a test naming it really was not run and stays listed.
+  it('still lists the scrub test for a staged path that did not force it', () => {
+    const grep = vi.fn((_root: string, _needles: string[]): Hits => new Map([['x.sh', [SCRUB]]]));
+    expect(logged(['cli/lib/ship/review/x.sh'], grep)).toEqual([
+      'related-tests: 1 staged path(s) have no import-graph tests — not run here, CI will:',
+      '  cli/lib/ship/review/x.sh ← vitest-setup-env-scrub.test.mts',
+    ]);
+  });
+
   // One git lookup per run, however many paths: a docs commit stages dozens.
   it('looks every unmapped basename up in one batch, once each', () => {
     const grep = vi.fn((_root: string, _needles: string[]): Hits => new Map());
@@ -234,5 +308,19 @@ describe('related-tests entrypoint', () => {
     expect(r.stdout).not.toContain('check.sh');
     // `[1]` is literal in a name, never a glob class matching x1.sh.
     expect(r.stdout).not.toContain('x[1].sh');
+  });
+
+  // relatedPaths drops vitest.setup.mjs, so the note must read the raw staged set to see it.
+  it('does not list a test the staged setup file forced as not run', () => {
+    const repo = editedRepo();
+    mkdirSync(join(repo, 'cli', '__tests__'), { recursive: true });
+    mkdirSync(join(repo, 'cli', 'lib', 'ship', 'review'), { recursive: true });
+    writeFileSync(join(repo, SCRUB), "read('cli/lib/ship/review/x.sh');\n");
+    writeFileSync(join(repo, 'cli', 'lib', 'ship', 'review', 'x.sh'), 'echo hi\n');
+    writeFileSync(join(repo, 'vitest.setup.mjs'), 'export {};\n');
+    git(repo, 'add', '.');
+    const r = spawnSync(process.execPath, [GATE], { cwd: repo, encoding: 'utf8' });
+    expect(r.stdout).toContain(', 1 forced');
+    expect(r.stdout).not.toContain('not run here');
   });
 });
