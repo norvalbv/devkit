@@ -24,7 +24,8 @@
 import { execFileSync } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
-import { cmpSemver, DEP } from '../../../commands/update.mts';
+import { cmpSemver } from '../../../../gate-engine/devkit-version.mts';
+import { DEP } from '../../../commands/update.mts';
 import { detectGitRoot } from '../../detect-git-root.mts';
 import { canonicalPath, packageDir, readJson } from '../../fs-helpers.mts';
 import { isDevkitRepo } from '../../husky/self-host.mts';
@@ -269,6 +270,13 @@ export function printSkewBanner(skew: RunnerSkew): void {
   );
   console.log(
     '    An older devkit rewrites .devkit/oxc in ITS shape, which the pinned gate then reports as stale.',
+  );
+}
+
+/** Overlay only: a newer global is the normal state after any sibling overlay upgrades it. */
+export function printNewerOverlayNotice(skew: RunnerSkew): void {
+  console.log(
+    `  ℹ devkit runner: global devkit ${skew.running} is newer than this overlay's devkitRef v${skew.pinned} — commits here are judged by ${skew.running}. Run \`devkit upgrade\` to re-sync the pin.`,
   );
 }
 

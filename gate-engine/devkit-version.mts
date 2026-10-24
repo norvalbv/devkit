@@ -38,3 +38,25 @@ export function devkitVersion(): string {
   cachedVersion = LEGACY_DEVKIT_VERSION;
   return cachedVersion;
 }
+
+/** -1 / 0 / 1 comparing two x.y.z strings numerically. */
+export function cmpSemver(a: string, b: string): number {
+  const pa = a.split('.');
+  const pb = b.split('.');
+  for (let i = 0; i < 3; i++) {
+    // BigInt, not Number: past MAX_SAFE_INTEGER two distinct versions round equal, and "equal" is
+    // the permissive answer everywhere (an older runner would read as in-sync).
+    let left: bigint;
+    let right: bigint;
+    try {
+      left = BigInt(pa[i] ?? '0');
+      right = BigInt(pb[i] ?? '0');
+    } catch {
+      // NaN, not 0: `update` reads `cmpSemver(latest, current) <= 0` as "up to date", so 0 would
+      // skip a real update while NaN fails the comparison and proceeds.
+      return Number.NaN;
+    }
+    if (left !== right) return left < right ? -1 : 1;
+  }
+  return 0;
+}
