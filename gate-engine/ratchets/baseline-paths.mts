@@ -1,6 +1,7 @@
 import {
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -9,7 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { overlayInstall } from '../overlay-mode.mts';
 import {
@@ -49,9 +50,10 @@ const LEGACY_BY_CANONICAL = new Map<string, string>(
 function discardRetiredCopy(root: string, canonical: string, stage: boolean): void {
   const legacy = LEGACY_BY_CANONICAL.get(canonical);
   if (!legacy) return;
-  // Overlay installs promise not to dirty the tree they land in, and `.git/info/exclude` cannot
-  // hide a deletion: a TRACKED retired copy is the consumer's committed state, so leave it.
-  if (overlayInstall(root) && indexTracksBaseline(root, legacy)) return;
+  // Overlay leaves a TRACKED retired copy (`.git/info/exclude` cannot hide a deletion) and one
+  // reached through a link into another checkout: neither is this checkout's to delete.
+  if (overlayInstall(root) && (indexTracksBaseline(root, legacy) || leavesCheckout(root, legacy)))
+    return;
   rmSync(join(root, legacy), { force: true });
   if (stage) stageBaseline(root, legacy);
 }
@@ -177,12 +179,38 @@ function replaceCanonical(canonicalFile: string, contents: string): void {
   }
 }
 
-/** The real path a canonical name resolves to; the name itself when nothing exists there yet. */
-function resolvedTarget(canonicalFile: string): string {
+/** The real path a name resolves to, through its nearest existing ancestor when it is missing. */
+function resolvedTarget(path: string): string {
   try {
-    return realpathSync(canonicalFile);
+    return realpathSync(path);
   } catch {
-    return join(realpathSync(dirname(canonicalFile)), basename(canonicalFile));
+    return join(resolvedTarget(dirname(path)), basename(path));
+  }
+}
+
+const isSymlink = (path: string) => lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink();
+
+/** Does `rel` resolve, through any link, to a path outside this checkout? */
+function leavesCheckout(root: string, rel: string): boolean {
+  const out = relative(realpathSync(root), resolvedTarget(join(root, rel)));
+  return out === '..' || out.startsWith(`..${sep}`) || isAbsolute(out);
+}
+
+/** An overlay freeze writes only this checkout's baselines: exit 2 when a link carries one elsewhere. */
+export function refuseFreezeThroughLink(root: string, bin: string, canonicals: string[]): void {
+  if (!overlayInstall(root)) return;
+  for (const canonical of canonicals) {
+    if (!leavesCheckout(root, canonical)) continue;
+    const parts = canonical.split('/');
+    const prefixes = parts.map((_, i) => parts.slice(0, i + 1).join('/'));
+    const link = prefixes.find((prefix) => isSymlink(join(root, prefix))) ?? canonical;
+    console.error(
+      `🚫 ${bin} freeze: ${link} links into another checkout, so freezing here would rewrite that checkout's baseline.`,
+    );
+    console.error(
+      `   Remove the link (rm '${link}'), then run \`devkit doctor --fix\` to give this worktree its own copy.`,
+    );
+    process.exit(2);
   }
 }
 
