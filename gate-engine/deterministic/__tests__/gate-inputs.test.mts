@@ -38,7 +38,6 @@ describe('gate-input registry', () => {
       'fallow.toml',
       '.fallow.toml',
       '.fallow',
-      'fallow-baselines',
       '.decisions',
       FANOUT_BASELINE,
       LINES_BASELINE,
@@ -122,7 +121,6 @@ describe('gate-input registry', () => {
       paths(repo()).filter((path) => gateInputFor(path)?.[flag]);
     expect(flagged('mutable')).toEqual([
       '.fallow',
-      'fallow-baselines',
       '.decisions',
       FANOUT_BASELINE,
       LINES_BASELINE,

@@ -52,7 +52,6 @@ export const FIXED_GATE_INPUTS: readonly GateInput[] = [
   { path: CONFIG_FILENAME, kind: 'file', share: 'clone', overlayWrites: true },
   ...FALLOW_CONFIG_FILES.map((path): GateInput => ({ path, kind: 'file', share: 'clone' })),
   FALLOW_CACHE,
-  { path: 'fallow-baselines', kind: 'dir', share: 'branch', mutable: true, overlayWrites: true },
   {
     path: '.decisions',
     kind: 'dir',

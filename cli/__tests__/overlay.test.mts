@@ -51,14 +51,13 @@ const preLedgerAll = () => {
   return { ...selection, guards: selection.guards.filter((guard) => guard !== 'comments') };
 };
 
-// Stub fallow's external CLI (detect/install/baselines) so overlay's fallow flow runs without
+// Stub fallow's external CLI (detect/install) so overlay's fallow flow runs without
 // a real `fallow` binary or a global network install. detectFallow → present, so resolveOverlayFallow
 // wires the gate without installing. Plain fns (not vi.fn) so afterEach's restoreAllMocks can't clear them.
 vi.mock('../lib/install/install-fallow.mts', async (importOriginal) => ({
   ...(await importOriginal()),
   detectFallow: () => ({ available: true, version: '2.89.0' }),
   installFallow: () => ({ ok: true, method: 'bun', message: 'installed fallow@2.89.0 via bun' }),
-  saveFallowBaselines: () => ({ ok: true }),
 }));
 
 // For the overlay-upgrade suite below: keep cmpSemver / needsRerun / repoUrl REAL, but stub the
@@ -843,7 +842,7 @@ describe('overlay (local-only) install', () => {
     ).toBe('');
   });
 
-  it('wires fallow as an inline hook gate (not `fallow hooks install`); baselines + cache hidden', async () => {
+  it('wires fallow as an inline hook gate (not `fallow hooks install`); cache hidden, no baselines', async () => {
     const root = workRepo();
     await applyInit(root, {
       stack: 'react-app',
@@ -857,7 +856,8 @@ describe('overlay (local-only) install', () => {
     expect(hook).not.toContain('fallow hooks install'); // NOT fallow's own (shadowed) hook
     const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
     expect(exclude).toContain('.fallow/');
-    expect(exclude).toContain('fallow-baselines/');
+    expect(exclude).not.toContain('fallow-baselines');
+    expect(existsSync(join(root, 'fallow-baselines'))).toBe(false);
     // sc-2274: the decisions embedding cache is local too, so ship never asks anyone to commit it
     expect(exclude).toContain('.decisions/index.json\n');
     expect(exclude).toContain('.decisions/index.json.*.tmp');

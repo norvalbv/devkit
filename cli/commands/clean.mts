@@ -121,11 +121,9 @@ function extendsDevkit(path: string): boolean {
 
 // Overlay leftovers when the config (and maybe the manifests) are gone — an orphaned or partial
 // clean. The tell-tale is a devkit-BUNDLED skill dir present-and-UNTRACKED under a surface (package
-// mode commits its skills, so a tracked one isn't a stray), or a surviving .devkit / fallow-baselines.
+// mode commits its skills, so a tracked one isn't a stray), or a surviving .devkit.
 function hasOverlayStrays(gitRoot: string): boolean {
-  if (existsSync(join(gitRoot, '.devkit')) || existsSync(join(gitRoot, 'fallow-baselines'))) {
-    return true;
-  }
+  if (existsSync(join(gitRoot, '.devkit'))) return true;
   if (hasOrphanExcludeBlock(gitRoot)) return true;
   const skillsSrc = join(packageDir(), 'skills');
   const names = existsSync(skillsSrc)
@@ -177,7 +175,18 @@ function cleanOverlayStrays(cwd: string, gitRoot: string, dryRun: boolean): void
   removeOverlayWritten(cwd, gitRoot, dryRun);
   rmUntrackedIn(cwd, gitRoot, dryRun)('eslint/baselines', 'eslint/baselines/');
   cleanUntrackedDevkitState(gitRoot, dryRun);
+  noteFallowBaselines(cwd, gitRoot);
   pruneGitExclude(gitRoot, dryRun);
+}
+
+// Older overlays wrote fallow-baselines/; fallow's docs make it the consumer's committed home, so
+// clean leaves it and says so once it stops being hidden.
+function noteFallowBaselines(cwd: string, gitRoot: string): void {
+  const pfx = cwd === gitRoot ? '' : `${relative(gitRoot, cwd)}/`;
+  if (existsSync(join(cwd, 'fallow-baselines')) && !isTracked(gitRoot, `${pfx}fallow-baselines`))
+    console.log(
+      '  · fallow-baselines/ left in place (devkit no longer manages it) — commit or delete it',
+    );
 }
 
 function restoreHooksPath(gitRoot: string, orig: string, dryRun: boolean): void {
@@ -265,6 +274,7 @@ function cleanOverlay(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
   if (comp.searchCode && existsSync(join(cwd, '.search-code')))
     console.log('  · .search-code/ index left in place (git now shows it) — delete it if unwanted');
   rm(join(cwd, 'eslint', 'baselines'), 'eslint/baselines/', dryRun);
+  noteFallowBaselines(cwd, gitRoot);
   pruneGitExclude(gitRoot, dryRun);
 }
 
@@ -423,7 +433,7 @@ export default async function run(args: string[], cwd: string): Promise<number> 
       // unset
     }
     // Orphaned/partial overlay: the config is gone, but core.hooksPath may still point at our
-    // (deleted) dir AND/OR synced agent-half files + fallow-baselines may be stranded. Recover the
+    // (deleted) dir AND/OR synced agent-half files may be stranded. Recover the
     // full overlay footprint, not just the hook — the agent-half is removed by bundled-name fallback
     // since the manifests may be gone too (the old recovery removed `.devkit/` without them).
     const ours = isOverlayHooksValue(hp, gitRoot);

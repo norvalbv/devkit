@@ -212,4 +212,17 @@ describe('pruneGitExclude', () => {
       '/fallow-baselines/',
     ]);
   });
+
+  // Older overlays wrote these; the registry no longer lists them, so only the legacy forms prune them.
+  it('prunes the fallow-baselines lines an older overlay wrote, monorepo prefix included', () => {
+    const { wt } = repoWithWorktree();
+    const file = gitExcludeFile(wt);
+    addToGitExclude(wt, ['.devkit/'], false);
+    const legacy = ['fallow-baselines/', 'fallow-baselines', 'packages/web/fallow-baselines/'];
+    writeFileSync(file, `${legacy.join('\n')}\n`, { flag: 'a' });
+
+    pruneGitExclude(wt, false);
+
+    expect(readFileSync(file, 'utf8')).not.toContain('fallow-baselines');
+  });
 });
