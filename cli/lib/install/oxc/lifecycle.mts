@@ -13,6 +13,8 @@ import {
   overlayEntry,
   readConsumerIgnores,
 } from './overlay-entry.mts';
+import { type ConfigOwnership, candidates, ownershipFor } from './ownership.mts';
+import { deriveOxfmtConfig, LEGACY_OXFMT_STARTER } from './oxfmt-derive.mts';
 import { probeOxcRuntime } from './runtime.mts';
 import { OXFMT_CONFIGS } from '../../husky/format-fragment.mts';
 
@@ -31,15 +33,9 @@ const OXLINT_STARTER = `${JSON.stringify(
   null,
   2,
 )}\n`;
-const OXFMT_STARTER = '{}\n';
 const MANIFEST_REL = '.devkit/oxc/manifest.json';
 const BASE_REL = '.devkit/oxc/oxlint.base.json';
 const LOCK_REL = '.devkit/oxc.lock';
-
-interface ConfigOwnership {
-  path: string;
-  createdDigest: string | null;
-}
 
 interface OxcManifest {
   schemaVersion: 1;
@@ -117,10 +113,6 @@ function readManifest(cwd: string): OxcManifest | null {
   } catch {
     return null;
   }
-}
-
-function candidates(cwd: string, names: string[]): string[] {
-  return names.filter((name) => existsSync(join(cwd, name)));
 }
 
 /**
@@ -210,30 +202,6 @@ export function oxcBaseCapabilityIssue(cwd: string): string | null {
   return null;
 }
 
-function ownershipFor(
-  cwd: string,
-  names: string[],
-  starterPath: string,
-  starter: string,
-  previous: ConfigOwnership | undefined,
-  dryRun: boolean,
-): ConfigOwnership {
-  const found = candidates(cwd, names);
-  if (found.length === 1) {
-    const path = found[0];
-    return previous?.path === path ? previous : { path, createdDigest: null };
-  }
-  // Last line of defence: makes a visible root config UNREACHABLE while the repo is still overlaid,
-  // even with every mode signal lost. Both remedies are named — the caller's intent is ambiguous.
-  if (overlayInstall(cwd)) {
-    throw new Error(
-      `refusing to create ${starterPath} in an overlay install: overlay writes no tracked root config. To stay on overlay, run \`devkit init --overlay\` (restores ${OVERLAY_ENTRY_REL}). To convert this repo to a package install, run \`devkit clean\` first.`,
-    );
-  }
-  if (!dryRun) writeFileAtomic(join(cwd, starterPath), starter);
-  return { path: starterPath, createdDigest: digest(starter) };
-}
-
 function syncOxcCapabilityUnlocked(cwd: string, dryRun: boolean, plan: SyncPlan): void {
   const { antiSlop, pinRoot, allowSkew } = plan;
   const previous = readManifest(cwd);
@@ -262,7 +230,8 @@ function syncOxcCapabilityUnlocked(cwd: string, dryRun: boolean, plan: SyncPlan)
     mkdirSync(join(cwd, '.devkit', 'oxc'), { recursive: true });
     writeFileAtomic(join(cwd, BASE_REL), base);
   }
-  const created: Array<[string, string]> = [];
+  // [path, digest written, bytes to restore on rollback — null means the file did not exist]
+  const created: Array<[string, string, string | null]> = [];
   try {
     // Overlay owns a root entry config outright and never adopts or creates a discovery-named one:
     // `.git/info/exclude` cannot hide a tracked file, and a consumer's is not devkit's to edit.
@@ -273,26 +242,39 @@ function syncOxcCapabilityUnlocked(cwd: string, dryRun: boolean, plan: SyncPlan)
       : ownershipFor(
           cwd,
           OXLINT_CONFIGS,
-          '.oxlintrc.json',
-          OXLINT_STARTER,
+          { starterPath: '.oxlintrc.json', starter: () => OXLINT_STARTER },
           previous?.configs.oxlint,
           dryRun,
         );
     if (overlay && !dryRun) writeFileAtomic(join(cwd, OVERLAY_ENTRY_REL), entry);
-    if (!dryRun && !hadOxlint && !overlay) created.push([oxlint.path, digest(OXLINT_STARTER)]);
-    if (!dryRun && overlay) created.push([OVERLAY_ENTRY_REL, digest(entry)]);
+    if (!dryRun && !hadOxlint && !overlay)
+      created.push([oxlint.path, digest(OXLINT_STARTER), null]);
+    if (!dryRun && overlay) created.push([OVERLAY_ENTRY_REL, digest(entry), null]);
     const hadOxfmt = overlay || candidates(cwd, OXFMT_CONFIGS).length > 0;
     const oxfmt = overlay
       ? { path: '.oxfmtrc.json', createdDigest: null }
       : ownershipFor(
           cwd,
           OXFMT_CONFIGS,
-          '.oxfmtrc.json',
-          OXFMT_STARTER,
+          {
+            starterPath: '.oxfmtrc.json',
+            starter: () => deriveOxfmtConfig(cwd),
+            // Ship publishes into a worktree of tracked files (pinRoot set): never rewrite one there.
+            replaces: pinRoot === undefined ? LEGACY_OXFMT_STARTER : undefined,
+          },
           previous?.configs.oxfmt,
           dryRun,
         );
-    if (!dryRun && !hadOxfmt) created.push([oxfmt.path, digest(OXFMT_STARTER)]);
+    const refreshed =
+      oxfmt.createdDigest !== null &&
+      hadOxfmt &&
+      oxfmt.createdDigest !== previous?.configs.oxfmt.createdDigest;
+    if (!dryRun && (!hadOxfmt || refreshed))
+      created.push([
+        oxfmt.path,
+        oxfmt.createdDigest ?? '',
+        refreshed ? LEGACY_OXFMT_STARTER : null,
+      ]);
     const manifest: OxcManifest = {
       schemaVersion: 1,
       pins: { oxlint: lint.runtime.expectedVersion, oxfmt: fmt.runtime.expectedVersion },
@@ -327,10 +309,12 @@ function syncOxcCapabilityUnlocked(cwd: string, dryRun: boolean, plan: SyncPlan)
       `  ✓ Oxc capability: oxlint@${manifest.pins.oxlint} + oxfmt@${manifest.pins.oxfmt}`,
     );
   } catch (error) {
-    for (const [path, createdDigest] of created) {
+    for (const [path, createdDigest, restore] of created) {
       try {
-        if (existsSync(join(cwd, path)) && fileDigest(join(cwd, path)) === createdDigest)
-          rmSync(join(cwd, path));
+        if (existsSync(join(cwd, path)) && fileDigest(join(cwd, path)) === createdDigest) {
+          if (restore === null) rmSync(join(cwd, path));
+          else writeFileAtomic(join(cwd, path), restore);
+        }
       } catch {
         // Preserve a config another process changed or removed while the failed sync rolled back.
       }
