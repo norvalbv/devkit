@@ -195,6 +195,50 @@ describe('ship managed capability refresh', () => {
   });
 });
 
+/** A fork point carrying stale Oxc + anti-slop state under the given package.json text. */
+function seedStaleManagedRepo(packageJson: string) {
+  return seedForkPointRepo((dir) => {
+    writeFileSync(join(dir, 'package.json'), packageJson);
+    mkdirSync(join(dir, '.devkit/oxc'), { recursive: true });
+    mkdirSync(join(dir, '.devkit/anti-slop'), { recursive: true });
+    writeFileSync(join(dir, '.devkit/oxc/manifest.json'), staleOxcManifest(true));
+    writeFileSync(join(dir, '.devkit/oxc/oxlint.base.json'), '{"stale":true}\n');
+    writeFileSync(
+      join(dir, ANTI_SLOP_MANIFEST_REL),
+      `${JSON.stringify({ ruleIds: ANTI_SLOP_RULE_IDS.slice(1) })}\n`,
+    );
+    writeFileSync(join(dir, '.oxlintrc.json'), EXTENDING_OXLINTRC);
+  }, true);
+}
+
+describe('ship managed capability refresh — devkit self-host', () => {
+  it("keeps devkit's own worktree on its tracked managed state, byte for byte", () => {
+    const { git, root, wt } = seedStaleManagedRepo('{"name":"@norvalbv/devkit"}\n');
+
+    const res = runManagedRefresh(wt, root);
+    expect(res.status).toBe(0);
+    expect(res.stderr).toContain("self-host — using the worktree's own tracked managed state");
+    expect(res.stderr).not.toContain('refreshed managed capability state');
+    expect(git(['status', '--porcelain', '--', '.devkit'])).toBe('');
+    expect(readFileSync(join(wt, '.devkit/oxc/manifest.json'), 'utf8')).toBe(
+      staleOxcManifest(true),
+    );
+  });
+
+  it.each([
+    ['a consumer package name', '{"name":"consumer"}\n'],
+    ['an unparseable package.json', '{ not json\n'],
+  ])('still refreshes a worktree with %s', (_label, packageJson) => {
+    const { root, wt } = seedStaleManagedRepo(packageJson);
+
+    const res = runManagedRefresh(wt, root);
+    expect(res.status).toBe(0);
+    expect(res.stderr).toContain('refreshed managed capability state');
+    expect(oxcBaseCapabilityIssue(wt)).toBeNull();
+    expect(antiSlopCapabilityIssue(wt)).toBeNull();
+  });
+});
+
 // ─── Wiring ────────────────────────────────────────────────────────────────────────────────────────
 // Each half is unit-covered above; these pin the CONTROL FLOW between them. `prepare_gate_worktree`
 // dispatches four purposes (shipping · "tag validation" · review · review-baseline) and its own exit

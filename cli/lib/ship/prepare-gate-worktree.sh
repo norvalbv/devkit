@@ -156,8 +156,8 @@ refresh_ship_reviewer_assets() {
 # branch's FORK POINT, while the gates that judge them arrive through the caller's linked node_modules.
 # Once a gate-infra change lands on the base, that mismatch makes every re-push to a pre-change branch
 # die on "managed Oxlint base manifest digest is stale" regardless of the staged content (sc-2099).
-# WORKING TREE ONLY: the helper never touches the index, so ship_assert_staged_unchanged still holds
-# byte-exact and the commit (made without `-a`) carries exactly the briefed paths.
+# WORKING TREE ONLY, and never devkit's own worktree, whose gates run from its own source. The index
+# stays byte-exact for ship_assert_staged_unchanged, so the commit carries exactly the briefed paths.
 refresh_ship_managed_capability() {
   local wt=$1 root=$2 purpose=$3 script_dir tool
   script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd) || return 0
