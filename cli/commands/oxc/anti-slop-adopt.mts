@@ -3,6 +3,7 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { failLine } from '../../../gate-engine/deterministic/reason.mts';
 import { withLock } from '../../lib/atomic-write.mts';
 import {
   type AntiSlopBaseline,
@@ -45,7 +46,7 @@ import {
 export function baselineOrExplain(cwd: string): AntiSlopBaseline | null {
   const baseline = readBaseline(cwd);
   if (!baseline) {
-    console.error(
+    failLine(
       `anti-slop: ${ANTI_SLOP_BASELINE_REL} is missing; run \`devkit anti-slop create\` explicitly`,
     );
   }
@@ -58,7 +59,7 @@ export function count(groups: readonly { count: number }[]): number {
 
 export function capabilityReady(cwd: string): boolean {
   if (existsSync(join(cwd, '.devkit', 'anti-slop', 'manifest.json'))) return true;
-  console.error('anti-slop: not installed — run `devkit init --anti-slop`');
+  failLine('anti-slop: not installed — run `devkit init --anti-slop`');
   return false;
 }
 
