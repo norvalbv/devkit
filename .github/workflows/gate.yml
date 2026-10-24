@@ -128,6 +128,10 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
+      # `devkit machine` records flows in Playwright's headless shell; its capture tests need it here.
+      - name: Install headless browser
+        run: node_modules/.bin/playwright-core install --with-deps chromium-headless-shell
+
       # STEP-level, deliberately, not job-level (sc-2393). A job timeout cancels the job, which puts
       # the `if: always()` uploads below at the mercy of cancellation semantics; a step bound leaves
       # the job alive so a wedged shard still publishes its tombstone. Vitest has no run-level
