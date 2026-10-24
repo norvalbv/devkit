@@ -48,6 +48,7 @@ export function readStory(run: RunShort, id: number): TrackerStory {
     description: story.description,
     ownerIds: story.owner_ids,
     closed: story.completed || story.archived,
+    completed: story.completed,
     linkedIds: [...new Set(linked)],
     archived: story.archived,
     teamId: story.group_id ?? null,
@@ -99,10 +100,6 @@ export function linkStories(run: RunShort, subjectId: number, objectId: number):
 
 export function archiveStory(run: RunShort, id: number): void {
   run(['story', String(id), '-q', '-a']);
-}
-
-export function renameStory(run: RunShort, id: number, name: string): void {
-  run(['story', String(id), '-q', '-t', name]);
 }
 
 /** Adding an owner is what a story-assigned trigger fires on. */
