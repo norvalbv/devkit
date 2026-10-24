@@ -16,7 +16,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { TestReportSummary } from './produce.mts';
-import { FILE_OUTCOMES, SUMMARY_NAME, SUMMARY_SCHEMA, fileTestsSchema } from './produce.mts';
+import {
+  FILE_OUTCOMES,
+  SUMMARY_NAME,
+  SUMMARY_SCHEMA,
+  fileTestsSchema,
+  unhandledRecordSchema,
+} from './produce.mts';
 
 /** Per-test names are optional evidence: malformed, they are dropped and the file answers stand. */
 const testsSchema = z.record(z.string(), fileTestsSchema);
@@ -264,8 +270,10 @@ export function parseSummary(raw: string, label: string): TestReportSummary {
   const tests = testsSchema.safeParse(parsed.tests);
   if (tests.success) parsed.tests = tests.data;
   else delete parsed.tests;
-  if (!Number.isSafeInteger(parsed.unhandled) || Number(parsed.unhandled) < 0)
-    delete parsed.unhandled;
+  // A count from before error lists were recorded proves nothing about which errors, so it is dropped.
+  const unhandled = unhandledRecordSchema.safeParse(parsed.unhandled);
+  if (unhandled.success) parsed.unhandled = unhandled.data;
+  else delete parsed.unhandled;
   return parsed;
 }
 
@@ -391,11 +399,12 @@ export interface CommitCi {
   failing?: FailedStep[];
 }
 
-/** A failed `job › step`. Matrix siblings (jobs with identical step lists) share a `key`, so a failure
- * that moved to another shard still matches; any other job's key is its label. */
+/** A failed `job › step`: `step` is GitHub's step number, null for a job that failed outside any
+ * step. Matrix shards repeat one step list, so the number pairs a failure that moved shard. */
 export interface FailedStep {
   label: string;
-  key: string;
+  job: string;
+  step: number | null;
 }
 
 /** `gh run view --json url,jobs`, every field optional so a malformed answer is rejected, not read. */
@@ -404,44 +413,43 @@ interface RunViewCandidate {
   jobs?: { name?: unknown; conclusion?: unknown; steps?: unknown }[];
 }
 
-/** A run's page and each failed `job › step`; a job that failed outside any step is named alone. */
-export function runView(cwd: string, runId: number) {
-  const out = gh(['run', 'view', String(runId), '--json', 'url,jobs'], cwd);
-  let view: RunViewCandidate | null;
+type ViewJob = NonNullable<RunViewCandidate['jobs']>[number];
+type ViewStep = { name?: unknown; conclusion?: unknown; number?: unknown };
+
+/** One failed job's `job › step` entries, or the job alone when no step failed. */
+function failedSteps(job: ViewJob): FailedStep[] {
+  const name = `${job.name}`;
+  const steps: ViewStep[] = Array.isArray(job.steps) ? job.steps : [];
+  const failed = steps.filter((step) => step?.conclusion === 'failure');
+  if (failed.length === 0) return [{ label: name, job: name, step: null }];
+  return failed.map((step) => ({
+    label: `${name} › ${step.name}`,
+    job: name,
+    step: Number.isSafeInteger(step.number) ? Number(step.number) : null,
+  }));
+}
+
+/** gh's answer as JSON, or null when it is not JSON at all. */
+function parseView(out: string): RunViewCandidate | null {
   try {
-    view = JSON.parse(out);
+    return JSON.parse(out);
   } catch {
-    view = null;
+    return null;
   }
+}
+
+/** A run's page and each failed `job › step`. */
+export function runView(cwd: string, runId: number) {
+  const view = parseView(gh(['run', 'view', String(runId), '--json', 'url,jobs'], cwd));
   if (`${view?.url}` !== view?.url || !Array.isArray(view?.jobs)) {
     throw new GhUnavailable(
       'gh-failed',
       `gh run view ${runId} returned JSON this reader cannot use`,
     );
   }
-  const signatures = view.jobs.map(stepSignature);
-  const failing = view.jobs.flatMap((job, i): FailedStep[] => {
-    if (job?.conclusion !== 'failure') return [];
-    const signature = signatures[i];
-    const sibling =
-      signature !== '[]' && signatures.indexOf(signature) !== signatures.lastIndexOf(signature);
-    const failed = stepsOf(job).filter((step) => step?.conclusion === 'failure');
-    const parts = failed.length ? failed.map((step) => ` › ${step.name}`) : [''];
-    return parts.map((part) => ({
-      label: `${job.name}${part}`,
-      key: sibling ? `${signature}${part}` : `${job.name}${part}`,
-    }));
-  });
+  const failing = view.jobs.filter((job) => job?.conclusion === 'failure').flatMap(failedSteps);
   return { url: `${view.url}`, failing };
 }
-
-type ViewJob = NonNullable<RunViewCandidate['jobs']>[number];
-
-const stepsOf = (job: ViewJob | null) => (Array.isArray(job?.steps) ? job.steps : []);
-
-/** A job's ordered step names: matrix jobs share it, unrelated jobs almost never do. */
-const stepSignature = (job: ViewJob | null): string =>
-  JSON.stringify(stepsOf(job).map((step) => step?.name ?? null));
 
 /**
  * Only a newest completed run that succeeded is green, and only one that failed is red. No run or a

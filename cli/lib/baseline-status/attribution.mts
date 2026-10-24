@@ -2,9 +2,13 @@
  * Which of a red PR's failures its base already had: the PR run's per-file summary against the run
  * on its merge commit's first parent. Never guesses; an unreadable input is a named reason.
  */
+import {
+  type UnhandledError,
+  unhandledKey,
+} from '../../../gate-engine/coverage/unhandled-reporter.mts';
 import type { CheckRow } from '../ship/wait-ci/wait.mts';
 import { type FailedStep, GhUnavailable, commitCi, gh, runView } from './gh.mts';
-import type { TestReportSummary } from './produce.mts';
+import type { TestReportSummary, UnhandledRecord } from './produce.mts';
 import { loadSummary, workflowSelector } from './query.mts';
 import { configuredSource } from './source.mts';
 
@@ -65,42 +69,65 @@ export function attributionToken(
   files: FileComparison,
   newSteps: string[],
   unattributed: string[],
-  extraUnhandled: number | null,
+  extraUnhandled: UnhandledError[] | null,
 ): AttributionToken {
-  if (files.fresh.length > 0 || newSteps.length > 0 || Number(extraUnhandled) > 0) return 'new';
-  const unread = files.unsure.length > 0 || unattributed.length > 0 || extraUnhandled === null;
+  if ([files.fresh, newSteps, extraUnhandled ?? []].some((list) => list.length > 0)) return 'new';
+  const unread = extraUnhandled === null || [files.unsure, unattributed].some((l) => l.length > 0);
   return unread ? 'unknown' : 'inherited-only';
 }
 
-/** Errors outside any test that the PR run has beyond its base, or null when either did not record. */
-export function newUnhandled(pr: TestReportSummary, base: TestReportSummary): number | null {
-  if (pr.unhandled === undefined || base.unhandled === undefined) return null;
-  return Math.max(0, pr.unhandled - base.unhandled);
+/**
+ * The PR's outside-test errors its base lacks, by file + message. Null when that is unproven: either
+ * run unrecorded, the base list truncated, or nothing new among a truncated PR list's shown errors.
+ */
+export function newUnhandled(
+  pr: TestReportSummary,
+  base: TestReportSummary,
+): UnhandledError[] | null {
+  const { unhandled: p } = pr;
+  if (p?.errors.length === 0 && !p.truncated) return [];
+  return p && base.unhandled && !base.unhandled.truncated ? unlisted(p, base.unhandled) : null;
+}
+
+/** `pr`'s errors missing from a complete `base` list; null when only a truncated tail could hold one. */
+function unlisted(pr: UnhandledRecord, base: UnhandledRecord): UnhandledError[] | null {
+  const known = new Set(base.errors.map(unhandledKey));
+  const fresh = pr.errors.filter((e) => !known.has(unhandledKey(e)));
+  return fresh.length > 0 || !pr.truncated ? fresh : null;
+}
+
+/** A shard of `shardJob` (GitHub names each `<job> (<matrix values>)`) keys on its step number, so a
+ * failure that moved shard matches whatever the step is named; any other step keys on its label. */
+export function stepKey(step: FailedStep, shardJob: string): string {
+  const shard = step.job.startsWith(`${shardJob} (`) && step.step !== null;
+  return shard ? `${shardJob} › #${step.step}` : step.label;
 }
 
 /**
- * The PR's failing steps the base did not fail. A matrix sibling that moved shard may match one
- * unmatched base failure of its key, once per inherited file not already explaining an exact match.
+ * The PR's failing steps the base did not fail. A shard that moved may match one unmatched base
+ * failure of its key, once per inherited file not already explaining an exact match.
  */
 export function newFailingSteps(
   pr: FailedStep[],
   base: FailedStep[],
   inheritedFiles: number,
+  shardJob: string,
 ): string[] {
   const exact = new Set(base.map((b) => b.label).filter((l) => pr.some((p) => p.label === l)));
-  const spare = base.filter((b) => !exact.has(b.label)).map((b) => b.key);
-  let moves = inheritedFiles - pr.filter((p) => exact.has(p.label) && p.key !== p.label).length;
-  const fresh: string[] = [];
-  for (const step of pr) {
-    if (exact.has(step.label)) continue;
-    const at = spare.indexOf(step.key);
-    if (at === -1 || moves <= 0) fresh.push(step.label);
-    else {
-      spare.splice(at, 1);
-      moves--;
-    }
-  }
-  return fresh;
+  const spare = base.filter((b) => !exact.has(b.label)).map((b) => stepKey(b, shardJob));
+  const exactShards = pr.filter((p) => exact.has(p.label) && stepKey(p, shardJob) !== p.label);
+  let moves = inheritedFiles - exactShards.length;
+  return pr
+    .filter((step) => !exact.has(step.label))
+    .filter((step) => {
+      const at = moves > 0 ? spare.indexOf(stepKey(step, shardJob)) : -1;
+      if (at !== -1) {
+        spare.splice(at, 1);
+        moves--;
+      }
+      return at === -1;
+    })
+    .map((step) => step.label);
 }
 
 /** One verdict-line value: whitespace collapsed (the line is grepped line-wise), capped, or `none`. */
@@ -112,8 +139,8 @@ export function capped(values: string[]): string {
 }
 
 /** The verdict-line field for outside-test errors: absent when the PR added none. */
-const unhandledField = (extra: number | null): string =>
-  extra === null ? ' unhandled=unrecorded' : extra > 0 ? ` unhandled=+${extra}` : '';
+const unhandledField = (extra: UnhandledError[] | null): string =>
+  extra === null ? ' unhandled=unrecorded' : extra.length > 0 ? ` unhandled=+${extra.length}` : '';
 
 const unknown = (reason: string, base = ''): Attribution => ({
   token: 'unknown',
@@ -158,7 +185,7 @@ export function attributeFailures({
   pr: string;
   failures: CheckRow[];
 }): Attribution {
-  const { workflow, artifact } = configuredSource(cwd);
+  const { workflow, artifact, shardJob } = configuredSource(cwd);
   let base = ''; // named once known, so a later unreadable artifact still reports the base's state
   try {
     const run = workflowRun(cwd, failures, workflow);
@@ -178,7 +205,7 @@ export function attributeFailures({
     const baseSummary = loadSummary({ cwd, run: ci.run, artifact });
     const files = compareSummaries(prSummary, baseSummary);
     const prSteps = runView(cwd, run.databaseId).failing;
-    const newSteps = newFailingSteps(prSteps, ci.failing, files.inherited.length);
+    const newSteps = newFailingSteps(prSteps, ci.failing, files.inherited.length, shardJob);
     const extraUnhandled = newUnhandled(prSummary, baseSummary);
     const token = attributionToken(files, newSteps, unattributed, extraUnhandled);
     const unsure = files.unsure.length > 0 ? ` unsure=${files.unsure.length}` : '';

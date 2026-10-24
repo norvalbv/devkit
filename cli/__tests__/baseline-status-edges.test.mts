@@ -15,7 +15,13 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import baselineStatus from '../commands/baseline/status.mts';
 import { type RunRef, isUsableRun } from '../lib/baseline-status/gh.mts';
-import { produceTestReport, summarise } from '../lib/baseline-status/produce.mts';
+import { newUnhandled } from '../lib/baseline-status/attribution.mts';
+import {
+  MAX_NAMES_PER_LIST,
+  produceTestReport,
+  recordUnhandled,
+  summarise,
+} from '../lib/baseline-status/produce.mts';
 import {
   addCommit,
   ghHarness,
@@ -932,13 +938,20 @@ describe('the producer fails loudly when it produces nothing', () => {
     expect(await produceTestReport(dir, [])).toBe(1);
   });
 
-  // The json report's `success` ignores errors outside any test; the summary must still count them.
+  // The json report's `success` ignores errors outside any test; the summary must still list them.
   it.each([
     [
       '[{"file":"a","message":"E: x"},{"file":"a","message":"E: x"},{"file":null,"message":"E: y"}]',
-      2,
+      {
+        errors: [
+          { file: 'a', message: 'E: x' },
+          { file: null, message: 'E: y' },
+        ],
+      },
     ],
-    [null, 0],
+    ['[]', { errors: [] }],
+    // The reporter always writes, so no file means the run went unrecorded, never error-free.
+    [null, undefined],
     ['{torn', undefined],
   ])('records unhandled.json %j as unhandled=%j', async (unhandled, expected) => {
     const report = '{"success":true,"testResults":[]}';
@@ -951,7 +964,47 @@ describe('the producer fails loudly when it produces nothing', () => {
     const summary = JSON.parse(
       readFileSync(join(dir, '.devkit/test-reports', run, 'summary.json'), 'utf8'),
     );
-    expect(summary.unhandled).toBe(expected);
+    expect(summary.unhandled).toEqual(expected);
+  });
+
+  it("compares two runs' unhandled errors by identity across runner checkouts", () => {
+    // Producer to comparator: a swapped error is new, the same error at another root is not.
+    const run = (root: string, message: string) => {
+      writeFileSync(
+        join(dir, 'unhandled.json'),
+        JSON.stringify([{ file: join(root, 'a.test.mts'), message }]),
+      );
+      return {
+        ...summarise({ success: false, testResults: [] }, root),
+        unhandled: recordUnhandled(join(dir, 'unhandled.json'), root),
+      };
+    };
+    const base = run('/runner/one', 'Error: x');
+    expect(newUnhandled(run('/runner/two', 'Error: y'), base)).toEqual([
+      { file: 'a.test.mts', message: 'Error: y' },
+    ]);
+    expect(newUnhandled(run('/runner/two', 'Error: x'), base)).toEqual([]);
+  });
+
+  it('records unhandled files repo-relative, sorted, and capped with a truncated flag', () => {
+    const entries = Array.from({ length: MAX_NAMES_PER_LIST + 1 }, (_, i) => ({
+      file: join(dir, `t${String(i).padStart(3, '0')}.test.mts`),
+      message: 'Error: x',
+    }));
+    writeFileSync(join(dir, 'unhandled.json'), JSON.stringify(entries.toReversed()));
+    const record = recordUnhandled(join(dir, 'unhandled.json'), dir);
+    expect(record?.truncated).toBe(true);
+    expect(record?.errors).toHaveLength(MAX_NAMES_PER_LIST);
+    expect(record?.errors[0]).toEqual({ file: 't000.test.mts', message: 'Error: x' });
+    writeFileSync(
+      join(dir, 'unhandled.json'),
+      JSON.stringify(entries.slice(0, MAX_NAMES_PER_LIST)),
+    );
+    expect(recordUnhandled(join(dir, 'unhandled.json'), dir)?.truncated).toBeUndefined();
+    writeFileSync(join(dir, 'unhandled.json'), JSON.stringify(entries.slice(0, 1)));
+    expect(recordUnhandled(join(dir, 'unhandled.json'), dir)).toEqual({
+      errors: [{ file: 't000.test.mts', message: 'Error: x' }],
+    });
   });
 });
 
