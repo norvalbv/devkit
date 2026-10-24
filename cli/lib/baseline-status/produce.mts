@@ -11,6 +11,12 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
+import { UNHANDLED_REPORTER } from '../../../gate-engine/coverage/failures.mts';
+import {
+  UNHANDLED_NAME,
+  type UnhandledError,
+  unhandledKey,
+} from '../../../gate-engine/coverage/unhandled-reporter.mts';
 import { resolveVitest, runVitest } from '../../../gate-engine/coverage/vitest-cli.mts';
 import { writeFileAtomic } from '../atomic-write.mts';
 
@@ -43,6 +49,15 @@ export const fileTestsSchema = z.object({
 });
 export type FileTests = z.infer<typeof fileTestsSchema>;
 
+const unhandledErrorSchema = z.object({ file: z.string().nullable(), message: z.string() });
+
+/** Distinct errors vitest raised outside any test, in key order; `truncated` past MAX_NAMES_PER_LIST. */
+export const unhandledRecordSchema = z.object({
+  errors: z.array(unhandledErrorSchema),
+  truncated: z.literal(true).optional(),
+});
+export type UnhandledRecord = z.infer<typeof unhandledRecordSchema>;
+
 /** Keep the summary few-KB however much of the suite fails; a name past either cap reads unknown. */
 export const MAX_NAMES_PER_LIST = 200;
 export const MAX_NAMES_PER_SUMMARY = 2000;
@@ -60,6 +75,9 @@ export interface TestReportSummary {
   files: Record<string, FileOutcome>;
   /** Test names for failed files only. Absent from artifacts written before per-test answers. */
   tests?: Record<string, FileTests>;
+  /** Errors vitest raised outside any test, which `testsPassed` ignores. Absent from older artifacts
+   * and from a run whose reporter wrote no readable record. */
+  unhandled?: UnhandledRecord;
   /** Entries resolving outside the repo root — nested-run leakage, dropped rather than reported. */
   droppedForeignPaths: number;
 }
@@ -221,6 +239,24 @@ export function summarise(
   };
 }
 
+/** The unhandled reporter's errors with repo-relative POSIX files, deduped, sorted and capped.
+ * Undefined when it wrote nothing readable: it always writes, so absence means unrecorded. */
+export function recordUnhandled(file: string, cwd: string): UnhandledRecord | undefined {
+  try {
+    const parsed = z.array(unhandledErrorSchema).parse(JSON.parse(readFileSync(file, 'utf8')));
+    const unique = new Map<string, UnhandledError>();
+    for (const e of parsed) {
+      const rel = e.file && relative(cwd, resolve(cwd, e.file)).split(sep).join('/');
+      unique.set(unhandledKey({ ...e, file: rel }), { ...e, file: rel });
+    }
+    const all = [...unique].sort(([a], [b]) => (a < b ? -1 : 1)).map(([, e]) => e);
+    const errors = all.slice(0, MAX_NAMES_PER_LIST);
+    return all.length > errors.length ? { errors, truncated: true } : { errors };
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Run the suite with a machine-readable reporter and write this run's two artifacts.
  */
@@ -254,6 +290,7 @@ export async function produceTestReport(cwd = process.cwd(), argv: string[] = []
       '--reporter=default',
       '--reporter=github-actions',
       '--reporter=json',
+      `--reporter=${UNHANDLED_REPORTER}`,
       `--outputFile.json=${relative(cwd, reportPath)}`,
       ...argv,
     ],
@@ -272,10 +309,10 @@ export async function produceTestReport(cwd = process.cwd(), argv: string[] = []
     // SAFETY: unverified at this point BY DESIGN — assertVitestReport below is what admits it.
     const parsed = JSON.parse(readFileSync(reportPath, 'utf8')) as VitestJsonReport;
     const report = assertVitestReport(parsed);
-    writeFileAtomic(
-      join(runDir, SUMMARY_NAME),
-      `${JSON.stringify(summarise(report, cwd), null, 2)}\n`,
-    );
+    const summary = summarise(report, cwd);
+    const unhandled = recordUnhandled(join(runDir, UNHANDLED_NAME), cwd);
+    if (unhandled !== undefined) summary.unhandled = unhandled;
+    writeFileAtomic(join(runDir, SUMMARY_NAME), `${JSON.stringify(summary, null, 2)}\n`);
   } catch (e) {
     console.error(`⚠️  could not summarise the test report: ${e instanceof Error ? e.message : e}`);
     rmSync(runDir, { recursive: true, force: true });

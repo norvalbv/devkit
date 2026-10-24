@@ -164,8 +164,11 @@ function staleRenameFailure(
       `BASELINE-RENAME ${entry.ruleId} ${entry.file} -> ${entry.nextFile} (${entry.count} adopted finding(s))`,
     );
   }
-  const remedy = baseRef
-    ? `devkit anti-slop adopt-renames --base ${baseRef}`
+  // Without a committed baseline (overlay, bootstrap), name the base commit: in a ship worktree the
+  // rename is committed in the author's checkout, where a staged-only adopt finds nothing.
+  const remedyBase = baseRef ?? (envelope.base ? null : envelope.baseOid);
+  const remedy = remedyBase
+    ? `devkit anti-slop adopt-renames --base ${remedyBase}`
     : 'devkit anti-slop adopt-renames';
   failLine(
     `anti-slop: FAIL — persist renamed debt with \`${remedy}\`${envelope.base ? ', then stage the baseline' : ''}`,

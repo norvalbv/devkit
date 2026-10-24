@@ -52,7 +52,6 @@ export const FIXED_GATE_INPUTS: readonly GateInput[] = [
   { path: CONFIG_FILENAME, kind: 'file', share: 'clone', overlayWrites: true },
   ...FALLOW_CONFIG_FILES.map((path): GateInput => ({ path, kind: 'file', share: 'clone' })),
   FALLOW_CACHE,
-  { path: 'fallow-baselines', kind: 'dir', share: 'branch', mutable: true, overlayWrites: true },
   {
     path: '.decisions',
     kind: 'dir',
@@ -73,7 +72,6 @@ export const FIXED_GATE_INPUTS: readonly GateInput[] = [
   { path: '.devkit/anti-slop', kind: 'dir', share: 'clone' },
   // Branch-local: Node resolves a linked config's imports from the home.
   { path: 'eslint.config.devkit.mjs', kind: 'file', share: 'branch', overlayWrites: true },
-  { path: 'biome.devkit.jsonc', kind: 'file', share: 'clone', overlayWrites: true },
   { path: 'oxlint.devkit.json', kind: 'file', share: 'clone', overlayWrites: true },
   // A ratchet ceiling lowered on one branch must not move the others. Only explicit anti-slop
   // commands write it, never a gate run, so it is not mutable.

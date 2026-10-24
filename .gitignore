@@ -22,6 +22,8 @@ node_modules
 # ...and the `.generation` sidecars those caches write. Untracked-but-not-ignored, they were enough
 # to make `devkit release` refuse ("working tree not clean") in the repo that ships devkit itself.
 .devkit/*.generation
+# vitest blob reports: gate.yml shards write them and the test-report job merges them
+.vitest/
 # Codex projections of devkit's own agents/skills, written by external codex tooling. Deliberately
 # NOT tracked, unlike .claude/ and .cursor/: those are emitted by devkit's own sync-agents/
 # sync-skills and drift-checked by `devkit doctor` against a manifest, whereas nothing here can
@@ -45,6 +47,7 @@ gate-engine/decisions/eval/progress-*.jsonl
 gate-engine/critique/eval/runs.log
 gate-engine/prior-art/eval/runs.log
 gate-engine/prior-art/eval/checkpoint.jsonl
+gate-engine/prior-art/eval/workflow-checkpoint.jsonl
 gate-engine/critique/eval/transcripts/
 
 # test:run:coverage:changed reports. Root-anchored: an unanchored `coverage/` would also ignore
@@ -106,8 +109,6 @@ gate-engine/edge-cases/eval/cases.jsonl
 !.devkit/baselines/structure/*.mjs
 !.devkit/structure/
 !.devkit/structure/exempt.mjs
-!.devkit/biome/
-!.devkit/biome/**
 !.devkit/tsconfig/
 !.devkit/tsconfig/**
 !.devkit/anti-slop/

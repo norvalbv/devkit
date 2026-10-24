@@ -31,7 +31,7 @@ export const hasDash = existsSync('/bin/dash');
 
 /** The overlay hook's STAGED lint step, cut out of the generated hook text. */
 export function overlayStagedStep() {
-  const hook = buildOverlayHook({ biome: false, guards: [] });
+  const hook = buildOverlayHook({ guards: [] });
   return hook.slice(
     hook.indexOf('# devkit lint overlay — STAGED'),
     hook.indexOf('# devkit lint overlay — review mode'),
@@ -56,7 +56,7 @@ interface FragmentRun {
 }
 
 // Stubs log to calls.log and exit with the named env knob, so ordering is read off the log.
-function writeStub(path, name, rcVar) {
+export function writeStub(path, name, rcVar) {
   writeFileSync(
     path,
     `#!/bin/sh\necho "${name} $*" >> "$HOME/calls.log"\ncat >/dev/null\nexit \${${rcVar}:-0}\n`,
@@ -66,20 +66,13 @@ function writeStub(path, name, rcVar) {
 
 // Overlay staged-gate fixtures. fallow is global ($HOME/.bun/bin, first on the hook's PATH), where a
 // consumer's `command -v fallow` finds it; eslint is the repo-local bin the overlay step requires.
-function stageOverlayFixtures(
-  home,
-  { bin, packageBin, pkgRel, fallow, staged, eslintOverlay, biomeOverlay },
-) {
+function stageOverlayFixtures(home, { bin, packageBin, pkgRel, fallow, staged, eslintOverlay }) {
   if (fallow) writeStub(join(bin, 'fallow'), 'fallow', 'FALLOW_RC');
   if (eslintOverlay) {
     // A string is the overlay config's own content; `true` is an empty config.
     const content = eslintOverlay === true ? 'export default [];\n' : eslintOverlay;
     writeFileSync(join(home, 'eslint.config.devkit.mjs'), content);
     writeStub(join(packageBin, 'eslint'), 'eslint', 'ESLINT_RC');
-  }
-  if (biomeOverlay) {
-    writeFileSync(join(home, 'biome.devkit.jsonc'), '{}\n');
-    writeStub(join(packageBin, 'biome'), 'biome', 'BIOME_RC');
   }
   if (!staged) return;
   // Outside a repo `git diff --cached` fails and the hook exits before fallow/eslint run, so an
@@ -129,7 +122,7 @@ function linkNodeModules(home, { entry = true, store = '' }) {
 
 export function runHook(
   env = {},
-  selection = { biome: false, guards: ALL_GUARDS },
+  selection = { guards: ALL_GUARDS },
   {
     shell = 'sh',
     dirPrefix = 'dk-hook-exec-',
@@ -142,7 +135,6 @@ export function runHook(
     fallow = false,
     staged = false,
     eslintOverlay = false,
-    biomeOverlay = false,
     linkedNodeModules = undefined,
   } = {},
 ) {
@@ -260,7 +252,10 @@ esac
   mkdirSync(baselineDir);
   writeFileSync(join(packageRoot, 'gate-engine', 'review', 'baseline-gate.mts'), '// test stub\n');
   if (builder === 'overlay') {
-    writeFileSync(join(bin, 'node'), '#!/bin/sh\necho "baseline $*" >> "$HOME/calls.log"\n');
+    writeFileSync(
+      join(bin, 'node'),
+      `#!/bin/sh\necho "baseline $*" >> "$HOME/calls.log"\nexit \${BASELINE_RC:-0}\n`,
+    );
     chmodSync(join(bin, 'node'), 0o755);
   }
 
@@ -272,7 +267,6 @@ esac
     fallow,
     staged,
     eslintOverlay,
-    biomeOverlay,
   });
   for (const name of missingLocalBins) rmSync(join(packageBin, name), { force: true });
   if (linkedNodeModules) linkNodeModules(home, linkedNodeModules);

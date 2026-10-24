@@ -4,6 +4,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { claudeFamilyKeyLine } from '../../gate-engine/judge/outage/family-override.mts';
 import {
   FANOUT_BASELINE,
   LINES_BASELINE,
@@ -26,8 +27,8 @@ import {
 } from '../lib/doctor/extends-checks.mts';
 import {
   checkGuardConfig,
+  familyBindRequested,
   judgeGuardsOf,
-  CODEX_RUNTIME_CHECK,
   SEARCH_INDEX_CHECK,
 } from '../lib/doctor/guard-config-checks.mts';
 import { bindClaudeFamily } from '../lib/doctor/judge/judge-family.mts';
@@ -167,14 +168,7 @@ export function checkVersion(cwd: string, env = process.env): CheckResult {
 // Reproduce the recorded selection rather than the all-on `--yes` default.
 function selectionFlags(sel: Partial<Selection>): string[] {
   const flags = ['--yes'];
-  const toggles: (keyof Selection)[] = [
-    'biome',
-    'tsconfig',
-    'skills',
-    'agents',
-    'husky',
-    'structure',
-  ];
+  const toggles: (keyof Selection)[] = ['tsconfig', 'skills', 'agents', 'husky', 'structure'];
   for (const id of toggles) {
     if (sel[id] === false) flags.push(`--no-${id}`);
   }
@@ -198,6 +192,10 @@ function selectionFlags(sel: Partial<Selection>): string[] {
   return flags;
 }
 
+/** --fix runs for any gating finding, and for an advisory one only when --fix can repair it. */
+export const fixRequested = (results: CheckResult[]): boolean =>
+  results.some((r) => r.status !== 'OK' && (!r.advisory || r.fixable));
+
 // --fix repairs only fixable findings, preserves tuned config content, and never refreezes.
 // Missing files/hooks use init with the recorded selection and install mode.
 // Reason: flat repair orchestration: independent sequential `if (this kind drifted) repair it` steps (extends-repair loop, init re-run, sync-skills, recreate-missing-baseline) with near-zero nesting; high branch COUNT, each a trivial guarded fixup. Splitting scatters the deliberate repair ordering.
@@ -220,12 +218,11 @@ function applyFix(
     }
   }
 
-  // A fixable codex-runtime DRIFT means the bind preconditions held at check time (claude
-  // resolves, no explicit review.* keys) — bindClaudeFamily re-verifies them before writing.
-  const codexRow = results.find((r) => r.name === CODEX_RUNTIME_CHECK);
-  if (codexRow?.fixable && codexRow.status !== 'OK' && bindClaudeFamily(cwd)) {
+  // A fixable codex-runtime or family-pin row means the bind (or refresh) preconditions held at
+  // check time — bindClaudeFamily re-verifies them before writing.
+  if (familyBindRequested(results) && bindClaudeFamily(cwd)) {
     console.log(
-      '  ✓ bound the claude judge family (haiku/opus/sonnet, chunking off) into guard.config.json',
+      `  ✓ wrote the claude judge family into guard.config.json (set: ${claudeFamilyKeyLine()}; operator-edited keys kept) — commit it`,
     );
   }
 
@@ -282,9 +279,9 @@ function applyFix(
       stdio: 'inherit',
     });
   }
-  if (needsAntiSlopSync) syncAntiSlopCapability(cwd);
+  if (needsAntiSlopSync) syncAntiSlopCapability(cwd, { refreshStarters: true });
   if (needsOxcSync && !needsAntiSlopSync)
-    syncOxcCapability(cwd, { antiSlop: sel.antiSlop === true });
+    syncOxcCapability(cwd, { antiSlop: sel.antiSlop === true, refreshStarters: true });
   const skills = results.find((r) => r.name === 'skills');
   if (skills?.fixable && skills.status !== 'OK') {
     execFileSync(process.execPath, [join(packageDir(), 'cli', `index${SELF_EXT}`), 'sync-skills'], {
@@ -304,7 +301,6 @@ function applyFix(
 
 // The default component selection (pre-`components`-block configs, and the all-on fallback).
 const DEFAULT_DOCTOR_SEL: Partial<Selection> = {
-  biome: true,
   tsconfig: true,
   skills: true,
   husky: true,
@@ -331,7 +327,7 @@ async function collectResults(
   const { gitRoot } = detectGitRoot(cwd);
   const surfaces = resolveExistingAgentProviders(gitRoot, recorded.agentTargets);
   const sel: Partial<Selection> = { ...recorded, agentTargets: surfaces };
-  // Standalone (no-package): biome/tsconfig extend VENDORED relative paths, and there is no devkit
+  // Standalone (no-package): tsconfig extends a VENDORED relative path, and there is no devkit
   // pin to check (the whole point — no package dep).
   const standalone = Boolean(cfg.standalone);
   const stack = cfg.stack ?? 'generic';
@@ -344,12 +340,16 @@ async function collectResults(
   results.push(checkDevkitCacheGitignore(cwd));
   if (sel.husky && commitMsgGuards(sel.guards ?? []).length)
     results.push(checkCommitMsgHook(cwd, sel.guards ?? []));
-  // biome and tsconfig differ only by filename and expected pointer.
-  for (const [on, file, want] of [
-    [sel.biome, 'biome.jsonc', expected.biome],
-    [sel.tsconfig, 'tsconfig.json', expected.tsconfig],
-  ] as const)
-    if (on) results.push(checkExtends(cwd, file, want, 'extends', overrides.has(file)));
+  if (sel.tsconfig)
+    results.push(
+      checkExtends(
+        cwd,
+        'tsconfig.json',
+        expected.tsconfig,
+        'extends',
+        overrides.has('tsconfig.json'),
+      ),
+    );
   if (sel.guards?.length || sel.structure)
     results.push(
       ...(await checkGuardConfig(
@@ -475,7 +475,7 @@ export default async function run(args: string[], cwd: string): Promise<number> 
   printPriorArtAdvisoryHealth(cwd, sel);
 
   const drifted = results.some((r) => r.status !== 'OK' && !r.advisory); // see CheckResult.advisory
-  if (fix && drifted) {
+  if (fix && fixRequested(results)) {
     applyFix(cwd, results, sel, cfg.stack ?? 'generic', Boolean(cfg.standalone));
     console.log('\n--fix applied. Re-run `devkit doctor` to confirm.');
   }

@@ -239,6 +239,18 @@ describe('--gate (integration, real git repo)', () => {
     expect(r.stderr).toContain('CONTRADICTS target "ax"');
   });
 
+  it('an untracked scoped draft Target is not judged at commit', () => {
+    const bin = stubClaude(repo, 'echo CONTRADICT\n');
+    writeFileSync(
+      join(repo, 'docs', 'decisions', 'draft.md'),
+      scopedTargetMd('draft', 'lib/**', 'a draft'),
+    );
+    mkdirSync(join(repo, 'lib'), { recursive: true });
+    writeFileSync(join(repo, 'lib', 'x.ts'), 'export const y = 2;\n');
+    git('add lib/x.ts');
+    expect(gateWithStub(bin).status).toBe(0);
+  });
+
   it('claude erroring entirely (e.g. a Cursor-only machine) fails open (0)', () => {
     const bin = stubClaude(repo, 'exit 3\n');
     writeFileSync(join(repo, 'src', 'new.ts'), 'export const y = 2;\n');

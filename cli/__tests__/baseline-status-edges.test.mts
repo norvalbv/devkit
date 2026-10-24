@@ -15,7 +15,13 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import baselineStatus from '../commands/baseline/status.mts';
 import { type RunRef, isUsableRun } from '../lib/baseline-status/gh.mts';
-import { produceTestReport, summarise } from '../lib/baseline-status/produce.mts';
+import { newUnhandled } from '../lib/baseline-status/attribution.mts';
+import {
+  MAX_NAMES_PER_LIST,
+  produceTestReport,
+  recordUnhandled,
+  summarise,
+} from '../lib/baseline-status/produce.mts';
 import {
   addCommit,
   ghHarness,
@@ -413,64 +419,8 @@ describe('wiring', () => {
     // An untracked-but-unignored .devkit sidecar was enough to make `devkit release` refuse on an
     // unclean tree — the reason .gitignore already carries that warning.
     const ignored = readFileSync(join(import.meta.dirname, '..', '..', '.gitignore'), 'utf8');
-    for (const path of ['.devkit/test-reports/', '.devkit/baseline-status/']) {
+    for (const path of ['.devkit/test-reports/', '.devkit/baseline-status/', '.vitest/']) {
       expect(ignored).toContain(path);
-    }
-  });
-
-  it('uploads both artifacts from the gate, on red runs too', () => {
-    // `if: always()` is the whole point: a red run is the one the per-file record decomposes.
-    const gate = readFileSync(
-      join(import.meta.dirname, '..', '..', '.github/workflows/gate.yml'),
-      'utf8',
-    );
-    expect(gate).toContain('bun run test:run:report');
-    expect(gate).toContain('name: test-report-summary');
-    expect(gate).toContain('name: test-report');
-    const uploads = gate.slice(gate.indexOf('Upload test report summary'));
-    expect(uploads.match(/if: always\(\)/g)).toHaveLength(2);
-    // `.devkit` is a dot-folder and upload-artifact skips "files within folders beginning with `.`"
-    // unless told otherwise, so without this BOTH artifacts upload nothing — silently, because
-    // `if-no-files-found: ignore` treats an empty match as success.
-    expect(uploads.match(/include-hidden-files: true/g)).toHaveLength(2);
-  });
-
-  // A cancelled job is where `if: always()` stops being a guarantee, so the bound and the uploads
-  // above are one mechanism. See docs/decisions/suite-hangs-bound-at-the-spawn-site.md (sc-2393).
-  it('bounds the test step itself, never the job that carries the uploads', () => {
-    const gate = readFileSync(
-      join(import.meta.dirname, '..', '..', '.github/workflows/gate.yml'),
-      'utf8',
-    );
-
-    const testsStep = gate.slice(gate.indexOf('- name: Tests'));
-    const step = testsStep.slice(0, testsStep.indexOf('- name: Upload'));
-    expect(step, 'the Tests step must carry its own timeout-minutes').toMatch(
-      /^\s+timeout-minutes: \d+$/m,
-    );
-    // Anchored at the job's indentation: 6 spaces is a step key, fewer is a job key.
-    expect(
-      gate.match(/^ {0,5}timeout-minutes:/m),
-      'timeout-minutes at job level would put the if: always() uploads at the mercy of cancellation',
-    ).toBeNull();
-  });
-
-  // Ship's pre-push leaves typecheck + test:run to CI, so an early red step must never skip them.
-  it('runs every check step once Install succeeds, whatever failed before it', () => {
-    const gate = readFileSync(
-      join(import.meta.dirname, '..', '..', '.github/workflows/gate.yml'),
-      'utf8',
-    );
-    const steps = gate.split(/^ {6}- /m);
-    const install = steps.findIndex((step) => step.startsWith('name: Install\n'));
-    expect(steps[install]).toContain('id: install');
-    const checks = steps.slice(install + 1).filter((step) => !step.includes('if: always()'));
-    expect(checks.length).toBeGreaterThan(0);
-    for (const step of checks) {
-      const name = step.slice(0, step.indexOf('\n'));
-      // The step's own `if:` line, so a guard in a comment or `||` instead of `&&` cannot pass.
-      const guard = step.split('\n').find((line) => line.startsWith('        if: '));
-      expect(guard ?? '', name).toContain("!cancelled() && steps.install.outcome == 'success'");
     }
   });
 
@@ -986,6 +936,75 @@ describe('the producer fails loudly when it produces nothing', () => {
       'd=$(ls -d .devkit/test-reports/*/ | head -1); printf "{oops" > "$d/report.json"; exit 0',
     );
     expect(await produceTestReport(dir, [])).toBe(1);
+  });
+
+  // The json report's `success` ignores errors outside any test; the summary must still list them.
+  it.each([
+    [
+      '[{"file":"a","message":"E: x"},{"file":"a","message":"E: x"},{"file":null,"message":"E: y"}]',
+      {
+        errors: [
+          { file: 'a', message: 'E: x' },
+          { file: null, message: 'E: y' },
+        ],
+      },
+    ],
+    ['[]', { errors: [] }],
+    // The reporter always writes, so no file means the run went unrecorded, never error-free.
+    [null, undefined],
+    ['{torn', undefined],
+  ])('records unhandled.json %j as unhandled=%j', async (unhandled, expected) => {
+    const report = '{"success":true,"testResults":[]}';
+    const write = unhandled === null ? '' : `printf '%s' '${unhandled}' > "$d/unhandled.json";`;
+    fakeVitest(
+      `d=$(ls -d .devkit/test-reports/*/ | head -1); printf '%s' '${report}' > "$d/report.json"; ${write} exit 1`,
+    );
+    expect(await produceTestReport(dir, [])).toBe(1);
+    const [run] = readdirSync(join(dir, '.devkit/test-reports'));
+    const summary = JSON.parse(
+      readFileSync(join(dir, '.devkit/test-reports', run, 'summary.json'), 'utf8'),
+    );
+    expect(summary.unhandled).toEqual(expected);
+  });
+
+  it("compares two runs' unhandled errors by identity across runner checkouts", () => {
+    // Producer to comparator: a swapped error is new, the same error at another root is not.
+    const run = (root: string, message: string) => {
+      writeFileSync(
+        join(dir, 'unhandled.json'),
+        JSON.stringify([{ file: join(root, 'a.test.mts'), message }]),
+      );
+      return {
+        ...summarise({ success: false, testResults: [] }, root),
+        unhandled: recordUnhandled(join(dir, 'unhandled.json'), root),
+      };
+    };
+    const base = run('/runner/one', 'Error: x');
+    expect(newUnhandled(run('/runner/two', 'Error: y'), base)).toEqual([
+      { file: 'a.test.mts', message: 'Error: y' },
+    ]);
+    expect(newUnhandled(run('/runner/two', 'Error: x'), base)).toEqual([]);
+  });
+
+  it('records unhandled files repo-relative, sorted, and capped with a truncated flag', () => {
+    const entries = Array.from({ length: MAX_NAMES_PER_LIST + 1 }, (_, i) => ({
+      file: join(dir, `t${String(i).padStart(3, '0')}.test.mts`),
+      message: 'Error: x',
+    }));
+    writeFileSync(join(dir, 'unhandled.json'), JSON.stringify(entries.toReversed()));
+    const record = recordUnhandled(join(dir, 'unhandled.json'), dir);
+    expect(record?.truncated).toBe(true);
+    expect(record?.errors).toHaveLength(MAX_NAMES_PER_LIST);
+    expect(record?.errors[0]).toEqual({ file: 't000.test.mts', message: 'Error: x' });
+    writeFileSync(
+      join(dir, 'unhandled.json'),
+      JSON.stringify(entries.slice(0, MAX_NAMES_PER_LIST)),
+    );
+    expect(recordUnhandled(join(dir, 'unhandled.json'), dir)?.truncated).toBeUndefined();
+    writeFileSync(join(dir, 'unhandled.json'), JSON.stringify(entries.slice(0, 1)));
+    expect(recordUnhandled(join(dir, 'unhandled.json'), dir)).toEqual({
+      errors: [{ file: 't000.test.mts', message: 'Error: x' }],
+    });
   });
 });
 

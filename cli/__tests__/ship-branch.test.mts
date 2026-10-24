@@ -21,6 +21,7 @@ import {
 import {
   addOverlay,
   buildAndRun,
+  COUNTING_HOOK,
   createPreservedCommit,
   DELETED_BRANCH_RE,
   DETACHED_RE,
@@ -34,12 +35,14 @@ import {
   GIT_ENV,
   ghStub,
   hasGh,
+  installPostCommitHang,
   localBranchExists,
   manifestOf,
   NOTE_RE,
   NOTHING_RE,
   packagedApiSecurityAgent,
   packagedApiSecurityChecklist,
+  POST_COMMIT_CEILING_BANNER,
   remoteBranchExists,
   reshipScript,
   resolve,
@@ -774,11 +777,8 @@ describe('ship-branch.sh — worktree integration', () => {
   });
 
   it('an identical retry publishes the preserved commit after a post-commit timeout', () => {
-    const { dir, env, git, bare } = seedShipRepoLocalRemote({
-      // The hook exits successfully but leaks a pipe-holding child. Git lands the commit; the gate
-      // supervisor then returns 124 while reaping that descendant — the reported Story #1550 state.
-      hookBody: 'echo run >> "$TEST_HOOK_COUNT"\nsleep 30 &',
-    });
+    const { dir, env, git, bare } = seedShipRepoLocalRemote({ hookBody: COUNTING_HOOK });
+    installPostCommitHang(dir);
     const hookCount = join(dir, 'hook-count');
     const stubBin = ghStub('echo https://github.com/acme/app/pull/42');
     const publishEnv = {
@@ -801,6 +801,7 @@ describe('ship-branch.sh — worktree integration', () => {
     );
 
     expect(first.status, first.stderr).toBe(124);
+    expect(first.stderr).toMatch(POST_COMMIT_CEILING_BANNER);
     expect(first.stderr).toMatch(/devkit ship --resume .+ to converge/);
     expect(first.stdout).not.toContain('https://github.com/acme/app/pull/42');
     expect(localBranchExists(git, 'feat/post-commit-timeout')).toBe(true);

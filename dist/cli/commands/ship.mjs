@@ -38,6 +38,7 @@ export const POSITIONAL_REJECTED_FLAGS = [
     '--wait-ci',
     '--wait-ci-timeout',
     '--wait-ci-required',
+    '--wait-ci-strict',
 ];
 export const meta = {
     name: 'ship',
@@ -90,8 +91,9 @@ Usage:
                       working-tree dirt remains untouched. Explicit paths stay the default because
                       dirty-file ownership cannot be inferred safely in a shared checkout. Not valid
                       with --pr; resume remembers the committed-source mode and frozen path set.
-  --body "<text>"     Commit + PR body, inline (no temp file). Wins over stdin; omit it to read the
-                      commit body from stdin (a pipe or here-doc) or to leave the body empty.
+  --body "<text>"     Commit + PR body, inline (no temp file). Wins over stdin; --body "" is an
+                      explicit empty body (with --pr it clears the description). Omit it to read
+                      the commit body from stdin (a pipe or here-doc) or to leave the body empty.
   --body-file <f>     Commit + PR body read from a file. The recorded invocation stores the file's
                       CONTENT, and --resume replays those bytes — a later edit to <f> is NOT picked
                       up until you re-pass --body-file on the resume (--resume warns when <f> and
@@ -141,8 +143,9 @@ Usage:
                       summaries of the PR run and of the run on the commit CI merged it onto. "new"
                       means not failing on that base run, so a flake reads as new; unknown names a
                       reason= or counts unsure= files whose test names cannot settle it.
-                      The verdict NEVER reaches the exit code: a red PR is not a failed ship, and an
-                      agent reading non-zero would retry --resume against a record the push deleted.
+                      The verdict NEVER reaches the exit code (unless --wait-ci-strict): a red PR is
+                      not a failed ship, and an agent reading non-zero would retry --resume against a
+                      record the push deleted.
                       Grep the line, or read the ship_ci telemetry row. Valid for a new ship and for
                       --pr. NOT replayed by --resume: it observes a PR that already exists rather
                       than describing what shipped, so re-request it on the retry.
@@ -152,6 +155,11 @@ Usage:
                       that has not started yet is invisible. A branch without protection, or whose
                       required checks have not reported, therefore ends in no-checks — never passed.
                       The verdict line carries \`scope=required\`. NOT replayed by --resume.
+  --wait-ci-strict    With --wait-ci only: exit 5 unless the verdict is passed — failed, cancelled,
+                      no-checks, timed-out, unavailable and not-run all exit 5, as does a crashed
+                      wait. Exit 5 means the PR is open (or SHIP_DRY_RUN committed) and CI is not
+                      known green: do NOT --resume. For \`devkit ship … --wait-ci --wait-ci-strict &&
+                      <merge>\`. NOT replayed by --resume.
   --wait-ci-timeout <s>  Bound for --wait-ci, 60..7200, default 900. The floor exists because below
                       it a "this repo has no checks" verdict is unreachable and would surface as a
                       timeout instead. A terminal result is confirmed over ~30s before it is
@@ -215,7 +223,8 @@ Judge models:
 
 Exits 0 on PR opened, committed under SHIP_DRY_RUN, or a passing --dry-gates rehearsal; 1 on any
 preflight/git/gh/gate error. A --wait-ci verdict never changes that — a red or timed-out CI still
-exits 0, because the PR opened. The one exception is a SIGNAL during the wait: ship exits 130/143
+exits 0, because the PR opened — unless --wait-ci-strict, which exits 5 on any verdict but passed
+(an exit 1 above still wins). The other exception is a SIGNAL during the wait: ship exits 130/143
 even though the PR is open, so the wait announces the PR URL before it starts. A commit
 that lands but fails to push KEEPS the branch; an identical retry verifies and resumes that commit.
 A commit that never lands auto-deletes the empty branch.

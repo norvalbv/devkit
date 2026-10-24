@@ -16,9 +16,9 @@ concurrency:
 
 jobs:
   # main's single required check: fails unless every job in needs succeeded, since GitHub passes a
-  # skipped required job. Kept first so tests reading gate's steps to end of file never reach it.
+  # skipped required job.
   required:
-    needs: [gate]
+    needs: [gate, tests, test-report]
     if: always()
     runs-on: ubuntu-latest
     permissions: {}
@@ -107,24 +107,99 @@ jobs:
           node cli/lib/ship/dist-integrity.mts --root . --tree "$(git rev-parse "$DIST_HEAD^{tree}")" \
             --base "$(git merge-base "$DIST_BASE" "$DIST_HEAD")" --branch "$DIST_BRANCH" --
 
+  # The suite is worker-bound (file time ≈ 3 workers x wall), so it splits across runners. No `name`:
+  # gh pr checks keeps one check per name, so same-named shards would let ship --wait-ci pass early.
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      # A cancelled sibling would take its blob, and so its files' per-file record, with it.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
       # STEP-level, deliberately, not job-level (sc-2393). A job timeout cancels the job, which puts
-      # the two `if: always()` uploads below at the mercy of cancellation semantics; a step bound
-      # leaves the job alive so a wedged run still publishes whatever per-file record exists and
-      # `devkit baseline-status` keeps answering. Vitest has no run-level deadline of its own and no
-      # open request for one, so an external bound is the only place this can live; without it the
-      # job inherited GitHub's 6-hour default. Sized as a HANG detector and nothing else, from the
-      # measured spread rather than a guess: this step ran 24m40s-31m56s across the six runs before
-      # sc-2393 (33835847680, 33835531417, 33833431176, 33824241686, 33808990242, 33775305022), so
-      # 90 leaves ~2.8x over the observed max. A bound that a healthy run can reach IS the flake it
-      # was meant to catch — raise it if a legitimate run ever approaches it, and never lower it to
-      # make a slow run fail faster.
+      # the `if: always()` uploads below at the mercy of cancellation semantics; a step bound leaves
+      # the job alive so a wedged shard still publishes its tombstone. Vitest has no run-level
+      # deadline of its own, so an external bound is the only place this can live. Sized as a HANG
+      # detector and nothing else: the unsharded step ran 24m40s-31m56s before sc-2393 and ~40 min
+      # by October, so 90 per shard is far over any healthy shard. Never lower it to make a slow
+      # run fail faster.
       - name: Tests
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         timeout-minutes: 90
         # The runner is dedicated, unlike a dev box: 3 workers on its 4 vCPUs instead of '50%' = 2.
         env:
           VITEST_MAX_WORKERS: 3
-        run: bun run test:run:report
+          SHARD: ${{ matrix.shard }}
+        run: bun run test:run --shard="$SHARD/4" --reporter=blob --reporter=default
+
+      # download-artifact takes the newest artifact per name across run attempts, so a shard that
+      # wrote no blob must still upload something, or a re-run would merge an older attempt's blob.
+      - name: Mark a shard that wrote no blob
+        if: always()
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          mkdir -p .vitest/blob
+          [[ -f ".vitest/blob/blob-$SHARD-4.json" ]] || touch ".vitest/blob/missing-$SHARD"
+
+      - name: Upload shard blob
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-blob-${{ matrix.shard }}
+          path: .vitest/blob/
+          include-hidden-files: true
+          if-no-files-found: error
+
+  # One merged report from every shard's blob, so `devkit baseline-status` still reads one summary.
+  test-report:
+    needs: [tests]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Download shard blobs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-blob-*
+          merge-multiple: true
+          path: .vitest/blob
+
+      # vitest merges whatever blobs exist, so a missing shard would publish a partial green.
+      - name: Every shard wrote a blob
+        run: |
+          missing=""
+          for i in 1 2 3 4; do
+            [[ -f ".vitest/blob/blob-$i-4.json" && ! -e ".vitest/blob/missing-$i" ]] || missing+=" $i"
+          done
+          if [[ -n "$missing" ]]; then
+            echo "::error::no test result from shard(s)$missing; refusing to publish a partial report"
+            exit 1
+          fi
+
+      # A hang bound only: the merge replays reporters and runs no tests, so a healthy one takes minutes.
+      - name: Merge shard reports
+        timeout-minutes: 30
+        run: bun run test:run:report --mergeReports
 
       # Uploaded on RED runs too — a red run is precisely the one `devkit baseline-status` exists to
       # decompose into per-file facts. Two artifacts, not one: a baseline query fetches only the

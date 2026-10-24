@@ -38,6 +38,14 @@ export function unavailableMessage(label, e, timeout, bin = 'claude') {
     const reason = e.code ?? (e.status != null ? `exit ${e.status}` : (e.message ?? 'unknown'));
     return `${prefix} unavailable (${reason}; offline/quota/absent) — judgement skipped`;
 }
+/** The outage causes whose remedies differ; every other classified kind shares the generic one. */
+export const REMEDY_CAUSES = [
+    'timeout',
+    'rate-limited',
+    'absent',
+    'model-unavailable',
+    'outage',
+];
 /** ONE outage→cause mapper for every fail-closed gate (sc-2769), so no gate keeps a private copy. */
 export function remedyCause(outage) {
     const kind = outage?.kind;

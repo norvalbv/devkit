@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { oneLine } from '../../../cli/lib/ship/digest/fields.mts';
 import { deterministicStrict } from '../../config.mts';
 import { recheckCommand } from '../recheck.mts';
-import { parseOpts, prefixCacheScope, runDeterministic, selectedIds } from '../run.mts';
+import { parseOpts, prefixCacheScope, runDeterministic } from '../run.mts';
 
 const dirs = [];
 afterEach(() => {
@@ -470,11 +470,33 @@ describe('runDeterministic — --structure / --extra / --only', () => {
     const exec = mkExec({});
     expect(runDeterministic(d, { exec })).toBe(0);
     expect(exec).toHaveBeenCalledTimes(2);
+    expect(runDeterministic(d, { exec })).toBe(0); // a green hit that still ran coverage
     const failing = mkExec({ 'coverage/run': 1 });
     expect(runDeterministic(d, { exec: failing })).toBe(1);
     expect(failing).toHaveBeenCalledTimes(1);
     expect(failing.mock.calls[0][1][0]).toMatch(/coverage[\\/]run\.m?ts$/);
-    expect(cacheStates(process.env.DEVKIT_GATE_EVENTS)).toEqual(['none', 'partial']);
+    expect(cacheStates(process.env.DEVKIT_GATE_EVENTS)).toEqual(['none', 'partial', 'partial']);
+  });
+
+  it('a green cache hit reports the cached run duration as its effective duration', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const d = repo(['size']);
+    execFileSync('git', ['init', '-q'], { cwd: d });
+    execFileSync('git', ['add', '.'], { cwd: d });
+    process.env.DEVKIT_SHIP = '1';
+    process.env.DEVKIT_GATE_EVENTS = join(d, 'events.jsonl');
+    // The first run takes >= 400 ms, so its recorded duration exceeds the near-instant cache hit.
+    const slow = vi.fn(() => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400));
+    expect(runDeterministic(d, { exec: slow })).toBe(0);
+    expect(runDeterministic(d, { exec: slow })).toBe(0);
+    expect(slow).toHaveBeenCalledTimes(1);
+    const timings = readFileSync(process.env.DEVKIT_GATE_EVENTS, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((e) => e.type === 'gate_timing' && e.gate === 'deterministic');
+    expect(timings.map((e) => e.cache_state)).toEqual(['none', 'full']);
+    expect(timings[1].effective_duration_ms).toBeGreaterThanOrEqual(400);
   });
 
   it('a run where a gate opted out is not cached, so a retry never calls that gate passed', () => {
@@ -720,91 +742,6 @@ describe('parseOpts — the argv tokenizer the real hook depends on', () => {
   it('--only splits/trims/drops blanks — `,,` yields [] (fail-closed at runDeterministic)', () => {
     expect(parseOpts(['--only', 'size, fanout ,']).only).toEqual(['size', 'fanout']);
     expect(parseOpts(['--only', ',,']).only).toEqual([]);
-  });
-});
-
-describe('selectedIds', () => {
-  // sc-2483 follow-through: .devkit/config.json is external JSON, so every layer is read as an own
-  // property — an inherited `components`/`guards`/`antiSlop` must never change the gate set.
-  it('ignores inherited properties at every layer of the config', () => {
-    const proto = Object.prototype;
-    Object.defineProperty(proto, 'components', {
-      value: { antiSlop: true, guards: ['size'] },
-      configurable: true,
-    });
-    Object.defineProperty(proto, 'antiSlop', { value: true, configurable: true });
-    Object.defineProperty(proto, 'guards', { value: ['size'], configurable: true });
-    try {
-      expect(selectedIds(repo(null))).toEqual(['size', 'fanout', 'dup', 'clone']);
-      expect(selectedIds(repo(['clone']))).toEqual(['clone']);
-      expect(selectedIds(repo([], false))).toEqual([]);
-    } finally {
-      delete proto.components;
-      delete proto.antiSlop;
-      delete proto.guards;
-    }
-  });
-
-  it('intersects components.guards with the deterministic set in fixed order, dropping AI ids', () => {
-    const d = repo(['clone', 'size', 'review']); // review is AI (fail-fast)
-    expect(selectedIds(d)).toEqual(['size', 'clone']);
-  });
-
-  it('runs an explicitly-selected opt-in guard (coverage)', () => {
-    expect(selectedIds(repo(['size', 'coverage']))).toEqual(['size', 'coverage']);
-  });
-
-  it('EXCLUDES opt-in coverage from the missing-config fallback (unadopted repo never wedged)', () => {
-    expect(selectedIds(repo(null))).toEqual(['size', 'fanout', 'dup', 'clone']);
-  });
-
-  it('selects anti-slop only from its explicit component bit, never components.guards', () => {
-    expect(selectedIds(repo([], true))).toEqual(['anti-slop']);
-    expect(selectedIds(repo(['anti-slop'], false))).toEqual([]);
-    expect(selectedIds(repo(['anti-slop']))).toEqual([]);
-  });
-
-  it('keeps anti-slop out of missing and unreadable config fallbacks', () => {
-    expect(selectedIds(repo(null))).not.toContain('anti-slop');
-    const d = repo([], true);
-    writeFileSync(join(d, '.devkit', 'config.json'), '{ nope');
-    expect(selectedIds(d)).toEqual(['size', 'fanout', 'dup', 'clone']);
-  });
-
-  it('selects comments from components.guards, but keeps it out of both fallbacks (opt-in)', () => {
-    expect(selectedIds(repo(['size', 'comments']))).toEqual(['size', 'comments']);
-    expect(selectedIds(repo(['review']))).toEqual([]);
-    expect(selectedIds(repo(null))).not.toContain('comments');
-    const d = repo(['comments']);
-    writeFileSync(join(d, '.devkit', 'config.json'), '{ nope');
-    expect(selectedIds(d)).not.toContain('comments');
-  });
-
-  it('review mode honours comments in the explicit allowlist, and only there', () => {
-    const d = repo(['size', 'comments']);
-    process.env.DEVKIT_RUN_MODE = 'review';
-    process.env.DEVKIT_REVIEW_GUARDS = 'comments,review';
-    expect(selectedIds(d)).toEqual(['comments']);
-    process.env.DEVKIT_REVIEW_GUARDS = 'size,review';
-    expect(selectedIds(d)).toEqual(['size']);
-  });
-
-  it('dry-gates keeps the configured size gate: only review mode narrows to the allowlist', () => {
-    const d = repo(['size', 'comments']);
-    process.env.DEVKIT_RUN_MODE = 'dry-gates';
-    process.env.DEVKIT_REVIEW_GUARDS = 'comments';
-    expect(selectedIds(d)).toEqual(['size', 'comments']);
-  });
-
-  it('uses the explicit review allowlist instead of components.guards in review mode', () => {
-    const d = repo(['size', 'fanout', 'dup', 'clone'], true);
-    process.env.DEVKIT_RUN_MODE = 'review';
-    process.env.DEVKIT_REVIEW_GUARDS = ' clone, size ,review, anti-slop ';
-    expect(selectedIds(d)).toEqual(['size', 'clone']);
-    process.env.DEVKIT_REVIEW_GUARDS = '';
-    expect(selectedIds(d)).toEqual([]);
-    delete process.env.DEVKIT_REVIEW_GUARDS;
-    expect(selectedIds(d)).toEqual([]);
   });
 });
 
@@ -1097,6 +1034,10 @@ describe('runDeterministic — opt-out reporting across the other run shapes', (
     const out = err.mock.calls.flat().join('\n');
     expect(out).toContain('1 deterministic gate opted out and did NOT run: guard-dup');
     expect(out).toContain('deterministic gates failed: guard-size');
+    // The two reports are separate calls; the opt-out block must still print first.
+    expect(out.indexOf('opted out and did NOT run')).toBeLessThan(
+      out.indexOf('✗ deterministic gates failed'),
+    );
   });
 
   it('separates the two in telemetry: the failure is a fail, the opt-out is could_not_run', () => {
@@ -1105,14 +1046,13 @@ describe('runDeterministic — opt-out reporting across the other run shapes', (
     const sink = join(d, 'events.jsonl');
     process.env.DEVKIT_GATE_EVENTS = sink;
     expect(runDeterministic(d, { exec: mkExec({ 'size-disable': 1, matcher: 2 }) })).toBe(1);
-    const byGate = Object.fromEntries(
-      readFileSync(sink, 'utf8')
-        .split('\n')
-        .filter(Boolean)
-        .map((l) => JSON.parse(l))
-        .filter((e) => e.type === 'gate_result')
-        .map((e) => [e.gate, e]),
-    );
+    const results = readFileSync(sink, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'gate_result');
+    expect(results.map((e) => e.gate)).toEqual(['dup', 'size']); // opt-out row first
+    const byGate = Object.fromEntries(results.map((e) => [e.gate, e]));
     expect(byGate.size).toMatchObject({ status: 'fail' });
     expect(byGate.dup).toMatchObject({ status: 'could_not_run', detail: 'guard-dup(opted-out)' });
   });
@@ -1378,8 +1318,9 @@ describe('runDeterministic — local re-check hint on failure', () => {
     }
     // A gate that passed gets no line.
     expect(out).not.toMatch(/guard-fanout:/);
-    expect(out).toMatch(/guard-size: env -- node .*size-disable\.m[jt]s gate/);
-    expect(out).toMatch(/guard-dup: env -- node .*matcher\.m[jt]s scan --new --changed --gate/);
+    // A devkit checkout path with a space or apostrophe prints the module single-quoted.
+    expect(out).toMatch(/guard-size: env -- node .*size-disable\.m[jt]s'? gate/);
+    expect(out).toMatch(/guard-dup: env -- node .*matcher\.m[jt]s'? scan --new --changed --gate/);
   });
 
   it('keeps the grepped failure line byte-identical and ahead of the hint', () => {
@@ -1402,7 +1343,7 @@ describe('runDeterministic — local re-check hint on failure', () => {
     const d = repo([], true);
     expect(runDeterministic(d, { exec: mkExec({ index: 1 }) })).toBe(1);
     const out = errOut(err);
-    expect(out).toMatch(/guard-anti-slop: env -- node .*index\.m[jt]s anti-slop check --staged/);
+    expect(out).toMatch(/guard-anti-slop: env -- node .*index\.m[jt]s'? anti-slop check --staged/);
     expect(out).toContain('devkit anti-slop check --staged');
   });
 
@@ -1473,6 +1414,12 @@ describe('recheckCommand', () => {
     symlinkSync(real, link);
     dirs.push(link);
     expect(recheckCommand(['node', join(real, 'm.mjs')], link)).toBe('env -- node m.mjs');
+  });
+
+  it('quotes an argument starting with `=`, which zsh would expand to a command path', () => {
+    expect(recheckCommand(['node', 'gate.mjs', '=x.ts'], repo())).toBe(
+      "env -- node gate.mjs '=x.ts'",
+    );
   });
 });
 

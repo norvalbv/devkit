@@ -12,14 +12,19 @@ import { DEFAULT_ARTIFACT, DEFAULT_WORKFLOW, workflowSelector } from './query.mt
 export interface BaselineSource {
   workflow: string;
   artifact: string;
+  /** The matrix job whose shards `ship --wait-ci` attribution pairs: `<shardJob> (<values>)`. */
+  shardJob: string;
 }
+
+/** gate.yml's sharded test job. */
+const DEFAULT_SHARD_JOB = 'tests';
 
 /**
  * The `baselineStatus` block, typed as EXPECTED at the JSON boundary — the same stance as
  * gate-engine/config.mts: a malformed value is tolerated by `named`, never trusted.
  */
 interface RawBaselineStatus {
-  baselineStatus?: { workflow?: string; artifact?: string } | null;
+  baselineStatus?: { workflow?: string; artifact?: string; shardJob?: string } | null;
 }
 
 /**
@@ -50,7 +55,9 @@ function named(value: string | undefined, fallback: string): string {
  */
 export function configuredSource(cwd: string): BaselineSource {
   const dir = configDir(cwd);
-  if (dir === null) return { workflow: DEFAULT_WORKFLOW, artifact: DEFAULT_ARTIFACT };
+  if (dir === null) {
+    return { workflow: DEFAULT_WORKFLOW, artifact: DEFAULT_ARTIFACT, shardJob: DEFAULT_SHARD_JOB };
+  }
   const path = join(dir, CONFIG_FILENAME);
   const block = parseJsonObject<RawBaselineStatus>(
     readFileSync(path, 'utf8'),
@@ -63,5 +70,9 @@ export function configuredSource(cwd: string): BaselineSource {
       `${CONFIG_FILENAME} at ${path}: baselineStatus.workflow names no workflow file`,
     );
   }
-  return { workflow, artifact: named(block?.artifact, DEFAULT_ARTIFACT) };
+  return {
+    workflow,
+    artifact: named(block?.artifact, DEFAULT_ARTIFACT),
+    shardJob: named(block?.shardJob, DEFAULT_SHARD_JOB),
+  };
 }

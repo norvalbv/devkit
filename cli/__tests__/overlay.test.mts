@@ -51,14 +51,13 @@ const preLedgerAll = () => {
   return { ...selection, guards: selection.guards.filter((guard) => guard !== 'comments') };
 };
 
-// Stub fallow's external CLI (detect/install/baselines) so overlay's fallow flow runs without
+// Stub fallow's external CLI (detect/install) so overlay's fallow flow runs without
 // a real `fallow` binary or a global network install. detectFallow → present, so resolveOverlayFallow
 // wires the gate without installing. Plain fns (not vi.fn) so afterEach's restoreAllMocks can't clear them.
 vi.mock('../lib/install/install-fallow.mts', async (importOriginal) => ({
   ...(await importOriginal()),
   detectFallow: () => ({ available: true, version: '2.89.0' }),
   installFallow: () => ({ ok: true, method: 'bun', message: 'installed fallow@2.89.0 via bun' }),
-  saveFallowBaselines: () => ({ ok: true }),
 }));
 
 // For the overlay-upgrade suite below: keep cmpSemver / needsRerun / repoUrl REAL, but stub the
@@ -258,10 +257,7 @@ describe('overlay (local-only) install', () => {
     expect(readFileSync(join(root, 'eslint.config.devkit.mjs'), 'utf8')).toContain(
       "import repoConfig from './eslint.config.mjs'",
     );
-    expect(JSON.parse(readFileSync(join(root, 'biome.devkit.jsonc'), 'utf8')).extends).toEqual([
-      './biome.jsonc',
-      './.devkit/biome/react.jsonc',
-    ]);
+    expect(existsSync(join(root, 'biome.devkit.jsonc'))).toBe(false); // Biome left the overlay
 
     // Core Oxc lands as in package mode, but only in git-excluded paths: no discovery-named config.
     const overlayConfig = JSON.parse(readFileSync(join(root, '.devkit', 'config.json'), 'utf8'));
@@ -393,7 +389,6 @@ describe('overlay (local-only) install', () => {
     ).toBe('.husky/_');
     expect(existsSync(join(root, '.devkit'))).toBe(false);
     expect(existsSync(join(root, 'guard.config.json'))).toBe(false);
-    expect(existsSync(join(root, 'biome.devkit.jsonc'))).toBe(false);
     expect(existsSync(join(root, 'eslint.config.devkit.mjs'))).toBe(false);
     expect(existsSync(join(root, 'biome.jsonc'))).toBe(true); // the team's, untouched
     const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
@@ -843,7 +838,7 @@ describe('overlay (local-only) install', () => {
     ).toBe('');
   });
 
-  it('wires fallow as an inline hook gate (not `fallow hooks install`); baselines + cache hidden', async () => {
+  it('wires fallow as an inline hook gate (not `fallow hooks install`); cache hidden, no baselines', async () => {
     const root = workRepo();
     await applyInit(root, {
       stack: 'react-app',
@@ -857,7 +852,8 @@ describe('overlay (local-only) install', () => {
     expect(hook).not.toContain('fallow hooks install'); // NOT fallow's own (shadowed) hook
     const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
     expect(exclude).toContain('.fallow/');
-    expect(exclude).toContain('fallow-baselines/');
+    expect(exclude).not.toContain('fallow-baselines');
+    expect(existsSync(join(root, 'fallow-baselines'))).toBe(false);
     // sc-2274: the decisions embedding cache is local too, so ship never asks anyone to commit it
     expect(exclude).toContain('.decisions/index.json\n');
     expect(exclude).toContain('.decisions/index.json.*.tmp');
@@ -1455,6 +1451,7 @@ describe('overlay hook regeneration (syncOverlayHook + doctor --fix)', () => {
       missing: false,
       drift: true,
       commitMsg: { missing: false, drift: false }, // no message judge selected, no repo hook
+      siblings: { scriptDir: '.husky', stale: [], foreign: [], unreadable: [] },
     });
     expect(readHook(root)).not.toContain('devkit-gates: chain start');
 
@@ -1706,22 +1703,6 @@ describe('overlay upgrade (re-syncs, not the old bail)', () => {
     expect(readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8')).toBe(stale); // untouched
   });
 
-  it('records a --no-biome overlay so later refreshes preserve the opt-out', async () => {
-    const root = workRepo();
-    await applyInit(root, {
-      stack: 'react-app',
-      selection: applyOverlayConstraints({ ...defaultSelection(), biome: false }, 'react-app'),
-      overlay: true,
-      devkitRef: 'v0.7.0',
-    });
-    expect(existsSync(join(root, 'biome.devkit.jsonc'))).toBe(false); // opted out at init
-    expect(readCfg(root).components.biome).toBe(false);
-
-    await upgrade([], root);
-
-    expect(existsSync(join(root, 'biome.devkit.jsonc'))).toBe(false);
-  });
-
   it('upgrade --force does NOT overwrite a tuned guard.config.json (configs are never overwritten)', async () => {
     const root = workRepo();
     await mkOverlay(root);
@@ -1876,7 +1857,7 @@ describe('overlay commit-msg judges (sc-1794)', () => {
     expect(existsSync(cmsgPath(root))).toBe(true);
   });
 
-  it('deselecting review + sentry reverts to a pass-through, or removes the hook when the team has none', async () => {
+  it('deselecting review + sentry reverts to a pass-through, with or without a team hook', async () => {
     const withTeam = workRepo();
     withRepoCommitMsg(withTeam);
     await init(withTeam);
@@ -1888,7 +1869,8 @@ describe('overlay commit-msg judges (sc-1794)', () => {
     await init(bare);
     expect(existsSync(cmsgPath(bare))).toBe(true);
     await init(bare, defaultSelection());
-    expect(existsSync(cmsgPath(bare))).toBe(false);
+    expect(cmsg(bare)).not.toContain('guard-review');
+    expect(cmsg(bare)).toContain('.husky/commit-msg'); // a team hook added later still runs
   });
 
   it('a team commit-msg that already calls completeness never makes devkit drop its judges', async () => {
@@ -1939,5 +1921,7 @@ describe('overlay commit-msg judges (sc-1794)', () => {
     const root = workRepo();
     await init(root, judged(), { dryRun: true });
     expect(existsSync(cmsgPath(root))).toBe(false);
+    // the planning pass over every hook name must not write either
+    expect(existsSync(join(root, '.devkit', 'hooks'))).toBe(false);
   });
 });

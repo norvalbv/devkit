@@ -33,7 +33,7 @@ import {
   replaceGuardBlock,
 } from '../lib/husky/husky-block.mts';
 
-const ALL = { biome: true, guards: [...GUARD_IDS] };
+const ALL = { guards: [...GUARD_IDS] };
 const PRE_COMMIT_GATE_BINS = [
   'guard-deterministic',
   'guard-comments',
@@ -90,10 +90,12 @@ describe('buildGuardBlock', () => {
     const block = buildGuardBlock(ALL);
     expect(block).toContain('# >>> devkit-guards >>>');
     expect(block).toContain('# <<< devkit-guards <<<');
-    expect(block).toContain('# devkit:biome-format');
-    // sc-2524: biome runs only where a biome CONFIG proves the repo actually formats with it.
-    expect(block).toContain('if [ ! -f biome.json ] && [ ! -f biome.jsonc ]; then');
-    expect(block).toContain('"$__dk_package_bin_dir/biome" format --write');
+    expect(block).toContain('# devkit:format');
+    // devkit's pinned Oxfmt runs only where an Oxfmt CONFIG says the repo formats with it.
+    expect(block).toContain('if [ -f .oxfmtrc.json ] || [ -f .oxfmtrc.jsonc ]');
+    expect(block).toContain(
+      '"$__dk_package_bin_dir/devkit" oxc fmt --no-error-on-unmatched-pattern --write',
+    );
     expect(block).toContain('__dk_package_bin_dir="$(bun pm bin)"');
     // Deterministic guards (size/fanout/dup/clone) run through the ONE orchestrator, not per-guard.
     expect(block).toContain('"$__dk_package_bin_dir/guard-deterministic" --hook');
@@ -124,19 +126,13 @@ describe('buildGuardBlock', () => {
     }
   });
 
-  it('omits the format step when biome is deselected — that selection is the opt-out', () => {
-    const block = buildGuardBlock({ biome: false, guards: [...GUARD_IDS] });
-    expect(block).not.toContain('# devkit:biome-format');
-    expect(block).not.toContain('biome format');
-  });
-
   it('never emits the format step inside a monorepo package block', () => {
     // A package-relative `git add` path from the subshell would be wrong.
-    expect(buildGuardBlock(ALL, 'packages/api')).not.toContain('# devkit:biome-format');
+    expect(buildGuardBlock(ALL, 'packages/api')).not.toContain('# devkit:format');
   });
 
   it('formats .mts/.cts sources, which the pre-sc-2524 extension filter silently skipped', () => {
-    const block = buildGuardBlock({ biome: true, guards: [] });
+    const block = buildGuardBlock({ guards: [] });
     expect(block).toContain("grep -E '\\.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$'");
   });
 
@@ -229,11 +225,11 @@ describe('removeFragment', () => {
     expect(content).toContain('$__dk_package_bin_dir/guard-decisions');
   });
 
-  it('removes the biome-format step only', () => {
+  it('removes the format step only', () => {
     const hook = buildFullHook(ALL);
-    const { content, removed } = removeFragment(hook, 'biome-format');
+    const { content, removed } = removeFragment(hook, 'format');
     expect(removed).toBe(true);
-    expect(content).not.toContain('biome format');
+    expect(content).not.toContain('oxc fmt');
     expect(content).toContain('$__dk_package_bin_dir/guard-deterministic');
   });
 
@@ -429,14 +425,14 @@ describe('exit 4 renders as an object-database fault, never as a verdict', () =>
     const { status, out } = runHook({ 'guard-review': 4 });
     expect(status).toBe(1);
     expect(out).toContain('unexpected exit 4');
-    expect(out).not.toContain('escalation-confirmed');
+    expect(out).not.toContain('guard-review blocked the commit');
     expect(out).not.toContain('auth/quota');
   });
 
   it('exit 1 and exit 3 DO still carry their verdict remedies — the contrast that matters', () => {
     // Non-vacuity guard: if these ever stopped printing, the two assertions above would pass for
     // the wrong reason and this suite would be measuring nothing.
-    expect(runHook({ 'guard-review': 1 }).out).toContain('escalation-confirmed');
+    expect(runHook({ 'guard-review': 1 }).out).toContain('guard-review blocked the commit');
     // sc-3400: exit 3 defers to the per-reviewer Remedy, which names the real cause — a flat
     // "auth/quota" here misdirected an engine error. The exit-4 lines above must still never say it.
     expect(runHook({ 'guard-review': 3 }).out).toContain('Follow the Remedy named above');
@@ -488,7 +484,7 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
     });
     expect(withFallow).toContain('__dk_review_baseline_gate eslint');
     expect(withFallow).toContain('__dk_review_baseline_gate fallow');
-    expect(withFallow).toContain('xargs $DK_ESLINT -c eslint.config.devkit.mjs');
+    expect(withFallow).toContain('xargs -0 -r $DK_ESLINT -c eslint.config.devkit.mjs');
     expect(withFallow).toContain('command -v fallow');
     expect(withFallow).toContain('baseline-gate.mjs');
     expect(withFallow.indexOf('__dk_review_baseline_gate fallow')).toBeLessThan(
@@ -509,7 +505,9 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
     const firstAi = hook.indexOf('# devkit:guard-decisions');
     expect(firstAi).toBeGreaterThan(0);
     expect(hook.indexOf('fallow audit --diff-stdin')).toBeLessThan(firstAi);
-    expect(hook.indexOf('xargs $DK_ESLINT -c eslint.config.devkit.mjs')).toBeLessThan(firstAi);
+    expect(hook.indexOf('xargs -0 -r $DK_ESLINT -c eslint.config.devkit.mjs')).toBeLessThan(
+      firstAi,
+    );
     expect(hook.indexOf('# devkit:guard-ui-evidence')).toBeGreaterThan(
       hook.indexOf('fallow audit --diff-stdin'),
     );

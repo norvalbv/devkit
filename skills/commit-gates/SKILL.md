@@ -25,7 +25,7 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
    is `devkit anti-slop check --staged`). Stage the fix and run that line — seconds, no judges.
    Under `devkit ship` those lines judge your checkout's index, not the briefed paths, so the ship
    block also prints the `devkit ship <branch> "<title>" --dry-gates …` invocation that re-runs the
-   deterministic set on ship's exact staging. A blocking overlay lint step (eslint, biome, fallow)
+   deterministic set on ship's exact staging. A blocking overlay lint step (eslint, fallow)
    and devkit's own formatter print the same invocation under `devkit ship`. A hand-rolled substitute (`npx oxlint …` against the
    anti-slop config) ignores the baseline and cannot reproduce the new-versus-inherited verdict.
    This re-checks a gate that already named itself; it is not a licence to pre-run every gate.
@@ -225,8 +225,9 @@ is in force:
 claude family bound by devkit doctor --fix (codex binary was unresolvable). Explicit edits and GUARD_* envs win; delete these four keys to return to package defaults.
 ```
 
-Unsetting alone leaves that bind in place: delete that key plus `model`, `escalationModel`, `correctnessModel` and
-`correctnessChunkLoc` by hand, commit, then `devkit ship --resume <branch>`. Any other value there is
+Unsetting alone leaves that bind in place: delete that key, its `//judgeFamilyBound` record, and
+`model`, `escalationModel`, `correctnessModel` and `correctnessChunkLoc` by hand, commit, then
+`devkit ship --resume <branch>`. Any other value there is
 an operator's note, and those keys are operator-owned — leave them.
 
 A remedy naming both (`` `codex` or `claude` ``) means one judge spans both families and either may be

@@ -9,10 +9,12 @@
  * blocked: the shell settled that and published it on this ship's ship_result row, which this
  * reader consumes, so the two can never disagree.
  */
+import { STICKY_RULING } from '../../../../gate-engine/review/evidence/base-context.mts';
 import { blockingFindings, judgeFinding } from './blocking.mts';
 import { count, oneLine, textOf } from './fields.mts';
 import { scanBackward } from './tail.mts';
 import { readBranchHistory, renderTrend, summariseTrend } from './trend.mts';
+import { waivedRows } from './waived.mts';
 
 /**
  * The fields this digest reads off a gate event, and only those. The sink is an append-only stream
@@ -68,11 +70,13 @@ export interface GateEvent {
   items?: unknown[];
   /** completeness gate_result FAIL only: its CRITICAL and IMPORTANT finding counts. */
   tally?: { critical?: number; important?: number };
+  /** review_result / cache_hit: the waivers a verdict rests on (a cache_hit keeps no rationale). */
+  waivers?: { lens?: string; fingerprint?: string; rationale?: string }[];
 }
 
 /** One gate's contribution to this attempt. `gate` is the event's own label, never parsed prose.
- * `unverified`: a downgraded judge, a PASS judged on an earlier diff, or a PASS over a packet that
- * omitted or truncated files. It never blocks. */
+ * `unverified`: a downgraded judge, a PASS judged on an earlier diff or a partial packet, or a
+ * waived finding. It never blocks. */
 export interface DigestRow {
   gate: string;
   state: 'finding' | 'cached' | 'could-not-run' | 'unverified';
@@ -207,12 +211,12 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
   const results = mine.filter((e) => e.type === 'ship_result');
   const result = results[results.length - 1];
   const blocked = result?.blocked_gate ?? '';
-  // 'unknown' is what the shell records when the run failed and none of its prose greps matched
-  // (sc-2520); an absent ship_result is a --dry-gates rehearsal, which emits none. Either way the
-  // blocking gate is not knowable, and saying "did NOT block this run" about a finding would state
-  // something this digest cannot know. A run that exited 0 attributes trivially: nothing blocked.
+  // 'unknown': the run failed and none of the shell's prose greps matched. 'interrupted':
+  // a signal stopped the chain. No ship_result at all: a --dry-gates rehearsal. Either way the
+  // blocking gate is not knowable, and "did NOT block this run" would state something this digest
+  // cannot know. A run that exited 0 attributes trivially: nothing blocked.
   const exitCode = result?.exit_code ?? null;
-  const unattributed = (blocked === '' || blocked === 'unknown') && exitCode !== 0;
+  const unattributed = ['', 'unknown', 'interrupted'].includes(blocked) && exitCode !== 0;
 
   // Findings and could-not-runs share one list because BOTH can be the blocker: under
   // GUARD_DETERMINISTIC_STRICT=1 an opted-out gate is labelled could-not-run and exits 1, so
@@ -350,6 +354,7 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
     ...firstPerGate(advisory),
     // Deduped for the same reason: pre-commit and commit-msg can both replay one stale verdict.
     ...firstPerGate(unverified),
+    ...waivedRows(mine),
     ...cached,
   ];
 }
@@ -361,7 +366,7 @@ const cacheGate = (e: GateEvent): string =>
 /** A PASS reused across a reshaped diff (sc-3175), or ''. `=== false`: an absent field covers it. */
 const earlierDiffDetail = (e: GateEvent): string =>
   e.diff_matches === false
-    ? 'cached PASS judged an earlier diff — this diff was not re-judged'
+    ? `cached PASS judged an earlier diff — this diff was not re-judged (${STICKY_RULING})`
     : '';
 
 /** A PASS judged on an earlier base whose reviewed paths moved (sc-3468), or ''. An absent
@@ -427,7 +432,7 @@ export function render(rows: DigestRow[], logPath = ''): string {
   const cached = rows.filter((r) => r.state === 'cached').length;
   const listed = [...findings, ...missing, ...unverified];
   const total = listed.reduce((n, r) => n + (r.findings ?? 1), 0);
-  const gates = new Set(listed.map((r) => `${r.state}:${r.gate}`)).size;
+  const gates = new Set(listed.map((r) => r.gate)).size;
   // Findings, not gates, are what a reader must clear: one reviewer can block on several IDs.
   const counted = gates === total ? `${total}` : `${gates} gate(s) / ${total} finding(s)`;
   const out = [`📋 Gate findings this run (${counted}):`];
@@ -465,7 +470,7 @@ export function render(rows: DigestRow[], logPath = ''): string {
   if (missingOthers.length > MAX_MISSING) {
     out.push(`   … ${missingOthers.length - MAX_MISSING} more gate(s) that could not run`);
   }
-  // Uncapped: at most one row per judge survives the dedupe, and a cut one would be the silent
+  // Uncapped: one row per judge or waived ID survives the dedupe, and a cut one would be the silent
   // omission this section exists to end. The same `·` a bypass wears, because it carries that weight.
   for (const r of unverified) out.push(`   · ${r.gate} — ${r.detail}`);
   if (cached > 0) {

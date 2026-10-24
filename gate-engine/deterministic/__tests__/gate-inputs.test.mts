@@ -38,7 +38,6 @@ describe('gate-input registry', () => {
       'fallow.toml',
       '.fallow.toml',
       '.fallow',
-      'fallow-baselines',
       '.decisions',
       FANOUT_BASELINE,
       LINES_BASELINE,
@@ -48,7 +47,6 @@ describe('gate-input registry', () => {
       '.devkit/oxc',
       '.devkit/anti-slop',
       'eslint.config.devkit.mjs',
-      'biome.devkit.jsonc',
       'oxlint.devkit.json',
       '.anti-slop-baseline.json',
       CORRECTNESS_OVERRIDES_FILE,
@@ -122,7 +120,6 @@ describe('gate-input registry', () => {
       paths(repo()).filter((path) => gateInputFor(path)?.[flag]);
     expect(flagged('mutable')).toEqual([
       '.fallow',
-      'fallow-baselines',
       '.decisions',
       FANOUT_BASELINE,
       LINES_BASELINE,

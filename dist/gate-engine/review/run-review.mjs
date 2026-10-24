@@ -10,7 +10,8 @@
  * reviewers (correctness) run single-pass and block directly.
  *
  * Contract:
- *   exit 1 = at least one confirmed FAIL
+ *   exit 1 = a confirmed FAIL, a REVIEW ERROR, or an integrity block (tamper, mass deletion)
+ *   exit 4 = a verified object-database fault (odb-probe.mts)
  *   exit 2 = no FAIL, but at least one judge was inconclusive (outage / no VERDICT line) → the
  *            hook treats this as fail-open (non-strict runs only)
  *   exit 3 = strict runs only (GUARD_AI_STRICT, set by devkit ship): a judge stayed inconclusive
@@ -50,7 +51,7 @@ import { gitCached, headHash, stagedFiles, stagedTreeHash } from './evidence/sta
 import { reviewerTargetSalts } from './evidence/targets-block.mjs';
 import { emitMergedLensResults } from './lens/merge-results.mjs';
 import { reportInconclusive } from './valve/inconclusive.mjs';
-import { narrowSelection, narrowTasks, printRemedy } from './valve/recheck.mjs';
+import { narrowSelection, narrowTasks, printRemedy, reportLensPartAdvisories, } from './valve/recheck.mjs';
 import { mapLimit, planReviewWork, resolveChunkCap, resolveLensGroups, taskLabel, } from './lens/split.mjs';
 import { clearProgress, writeProgress } from './progress.mjs';
 import { retryableReason, runDeferredRecoveries, settleReviewOutcome, } from './recovery/settle.mjs';
@@ -198,8 +199,8 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             throw new Error('staged tree changed while review evidence was being read — re-run the gate');
     }
     catch (e) {
-        // sc-1366: both branches read the staged diff, so both can die on an unreadable object. Review
-        // mode is the worse — exit 1 is rendered as "A reviewer FAILED (opus-confirmed)".
+        // Both branches read the staged diff, so both can die on an unreadable object; review mode
+        // blocks at exit 1, so its message must name the setup failure, not a reviewer.
         const g = 'guard-review';
         const m = `${g}: review setup failure — ${e instanceof Error ? e.message : String(e)}`;
         const fb = reviewMode ? { message: m } : { strict };
@@ -355,8 +356,11 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     })), gateStart);
     if (progressFile)
         clearProgress(progressFile); // ran to completion → nothing unfinished to report
-    if (!only?.lens)
-        emitMergedLensResults(splitParts, firstModel); // never a recheck's partial vector
+    // Never a recheck's partial vector: its live parts report their own advisories instead.
+    if (only?.lens)
+        reportLensPartAdvisories(splitParts);
+    else
+        emitMergedLensResults(splitParts, firstModel);
     const fails = results.filter((r) => r.status === 'fail');
     const findingsPrinted = new Set();
     let hinted = false;
@@ -381,6 +385,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     const errors = results.filter((r) => r.status === 'error');
     for (const r of errors) {
         console.error(`guard-review: ${r.name} REVIEW ERROR — ${r.reason}`);
+        console.error('   No verdict was reached on the code — follow the error text above, then re-run.');
         if (r.transcript)
             console.error(r.transcript.trim());
     }

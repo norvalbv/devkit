@@ -195,6 +195,20 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     expect(existsSync(join(root, 'telemetry/gate-events.jsonl'))).toBe(false);
   });
 
+  for (const dryGates of [false, true]) {
+    it(`disables auto-maintenance for the gated commit (dry-gates=${dryGates})`, () => {
+      const probe = 'echo "MAINT_AUTO=$(git config --get maintenance.auto)" >&2\n';
+      const { root, wt, base } = fixture(true, probe);
+      // The suite's git template pins maintenance.auto=false; re-enable it so only ship's -c can disable it.
+      git(root, 'config', 'maintenance.auto', 'true');
+
+      const result = runCommit(root, wt, base, false, dryGates);
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stderr).toContain('MAINT_AUTO=false');
+    });
+  }
+
   for (const inherited of ['0', '1']) {
     it(`does not let an inherited dry-gates=${inherited} switch a reship-mode commit`, () => {
       const { root, wt, base } = fixture(true);
@@ -480,6 +494,19 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     ['✗ staged gate blocked: fallow (its report is above)', 'fallow'],
     ['✗ staged gate blocked: eslint-overlay (its report is above)', 'eslint-overlay'],
     ['✗ staged gate blocked: biome-overlay (its report is above)', 'biome-overlay'],
+    // Lines the generated hook prints when a judge fails closed (cli/lib/husky/ai-guard-fragments.mts).
+    ['   Confirmed completeness gap (hard-by-default; findings above).', 'review'],
+    ['   guard-review: judge unavailable after retry — strict ship mode failed closed.', 'review'],
+    ['   guard-review: unexpected exit 5 — blocking the commit.', 'review'],
+    [
+      '   guard-review completeness: judge unavailable or returned no verdict — strict ship mode failed closed.',
+      'review',
+    ],
+    [
+      '   guard-decisions: judge unavailable or gate could not run — strict ship mode failed closed.',
+      'decisions',
+    ],
+    ['   guard-decisions: unexpected exit 5 — blocking the commit.', 'decisions'],
   ])('attributes terminal hook output %s to %s', (message, blockedGate) => {
     const { root, wt, base } = fixture(
       true,
@@ -504,6 +531,12 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     // A finding that QUOTES the shell-gate line (a diff of this very file) is not that gate blocking.
     [
       "printf '%s\\n' '  finding: ✗ staged gate blocked: fallow (its report is above)' 'guard-review: correctness FAILED'",
+      {},
+      'review',
+    ],
+    // A review finding quoting the decisions judge's fail-closed line is not the decisions gate blocking.
+    [
+      "printf '%s\\n' '  finding: prints guard-decisions: judge unavailable on outage' 'guard-review: correctness FAILED'",
       {},
       'review',
     ],

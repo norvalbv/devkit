@@ -38,7 +38,7 @@ import {
   couldNotRun,
   type StructureGateResult,
   violations,
-  withUncompiledWalls,
+  withStructureConfigGaps,
 } from './verdict.mts';
 
 export { combineStructureResults };
@@ -355,7 +355,7 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
     const grammarFiles = legFiles('grammar');
     if (presetFiles.length) results.push(runPresetLint(cwd, presetFiles));
     if (grammarFiles.length) results.push(await runGrammarLint(cwd, grammarFiles));
-    return withUncompiledWalls(cwd, combineStructureResults(results));
+    return withStructureConfigGaps(cwd, combineStructureResults(results));
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     return couldNotRun(message);
@@ -369,7 +369,7 @@ export async function runStructureGate(
   targets?: string[],
 ): Promise<StructureGateResult> {
   try {
-    return withUncompiledWalls(cwd, await structureLegs(cwd, targets));
+    return withStructureConfigGaps(cwd, await structureLegs(cwd, targets));
   } catch (e: unknown) {
     return couldNotRun(e instanceof Error ? e.message : String(e));
   }

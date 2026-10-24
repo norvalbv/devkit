@@ -18,6 +18,7 @@ import {
   commitIndexKind,
   commitIndexTree,
   resetCommitIndexCache,
+  withIndexCopy,
 } from '../../gate-engine/ratchets/commit-index.mts';
 import { computeKey } from '../../gate-engine/prefix-cache/prefix-cache.mts';
 import {
@@ -235,6 +236,20 @@ describe('index snapshots read the commit index', () => {
     expect(result).toBe('applied');
     expect(existsSync(lock)).toBe(true);
   });
+
+  it('anti-slop names git’s reason and skips the write when the index cannot be hashed', () => {
+    const root = seedRepo();
+    const head = { oid: resolveRef(root, 'HEAD'), symbolicRef: symbolicHead(root) };
+    writeFileSync(join(root, '.git', 'index'), 'not an index');
+    let applied = false;
+    expect(() =>
+      withStableGitIndex(root, head, null, 'unused', () => {
+        applied = true;
+      }),
+    ).toThrow(/could not hash the Git index under its lock: git write-tree: .*baseline unchanged/);
+    expect(applied).toBe(false);
+    expect(existsSync(join(root, '.git', 'index.lock'))).toBe(false);
+  });
 });
 
 // The tree `index` describes, read from a scratch copy so the expectation never locks the original.
@@ -429,5 +444,44 @@ describe('commitIndexTree: lock-free staged tree identity', () => {
     expect(readdirSync(scratch).filter((name) => name.startsWith('devkit-tree-index-'))).toEqual(
       [],
     );
+  });
+
+  it('keeps its scratch under the caller’s dir instead of TMPDIR', () => {
+    const root = seedRepo();
+    const dir = mkTmp('commit-index-dir-');
+    const saved = process.env.TMPDIR;
+    process.env.TMPDIR = join(mkTmp('commit-index-gone-'), 'missing');
+    try {
+      expect(commitIndexTree(root, process.env, dir).tree).toMatch(/^[0-9a-f]{40,64}$/);
+    } finally {
+      if (saved === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = saved;
+    }
+    expect(readdirSync(dir)).toEqual([]);
+  });
+});
+
+describe('withIndexCopy: callers that go on to write their copy', () => {
+  it('lets the copy be rewritten and removes it when the caller throws, leaving the real index alone', () => {
+    const root = seedRepo();
+    writeFileSync(join(root, 'f.txt'), 'staged\n');
+    git(root, ['add', 'f.txt']);
+    const index = join(root, '.git', 'index');
+    const before = readFileSync(index);
+    const dir = mkTmp('commit-index-use-');
+    expect(() =>
+      withIndexCopy(
+        root,
+        (env, scratch) => {
+          expect(scratch.startsWith(join(dir, 'devkit-tree-index-'))).toBe(true);
+          git(root, ['update-index', '--chmod=+x', 'f.txt'], env);
+          expect(git(root, ['ls-files', '-s', 'f.txt'], env)).toMatch(/^100755 /);
+          throw new Error('caller failed');
+        },
+        { dir },
+      ),
+    ).toThrow('caller failed');
+    expect(readdirSync(dir)).toEqual([]);
+    expect(readFileSync(index).equals(before)).toBe(true);
   });
 });

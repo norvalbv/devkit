@@ -16,7 +16,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { TestReportSummary } from './produce.mts';
-import { FILE_OUTCOMES, SUMMARY_NAME, SUMMARY_SCHEMA, fileTestsSchema } from './produce.mts';
+import {
+  FILE_OUTCOMES,
+  SUMMARY_NAME,
+  SUMMARY_SCHEMA,
+  fileTestsSchema,
+  unhandledRecordSchema,
+} from './produce.mts';
 
 /** Per-test names are optional evidence: malformed, they are dropped and the file answers stand. */
 const testsSchema = z.record(z.string(), fileTestsSchema);
@@ -264,6 +270,10 @@ export function parseSummary(raw: string, label: string): TestReportSummary {
   const tests = testsSchema.safeParse(parsed.tests);
   if (tests.success) parsed.tests = tests.data;
   else delete parsed.tests;
+  // A count from before error lists were recorded proves nothing about which errors, so it is dropped.
+  const unhandled = unhandledRecordSchema.safeParse(parsed.unhandled);
+  if (unhandled.success) parsed.unhandled = unhandled.data;
+  else delete parsed.unhandled;
   return parsed;
 }
 
@@ -386,7 +396,15 @@ export interface CommitCi {
   url?: string;
   /** The deciding run and its failed `job › step` list, present on green and red. */
   run?: RunRef;
-  failing?: string[];
+  failing?: FailedStep[];
+}
+
+/** A failed `job › step`: `step` is GitHub's step number, null for a job that failed outside any
+ * step. Matrix shards repeat one step list, so the number pairs a failure that moved shard. */
+export interface FailedStep {
+  label: string;
+  job: string;
+  step: number | null;
 }
 
 /** `gh run view --json url,jobs`, every field optional so a malformed answer is rejected, not read. */
@@ -395,28 +413,41 @@ interface RunViewCandidate {
   jobs?: { name?: unknown; conclusion?: unknown; steps?: unknown }[];
 }
 
-/** A run's page and each failed `job › step`; a job that failed outside any step is named alone. */
-export function runView(cwd: string, runId: number) {
-  const out = gh(['run', 'view', String(runId), '--json', 'url,jobs'], cwd);
-  let view: RunViewCandidate | null;
+type ViewJob = NonNullable<RunViewCandidate['jobs']>[number];
+type ViewStep = { name?: unknown; conclusion?: unknown; number?: unknown };
+
+/** One failed job's `job › step` entries, or the job alone when no step failed. */
+function failedSteps(job: ViewJob): FailedStep[] {
+  const name = `${job.name}`;
+  const steps: ViewStep[] = Array.isArray(job.steps) ? job.steps : [];
+  const failed = steps.filter((step) => step?.conclusion === 'failure');
+  if (failed.length === 0) return [{ label: name, job: name, step: null }];
+  return failed.map((step) => ({
+    label: `${name} › ${step.name}`,
+    job: name,
+    step: Number.isSafeInteger(step.number) ? Number(step.number) : null,
+  }));
+}
+
+/** gh's answer as JSON, or null when it is not JSON at all. */
+function parseView(out: string): RunViewCandidate | null {
   try {
-    view = JSON.parse(out);
+    return JSON.parse(out);
   } catch {
-    view = null;
+    return null;
   }
+}
+
+/** A run's page and each failed `job › step`. */
+export function runView(cwd: string, runId: number) {
+  const view = parseView(gh(['run', 'view', String(runId), '--json', 'url,jobs'], cwd));
   if (`${view?.url}` !== view?.url || !Array.isArray(view?.jobs)) {
     throw new GhUnavailable(
       'gh-failed',
       `gh run view ${runId} returned JSON this reader cannot use`,
     );
   }
-  const failing = view.jobs
-    .filter((job) => job?.conclusion === 'failure')
-    .flatMap((job) => {
-      const steps = Array.isArray(job.steps) ? job.steps : [];
-      const failed = steps.filter((step) => step?.conclusion === 'failure');
-      return failed.length ? failed.map((step) => `${job.name} › ${step.name}`) : [`${job.name}`];
-    });
+  const failing = view.jobs.filter((job) => job?.conclusion === 'failure').flatMap(failedSteps);
   return { url: `${view.url}`, failing };
 }
 
@@ -445,7 +476,7 @@ export function commitCi(opts: {
     }
     if (run.conclusion === 'success') return { verdict: 'green', detail: '', url, run, failing };
     if (run.conclusion === 'failure') {
-      const detail = failing.join(', ') || 'no failed job named';
+      const detail = failing.map((f) => f.label).join(', ') || 'no failed job named';
       return { verdict: 'red', detail, url, run, failing };
     }
     const detail = `no-usable-run: run ${run.databaseId} concluded ${run.conclusion}`;

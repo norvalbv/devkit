@@ -80,6 +80,24 @@ describe('clean (package mode)', () => {
     expect(existsSync(join(root, 'cfg', 'allow.json'))).toBe(false);
   });
 
+  // The scripts call `devkit oxc`, which clean uninstalls, so devkit's own values must go; a value
+  // the consumer rewrote is theirs and stays.
+  it("removes devkit's lint/format scripts but keeps one the consumer rewrote", () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--stack', 'generic', '--yes', '--no-husky').status).toBe(0);
+    const pkgPath = join(root, 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+    expect(pkg.scripts.lint).toContain('devkit oxc lint');
+    pkg.scripts.lint = 'eslint .';
+    writeFileSync(pkgPath, JSON.stringify(pkg));
+
+    expect(devkit(root, 'clean', '--yes').status).toBe(0);
+
+    const scripts = JSON.parse(readFileSync(pkgPath, 'utf8')).scripts ?? {};
+    expect(scripts.format).toBeUndefined();
+    expect(scripts.lint).toBe('eslint .');
+  });
+
   it('--dry-run removes nothing', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes');
@@ -123,6 +141,38 @@ describe('clean (package mode)', () => {
     expect(existsSync(join(root, '.agents/skills/brainstorming/SKILL.md'))).toBe(true);
     expect(existsSync(join(root, '.codex/agents/feature-critique.toml'))).toBe(true);
     expect(readFileSync(exclude, 'utf8')).not.toContain('devkit overlay');
+  });
+
+  it('does not treat a lone fallow-baselines/ as overlay leftovers', () => {
+    const root = tmpRepo();
+    execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
+    mkdirSync(join(root, 'fallow-baselines'));
+    writeFileSync(join(root, 'fallow-baselines/health.json'), '{}\n');
+
+    const result = devkit(root, 'clean', '--yes');
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('nothing to clean');
+    expect(existsSync(join(root, 'fallow-baselines/health.json'))).toBe(true);
+  });
+
+  it('un-hides a legacy fallow-baselines/ when recovering an orphaned overlay', () => {
+    const root = tmpRepo();
+    execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
+    mkdirSync(join(root, 'fallow-baselines'));
+    writeFileSync(join(root, 'fallow-baselines/health.json'), '{}\n');
+    const exclude = join(root, '.git/info/exclude');
+    writeFileSync(
+      exclude,
+      '# devkit overlay (local-only) — not committed\nfallow-baselines/\nfallow-baselines\n',
+    );
+
+    const result = devkit(root, 'clean', '--yes');
+
+    expect(result.stdout).toContain('overlay leftovers found');
+    expect(result.stdout).toContain('fallow-baselines/ left in place');
+    expect(existsSync(join(root, 'fallow-baselines/health.json'))).toBe(true);
+    expect(readFileSync(exclude, 'utf8')).not.toContain('fallow-baselines');
   });
 });
 
@@ -209,5 +259,52 @@ describe('clean (overlay mode) — anti-slop root files', () => {
     // Untracked siblings under the same tree still go — the walk is per-path, not all-or-nothing.
     expect(existsSync(join(root, '.devkit/oxc'))).toBe(false);
     expect(existsSync(join(root, '.devkit/config.json'))).toBe(false);
+  });
+
+  // Older overlays wrote and hid fallow-baselines/; fallow's docs make it the consumer's committed
+  // dir, so upgrade leaves it hidden and clean un-hides it without deleting it.
+  it('leaves a legacy fallow-baselines/ in place and prunes its old exclude lines', () => {
+    const root = overlayRepo();
+    const init = () =>
+      devkit(root, 'init', '--overlay', '--stack', 'generic', '--yes', '--anti-slop').status;
+    expect(init()).toBe(0);
+    writeFileSync(join(root, '.git/info/exclude'), 'fallow-baselines/\nfallow-baselines\n', {
+      flag: 'a',
+    });
+    mkdirSync(join(root, 'fallow-baselines'));
+    writeFileSync(join(root, 'fallow-baselines/health.json'), '{}\n');
+    expect(init()).toBe(0);
+    expect(exclude(root)).toContain('fallow-baselines/\nfallow-baselines\n');
+
+    const result = devkit(root, 'clean', '--yes');
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('fallow-baselines/ left in place');
+    expect(readFileSync(join(root, 'fallow-baselines/health.json'), 'utf8')).toBe('{}\n');
+    expect(exclude(root)).not.toContain('fallow-baselines');
+    const porcelain = execFileSync('git', ['status', '--porcelain'], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    expect(porcelain).toContain('fallow-baselines/');
+  });
+
+  // A committed fallow-baselines/ is the consumer's: clean must not name an untracking remedy for it.
+  it('leaves a committed fallow-baselines/ alone and silent', () => {
+    const root = overlayRepo();
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: root, stdio: 'ignore' });
+    expect(
+      devkit(root, 'init', '--overlay', '--stack', 'generic', '--yes', '--anti-slop').status,
+    ).toBe(0);
+    mkdirSync(join(root, 'fallow-baselines'));
+    writeFileSync(join(root, 'fallow-baselines/health.json'), '{}\n');
+    git('add', 'fallow-baselines');
+    git('commit', '-qm', 'own baselines', '--no-verify');
+
+    const result = devkit(root, 'clean', '--yes');
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain('fallow-baselines');
+    expect(existsSync(join(root, 'fallow-baselines/health.json'))).toBe(true);
   });
 });

@@ -232,7 +232,7 @@ __dk_block_ai() {
     dk_review_failed_gates="$dk_review_failed_gates $1"
 }
 
-# devkit:biome-format
+# devkit:format
 # Format staged files, then re-stage exactly those (scoped — never a blanket `git add -u`, which
 # would sweep unrelated working-tree changes into the commit). Only re-add files with NO unstaged
 # edits, so partially-staged files commit exactly as staged.
@@ -257,7 +257,7 @@ __dk_block_ai() {
 __dk_format_staged() {
     FMT_TOOL=Oxfmt; FMT_BIN=node_modules/.bin/oxfmt
     __dk_fmt_run() { xargs -0 node_modules/.bin/oxfmt --threads 1 --write; }
-STAGED_FMT=$(git diff --cached --name-only -z --diff-filter=ACM | tr '\0' '\n' | grep -E '^((cli|gate-engine)/.*\.(tsx?|jsx?|css|jsonc?|mjs|mts)|(tsconfig|biome)/.*\.jsonc?|skills/.*\.mjs|templates/.*\.mjs|\.co-occurrence-allowlist\.json|\.fallowrc\.jsonc|\.oxfmtrc\.json|biome\.jsonc|eslint\.config\.mjs|guard\.config(\.example)?\.json|package\.json|search-code\.config\.json|tsconfig(\.build)?\.json|vitest(\.e2e)?\.config\.mjs|vitest\.setup\.mjs)$' || true)
+STAGED_FMT=$(git diff --cached --name-only -z --diff-filter=ACM | tr '\0' '\n' | grep -E '^((cli|gate-engine)/.*\.(tsx?|jsx?|css|jsonc?|mjs|mts)|(tsconfig|oxc)/.*\.jsonc?|skills/.*\.mjs|templates/.*\.mjs|\.co-occurrence-allowlist\.json|\.fallowrc\.jsonc|\.oxfmtrc\.json|eslint\.config\.mjs|guard\.config(\.example)?\.json|package\.json|search-code\.config\.json|tsconfig(\.build)?\.json|vitest(\.e2e)?\.config\.mjs|vitest\.setup\.mjs)$' || true)
 if [ -z "$STAGED_FMT" ]; then
     echo "🎨 $FMT_TOOL: no staged formattable path — nothing to format."
 else
@@ -295,7 +295,7 @@ else
 fi
 }
 __dk_format_staged
-# /devkit:biome-format
+# /devkit:format
 
 __dk_gate_deterministic() {
     dk_det_rc=0
@@ -395,7 +395,7 @@ if [ -n "$comp_pid" ]; then
     fi
 fi
 if [ "$rrc" -eq 1 ]; then
-    echo "   A reviewer FAILED (escalation-confirmed). Fix the findings above, then re-run."
+    echo "   guard-review blocked the commit — each reason and its remedy are printed above; fix any reviewer findings, then re-run."
     __dk_comp_observed
     __dk_block_ai guard-review
 elif [ "$rrc" -eq 3 ]; then

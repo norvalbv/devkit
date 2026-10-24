@@ -253,7 +253,7 @@ export function renderTarget(date: string, options: TargetOptions) {
     if (err) throw new Error(err);
     lines.push(`**Category:** ${options.category}`);
   }
-  if (options.supersedes) lines.push(`**Supersedes:** ${options.supersedes}`);
+  if (options.supersedes?.trim()) lines.push(`**Supersedes:** ${options.supersedes.trim()}`);
   lines.push(
     `**Source:** ${[options.source || 'manual', options.ref].filter(Boolean).join(' · ')}`,
   );

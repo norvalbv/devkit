@@ -36,12 +36,12 @@ describe('selection helpers', () => {
   it('defaultSelection is all-on with all guards', () => {
     const s = defaultSelection();
     expect(s).toMatchObject({
-      biome: true,
       tsconfig: true,
       skills: true,
       husky: true,
       structure: true,
     });
+    expect(s).not.toHaveProperty('biome');
     expect(s.guards).toEqual([
       'size',
       'fanout',
@@ -55,8 +55,8 @@ describe('selection helpers', () => {
   });
 
   it('normalizeSelection fills missing keys + drops unknown guards', () => {
-    const s = normalizeSelection({ biome: false, guards: ['size', 'bogus'] });
-    expect(s.biome).toBe(false);
+    const s = normalizeSelection({ skills: false, guards: ['size', 'bogus'] });
+    expect(s.skills).toBe(false);
     expect(s.tsconfig).toBe(true);
     expect(s.guards).toEqual(['size']);
     expect(normalizeSelection({ agentTargets: null as never }).agentTargets).toEqual([
@@ -67,24 +67,16 @@ describe('selection helpers', () => {
   });
 
   it('parseFlags reads --no-* and --guards and --remove-deselected', () => {
-    const f = parseFlags([
-      '--yes',
-      '--no-biome',
-      '--no-skills',
-      '--guards',
-      'size,dup',
-      '--remove-deselected',
-    ]);
+    const f = parseFlags(['--yes', '--no-skills', '--guards', 'size,dup', '--remove-deselected']);
     expect(f.yes).toBe(true);
-    expect(f.no.has('biome')).toBe(true);
     expect(f.no.has('skills')).toBe(true);
     expect(f.guards).toEqual(['size', 'dup']);
     expect(f.removeDeselected).toBe(true);
   });
 
   it('selectionFromFlags applies --no-* and narrows guards', () => {
-    const sel = selectionFromFlags(parseFlags(['--no-biome', '--guards', 'fanout']));
-    expect(sel.biome).toBe(false);
+    const sel = selectionFromFlags(parseFlags(['--no-skills', '--guards', 'fanout']));
+    expect(sel.skills).toBe(false);
     expect(sel.tsconfig).toBe(true);
     expect(sel.guards).toEqual(['fanout']);
   });
@@ -195,7 +187,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     await applyInit(root, {
       stack: 'generic',
       selection: {
-        biome: false,
         tsconfig: true,
         skills: false,
         husky: true,
@@ -212,7 +203,7 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(existsSync(join(root, '.oxlintrc.json'))).toBe(true);
     expect(existsSync(join(root, '.oxfmtrc.json'))).toBe(true);
     const cfg = config(root);
-    expect(cfg.components).toMatchObject({ biome: false, skills: false, guards: ['size'] });
+    expect(cfg.components).toMatchObject({ skills: false, guards: ['size'] });
     expect(cfg.components).not.toHaveProperty('oxc');
     expect(cfg.review).toEqual({
       enabled: false,
@@ -224,7 +215,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
   it('writes and preserves a local review profile, pruning guards removed from the install', async () => {
     const root = tmpRepo();
     const selection = {
-      biome: false,
       tsconfig: false,
       skills: false,
       husky: true,
@@ -260,7 +250,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
   it('migrates a legacy initialized config without a review section as enabled', async () => {
     const root = tmpRepo();
     const selection = {
-      biome: false,
       tsconfig: false,
       skills: false,
       husky: true,
@@ -302,7 +291,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     const root = tmpRepo();
     execFileSync('git', ['init', '-q'], { cwd: root });
     const selection = {
-      biome: false,
       tsconfig: false,
       skills: false,
       husky: true,
@@ -345,17 +333,17 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     const root = tmpRepo();
     // First install everything.
     await applyInit(root, { stack: 'generic', selection: defaultSelection(), devkitRef: 'v0.3.0' });
-    expect(existsSync(join(root, 'biome.jsonc'))).toBe(true);
-    // Now deselect + remove biome.
+    expect(existsSync(join(root, '.claude/skills'))).toBe(true);
+    // Now deselect + remove skills.
     await applyInit(root, {
       stack: 'generic',
-      selection: { ...defaultSelection(), biome: false },
-      remove: ['biome'],
+      selection: { ...defaultSelection(), skills: false },
+      remove: ['skills'],
       devkitRef: 'v0.3.0',
     });
-    expect(existsSync(join(root, 'biome.jsonc'))).toBe(false);
+    expect(existsSync(join(root, '.claude/skills'))).toBe(false);
     expect(existsSync(join(root, 'tsconfig.json'))).toBe(true);
-    expect(config(root).components.biome).toBe(false);
+    expect(config(root).components.skills).toBe(false);
   });
 
   it('agentTargets: skills sync to ONE surface only + the choice is recorded', async () => {
@@ -363,7 +351,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     await applyInit(root, {
       stack: 'generic',
       selection: {
-        biome: false,
         tsconfig: false,
         skills: true,
         husky: false,
@@ -382,7 +369,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
   it('projects commit-gate guidance only while a managed Husky guard chain is active', async () => {
     const root = tmpRepo();
     const selection = {
-      biome: false,
       tsconfig: false,
       skills: true,
       husky: true,
@@ -426,7 +412,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     await applyInit(root, {
       stack: 'generic',
       selection: {
-        biome: false,
         tsconfig: false,
         skills: true,
         husky: true,
@@ -447,7 +432,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     await applyInit(root, {
       stack: 'generic',
       selection: {
-        biome: false,
         tsconfig: false,
         skills: true,
         agents: false,
@@ -476,7 +460,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     await applyInit(root, {
       stack: 'generic',
       selection: {
-        biome: false,
         tsconfig: false,
         skills: false,
         agents: false,
@@ -495,7 +478,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
   it('switching to --no-skills prunes every previously manifested skill', async () => {
     const root = tmpRepo();
     const base = {
-      biome: false,
       tsconfig: false,
       agents: false,
       agentHooks: false,
@@ -523,7 +505,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
   it('removing decisions prunes its Devkit-owned skill, hook, and registration', async () => {
     const root = tmpRepo();
     const base = {
-      biome: false,
       tsconfig: false,
       skills: true,
       agents: false,
@@ -554,7 +535,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     await applyInit(root, {
       stack: 'generic',
       selection: {
-        biome: false,
         tsconfig: false,
         skills: true,
         agents: false,
@@ -574,7 +554,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
   it('removing decisions keeps general agent hooks selected', async () => {
     const root = tmpRepo();
     const base = {
-      biome: false,
       tsconfig: false,
       skills: false,
       agents: false,
@@ -601,7 +580,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     await applyInit(root, {
       stack: 'generic',
       selection: {
-        biome: false,
         tsconfig: false,
         skills: true,
         agents: true,
@@ -624,7 +602,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
   it('switching to one surface prunes the deselected surface but keeps the manifest', async () => {
     const root = tmpRepo();
     const base = {
-      biome: false,
       tsconfig: false,
       skills: true,
       husky: false,
@@ -655,7 +632,6 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     await applyInit(root, {
       stack: 'generic',
       selection: {
-        biome: false,
         tsconfig: false,
         skills: false,
         husky: false,
@@ -693,18 +669,18 @@ describe('detectInstalled', () => {
       devkitRef: 'v0.3.0',
     });
     const installed = detectInstalled(root);
-    expect(installed.has('biome')).toBe(true);
+    expect(installed.has('tsconfig')).toBe(true);
     expect(installed.has('skills')).toBe(false);
     expect(installed.has('guards')).toBe(true);
   });
 
   it('falls back to on-disk detection without a components block', () => {
     const root = tmpRepo();
-    writeFileSync(join(root, 'biome.jsonc'), '{}');
+    writeFileSync(join(root, 'eslint.config.mjs'), '');
     mkdirSync(join(root, '.devkit/anti-slop'), { recursive: true });
     writeFileSync(join(root, '.devkit/anti-slop/manifest.json'), '{}');
     const installed = detectInstalled(root);
-    expect(installed.has('biome')).toBe(true);
+    expect(installed.has('structure')).toBe(true);
     expect(installed.has('tsconfig')).toBe(false);
     expect(installed.has('antiSlop')).toBe(true);
   });
@@ -776,7 +752,6 @@ describe('fallow apply step (mocked installer — never shells out)', () => {
     await applyInit(root, {
       stack: 'generic',
       selection: {
-        biome: false,
         tsconfig: false,
         skills: false,
         husky: false,
@@ -967,7 +942,7 @@ describe('applyInit — per-file line-growth block (recommended-on)', () => {
 });
 
 describe('applyInit — managed .husky/commit-msg (review/sentry judges)', () => {
-  const base = { biome: false, tsconfig: false, skills: false, husky: true, structure: false };
+  const base = { tsconfig: false, skills: false, husky: true, structure: false };
   const hookAt = (root) => join(root, '.husky', 'commit-msg');
 
   it('review selected → commit-msg written with the completeness fragment only', async () => {

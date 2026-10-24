@@ -132,6 +132,35 @@ describe('parseSummary — test names are optional evidence', () => {
     expect(parsed.tests).toBeUndefined();
     expect(parsed.files).toEqual(files);
   });
+
+  it('keeps a well-formed outside-test error list and drops any other value, which reads unrecorded', () => {
+    /** What a summary might hold in place of a list: an older count, or a hand-edited shape. */
+    type RawUnhandled =
+      | number
+      | string
+      | null
+      | { errors: { file: string | number | null; message: string }[]; truncated?: boolean };
+    const read = (unhandled: RawUnhandled) =>
+      parseSummary(JSON.stringify({ ...base, files, unhandled }), 'l').unhandled;
+    const list = {
+      errors: [
+        { file: 'a.test.mts', message: 'Error: x' },
+        { file: null, message: 'E' },
+      ],
+    };
+    expect(read(list)).toEqual(list);
+    expect(read({ errors: [], truncated: true })).toEqual({ errors: [], truncated: true });
+    // A count from before error lists names no error, so it cannot be compared by identity.
+    for (const bad of [
+      0,
+      2,
+      '1',
+      null,
+      { errors: [{ file: 1, message: 'x' }] },
+      { errors: [], truncated: false },
+    ])
+      expect(read(bad)).toBeUndefined();
+  });
 });
 
 describe('testVerdict — positive evidence or unknown', () => {

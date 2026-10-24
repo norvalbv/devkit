@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { detectChangedComments, parsePatchHunks, scanCommentTokens } from '../detect.mts';
+import { detectChangedComments, parsePatchHunks } from '../detect.mts';
+import { scanCommentTokens } from '../scan.mts';
 import { runCommentFirewall } from '../gate.mts';
 
 const roots: string[] = [];

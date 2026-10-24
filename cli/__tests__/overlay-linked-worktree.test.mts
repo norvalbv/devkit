@@ -25,13 +25,20 @@ import cleanRun from '../commands/clean.mts';
 import doctorRun from '../commands/doctor.mts';
 import { applyInit } from '../commands/init.mts';
 import { applyOverlayConstraints, defaultSelection } from '../lib/components.mts';
+import { checkAntiSlopCapability } from '../lib/install/anti-slop/lifecycle.mts';
+import { checkOxcCapability } from '../lib/install/oxc/lifecycle.mts';
 import { nativeHooksDir } from '../lib/doctor/hooks-path.mts';
 import { printLegacyEslintOverlays } from '../lib/doctor/overlay-doctor.mts';
 import { chainWord } from '../lib/husky/husky-block.mts';
 import { healAliasCmd, isHealAlias } from '../lib/husky/overlay/heal-alias.mts';
+import { projectBorrowedOverlay } from '../lib/husky/overlay/projection-report.mts';
+import {
+  copiedFrom,
+  overlayCommandCwd,
+  shipOverlayRoot,
+} from '../lib/husky/overlay/copied-overlay.mts';
 import {
   isOverlayHooksValue,
-  overlayCommandCwd,
   overlayHome,
   ownsOverlayConfig,
   unprojectOverlay,
@@ -46,7 +53,7 @@ import { captureOrigHooksPath, syncOverlayHook } from '../lib/overlay.mts';
 import { installGlobalHook } from '../lib/overlay-global-hook.mts';
 import { shQuote } from '../lib/ship/redact-secrets.mts';
 import { overlayHooksPathRejection } from '../lib/ship/review/setup/overlay-hooks-path.mts';
-import { devkitHome, rootRegistry, testExecFileSync } from './_helpers.mts';
+import { CLI, devkitHome, rootRegistry, testExecFileSync, testSpawnSync } from './_helpers.mts';
 
 const { mkTmp, cleanup } = rootRegistry();
 
@@ -314,6 +321,120 @@ describe('overlay installed from a linked worktree keeps the native hooks', () =
   });
 });
 
+const consoleOutput = () => vi.mocked(console.log).mock.calls.flat().join('\n');
+
+function bareRemote(): string {
+  const remote = mkTmp('overlay-remote-');
+  git(remote, 'init', '-q', '--bare');
+  return remote;
+}
+
+const push = (cwd: string, remote: string) =>
+  testExecFileSync('git', ['push', '-q', remote, 'HEAD:refs/heads/pushed'], {
+    cwd,
+    encoding: 'utf8',
+    env: hookEnv(),
+  });
+
+describe('overlay wraps every git hook name, so the native hooks are decided at run time', () => {
+  it('native hooks added after init run, with no doctor step, from a linked worktree', async () => {
+    const root = nativeHooksRepo();
+    const hooks = join(root, '.git', 'hooks');
+    rmSync(join(hooks, 'pre-commit'));
+    rmSync(join(hooks, 'pre-push'));
+    const guards = SELECTION.guards.filter((g) => g !== 'review');
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: { ...SELECTION, guards },
+      overlay: true,
+      devkitRef: 'v0.9.0',
+    });
+    for (const h of ['pre-commit', 'commit-msg', 'pre-push'])
+      writeFileSync(join(hooks, h), `#!/bin/sh\necho ${h} >> "$DK_TEST_MARKER"\n`, { mode: 0o755 });
+    writeFileSync(
+      join(hooks, 'pre-push'),
+      '#!/bin/sh\necho pre-push >> "$DK_TEST_MARKER"\nexit 1\n',
+      {
+        mode: 0o755,
+      },
+    );
+    const wt = addWorktree(root);
+
+    commit(wt, 'late hooks');
+    expect(() => push(wt, bareRemote())).toThrow();
+
+    expect(markerLines()).toEqual(['pre-commit', 'commit-msg', 'pre-push']);
+  });
+
+  it('a native hook deleted after init leaves a no-op wrapper: push succeeds, doctor stays clean', async () => {
+    const root = nativeHooksRepo();
+    await initOverlay(root);
+    rmSync(join(root, '.git', 'hooks', 'pre-push'));
+
+    push(root, bareRemote());
+
+    expect(existsSync(join(root, '.devkit', 'hooks', 'pre-push'))).toBe(true);
+    expect(await doctorRun([], root)).toBe(0);
+  });
+
+  it('a hook-named file devkit did not write is kept byte-for-byte and named, never failing doctor', async () => {
+    const root = nativeHooksRepo();
+    const dir = join(root, '.devkit', 'hooks');
+    mkdirSync(dir, { recursive: true });
+    const lfs = '#!/bin/sh\ncommand -v git-lfs >/dev/null 2>&1 || exit 2\ngit lfs pre-push "$@"\n';
+    writeFileSync(join(dir, 'pre-push'), lfs, { mode: 0o755 });
+    writeFileSync(join(dir, 'notes.txt'), 'mine\n');
+
+    await initOverlay(root);
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    expect(await doctorRun([], root)).toBe(0);
+
+    expect(readFileSync(join(dir, 'pre-push'), 'utf8')).toBe(lfs);
+    expect(readFileSync(join(dir, 'notes.txt'), 'utf8')).toBe('mine\n');
+    expect(consoleOutput()).toContain(
+      ".devkit/hooks/pre-push is not devkit's, so devkit leaves it",
+    );
+  });
+
+  it('a missing or non-executable wrapper is doctor drift that --fix heals once, then leaves alone', async () => {
+    const root = nativeHooksRepo();
+    await initOverlay(root);
+    const dir = join(root, '.devkit', 'hooks');
+    rmSync(join(dir, 'post-merge'));
+    chmodSync(join(dir, 'post-checkout'), 0o644);
+
+    expect(await doctorRun([], root)).toBe(1);
+    expect(consoleOutput()).toMatch(
+      /2 pass-through wrapper\(s\) missing or stale \(post-checkout, post-merge\) — a repo hook of those names would not run; run `devkit doctor --fix`/,
+    );
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    const healed = lstatSync(join(dir, 'post-merge'));
+    expect(lstatSync(join(dir, 'post-checkout')).mode & 0o777).toBe(0o755);
+
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    expect(lstatSync(join(dir, 'post-merge')).ino).toBe(healed.ino);
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    'an unreadable wrapper fails doctor, even with --fix, until its read permission is restored',
+    async () => {
+      const root = nativeHooksRepo();
+      await initOverlay(root);
+      const hook = join(root, '.devkit', 'hooks', 'post-merge');
+      chmodSync(hook, 0o000);
+      const before = lstatSync(hook).ino;
+
+      expect(await doctorRun(['--fix'], root)).toBe(1);
+      expect(consoleOutput()).toContain('.devkit/hooks/post-merge cannot be read');
+      expect(lstatSync(hook).ino).toBe(before);
+
+      chmodSync(hook, 0o644);
+      expect(await doctorRun(['--fix'], root)).toBe(0);
+      expect(lstatSync(hook).mode & 0o777).toBe(0o755);
+    },
+  );
+});
+
 describe('overlay hooks in linked worktrees (sc-4157)', () => {
   it('a commit in a fresh linked worktree runs the overlay chain and links the overlay in', async () => {
     const root = workRepo();
@@ -520,16 +641,12 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     await initOverlay(root);
     mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
     writeFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), '{"a.ts":400}\n');
-    mkdirSync(join(root, 'fallow-baselines'));
-    writeFileSync(join(root, 'fallow-baselines', 'health.json'), '{}\n');
-    writeFileSync(join(root, '.git', 'info', 'exclude'), '\nfallow-baselines\n', { flag: 'a' });
     const wt = addWorktree(root);
 
     commit(wt, 'link it');
     writeFileSync(join(wt, '.devkit', 'baselines', 'size-lines.json'), '{"a.ts":300}\n');
 
     expect(lstatSync(join(wt, '.devkit', 'baselines')).isSymbolicLink()).toBe(false);
-    expect(lstatSync(join(wt, 'fallow-baselines')).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), 'utf8')).toBe(
       '{"a.ts":400}\n',
     );
@@ -628,26 +745,6 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(existsSync(join(wt, 'eslint.config.devkit.mjs'))).toBe(false);
   });
 
-  it('clean removes a copied directory that only a `dir/` line ignores', async () => {
-    const root = workRepo();
-    await initOverlay(root);
-    mkdirSync(join(root, 'fallow-baselines'));
-    writeFileSync(join(root, 'fallow-baselines', 'health.json'), '{}\n');
-    const exclude = join(root, '.git', 'info', 'exclude');
-    const lines = readFileSync(exclude, 'utf8').split('\n');
-    writeFileSync(
-      exclude,
-      `${lines.filter((line) => line !== 'fallow-baselines').join('\n')}\nfallow-baselines/\n`,
-    );
-    const wt = addWorktree(root);
-    await doctorRun(['--fix'], root);
-    expect(lstatSync(join(wt, 'fallow-baselines')).isDirectory()).toBe(true);
-
-    await cleanRun(['--yes'], root);
-
-    expect(existsSync(join(wt, 'fallow-baselines'))).toBe(false);
-  });
-
   it('doctor --fix restores a copy a worktree lost', async () => {
     const root = workRepo();
     await initOverlay(root);
@@ -677,23 +774,22 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
   it('a projection that fails blocks the commit with its remedy, and the next commit retries', async () => {
     const root = workRepo();
     await initOverlay(root);
-    mkdirSync(join(root, 'fallow-baselines'));
-    const unreadable = join(root, 'fallow-baselines', 'health.json');
+    mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
+    const unreadable = join(root, '.devkit', 'baselines', 'size-lines.json');
     writeFileSync(unreadable, '{}\n');
     chmodSync(unreadable, 0o000);
-    writeFileSync(join(root, '.git', 'info', 'exclude'), '\nfallow-baselines\n', { flag: 'a' });
     const wt = addWorktree(root);
 
     try {
       expect(blockedCommit(wt)).toContain('could not repair the projection');
-      expect(existsSync(join(wt, 'fallow-baselines'))).toBe(false);
+      expect(existsSync(join(wt, '.devkit', 'baselines', 'size-lines.json'))).toBe(false);
       expect(markerLines()).toEqual([]);
     } finally {
       chmodSync(unreadable, 0o644);
     }
     commit(wt, 'copy succeeds');
 
-    expect(readFileSync(join(wt, 'fallow-baselines', 'health.json'), 'utf8')).toBe('{}\n');
+    expect(readFileSync(join(wt, '.devkit', 'baselines', 'size-lines.json'), 'utf8')).toBe('{}\n');
     expect(lstatSync(join(wt, '.devkit', 'config.json')).isSymbolicLink()).toBe(true);
     expect(markerLines()).toEqual([realpathSync(wt)]);
   });
@@ -701,11 +797,10 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
   it('under the global husky shim a failed projection blocks without running the repo hook', async () => {
     const root = workRepo();
     await initOverlay(root);
-    mkdirSync(join(root, 'fallow-baselines'));
-    const unreadable = join(root, 'fallow-baselines', 'health.json');
+    mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
+    const unreadable = join(root, '.devkit', 'baselines', 'size-lines.json');
     writeFileSync(unreadable, '{}\n');
     chmodSync(unreadable, 0o000);
-    writeFileSync(join(root, '.git', 'info', 'exclude'), '\nfallow-baselines\n', { flag: 'a' });
     const wt = addWorktree(root);
 
     try {
@@ -882,23 +977,21 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(git(wt, 'status', '--porcelain')).toBe('');
   });
 
-  it('a directory ignored only by a `dir/` line is copied when branch-local and reported when linked', async () => {
+  it('a linked directory ignored only by a `dir/` line is reported, not linked', async () => {
     const root = workRepo();
     await initOverlay(root);
     writeFileSync(join(root, 'guard.config.json'), '{}\n');
-    for (const dir of ['docs/decisions', '.fallow', 'fallow-baselines']) {
+    for (const dir of ['docs/decisions', '.fallow']) {
       mkdirSync(join(root, dir), { recursive: true });
       writeFileSync(join(root, dir, 'a'), 'a\n');
     }
     const excludeFile = join(root, '.git', 'info', 'exclude');
-    const lines = readFileSync(excludeFile, 'utf8').replace(/^fallow-baselines$/m, '');
-    writeFileSync(excludeFile, `${lines}\ndocs/decisions/\n.fallow/\n`);
+    writeFileSync(excludeFile, '\ndocs/decisions/\n.fallow/\n', { flag: 'a' });
     const wt = addWorktree(root);
 
     expect(await doctorRun([], root)).toBe(1);
     expect(await doctorRun(['--fix'], root)).toBe(1);
 
-    expect(lstatSync(join(wt, 'fallow-baselines')).isDirectory()).toBe(true);
     for (const rel of ['docs/decisions', '.fallow']) expect(existsSync(join(wt, rel))).toBe(false);
     expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain(
       '.fallow, docs/decisions cannot be linked from the overlay',
@@ -940,7 +1033,7 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(lstatSync(join(wt, 'guard.config.json')).isSymbolicLink()).toBe(true);
   });
 
-  it('doctor leaves a sibling checkout with its own overlay unprojected', async () => {
+  it('doctor names a sibling checkout holding its own overlay config as a copy, and projects nothing', async () => {
     const root = workRepo();
     await initOverlay(root);
     writeFileSync(join(root, 'guard.config.json'), '{}\n');
@@ -949,7 +1042,7 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     writeFileSync(join(wt, '.devkit', 'hooks', 'pre-commit'), '#!/bin/sh\n', { mode: 0o755 });
     writeFileSync(join(wt, '.devkit', 'config.json'), '{"overlay":true}\n');
 
-    expect(await doctorRun([], root)).toBe(0);
+    expect(await doctorRun(['--fix'], root)).toBe(1);
     expect(existsSync(join(wt, 'guard.config.json'))).toBe(false);
   });
 
@@ -1136,7 +1229,7 @@ describe('overlay eslint config across re-init (sc-3791)', () => {
     expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain('derives from');
   });
 
-  it('a sibling checkout with its own overlay is told to upgrade there, not to doctor --fix', async () => {
+  it('a copied overlay is told to drop its copy, not to upgrade there', async () => {
     const root = workRepo();
     await initOverlay(root);
     const wt = addWorktree(root);
@@ -1146,8 +1239,227 @@ describe('overlay eslint config across re-init (sc-3791)', () => {
     writeFileSync(join(wt, ESLINT_OVERLAY_FILE), HAND_EDITED_LEGACY);
 
     const { out } = await doctorOut(root);
-    expect(out).toContain(`${ESLINT_OVERLAY_FILE} in ${realpathSync(wt)} derives from`);
-    expect(out).toContain('run `devkit upgrade` there');
-    expect(out).not.toContain('devkit doctor --fix`');
+    expect(out).toContain(`${realpathSync(wt)}: its .devkit is a copy of the overlay's`);
+    expect(out).not.toContain('run `devkit upgrade` there');
+  });
+});
+
+// What agents did by hand: `cp -r` the home's .devkit into an ad-hoc linked worktree. Projection
+// never replaces an occupied path, so the copy's stale config.json and hook would keep gating there.
+describe('a linked worktree holding a copy of the home’s .devkit', () => {
+  const doctorOut = async (cwd: string, args: string[] = []) => {
+    vi.mocked(console.log).mockClear();
+    const code = await doctorRun(args, cwd);
+    return { code, out: vi.mocked(console.log).mock.calls.flat().join('\n') };
+  };
+  const copyRow = (wt: string) => `${realpathSync(wt)}: its .devkit is a copy of the overlay's`;
+  const copyInto = (root: string, wt: string) =>
+    cpSync(join(root, '.devkit'), join(wt, '.devkit'), { recursive: true });
+
+  async function copiedWorktree() {
+    const root = workRepo();
+    const selection = { ...SELECTION, antiSlop: true };
+    await applyInit(root, { stack: 'react-app', selection, overlay: true, devkitRef: 'v0.9.0' });
+    expect(existsSync(join(root, 'oxlint.devkit.json'))).toBe(true);
+    const wt = addWorktree(root);
+    copyInto(root, wt);
+    return { root, wt };
+  }
+
+  it('doctor names the copy and --fix writes nothing into it', async () => {
+    const { root, wt } = await copiedWorktree();
+
+    const { code, out } = await doctorOut(root);
+    expect(code).toBe(1);
+    expect(out).toContain(copyRow(wt));
+    expect(out).toContain('then run `devkit doctor --fix`');
+
+    expect((await doctorOut(root, ['--fix'])).code).toBe(1);
+    expect(existsSync(join(wt, 'oxlint.devkit.json'))).toBe(false);
+    expect(lstatSync(join(wt, '.devkit', 'config.json')).isFile()).toBe(true);
+  });
+
+  it('commands run in the copy act on the home, and clean refuses there', async () => {
+    const { root, wt } = await copiedWorktree();
+
+    expect(realpathSync(overlayCommandCwd(wt))).toBe(realpathSync(root));
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain(
+      'holds a copy of the overlay',
+    );
+    expect(() => overlayCommandCwd(wt, true)).toThrow(/is a copy of the overlay's/);
+    expect(overlayCommandCwd(root)).toBe(root);
+
+    writeFileSync(join(wt, '.devkit', 'config.json'), '{not json');
+    expect(realpathSync(copiedFrom(wt, '') ?? '')).toBe(realpathSync(root));
+  });
+
+  it('the named remedy, followed literally, projects the worktree and anti-slop can run', async () => {
+    const { root, wt } = await copiedWorktree();
+
+    rmSync(join(wt, '.devkit'), { recursive: true, force: true });
+    expect(await doctorRun(['--fix'], overlayCommandCwd(wt))).toBe(0);
+
+    expect(existsSync(join(wt, 'oxlint.devkit.json'))).toBe(true);
+    expect(checkOxcCapability(wt).filter((r) => r.status !== 'OK')).toEqual([]);
+    expect(JSON.stringify(checkAntiSlopCapability(wt))).not.toContain('overlay entry');
+    expect((await doctorOut(root)).code).toBe(0);
+  });
+
+  it('a commit, a ship and the projector refuse the copy, with or without gaps', async () => {
+    const { root, wt } = await copiedWorktree();
+
+    expect(blockedCommit(wt)).toContain('is a copy of the overlay');
+    symlinkSync(join(root, 'oxlint.devkit.json'), join(wt, 'oxlint.devkit.json'));
+    expect(blockedCommit(wt)).toContain('is a copy of the overlay');
+
+    expect(realpathSync(shipOverlayRoot(wt) ?? '')).toBe(realpathSync(root));
+    expect(shipOverlayRoot(root)).toBe(root);
+    expect(projectBorrowedOverlay(wt, root, '')).toBe(false);
+  });
+
+  it('the home is never a copy, even with its hook gone and a copy beside it', async () => {
+    const { root, wt } = await copiedWorktree();
+    rmSync(join(root, '.devkit', 'hooks', 'pre-commit'));
+
+    expect(copiedFrom(root, '')).toBeNull();
+    expect(overlayCommandCwd(root)).toBe(root);
+    expect(copiedFrom(wt, '')).not.toBeNull();
+  });
+
+  it('a home in a linked worktree flags a copy in the main checkout', async () => {
+    const main = workRepo();
+    const linked = addWorktree(main);
+    await initOverlay(linked);
+    copyInto(linked, main);
+
+    expect(realpathSync(copiedFrom(main, '') ?? '')).toBe(realpathSync(linked));
+    expect(copiedFrom(linked, '')).toBeNull();
+    expect((await doctorOut(linked)).out).toContain(copyRow(main));
+  });
+
+  // Package mode commits .devkit/config.json, so every linked worktree holds a real one.
+  it('a package-mode worktree is never a copy, and commands stay in it', () => {
+    const root = workRepo();
+    mkdirSync(join(root, '.devkit'));
+    writeFileSync(join(root, '.devkit', 'config.json'), '{"stack":"generic","selfHost":true}\n');
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'package mode');
+    const wt = addWorktree(root);
+
+    expect(lstatSync(join(wt, '.devkit', 'config.json')).isFile()).toBe(true);
+    expect(copiedFrom(wt, '')).toBeNull();
+    expect(overlayCommandCwd(wt)).toBe(wt);
+  });
+
+  // Husky rewrites core.hooksPath on every install, so devkit's absolute value is often gone.
+  it('after husky reclaims hooksPath the main checkout still owns the overlay', async () => {
+    const { root, wt } = await copiedWorktree();
+    huskyReclaim(root);
+
+    expect(realpathSync(copiedFrom(wt, '') ?? '')).toBe(realpathSync(root));
+    expect(copiedFrom(root, '')).toBeNull();
+    expect((await doctorOut(root)).out).toContain(copyRow(wt));
+  });
+
+  it('a monorepo copy is found under its package, and ship resolves the owner’s package', () => {
+    const root = workRepo();
+    const pkgConfig = (dir: string) => {
+      mkdirSync(join(dir, 'pkg', '.devkit'), { recursive: true });
+      writeFileSync(
+        join(dir, 'pkg', '.devkit', 'config.json'),
+        '{"overlay":true,"pkgRel":"pkg"}\n',
+      );
+    };
+    pkgConfig(root);
+    const wt = addWorktree(root);
+    pkgConfig(wt);
+
+    expect(copiedFrom(wt, '')).toBeNull();
+    expect(realpathSync(copiedFrom(wt, 'pkg') ?? '')).toBe(realpathSync(root));
+    expect(realpathSync(shipOverlayRoot(join(wt, 'pkg')) ?? '')).toBe(
+      realpathSync(join(root, 'pkg')),
+    );
+    expect(shipOverlayRoot(join(root, 'pkg'))).toBe(join(root, 'pkg'));
+  });
+
+  it('the CLI wiring: clean refuses in a copy, and ship’s overlay-root fails closed on it', async () => {
+    const { root, wt } = await copiedWorktree();
+    const env = hookEnv();
+
+    const clean = testSpawnSync('node', [CLI, 'clean', '--yes'], {
+      cwd: wt,
+      env,
+      encoding: 'utf8',
+    });
+    expect(clean.status).toBe(1);
+    expect(clean.stderr).toContain("is a copy of the overlay's");
+    expect(existsSync(join(root, '.devkit', 'config.json'))).toBe(true);
+
+    const emitter = join(dirname(CLI), 'lib', 'husky', 'overlay', 'overlay-root.mts');
+    const project = testSpawnSync('node', [emitter, wt, '--project'], { env, encoding: 'utf8' });
+    expect(project.status).toBe(1);
+    expect(project.stdout).toContain("is a copy of the overlay's");
+    const resolved = testSpawnSync('node', [emitter, wt], { env, encoding: 'utf8' });
+    expect(realpathSync(resolved.stdout.trim())).toBe(realpathSync(root));
+  });
+
+  // The main-worktree fallback names an owner only when main holds an overlay itself.
+  it('a linked home is never a copy once husky reclaims hooksPath beside a plain main', async () => {
+    const main = workRepo();
+    const linked = addWorktree(main);
+    await initOverlay(linked);
+    huskyReclaim(main);
+
+    expect(copiedFrom(linked, '')).toBeNull();
+    expect(overlayCommandCwd(linked)).toBe(linked);
+  });
+
+  it('a hooksPath naming a deleted home never makes the main checkout a copy', async () => {
+    const main = workRepo();
+    const linked = addWorktree(main);
+    await initOverlay(linked);
+    copyInto(linked, main);
+    rmSync(linked, { recursive: true, force: true });
+
+    expect(copiedFrom(main, '')).toBeNull();
+  });
+
+  it('a home whose config.json no longer parses still owns the overlay, so its copy is named', async () => {
+    const { root, wt } = await copiedWorktree();
+    writeFileSync(join(root, '.devkit', 'config.json'), '{not json');
+
+    expect(realpathSync(copiedFrom(wt, '') ?? '')).toBe(realpathSync(root));
+  });
+
+  it('a copy under any other devkit-review-* directory is still named', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const wt = join(mkTmp('overlay-anywhere-'), 'devkit-review-fix', 'app');
+    mkdirSync(dirname(wt));
+    git(root, 'worktree', 'add', '-q', '--detach', wt);
+    copyInto(root, wt);
+
+    expect(realpathSync(copiedFrom(wt, '') ?? '')).toBe(realpathSync(root));
+  });
+
+  it('devkit review’s private worktree is not a copy', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const review = join(mkTmp('devkit-review-'), 'final');
+    git(root, 'worktree', 'add', '-q', '--detach', review);
+    copyInto(root, review);
+
+    expect(copiedFrom(review, '')).toBeNull();
+    expect((await doctorOut(root)).out).not.toContain(copyRow(review));
+    const target = join(dirname(fileURLToPath(import.meta.url)), '../lib/ship/review-target.sh');
+    const script = readFileSync(target, 'utf8');
+    for (const line of [
+      'STATE_ROOT="$TEMP_BASE/devkit-review-$RUN_ID"',
+      'FINAL_WT="$STATE_ROOT/final"',
+    ])
+      expect(script).toContain(line);
+    expect(script).toContain('BASE_WT="$STATE_ROOT/base"');
+    const snapshot = readFileSync(join(dirname(target), 'review', 'snapshot.sh'), 'utf8');
+    expect(snapshot).toContain('for candidate in "${TMPDIR:-}" /tmp /var/tmp; do');
   });
 });

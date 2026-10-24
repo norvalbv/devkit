@@ -9,7 +9,7 @@ import { z } from 'zod';
 const resultsCacheSchema = z.object({
     results: z.array(z.tuple([z.string(), z.object({ failed: z.boolean() })])),
 });
-// The cache is cumulative and shared by every vitest config, so a file counts only when every named
+// The cache is cumulative across this checkout's vitest runs, so a file counts only when every named
 // project that recorded it says failed and it still exists. Any doubt returns [].
 export function readFailingTestFiles(resultsPath, notBeforeMs, root) {
     try {

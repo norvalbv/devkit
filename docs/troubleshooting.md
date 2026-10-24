@@ -26,7 +26,7 @@ invalidates the cached smell verdict.
 
 ## `invalid JSON: …` from `devkit doctor`
 
-A managed config (`biome.jsonc`, `tsconfig.json`) has a syntax error (a trailing comma, a missing brace).
+A managed config (`tsconfig.json`) has a syntax error (a trailing comma, a missing brace).
 doctor now reports the parser's reason. Fix the JSON and re-run `devkit doctor`. For `guard.config.json`
 specifically, the error comes from the config loader — same fix.
 
@@ -65,6 +65,17 @@ devkit is not on PATH, the commit is **blocked** rather than run without gates, 
 name the fix: install devkit, add a slash-less `.git/info/exclude` line, or run `devkit doctor --fix`.
 An install from before this change wrote a relative path, and under it every linked worktree ran no
 hooks at all. `devkit doctor --fix` (or `devkit upgrade`) re-points it.
+
+## `git lfs install` says `Hook already exists` (overlay mode)
+
+The overlay owns `core.hooksPath`, and `.devkit/hooks` holds a pass-through for every git hook name, so
+the repo's own hooks run even when added after install. git-lfs installs into `core.hooksPath` and
+refuses to replace a hook it did not write; `git lfs track` drops that error silently, and a push then
+uploads no LFS objects. Install lfs's hooks into the repo's own hook directory instead, where devkit's
+pass-throughs run them: `git -c core.hooksPath=<dir> lfs install`, with `<dir>` the directory init
+printed as `other git hooks pass through to <dir>` (`.git/hooks`, `.husky`, or your custom hooks
+path). An lfs hook already sitting
+in `.devkit/hooks` keeps working: devkit never overwrites a file it did not write, and doctor lists it.
 
 ## My commit in a worktree ran a DIFFERENT checkout's hook
 
@@ -285,8 +296,9 @@ claude family bound by devkit doctor --fix (codex binary was unresolvable). Expl
 ```
 
 then a doctor bind put the claude family there, and unsetting alone leaves it in force. Delete
-that key and the four keys it names (`model`, `escalationModel`, `correctnessModel`,
-`correctnessChunkLoc`) by hand, then commit the file, because a ship reads it from the base commit.
+that key, its `//judgeFamilyBound` record, and the four keys it names (`model`, `escalationModel`,
+`correctnessModel`, `correctnessChunkLoc`) by hand, then commit the file, because a ship reads it
+from the base commit.
 Leave the file alone if the marker is absent or holds your own note: those keys are yours. Then
 `devkit ship --resume <branch>`. This is also the way back once a codex outage clears.
 
@@ -390,7 +402,10 @@ the two disagree.
   package and prints `↳ shipping: refreshed managed capability state …`. That refresh touches the
   **working tree only** — it is never staged and never reaches the commit, so the PR branch stays
   self-consistent for its own CI. If you instead see `↳ shipping: managed capability refresh skipped
-— <reason>`, the reason names the fix (usually `devkit doctor --fix`).
+— <reason>`, the reason names the fix (usually `devkit doctor --fix`). In devkit's own repository
+  the reason is `self-host`: the worktree's gates run from its own source, so the error there is real.
+  Regenerate `.devkit/oxc` and `.devkit/anti-slop` from source (`bun run devkit doctor --fix`) and
+  include them in the ship.
 - **On a plain commit**, your checkout's managed state lags the devkit you upgraded to. Run
   `devkit doctor --fix` and commit the refreshed `.devkit/` bytes.
 
@@ -414,8 +429,8 @@ at a time, by design.
 
 ## `✗ staged gate blocked: <gate>`
 
-A gate the hook runs as shell blocked the commit: `fallow` (the staged audit), `eslint-overlay` or
-`biome-overlay`. Its own report sits directly above the line; `guard-deterministic` does not re-run
+A gate the hook runs as shell blocked the commit: `fallow` (the staged audit) or
+`eslint-overlay`. Its own report sits directly above the line; `guard-deterministic` does not re-run
 it, so fix what that report names and re-commit. Under `devkit ship` the block also prints the
 `devkit ship … --dry-gates` command that re-checks the fix on ship's exact staging.
 
@@ -430,7 +445,7 @@ Each named gate's findings appear above the line.
 To check a fix without another commit or ship, stage it and run the per-gate command the block prints
 under `Re-check a fix locally` (anti-slop: `devkit anti-slop check --staged`). Under `devkit ship`, those
 commands judge your checkout's index; the ship block also prints the `devkit ship … --dry-gates` invocation
-that re-runs the deterministic set on ship's exact staging. A blocking overlay lint step (eslint, biome,
+that re-runs the deterministic set on ship's exact staging. A blocking overlay lint step (eslint,
 fallow) and devkit's own formatter print the same invocation under `devkit ship`. No judges run after a
 deterministic block.
 A reviewer FAIL prints `guard-review lens <reviewer>[:<lens>]` the same way: it re-judges only that

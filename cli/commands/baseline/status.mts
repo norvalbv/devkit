@@ -34,6 +34,9 @@ Configure both in guard.config.json — { "baselineStatus": { "workflow": "<file
 the default branch. No log scraping: a CI log interleaves failures from nested test runs, so
 grepping it cannot prove a file passed.
 
+A third key, "shardJob" (default \`tests\`), names the matrix job whose \`<job> (<values>)\` shards
+\`ship --wait-ci\` attribution pairs by step number when an inherited failure moves shard.
+
 Runs are looked up per commit, walking back from the branch head GitHub reports for the repository
 gh queries, never from GitHub's branch run list (which can serve weeks-old pages). The answer names
 that head and how many commits behind it the answering run sits (commitsBehindHead).

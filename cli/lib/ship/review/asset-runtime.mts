@@ -172,7 +172,7 @@ function runtimeFiles(root: string): string[] {
     }
   };
   visit(root);
-  return files;
+  return files.sort(); // flat order: the walk yields `a/x` before `a-y`, registered paths do not
 }
 
 function packageShipAssetPaths(sourceRoot: string): readonly string[] {

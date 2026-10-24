@@ -10,7 +10,7 @@ import {
   dropWorktree,
   GIT_ENV,
   installHook,
-  LEAKING_HOOK,
+  COUNTING_HOOK,
   publishEnvFor,
   scriptPath,
   seedShipRepo,
@@ -21,8 +21,8 @@ describe('ship — the format stage is evidence, not inference', () => {
   // The arm that COMMITS: the report must reach the captured log, so "did it format?" has an answer
   // rather than a silence. `run-gates-with-capture.sh` also scrapes 🎨 as a stage anchor.
   it('captures the format step report in the ship gate log', () => {
-    const fragment = buildGuardBlock({ biome: true, guards: [] }).match(
-      /# devkit:biome-format[\s\S]*?# \/devkit:biome-format/,
+    const fragment = buildGuardBlock({ guards: [] }).match(
+      /# devkit:format[\s\S]*?# \/devkit:format/,
     )?.[0];
     expect(fragment, 'the generator must still emit a format fragment').toBeTruthy();
     const { dir, env, git } = seedShipRepo({
@@ -31,9 +31,9 @@ describe('ship — the format stage is evidence, not inference', () => {
       hookBody: `__dk_package_bin_dir="$PWD/.shipbin"\n${fragment}\nexit 0`,
     });
     mkdirSync(join(dir, '.shipbin'), { recursive: true });
-    writeFileSync(join(dir, 'biome.jsonc'), '{}\n');
-    writeFileSync(join(dir, '.shipbin', 'biome'), '#!/bin/sh\nexit 0\n');
-    chmodSync(join(dir, '.shipbin', 'biome'), 0o755);
+    writeFileSync(join(dir, '.oxfmtrc.json'), '{}\n');
+    writeFileSync(join(dir, '.shipbin', 'devkit'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(dir, '.shipbin', 'devkit'), 0o755);
     execFileSync('git', ['add', '-A'], { cwd: dir });
     execFileSync('git', ['commit', '-qm', 'stub'], { cwd: dir });
 
@@ -47,14 +47,14 @@ describe('ship — the format stage is evidence, not inference', () => {
     dropWorktree(git, r.stderr);
     expect(r.status, r.stderr).toBe(0);
     const log = readFileSync(join(dir, '.devkit/last-ship-gates-feat-fmt-log.log'), 'utf8');
-    expect(log).toContain('🎨 biome formatted and re-staged 1 staged file(s).');
+    expect(log).toContain('🎨 oxfmt formatted and re-staged 1 staged file(s).');
   });
 
   // The arm that must NOT: sc-2524 read this absence as a bug and asked for a resume-time
   // re-format, which would have invalidated the receipt it resumes on.
   it('runs no format step on a receipt-authorised resume — the preserved commit is published as-is', () => {
     const { dir, env, git, bare } = seedShipRepoLocalRemote();
-    installHook(dir, LEAKING_HOOK);
+    installHook(dir, COUNTING_HOOK);
     const { hookCount, publishEnv } = publishEnvFor(dir, env);
     // No note.txt cleanup: the preserved commit and $ROOT's copy must match for the scope check.
     const branch = 'feat/resume-no-fmt';

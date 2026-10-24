@@ -300,7 +300,7 @@ REQUIRED_SCOPE_FILE=""
 REWRITE_FETCH_ERR=""
 FINAL_SCOPE_FILE=""
 REWRITE_PUBLISH_LOCK=""
-REWRITE_PUBLISH_STAMP=""
+REWRITE_PUBLISH_NONCE=""
 REWRITE_PUBLISH_OWNED=0
 rewrite_ref_cleanup() {
   ship_resume_extras_notice # first: it reads the exit status
@@ -317,15 +317,15 @@ rewrite_ref_cleanup() {
   [ -z "$REWRITE_FETCH_ERR" ] || rm -f "$REWRITE_FETCH_ERR"
 }
 
-# Serialize a rewrite's destructive publication/bookkeeping window and every explicit PR-body
-# publication with the matching head push. Gates still run in parallel. Atomic mkdir supplies
-# exclusion; the holder PID makes a killed publisher reclaimable.
-# Keyed on the GIT COMMON DIR, not $ROOT (sc-2476): linked worktrees of one clone publish the same
-# origin/$BR, so a per-checkout lock let a paused publisher overwrite a sibling's newer PR body. Not
-# $TMPDIR either — it differs per process (sandboxed agents), which would fail open silently. The
-# branch is hashed: a sanitised name maps a/b and a-b to one lock.
+# Serialize each rewrite publication and explicit PR-body edit with its head push; gates stay
+# parallel. publish-lock.mts holds a process-lock.mts lock for THIS bash ($$) until it exits.
+
+# Keyed on the git common dir: linked worktrees publish one origin/$BR, and $TMPDIR differs per
+# process. The branch is hashed because a sanitised name maps a/b and a-b to one lock.
+REWRITE_PUBLISH_LOCK_CLI="$SCRIPT_DIR/reship/publish-lock.mts"
+[ -f "$REWRITE_PUBLISH_LOCK_CLI" ] || REWRITE_PUBLISH_LOCK_CLI="$SCRIPT_DIR/reship/publish-lock.mjs"
 rewrite_publish_lock_acquire() {
-  local lock_root holder owner owner_start current_start attempts=0
+  local lock_root rc=0
   lock_root=$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
     [ -n "$lock_root" ] || {
     echo "reship rejected: could not resolve the git common dir for the publication lock" >&2
@@ -337,49 +337,23 @@ rewrite_publish_lock_acquire() {
     echo "reship rejected: cannot create the publication lock directory $lock_root" >&2
     return 1
   }
-  REWRITE_PUBLISH_LOCK="$lock_root/$(printf '%s' "$BR" | git hash-object --stdin).lock"
-  owner_start=$(ps -o lstart= -p $$ 2>/dev/null | git hash-object --stdin)
-  REWRITE_PUBLISH_STAMP="$$:$owner_start:$(date +%s)"
-  while ! mkdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null; do
-    holder=$(cat "$REWRITE_PUBLISH_LOCK/holder" 2>/dev/null || true)
-    owner=${holder%%:*}
-    owner_start=${holder#*:}; owner_start=${owner_start%%:*}
-    current_start=""
-    if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
-      current_start=$(ps -o lstart= -p "$owner" 2>/dev/null | git hash-object --stdin)
-    fi
-    if [ -n "$holder" ] && [ "$holder" = "$(cat "$REWRITE_PUBLISH_LOCK/holder" 2>/dev/null || true)" ] && \
-       { [ -z "$current_start" ] || [ "$current_start" != "$owner_start" ]; }; then
-      rm -f "$REWRITE_PUBLISH_LOCK/holder" 2>/dev/null || true
-      rmdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null || true
-      continue
-    fi
-    # An acquirer killed between mkdir and its holder write leaves no PID to prove. Only age may
-    # reclaim that micro-window; a live but paused acquirer younger than a minute remains protected.
-    if [ -z "$holder" ] && [ -n "$(find "$REWRITE_PUBLISH_LOCK" -prune -mmin +1 -print 2>/dev/null)" ]; then
-      rmdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null || true
-      continue
-    fi
-    attempts=$((attempts + 1))
-    [ "$attempts" -lt 300 ] || {
+  # .mutex, not the old .lock: a pre-nonce `holder`-format lock left there could never be reaped.
+  REWRITE_PUBLISH_LOCK="$lock_root/$(printf '%s' "$BR" | git hash-object --stdin).mutex"
+  REWRITE_PUBLISH_NONCE=$(node "$REWRITE_PUBLISH_LOCK_CLI" acquire "$$" "$REWRITE_PUBLISH_LOCK") ||
+    rc=$?
+  case $rc in
+    0) REWRITE_PUBLISH_OWNED=1 ;;
+    75)
       echo "reship rejected: another publisher still owns origin/$BR; resume after it finishes" >&2
       return 1
-    }
-    sleep 0.1
-  done
-  printf '%s' "$REWRITE_PUBLISH_STAMP" > "$REWRITE_PUBLISH_LOCK/holder" || {
-    rmdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null || true
-    return 1
-  }
-  REWRITE_PUBLISH_OWNED=1
+      ;;
+    *) return 1 ;; # publish-lock.mts already named the cause
+  esac
 }
 
 rewrite_publish_lock_release() {
   [ "$REWRITE_PUBLISH_OWNED" -eq 1 ] || return 0
-  if [ "$(cat "$REWRITE_PUBLISH_LOCK/holder" 2>/dev/null || true)" = "$REWRITE_PUBLISH_STAMP" ]; then
-    rm -f "$REWRITE_PUBLISH_LOCK/holder" 2>/dev/null || true
-    rmdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null || true
-  fi
+  node "$REWRITE_PUBLISH_LOCK_CLI" release "$REWRITE_PUBLISH_LOCK" "$REWRITE_PUBLISH_NONCE" || true
   REWRITE_PUBLISH_OWNED=0
 }
 

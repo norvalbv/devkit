@@ -88,6 +88,7 @@ e.g. devkit's `gate-engine/`, whose top-level folders are its sub-engines.)
 | "Folder fan-out exceeded" | > cap impl files in one folder | split into cohesive kebab subfolders |
 | import across a wall rejected | an electron preset import wall | route through the allowed surface (a barrel, a bridge) |
 | "structure.walls declares N import wall(s) that are NOT enforced" | `structure.walls` is not compiled yet | nothing is checked; enforce the boundary by review until the compiler lands |
+| "guard.config.json structure.walls: … expected array, received string" | `structure`, `trees` or `walls` has the wrong JSON type | nothing in that field is checked; fix its type (`structure` an object, `trees`/`walls` arrays) |
 
 **If you believe a block is genuinely a permanent exception** (architectural, not "I'm in a hurry"):
 add an entry to `.devkit/structure/exempt.mjs` with a one-line reason. That hand-edited file is the

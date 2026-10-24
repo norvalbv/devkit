@@ -327,7 +327,7 @@ async function runGate() {
             header: '## RECORDED TARGETS (current rulings matching changed files)',
             skipHeader: '## RECORDED TARGETS — NONE',
             skipNote: 'No scoped Target matches. Judge the diff without assuming prior approval.',
-        }, 4096))
+        }, 8192))
             .catch(() => '## RECORDED TARGETS — UNAVAILABLE\nDecision log could not be read. Judge the diff without assuming prior approval.');
         // Target context has its own budget so it cannot displace diff evidence.
         const key = verdictKey('detect', input, targets);

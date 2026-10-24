@@ -23,6 +23,7 @@ import {
 import { selectedHookAssets } from '../install/hook-registration-ledger/selection.mts';
 import { checkOxcCapability, syncOxcCapability } from '../install/oxc/lifecycle.mts';
 import { commitMsgGuards } from '../husky/commit-msg-block.mts';
+import { describeForeignHook, describeUnreadableHook } from '../husky/overlay/commit-msg.mts';
 import {
   hasOwnOverlay,
   LOCAL_HOOKS,
@@ -31,6 +32,7 @@ import {
   overlayHooksPath,
   worktrees,
 } from '../husky/overlay/overlay-home.mts';
+import { copiedFrom, copiedOverlayRow } from '../husky/overlay/copied-overlay.mts';
 import { listed, printProjectionGaps } from '../husky/overlay/projection-report.mts';
 import { ESLINT_OVERLAY_FILE, isLegacyEslintOverlay } from '../install/overlay-lint-configs.mts';
 import {
@@ -110,6 +112,7 @@ export async function runOverlayDoctor(
   const worktreesOk = printLinkedWorktrees(home, pkgRel, fix);
   printLegacyEslintOverlays(home, pkgRel);
   const judgesWired = printCommitMsgRow(cfg, fix, sync.commitMsg);
+  printSiblingHooksRow(fix, sync.siblings);
   if (judgesWired && !pathOk && !globalHookInstalled())
     console.log(
       `    commit-msg judges run only via \`git ${HEAL_ALIAS_NAME}\` / \`devkit ship\` while husky owns core.hooksPath`,
@@ -228,7 +231,10 @@ export async function runOverlayDoctor(
     );
   }
   // A stale hook is unhealthy (exit 1) so CI/agents notice; --fix having just regenerated it heals this run.
-  const hookCurrent = fix || (!sync.drift && !sync.commitMsg.drift);
+  // An unreadable wrapper stays unhealthy under --fix: only restoring its read permission clears it.
+  const hookCurrent =
+    (fix || (!sync.drift && !sync.commitMsg.drift && !sync.siblings.stale.length)) &&
+    !sync.siblings.unreadable.length;
   return hookOk && pathOk && worktreesOk && agentsOk && hookCurrent ? 0 : 1;
 }
 
@@ -246,7 +252,7 @@ function agentHalfChecks(cwd: string, sel: Partial<Selection>, surfaces: AgentPr
 }
 
 // sc-4157: a worktree-scoped hooksPath shadows the overlay, and a worktree missing any of the overlay's
-// gate inputs runs its gates without them: both unhealthy. A checkout with its own overlay projects nothing.
+// gate inputs, or holding a copy of it, runs its gates without them: all unhealthy, none rewritten.
 function printLinkedWorktrees(home: string, pkgRel: string, fix: boolean): boolean {
   let ok = true;
   const expected = overlayHooksPath(home);
@@ -259,7 +265,11 @@ function printLinkedWorktrees(home: string, pkgRel: string, fix: boolean): boole
         `  ⚠ ${path}: a worktree-scoped core.hooksPath (${pin}) shadows the overlay — commits there skip devkit's gates`,
       );
     }
-    if (!ownsOverlayConfig(path, pkgRel)) ok = printProjectionGaps(path, home, pkgRel, fix) && ok;
+    if (copiedFrom(path, pkgRel)) {
+      ok = false;
+      console.log(copiedOverlayRow(path, pkgRel));
+    } else if (!ownsOverlayConfig(path, pkgRel))
+      ok = printProjectionGaps(path, home, pkgRel, fix) && ok;
   }
   return ok;
 }
@@ -280,10 +290,12 @@ export function printLegacyEslintOverlays(home: string, pkgRel: string) {
       ({ path, bare }) => !bare && !sameDir(path, home) && hasLegacyEslintOverlay(path, pkgRel),
     )
     .map(({ path }) => path);
-  // A checkout with its own overlay is never projected into, so only its own upgrade rewrites it.
-  for (const own of stale.filter((path) => ownsOverlayConfig(path, pkgRel)))
+  // A checkout with its own overlay is never projected into, so only its own upgrade rewrites it; a
+  // copy's row is printed by printLinkedWorktrees.
+  const own = (path: string) => ownsOverlayConfig(path, pkgRel) && !copiedFrom(path, pkgRel);
+  for (const path of stale.filter(own))
     console.log(
-      `  ⚠ ${ESLINT_OVERLAY_FILE} in ${own} ${why} — delete it (hand edits are lost) and run \`devkit upgrade\` there`,
+      `  ⚠ ${ESLINT_OVERLAY_FILE} in ${path} ${why} — delete it (hand edits are lost) and run \`devkit upgrade\` there`,
     );
   const borrowed = stale.filter((path) => !ownsOverlayConfig(path, pkgRel));
   if (hasLegacyEslintOverlay(home, pkgRel))
@@ -320,4 +332,25 @@ function printCommitMsgRow(
   }
   console.log(`  ✓ .devkit/hooks/commit-msg: ${what} ${state.drift ? 'regenerated' : 'wired'}`);
   return wanted.length > 0;
+}
+
+// A missing or stale pass-through means a repo hook of that name would not run: unhealthy, healed by
+// --fix. A file devkit did not write is only named: --fix must not touch it, so it cannot fail exit.
+function printSiblingHooksRow(
+  fix: boolean,
+  {
+    scriptDir,
+    stale,
+    foreign,
+    unreadable,
+  }: { scriptDir: string; stale: string[]; foreign: string[]; unreadable: string[] },
+) {
+  if (stale.length)
+    console.log(
+      fix
+        ? `  ✓ .devkit/hooks pass-through wrappers refreshed (${stale.join(', ')})`
+        : `  ⚠ .devkit/hooks: ${stale.length} pass-through wrapper(s) missing or stale (${stale.join(', ')}) — a repo hook of those names would not run; run \`devkit doctor --fix\``,
+    );
+  for (const h of foreign) console.log(`  · ${describeForeignHook(h, scriptDir)}`);
+  for (const h of unreadable) console.log(`  ⚠ ${describeUnreadableHook(h)}`);
 }

@@ -9,7 +9,10 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import doctorRun from '../commands/doctor.mts';
+import type { Selection } from '../lib/components.mts';
 import { ALLOW_SKEW_ENV, runnerSkew } from '../lib/doctor/pin/runner-identity.mts';
+import { overlayHooksPath } from '../lib/husky/overlay/overlay-home.mts';
+import { syncOverlayHook } from '../lib/overlay.mts';
 import { syncAntiSlopCapability } from '../lib/install/anti-slop/lifecycle.mts';
 import { syncOxcCapability } from '../lib/install/oxc/lifecycle.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
@@ -35,6 +38,7 @@ interface FixtureConfig {
   overlay?: boolean;
   selfHost?: boolean;
   devkitRef?: string;
+  components?: Partial<Selection>;
 }
 
 /** Minimal initialised repo pinned ABOVE the running devkit. */
@@ -113,9 +117,36 @@ describe('doctor --fix hands off before it repairs', () => {
 
   // Drift is drift in every mode — a skewed overlay must not report 0 where package mode reports 1.
   it('a skewed overlay doctor exits non-zero like package mode does', async () => {
-    expect(await doctorRun([], skewedRepo({ overlay: true, devkitRef: `v${NEWER}` }))).toBe(1);
+    const root = healthyOverlay();
+    expect(await doctorRun([], root)).toBe(0); // healthy unskewed, so only skew can fail it
+    pinOverlay(root, `v${NEWER}`);
+    expect(await doctorRun([], root)).toBe(1);
+  });
+
+  // A runner newer than the pin is the normal state after a devkit upgrade, not drift.
+  it('an overlay pinned below the running devkit stays healthy', async () => {
+    const root = healthyOverlay();
+    pinOverlay(root, 'v0.0.1');
+    expect(await doctorRun([], root)).toBe(0);
   });
 });
+
+const OVERLAY_CFG = { stack: 'generic', overlay: true, components: { agentTargets: [] } };
+
+/** An overlay whose doctor exits 0 unskewed: no agent half, a current hook, an absolute hooksPath. */
+function healthyOverlay(): string {
+  const root = skewedRepo(OVERLAY_CFG);
+  // hooksPath before the sync, so setup and the doctor derive the same chained hook.
+  execFileSync('git', ['config', 'core.hooksPath', overlayHooksPath(root)], { cwd: root });
+  syncOverlayHook(root, root, OVERLAY_CFG, { dryRun: false });
+  return root;
+}
+
+const pinOverlay = (root: string, devkitRef: string) =>
+  writeFileSync(
+    join(root, '.devkit', 'config.json'),
+    JSON.stringify({ ...OVERLAY_CFG, devkitRef }),
+  );
 
 describe('the guard sits above every mode branch', () => {
   // overlay short-circuits at the top of run(); a guard placed after it would let runOverlayDoctor
