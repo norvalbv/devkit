@@ -312,7 +312,7 @@ function depesc(cwd: string, dryRun: boolean): void {
   if (!dryRun) writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 }
 
-// Remove a single line devkit added to .gitignore (e.g. fallow's `.fallow/` cache dir). Leaves the
+// Remove a single line devkit added to .gitignore (search-code's `.search-code/`). Leaves the
 // rest of the file untouched; no-ops if the line isn't present.
 function pruneGitignoreLine(root: string, line: string, dryRun: boolean): void {
   const giPath = join(root, '.gitignore');
@@ -369,9 +369,6 @@ function cleanPackage(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
   rm(join(cwd, 'eslint.config.mjs'), 'eslint.config.mjs', dryRun);
   rm(join(cwd, 'eslint'), 'eslint/ (domains + baselines)', dryRun);
   if (allowlist) rm(join(cwd, allowlist.path), allowlist.path, dryRun);
-  // fallow component: devkit added the `.fallow/` gitignore line (install-fallow); its staged gate
-  // lives in the hook block removed above. A .fallowrc is the consumer's, never devkit-created.
-  if (cfg.components?.fallow) pruneGitignoreLine(gitRoot, '.fallow/', dryRun);
   // search-code: remove the devkit-written opt-in config + the `.search-code/` gitignore line.
   // The index dir itself is the engine's data — left in place.
   if (cfg.components?.searchCode) {
