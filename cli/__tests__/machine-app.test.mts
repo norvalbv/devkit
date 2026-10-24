@@ -82,11 +82,15 @@ describe('machine app process', () => {
   it('waits for the app to answer HTTP, and gives up when the app exits first', async () => {
     const port = await getPort();
     const serve = `require('node:http').createServer((q, s) => s.end('ok')).listen(${port}, '127.0.0.1')`;
-    expect(await waitForHttp(`http://127.0.0.1:${port}`, start(serve).pgid, 10_000)).toBe(true);
+    const alive = (code: string) => {
+      const { pgid } = start(code);
+      return () => groupAlive(pgid);
+    };
+    expect(await waitForHttp(`http://127.0.0.1:${port}`, alive(serve), 10_000)).toBe(true);
     const dead = await getPort();
-    expect(
-      await waitForHttp(`http://127.0.0.1:${dead}`, start('process.exit(3)').pgid, 10_000),
-    ).toBe(false);
+    expect(await waitForHttp(`http://127.0.0.1:${dead}`, alive('process.exit(3)'), 10_000)).toBe(
+      false,
+    );
   });
 
   it("starts the app without ship's own env or a host app's run mode, plus the slot's", () => {

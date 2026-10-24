@@ -25,8 +25,8 @@ const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
 /** A free port, preferring the slot's block; every local host is probed, so a port held on `::` or
  * `0.0.0.0` by another program never reads as free. */
-export function pickPort(base: number): Promise<number> {
-  return getPort({ port: portNumbers(base, base + PORTS_PER_SLOT - 1) });
+export function pickPort(base: number, exclude: number[] = []): Promise<number> {
+  return getPort({ port: portNumbers(base, base + PORTS_PER_SLOT - 1), exclude });
 }
 
 /** The env a slot's processes start from: the caller's, minus ship's own and host-app run mode. */
@@ -91,13 +91,17 @@ async function answers(url: string, ms: number): Promise<boolean> {
 }
 
 /** Wait until `url` answers any HTTP response (a dev server compiles its first page here); false
- * when the app's group died or time ran out. */
-export async function waitForHttp(url: string, pgid: number, timeoutMs: number): Promise<boolean> {
+ * when what serves it died or time ran out. */
+export async function waitForHttp(
+  url: string,
+  alive: () => boolean,
+  timeoutMs: number,
+): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await answers(url, Math.max(1, Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now()))))
       return true;
-    if (!groupAlive(pgid)) return false;
+    if (!alive()) return false;
     await sleep(POLL_MS);
   }
   return false;

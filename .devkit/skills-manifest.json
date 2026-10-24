@@ -35,7 +35,7 @@
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "e6765e7638f10ea173a93786c545d3e40eeff8449671065d088fd1b161ce1b75"
+    "using-devkit/SKILL.md": "fd38f1aa52f02360cfa1e0f8f19de7770712cc883f82d41d4ecb5c7bb5cce3f9"
   },
   "providers": {
     "claude": {
@@ -72,7 +72,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "e6765e7638f10ea173a93786c545d3e40eeff8449671065d088fd1b161ce1b75"
+        "using-devkit/SKILL.md": "fd38f1aa52f02360cfa1e0f8f19de7770712cc883f82d41d4ecb5c7bb5cce3f9"
       }
     },
     "codex": {
@@ -109,7 +109,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "e6765e7638f10ea173a93786c545d3e40eeff8449671065d088fd1b161ce1b75"
+        "using-devkit/SKILL.md": "fd38f1aa52f02360cfa1e0f8f19de7770712cc883f82d41d4ecb5c7bb5cce3f9"
       }
     },
     "cursor": {
@@ -146,7 +146,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "e6765e7638f10ea173a93786c545d3e40eeff8449671065d088fd1b161ce1b75"
+        "using-devkit/SKILL.md": "fd38f1aa52f02360cfa1e0f8f19de7770712cc883f82d41d4ecb5c7bb5cce3f9"
       }
     }
   }

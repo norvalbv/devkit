@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -7,6 +7,7 @@ import {
   claimStart,
   findLease,
   IDLE_MS,
+  type Lease,
   listLeases,
   PORT_BASE,
   PORTS_PER_SLOT,
@@ -31,7 +32,7 @@ afterEach(() => {
 function pool() {
   const root = join(temp('machines-'), 'machines');
   const killed: number[] = [];
-  return { root, killed, kill: (pgid: number) => killed.push(pgid) };
+  return { root, killed, kill: (lease: Lease) => void (lease.pgid && killed.push(lease.pgid)) };
 }
 
 describe('machine leases', () => {
@@ -113,6 +114,21 @@ describe('machine leases', () => {
     expect(slotCap(root)).toBe(5);
   });
 
+  it('keeps the keys another devkit version wrote when it rewrites a lease', () => {
+    const { root, kill } = pool();
+    const { lease } = acquireLease(temp('wt-'), { root, kill });
+    const holder = join(slotDir(root, lease.slot), 'holder.json');
+    const box = { name: 'b', view: 1, cdp: 2, password: 'p', future: 1 };
+    writeFileSync(holder, JSON.stringify({ ...lease, box, future: { kept: true } }));
+    expect(findLease(root, lease.worktree)).toMatchObject({ id: lease.id });
+    updateLease(root, lease, { pgid: 5 });
+    expect(JSON.parse(readFileSync(holder, 'utf8'))).toMatchObject({
+      pgid: 5,
+      box,
+      future: { kept: true },
+    });
+  });
+
   it('keeps a released slot released when a late update arrives', async () => {
     const { root, kill } = pool();
     const { lease } = acquireLease(temp('wt-'), { root, kill });
@@ -147,6 +163,13 @@ describe('machine leases', () => {
     });
     expect(freed).toBe('freed');
     expect(acquireLease(other, { root, kill }).lease.slot).toBe(lease.slot);
+  });
+
+  it('makes a second `up` wait while a live one is starting the slot, even if it looks up', () => {
+    const { root, kill } = pool();
+    const { lease } = acquireLease(temp('wt-'), { root, kill });
+    expect(claimStart(root, lease, () => false)).toBe('claimed');
+    expect(claimStart(root, lease, () => true)).toBe('busy');
   });
 
   it('takes over the start claim of an `up` that died', () => {

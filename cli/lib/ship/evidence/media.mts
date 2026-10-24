@@ -15,7 +15,7 @@ const SHA_CELL = /· sha `([0-9a-f]{12})` ·/;
 
 const MB = 1024 * 1024;
 /** GitHub's free-plan video limit is 10 MB and its image limit 10 MB; the margin covers rounding. */
-const VIDEO_CAP = 9 * MB;
+export const VIDEO_CAP = 9 * MB;
 const IMAGE_CAP = 10 * MB;
 const MAX_FILES = 6;
 const MAX_SHOTS = 4;

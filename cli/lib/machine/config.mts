@@ -7,6 +7,8 @@ import { CONFIG_FILENAME } from '../../../gate-engine/config.mts';
 const argv = z.array(z.string().min(1)).min(1);
 
 const machineSchema = z.strictObject({
+  /** light: a headless browser slot on this Mac; full: a desktop computer per agent in a container. */
+  mode: z.enum(['light', 'full']).default('light'),
   command: argv.optional(),
   seed: argv.optional(),
   env: z
