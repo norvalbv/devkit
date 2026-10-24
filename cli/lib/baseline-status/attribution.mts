@@ -3,7 +3,7 @@
  * on its merge commit's first parent. Never guesses; an unreadable input is a named reason.
  */
 import type { CheckRow } from '../ship/wait-ci/wait.mts';
-import { GhUnavailable, commitCi, gh, runView } from './gh.mts';
+import { type FailedStep, GhUnavailable, commitCi, gh, runView } from './gh.mts';
 import type { TestReportSummary } from './produce.mts';
 import { loadSummary, workflowSelector } from './query.mts';
 import { configuredSource } from './source.mts';
@@ -59,14 +59,48 @@ export function compareSummaries(pr: TestReportSummary, base: TestReportSummary)
   return out;
 }
 
-/** `inherited-only` is earned: no new or unsure file, no new failing step, no check left unread. */
+/** `inherited-only` is earned: no new or unsure file, no new failing step or outside-test error, no
+ * check left unread. `extraUnhandled` is null when either run did not record its errors. */
 export function attributionToken(
   files: FileComparison,
   newSteps: string[],
   unattributed: string[],
+  extraUnhandled: number | null,
 ): AttributionToken {
-  if (files.fresh.length > 0 || newSteps.length > 0) return 'new';
-  return files.unsure.length > 0 || unattributed.length > 0 ? 'unknown' : 'inherited-only';
+  if (files.fresh.length > 0 || newSteps.length > 0 || Number(extraUnhandled) > 0) return 'new';
+  const unread = files.unsure.length > 0 || unattributed.length > 0 || extraUnhandled === null;
+  return unread ? 'unknown' : 'inherited-only';
+}
+
+/** Errors outside any test that the PR run has beyond its base, or null when either did not record. */
+export function newUnhandled(pr: TestReportSummary, base: TestReportSummary): number | null {
+  if (pr.unhandled === undefined || base.unhandled === undefined) return null;
+  return Math.max(0, pr.unhandled - base.unhandled);
+}
+
+/**
+ * The PR's failing steps the base did not fail. A matrix sibling that moved shard may match one
+ * unmatched base failure of its key, once per inherited file not already explaining an exact match.
+ */
+export function newFailingSteps(
+  pr: FailedStep[],
+  base: FailedStep[],
+  inheritedFiles: number,
+): string[] {
+  const exact = new Set(base.map((b) => b.label).filter((l) => pr.some((p) => p.label === l)));
+  const spare = base.filter((b) => !exact.has(b.label)).map((b) => b.key);
+  let moves = inheritedFiles - pr.filter((p) => exact.has(p.label) && p.key !== p.label).length;
+  const fresh: string[] = [];
+  for (const step of pr) {
+    if (exact.has(step.label)) continue;
+    const at = spare.indexOf(step.key);
+    if (at === -1 || moves <= 0) fresh.push(step.label);
+    else {
+      spare.splice(at, 1);
+      moves--;
+    }
+  }
+  return fresh;
 }
 
 /** One verdict-line value: whitespace collapsed (the line is grepped line-wise), capped, or `none`. */
@@ -76,6 +110,10 @@ export function capped(values: string[]): string {
   const rest = values.length - shown.length;
   return rest > 0 ? `${shown.join(',')},+${rest}` : shown.join(',');
 }
+
+/** The verdict-line field for outside-test errors: absent when the PR added none. */
+const unhandledField = (extra: number | null): string =>
+  extra === null ? ' unhandled=unrecorded' : extra > 0 ? ` unhandled=+${extra}` : '';
 
 const unknown = (reason: string, base = ''): Attribution => ({
   token: 'unknown',
@@ -137,10 +175,12 @@ export function attributeFailures({
     const ci = commitCi({ cwd, workflow, ref, sha });
     if (!ci.run || !ci.failing) return unknown(`base-${ci.verdict}`);
     base = ` base-run=${ci.run.databaseId} base-ci=${ci.verdict}`;
-    const files = compareSummaries(prSummary, loadSummary({ cwd, run: ci.run, artifact }));
-    const baseSteps = ci.failing;
-    const newSteps = runView(cwd, run.databaseId).failing.filter((s) => !baseSteps.includes(s));
-    const token = attributionToken(files, newSteps, unattributed);
+    const baseSummary = loadSummary({ cwd, run: ci.run, artifact });
+    const files = compareSummaries(prSummary, baseSummary);
+    const prSteps = runView(cwd, run.databaseId).failing;
+    const newSteps = newFailingSteps(prSteps, ci.failing, files.inherited.length);
+    const extraUnhandled = newUnhandled(prSummary, baseSummary);
+    const token = attributionToken(files, newSteps, unattributed, extraUnhandled);
     const unsure = files.unsure.length > 0 ? ` unsure=${files.unsure.length}` : '';
     const other = unattributed.length > 0 ? ` unattributed=${capped(unattributed)}` : '';
     return {
@@ -149,7 +189,8 @@ export function attributeFailures({
       fresh: files.fresh.length,
       line:
         `attribution=${token} inherited=${files.inherited.length} new=${files.fresh.length}${unsure}` +
-        ` new-failing=${capped(files.fresh)} new-steps=${capped(newSteps)}${other}${base}`,
+        ` new-failing=${capped(files.fresh)} new-steps=${capped(newSteps)}` +
+        `${unhandledField(extraUnhandled)}${other}${base}`,
     };
   } catch (e) {
     if (e instanceof GhUnavailable) return unknown(e.reason, base);
