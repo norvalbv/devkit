@@ -432,6 +432,9 @@ export function bodyUpdateRepo({ hookBody = 'exit 0' } = {}) {
     [
       '#!/bin/sh',
       'printf \'%s\\n\' "$*" >> "$GH_LOG"',
+      // --wait-ci-required reads the base's required contexts: base `main`, then GH_REQUIRED_CONTEXTS.
+      'if [ "$1" = api ]; then printf \'%s\\n\' "${GH_REQUIRED_CONTEXTS:-}"; exit 0; fi',
+      'case " $* " in *" baseRefName "*) echo main; exit 0 ;; esac',
       'if [ "$1" = pr ] && [ "$2" = view ]; then',
       '  [ "${GH_VIEW_STATUS:-0}" -eq 0 ] || exit "$GH_VIEW_STATUS"',
       // PR identity TSV for the state check. GH_PR_STATE_AFTER answers from view GH_PR_FLIP_AT (default
