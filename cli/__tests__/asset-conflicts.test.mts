@@ -104,6 +104,20 @@ describe.each(legacyWriters)('$label writer compatibility preflight', (writer) =
     else expect(readFileSync(manifestPath, 'utf8')).toBe(manifest);
   });
 
+  it('writes a v1 manifest with no generatedAt and drops a legacy stamp on re-sync', () => {
+    const root = tmpRepo();
+    const manifestPath = join(root, '.devkit', writer.manifest);
+    writer.run(root, ['claude']);
+    const clean = readFileSync(manifestPath, 'utf8');
+    expect(JSON.parse(clean)).not.toHaveProperty('schemaVersion');
+    expect(clean).not.toContain('generatedAt');
+    const stamped = { ...JSON.parse(clean), generatedAt: '2026-01-01T00:00:00.000Z' };
+    writeFileSync(manifestPath, JSON.stringify(stamped, null, 2));
+
+    writer.run(root, ['claude']);
+    expect(readFileSync(manifestPath, 'utf8')).toBe(clean);
+  });
+
   it('accepts an existing v2 manifest and republishes it after syncing', () => {
     const root = tmpRepo();
     const manifestPath = join(root, '.devkit', writer.manifest);
@@ -408,7 +422,7 @@ describe('edge cases', () => {
     });
     const man2 = readFileSync(join(root, '.devkit', 'skills-manifest.json'), 'utf8');
 
-    expect(man2).toBe(man1); // byte-identical → stable generatedAt, no spurious diff
+    expect(man2).toBe(man1); // byte-identical → no spurious diff
     expect(readFileSync(SKILL(root), 'utf8')).toBe('# mine\n'); // still preserved
   });
 
