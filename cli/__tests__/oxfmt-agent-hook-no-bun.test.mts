@@ -1,4 +1,4 @@
-// The agent hooks' biome steps run the local bin, so a repo without bun still gets them. Each test
+// The agent hooks' Oxfmt steps run the local bin, so a repo without bun still gets them. Each test
 // REPLACES PATH, so the runtimes that exist are exactly the ones it lists.
 import { spawnSync } from 'node:child_process';
 import {
@@ -43,17 +43,17 @@ const pathWithout = (root, { node = true } = {}) => {
   return `${dir}:${SYSTEM_PATH}`;
 };
 
-/** A biome repo whose stub bin logs its argv, prints to stdout like biome does, and exits `code`. */
-const biomeRepo = (code, files = {}) => {
-  const root = mkTmp('biome-nobun-');
+/** An Oxfmt repo whose stub bin logs its argv, prints to stdout like oxfmt does, and exits `code`. */
+const oxfmtRepo = (code, files = {}) => {
+  const root = mkTmp('oxfmt-nobun-');
   write(root, 'package.json', JSON.stringify({ name: 'fx', version: '0.0.0' }));
-  write(root, 'biome.json', '{}\n');
+  write(root, '.oxfmtrc.json', '{}\n');
   write(root, 'src/mine.ts', 'export const x = 1;\n');
   for (const [rel, body] of Object.entries(files)) write(root, rel, body);
   write(
     root,
-    'node_modules/.bin/biome',
-    `#!/bin/sh\necho "$@" > biome-args.txt\necho "Checked 1 file."\nexit ${code}\n`,
+    'node_modules/.bin/oxfmt',
+    `#!/bin/sh\necho "$@" > oxfmt-args.txt\necho "Checking formatting..."\nexit ${code}\n`,
     0o755,
   );
   return root;
@@ -71,41 +71,46 @@ const runHook = (hook, root, payload, path) =>
     encoding: 'utf8',
   });
 
-describe.skipIf(!NO_SYSTEM_BUN)('biome agent-hook steps without bun', () => {
-  it('format-after-edit runs the local biome on the edit and keeps its stdout to `{}`', () => {
-    const root = biomeRepo(0);
+describe.skipIf(!NO_SYSTEM_BUN)('Oxfmt agent-hook steps without bun', () => {
+  it('format-after-edit runs the local oxfmt on the edit and keeps its stdout to `{}`', () => {
+    const root = oxfmtRepo(0);
     const r = runHook(
       FORMAT_HOOK,
       root,
       { file_path: join(root, 'src/mine.ts') },
       pathWithout(root),
     );
-    expect(readFileSync(join(root, 'biome-args.txt'), 'utf8')).toContain('check --write');
+    expect(readFileSync(join(root, 'oxfmt-args.txt'), 'utf8')).toMatch(/--write .*src\/mine\.ts/);
     expect(r.stdout.trim()).toBe('{}');
   });
 
-  it("lint-check blocks on biome's findings with a hint naming the command that ran", () => {
-    const r = runHook(LINT_HOOK, biomeRepo(1), {}, pathWithout(mkTmp('shims-')));
-    expect(r.status).toBe(2);
-    expect(r.stderr).toContain("Run './node_modules/.bin/biome check --write <file>' to auto-fix.");
-    expect(r.stderr).not.toContain('bun run');
-  });
+  it.each([1, 2])(
+    "lint-check blocks on oxfmt's exit %i with a hint naming the command that ran",
+    (code) => {
+      const r = runHook(LINT_HOOK, oxfmtRepo(code), {}, pathWithout(mkTmp('shims-')));
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain("Run './node_modules/.bin/oxfmt --write <file>' to auto-fix.");
+      expect(r.stderr).not.toContain('bun run');
+    },
+  );
 
-  it('lint-check stands down when the biome bin cannot start (exit 127)', () => {
-    const r = runHook(LINT_HOOK, biomeRepo(127), {}, pathWithout(mkTmp('shims-')));
+  it('lint-check stands down when the oxfmt bin cannot start (exit 127)', () => {
+    const root = oxfmtRepo(127);
+    const r = runHook(LINT_HOOK, root, {}, pathWithout(mkTmp('shims-')));
+    expect(readFileSync(join(root, 'oxfmt-args.txt'), 'utf8')).toContain('--check');
     expect(r.status).toBe(0);
   });
 
-  it('a lockfile naming an uninstalled package manager still runs the biome step', () => {
-    const root = biomeRepo(1, { 'pnpm-lock.yaml': '' });
+  it('a lockfile naming an uninstalled package manager still runs the oxfmt step', () => {
+    const root = oxfmtRepo(1, { 'pnpm-lock.yaml': '' });
     const r = runHook(LINT_HOOK, root, {}, pathWithout(mkTmp('shims-')));
     expect(r.status).toBe(2);
-    expect(readFileSync(join(root, 'biome-args.txt'), 'utf8')).toContain('src/mine.ts');
+    expect(readFileSync(join(root, 'oxfmt-args.txt'), 'utf8')).toContain('src/mine.ts');
   });
 
-  it('a clean biome pass still reaches the npm-script steps through the resolved manager', () => {
+  it('a clean oxfmt pass still reaches the npm-script steps through the resolved manager', () => {
     const pkg = { name: 'fx', version: '0.0.0', scripts: { 'lint:structure': 'x' } };
-    const root = biomeRepo(0, { 'package.json': JSON.stringify(pkg), 'package-lock.json': '{}' });
+    const root = oxfmtRepo(0, { 'package.json': JSON.stringify(pkg), 'package-lock.json': '{}' });
     const shims = pathWithout(root);
     write(
       root,
@@ -119,10 +124,10 @@ describe.skipIf(!NO_SYSTEM_BUN)('biome agent-hook steps without bun', () => {
   });
 });
 
-describe.skipIf(!NO_SYSTEM_BUN || systemHas('node'))('biome agent-hook steps without node', () => {
+describe.skipIf(!NO_SYSTEM_BUN || systemHas('node'))('Oxfmt agent-hook steps without node', () => {
   it("lint-check stands down when the real launcher's node shebang has no node", () => {
-    const root = biomeRepo(0);
-    write(root, 'node_modules/.bin/biome', '#!/usr/bin/env node\nprocess.exit(1);\n', 0o755);
+    const root = oxfmtRepo(0);
+    write(root, 'node_modules/.bin/oxfmt', '#!/usr/bin/env node\nprocess.exit(1);\n', 0o755);
     const r = runHook(LINT_HOOK, root, {}, pathWithout(root, { node: false }));
     expect(r.status).toBe(0);
   });

@@ -12,7 +12,6 @@
 
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
-import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 /**
