@@ -12,10 +12,12 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeFileAtomic } from './atomic-write.mts';
 
 /**
  * Resolve devkit's OWN package root from this module's URL. cli/lib/fs-helpers.mjs is
@@ -87,7 +89,8 @@ function isSymlink(path: string) {
 
 /**
  * Write `content` to `path` only if the file is absent (idempotent create). With
- * `{ force: true }` it overwrites. Creates parent dirs. Returns one of:
+ * `{ force: true }` it replaces the file atomically, keeping its mode. Creates parent dirs.
+ * Returns one of:
  *   'created'   — file did not exist, written
  *   'forced'    — file existed, overwritten (force)
  *   'exists'    — file existed, left untouched (no force)
@@ -108,6 +111,9 @@ export function writeIfAbsent(
   if (isSymlink(dir)) rmSync(dir, { force: true });
   mkdirSync(dir, { recursive: true });
   if (isSymlink(path)) rmSync(path, { force: true });
-  writeFileSync(path, content);
+  // Replace via temp + rename, so a crash or a concurrent reader never sees a truncated file.
+  const st = statSync(path, { throwIfNoEntry: false });
+  if (st) writeFileAtomic(path, content, st.mode & 0o777);
+  else writeFileSync(path, content);
   return present ? 'forced' : 'created';
 }
