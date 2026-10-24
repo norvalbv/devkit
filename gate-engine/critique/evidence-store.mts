@@ -25,6 +25,7 @@ import {
   readStoredBlob,
   validatePersistedParent,
 } from './evidence-store-internal.mts';
+import { isRecord } from '../eval/schema.mts';
 import { listPrivateFiles, managedPath, readPrivateFile } from './immutable-file.mts';
 import {
   resolvePlanCritiqueEvidenceRoot,
@@ -48,15 +49,13 @@ const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const RECORD_FILE = /^pc1_[0-9a-f]{64}\.json$/;
 const MAX_METADATA_BYTES = 4 * 1024;
 const MAX_CRITICAL_FINDINGS = 50;
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
 function exactObject(
   value: unknown,
   fields: readonly string[],
   at: string,
   optionalFields: readonly string[] = [],
 ): Record<string, unknown> {
-  requireValue(isObject(value), at);
+  requireValue(isRecord(value), at);
   const object = value as Record<string, unknown>;
   const prototype = Object.getPrototypeOf(object);
   requireValue(prototype === Object.prototype || prototype === null, at);
@@ -132,8 +131,9 @@ function validateRef(
   value: unknown,
   at: string,
   maxBytes = PLAN_CRITIQUE_TRANSCRIPT_MAX_BYTES,
+  extraFields: readonly string[] = [],
 ): asserts value is BlobRefV1 {
-  const ref = exactObject(value, ['sha256', 'byteLength', 'ref'], at);
+  const ref = exactObject(value, ['sha256', 'byteLength', 'ref', ...extraFields], at);
   const hash = sha256(ref.sha256, `${at}.sha256`);
   nonnegativeInteger(ref.byteLength, `${at}.byteLength`, maxBytes);
   requireValue(ref.ref === `blobs/sha256/${hash}`, `${at}.ref`);
@@ -304,9 +304,10 @@ function validateEvidenceRefs(root: Record<string, unknown>, capturedAt: string)
       '$.sanitizedProjection',
     );
     validateRef(
-      { sha256: projection.sha256, byteLength: projection.byteLength, ref: projection.ref },
+      root.sanitizedProjection,
       '$.sanitizedProjection',
       PLAN_CRITIQUE_PROJECTION_MAX_BYTES,
+      ['projectionSchemaVersion'],
     );
     requireValue(
       projection.projectionSchemaVersion === 1,
@@ -319,11 +320,9 @@ function validateEvidenceRefs(root: Record<string, unknown>, capturedAt: string)
     ['sha256', 'byteLength', 'ref', 'expiresAt'],
     '$.opaqueTranscript',
   );
-  validateRef(
-    { sha256: transcript.sha256, byteLength: transcript.byteLength, ref: transcript.ref },
-    '$.opaqueTranscript',
-    PLAN_CRITIQUE_TRANSCRIPT_MAX_BYTES,
-  );
+  validateRef(root.opaqueTranscript, '$.opaqueTranscript', PLAN_CRITIQUE_TRANSCRIPT_MAX_BYTES, [
+    'expiresAt',
+  ]);
   const expiresAt = timestamp(transcript.expiresAt, '$.opaqueTranscript.expiresAt');
   requireValue(Date.parse(expiresAt) > Date.parse(capturedAt), '$.opaqueTranscript.expiresAt');
 }

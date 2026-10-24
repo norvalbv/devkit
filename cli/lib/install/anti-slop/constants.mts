@@ -2,7 +2,9 @@
 
 import { digest } from '../../fs-helpers.mts';
 
-export const ANTI_SLOP_UPSTREAM = '446268e5d15baa968eaec669ff65358d36ae6259';
+export const ANTI_SLOP_UPSTREAM = 'e8c4880471b23ab7f216fba7b27d173a6ef07d4c';
+/** Earlier pins a baseline may still carry; append-only, since an untouched baseline keeps its pin. */
+export const ANTI_SLOP_PRIOR_UPSTREAMS = ['446268e5d15baa968eaec669ff65358d36ae6259'];
 export const ANTI_SLOP_PLUGIN_API_VERSION = '1.78.0';
 export const ANTI_SLOP_MANAGED_REL = '.devkit/anti-slop';
 export const ANTI_SLOP_MANIFEST_REL = `${ANTI_SLOP_MANAGED_REL}/manifest.json`;
