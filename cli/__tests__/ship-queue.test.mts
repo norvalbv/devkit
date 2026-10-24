@@ -30,7 +30,7 @@ import {
   retryBudgetMs,
   type SlotHolder,
 } from '../lib/ship/queue/ship-queue.mts';
-import { LOCK_TIMEOUT_PREFIX, reapIfDead, withQueueLock } from '../lib/ship/queue/queue-lock.mts';
+import { LockHeldError } from '../../gate-engine/judge/process/process-lock.mts';
 import { currentGate, formatShipQueue, readShipQueue } from '../lib/ship/queue/status.mts';
 
 // Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
@@ -350,6 +350,24 @@ describe('tickets and acquisition', () => {
     expect(existsSync(join(root, 'slot'))).toBe(true);
     handle.release();
   });
+
+  it('retries a contended queue lock at the next poll instead of failing the ship', async () => {
+    // The wait loop must swallow the lock's LockHeldError; letting it escape stops a queued ship.
+    const root = tempRoot();
+    mkdirSync(join(root, 'slot.lock'), { recursive: true });
+    writeFileSync(join(root, 'slot.lock', 'busy'), `${process.pid}\n${processStartIdentity()}`);
+    setTimeout(() => rmSync(join(root, 'slot.lock'), { recursive: true, force: true }), 0);
+    const handle = await acquireShipSlot({
+      repo: '/r',
+      branch: 'feat/contended',
+      mode: 'test',
+      root,
+      pollMs: 10,
+      log: () => undefined,
+    });
+    expect(existsSync(join(root, 'slot'))).toBe(true);
+    handle.release();
+  }, 30_000);
 
   it('leaves the queue at acquire time and releases only its own claim', async () => {
     const root = tempRoot();
@@ -739,78 +757,6 @@ describe("ship_queue_slot_register (bash, the acquirer's first action)", () => {
   });
 });
 
-describe('queue lock', () => {
-  /** A held lock: one file named by the holder's nonce, holding its pid and start identity. */
-  function seatLock(lock: string, pid: number, identity: string, nonce: string): void {
-    mkdirSync(lock, { recursive: true });
-    writeFileSync(join(lock, nonce), `${pid}\n${identity}`);
-  }
-
-  it('reaps a lock whose holder is provably gone, and keeps a live one', () => {
-    const lock = join(tempRoot(), 'l.lock');
-    seatLock(lock, 111, 'ps:x', 'n1');
-    reapIfDead(lock, () => false);
-    expect(existsSync(join(lock, 'n1'))).toBe(true);
-    reapIfDead(lock, () => true);
-    expect(existsSync(lock)).toBe(false);
-  });
-
-  it('takes over an empty lock directory left by a crash mid-release', () => {
-    const lock = join(tempRoot(), 'l.lock');
-    mkdirSync(lock);
-    const held = withQueueLock(lock, () => readdirSync(lock).length);
-    expect(held).toBe(1);
-    expect(existsSync(lock)).toBe(false);
-  });
-
-  it('never removes a holder that re-took the lock after the old one was judged dead', () => {
-    const lock = join(tempRoot(), 'l.lock');
-    seatLock(lock, 111, 'ps:x', 'dead');
-    reapIfDead(lock, () => {
-      rmSync(join(lock, 'dead'));
-      writeFileSync(join(lock, 'live'), '222\nps:y');
-      return true;
-    });
-    expect(readdirSync(lock)).toEqual(['live']);
-  });
-
-  it('lets two reapers of one dead holder remove it exactly once', () => {
-    const lock = join(tempRoot(), 'l.lock');
-    seatLock(lock, 111, 'ps:x', 'dead');
-    reapIfDead(lock, () => {
-      reapIfDead(lock, () => true); // a second reaper wins the race inside the first one's check
-      seatLock(lock, 333, 'ps:z', 'fresh'); // and a fresh holder takes the lock
-      return true;
-    });
-    expect(readdirSync(lock)).toEqual(['fresh']);
-  });
-
-  it('refuses an async callback, which would run its awaited half outside the lock', () => {
-    const lock = join(tempRoot(), 'l.lock');
-    expect(() => withQueueLock(lock, () => Promise.resolve(1))).toThrow('synchronous callback');
-    expect(existsSync(lock)).toBe(false);
-  });
-
-  it('times out rather than run unlocked while a live holder keeps the lock', () => {
-    const lock = join(tempRoot(), 'l.lock');
-    seatLock(lock, process.pid, processStartIdentity(), 'held');
-    let ran = false;
-    expect(() =>
-      withQueueLock(lock, () => {
-        ran = true;
-      }),
-    ).toThrow(LOCK_TIMEOUT_PREFIX);
-    expect(ran).toBe(false);
-  }, 20_000);
-
-  it('takes over a dead holder lock and releases only its own acquisition', () => {
-    const lock = join(tempRoot(), 'l.lock');
-    seatLock(lock, 999_991, 'ps:gone', 'dead');
-    expect(withQueueLock(lock, () => readdirSync(lock).includes('dead'))).toBe(false);
-    expect(existsSync(lock)).toBe(false);
-  });
-});
-
 describe('slot retry budget', () => {
   it.each([
     ['garbage', 75_000],
@@ -832,7 +778,7 @@ describe('status snapshot during a hand-off', () => {
     seatHolder(root, holder({ pid: process.pid, identity: processStartIdentity() }));
     mkdirSync(join(root, 'slot.lock'));
     writeFileSync(join(root, 'slot.lock', 'busy'), `${process.pid}\n${processStartIdentity()}`);
-    expect(() => readShipQueue(root)).toThrow(LOCK_TIMEOUT_PREFIX);
+    expect(() => readShipQueue(root)).toThrow(LockHeldError);
   }, 20_000);
 
   it('changes no queue state and creates no queue root', () => {
