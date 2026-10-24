@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   CHECKS_JSON_FIELDS,
+  attribute,
   MIN_TIMEOUT_S,
   VERDICT_PREFIX,
   type CheckBucket,
@@ -109,6 +110,23 @@ describe('waitForChecks', () => {
       rows(row('pass', 'gate'), row('fail', 'deploy')),
     ]).run();
     expect(result.outcome).toBe('failed');
+  });
+
+  it('returns red while another check is still pending, after the same confirmation', async () => {
+    const result = await drive([rows(row('fail', 'lint'), row('pending', 'gate'))]).run();
+    expect(result).toMatchObject({ outcome: 'failed', polls: 2 });
+    expect(result.pending.map((p) => p.name)).toEqual(['gate']);
+  });
+
+  it('does not settle on an early red that the next poll no longer shows', async () => {
+    // A superseded old-head job, or a step read that failed this poll, must not end the wait red.
+    const early = { ...row('fail', 'gate'), failedSteps: ['gate › Lint (Oxlint)'] };
+    const result = await drive([
+      rows(early),
+      rows(row('pending', 'gate')),
+      rows(row('pass', 'gate')),
+    ]).run();
+    expect(result.outcome).toBe('passed');
   });
 
   it('confirms a stable terminal state and stops', async () => {
@@ -339,6 +357,14 @@ describe('verdictLine', () => {
     expect(verdictLine({ ...passed, attribution }, '514')).not.toContain('attribution=');
   });
 
+  it('names the already-failed steps of a still-running job', async () => {
+    const early = { ...row('fail', 'gate', 'https://x/1'), failedSteps: ['gate › Lint (Oxlint)'] };
+    const result = await drive([rows(early)]).run();
+    expect(verdictLine(result, '514')).toBe(
+      'ship: ci-outcome=failed pr=514 failing=gate:https://x/1 failed-steps=gate › Lint (Oxlint)',
+    );
+  });
+
   it('names the pending checks and the time waited on a timeout', () => {
     expect(
       verdictLine(
@@ -445,6 +471,24 @@ describe('ghChecksPoller', () => {
     ['gh-failed', { status: 1, stderr: 'unknown flag: --bogus' }],
   ])('names a %s failure', (reason, thrown) => {
     expect(poll(() => fail(thrown))).toMatchObject({ kind: 'unavailable', reason });
+  });
+
+  it('reports red for a pending job whose step has already failed, naming the step', () => {
+    const link = 'https://github.com/acme/app/actions/runs/9/job/42';
+    const result = poll((args) => {
+      if (args[0] === 'api') {
+        expect(args[1]).toBe('repos/acme/app/actions/runs/9/jobs?per_page=100');
+        return '{"jobs":[{"id":42,"steps":[{"name":"Format (Oxfmt)","conclusion":"failure"}]}]}';
+      }
+      return fail({
+        status: 8,
+        stdout: `[{"bucket":"pending","name":"gate","state":"IN_PROGRESS","link":"${link}","workflow":"gate"}]`,
+      });
+    });
+    expect(result).toMatchObject({
+      kind: 'rows',
+      rows: [{ bucket: 'fail', name: 'gate', failedSteps: ['gate › Format (Oxfmt)'] }],
+    });
   });
 
   it('refuses output it cannot parse instead of guessing', () => {
@@ -589,5 +633,18 @@ describe('--required narrowing (opt-in)', () => {
       .split('\n')
       .map((l) => JSON.parse(l));
     expect(written.map((r) => r.required)).toEqual([true, false]);
+  });
+});
+
+describe('attribute', () => {
+  it('reports an early red as run-in-progress without reading CI', async () => {
+    // The Tests step uploads the per-file summary only when it ends; no-artifact would misdirect.
+    const early = { ...row('fail', 'gate'), failedSteps: ['gate › Lint (Oxlint)'] };
+    expect(await attribute('514', [early], [])).toEqual({
+      token: 'unknown',
+      inherited: null,
+      fresh: null,
+      line: 'attribution=unknown reason=run-in-progress',
+    });
   });
 });
