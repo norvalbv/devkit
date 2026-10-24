@@ -20,14 +20,15 @@ function repoWith(config: string | null): string {
 const vars = { port: 40010, data: '/m/slot-1/data', profile: '/m/slot-1/profile', slot: 1 };
 
 describe('machine recipe', () => {
-  it('is empty when guard.config.json or its machine key is absent', () => {
-    expect(readMachineConfig(repoWith(null))).toEqual({});
-    expect(readMachineConfig(repoWith('{"maxLines": 500}'))).toEqual({});
+  it('is an empty light recipe when guard.config.json or its machine key is absent', () => {
+    expect(readMachineConfig(repoWith(null))).toEqual({ mode: 'light' });
+    expect(readMachineConfig(repoWith('{"maxLines": 500}'))).toEqual({ mode: 'light' });
   });
 
-  it('reads a command and seed', () => {
+  it('reads a mode, command and seed', () => {
     const recipe = {
       machine: {
+        mode: 'full',
         command: ['bunx', 'next', 'dev', '-p', '{port}'],
         seed: ['node', 'seed.mjs'],
       },
@@ -39,6 +40,7 @@ describe('machine recipe', () => {
     expect(() => readMachineConfig(repoWith('{"machine": {"command": "next dev"}}'))).toThrow();
     expect(() => readMachineConfig(repoWith('{"machine": {"comand": ["x"]}}'))).toThrow();
     expect(() => readMachineConfig(repoWith('{"machine": {"electron": {"main": "x"}}}'))).toThrow();
+    expect(() => readMachineConfig(repoWith('{"machine": {"mode": "vm"}}'))).toThrow();
   });
 
   it('holds no env, because guard.config.json may be committed with any secret in it', () => {
