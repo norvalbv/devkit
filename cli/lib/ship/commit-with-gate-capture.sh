@@ -213,12 +213,9 @@ SHIP_HOOK_WRAPPER
     export DEVKIT_SHIP_REAL_HOOKS_DIR="$real_hooks_dir"
   fi
 
-  # gc.auto=0: this commit is the one ship-owned git call that can trip auto-gc, and it fires at the
-  # END of a multi-minute gate chain in a repo that may hold dozens of worktrees. Auto-gc cannot
-  # delete a minutes-old object under git's default pruneExpire, so this is hygiene rather than the
-  # sc-1420 fix — it just keeps ship from starting repository maintenance at its most fragile moment.
-  # APPEND the overlay flag below; assigning here would confine gc.auto=0 to overlay installs only.
-  local hookcfg=(-c gc.auto=0 -c core.hooksPath="$ship_hook_rel")
+  # maintenance.auto=false: commit would spawn a detached `maintenance run --auto` that the supervisor
+  # reaps into a 124; gc.auto=0 covers git < 2.29, which runs `gc --auto` directly.
+  local hookcfg=(-c gc.auto=0 -c maintenance.auto=false -c core.hooksPath="$ship_hook_rel")
 
   # sc-1442: the composed message exists BEFORE `git commit` runs — hand it to the pre-commit
   # reviewers as ADVISORY intent via a temp file (NEVER .git/COMMIT_EDITMSG: at pre-commit that
