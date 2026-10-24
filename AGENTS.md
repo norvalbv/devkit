@@ -12,7 +12,7 @@ file. Read it first. This file carries the working rules for changing devkit its
 <pr_scope_rules>
 <rule>Keep every PR limited to the requested scope and the smallest coherent implementation. Do not bundle opportunistic refactors, cleanup, or hardening.</rule>
 <rule>Do not defer work required by the request's acceptance criteria or required for correctness.</rule>
-<rule>When worthwhile out-of-scope work is discovered, create a separate Shortcut story with the `short` CLI before opening the PR.</rule>
+<rule>When worthwhile out-of-scope work is discovered, file it as a separate Shortcut story with `devkit follow-up file --pr <url>` once the PR is open.</rule>
 <rule>Make each follow-up story self-contained: context, the problem, the desired outcome, acceptance criteria, and likely code and tests. Link it from the PR description.</rule>
 <rule>Provide proof where possible. A performance change carries before and after benchmarks; a gate or reviewer change carries the run that shows the new verdict. For ship output or a deterministic gate, `bun run playground --change <dir> [--seed <dir>]` runs a queued `devkit ship --dry-gates` of `<dir>`'s files in a throwaway consumer built from this checkout, offline and without judges.</rule>
 <rule>Aim for PRs under 500 LOC unless the bulk is tests or a greenfield addition. Over 500 LOC is scrutinised; over 1K LOC is usually rejected unless it is wholly new surface.</rule>
