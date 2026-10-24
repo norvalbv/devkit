@@ -77,35 +77,35 @@
     "build": "node ./node_modules/@typescript/native/bin/tsc -p tsconfig.build.json && node scripts/copy-dist-assets.mjs"
   },
   "devDependencies": {
-    "@babel/core": "^8.0.0",
-    "@babel/eslint-parser": "^8.0.0",
-    "@babel/plugin-syntax-jsx": "^8.0.0",
-    "@babel/preset-typescript": "^8.0.0",
-    "@types/node": "^25.9.3",
+    "@babel/core": "^8.0.9",
+    "@babel/eslint-parser": "^8.0.7",
+    "@babel/plugin-syntax-jsx": "^8.0.1",
+    "@babel/preset-typescript": "^8.0.7",
+    "@types/node": "^25.9.9",
     "@typescript/native": "npm:typescript@7.0.2",
-    "@vitest/coverage-v8": "^5.0.3",
+    "@vitest/coverage-v8": "^5.0.5",
     "husky": "^9.1.7",
     "typescript": "^6.0.3",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.5"
   },
   "optionalDependencies": {
-    "jscpd": "^4.2.4"
+    "jscpd": "^4.3.0"
   },
   "dependencies": {
-    "@clack/prompts": "^1.5.1",
+    "@clack/prompts": "^1.8.1",
     "@oxlint/plugins": "1.78.0",
-    "@typescript-eslint/parser": "^8.0.0",
-    "es-module-lexer": "^2.1.0",
-    "eslint": "^10.5.0",
-    "eslint-plugin-project-structure": "^3.14.3",
+    "@typescript-eslint/parser": "^8.72.0",
+    "es-module-lexer": "^2.3.2",
+    "eslint": "^10.13.0",
+    "eslint-plugin-project-structure": "^3.14.5",
     "get-port": "7.2.0",
-    "mdast-util-from-markdown": "^2.0.3",
+    "mdast-util-from-markdown": "^2.1.0",
     "oxfmt": "0.63.0",
     "oxlint": "1.78.0",
     "playwright-core": "1.63.0",
     "ts-morph": "^28.0.0",
-    "unbash": "^4.0.11",
-    "zod": "4.5.4"
+    "unbash": "^4.0.12",
+    "zod": "4.6.7"
   },
   "engines": {
     "node": ">=23.6"

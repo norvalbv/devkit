@@ -16,5 +16,7 @@ export default defineConfig({
     // unit suite's generous ceiling rather than vitest's 5s default.
     hookTimeout: 120000,
     testTimeout: 120000,
+    // Off for the reason vitest.config.mjs gives: the cache sits in a shared node_modules.
+    fsModuleCache: false,
   },
 });

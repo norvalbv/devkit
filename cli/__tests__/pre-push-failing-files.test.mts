@@ -38,7 +38,10 @@ describe('readFailingTestFiles', () => {
     writeFileSync(join(root, 'a.test.mts'), '');
     writeFileSync(
       cache,
-      JSON.stringify({ results: [['parallel:a.test.mts', { duration: 1, failed: true }]] }),
+      JSON.stringify({
+        version: 1,
+        projects: { parallel: { files: { 'a.test.mts': { duration: 1, failed: true } } } },
+      }),
     );
     utimesSync(cache, 1_700_000_000, 1_700_000_000);
     const { mtimeMs } = statSync(cache);
@@ -74,7 +77,10 @@ describe('readFailingTestFiles', () => {
     );
     expect(run.status, run.stderr).toBe(1);
 
-    const [hash = ''] = readdirSync(join(root, cacheDir, 'vitest'));
+    // vitest also writes a CACHEDIR.TAG file beside the hash directory.
+    const [hash = ''] = readdirSync(join(root, cacheDir, 'vitest'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
     expect(
       readFailingTestFiles(join(root, cacheDir, 'vitest', hash, 'results.json'), 0, root),
     ).toEqual(['boom.test.mjs']);
