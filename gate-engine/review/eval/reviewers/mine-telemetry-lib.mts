@@ -343,8 +343,8 @@ export function buildFailFixCandidate({
   };
 }
 
-/** Builds one waived-decoy candidate row. `rationale` and `waiverKind` come from the gate-events
- * sink (indexWaiverLine) and stay null when no sink line names the waiver — never fabricated. */
+/** Builds one waived-decoy candidate row. `rationale` and `waiverKind` are the facts
+ * resolveWaiverFacts found, never fabricated. */
 export function buildWaivedCandidate({
   shipId,
   repo,
@@ -380,11 +380,26 @@ export function buildWaivedCandidate({
   };
 }
 
-// Waiver kind lookup from the gate-events sink (usage.db has no kind or rationale column).
+// Waiver facts: the lens row's own usage.db columns, else the gate-events sink.
 
 const REAL_DEFECT_WAIVER_KINDS = new Set(['deferred', 'pre-existing', 'accepted']);
 /** A waiver whose author says the defect is real: never a "this diff is clean" decoy. */
 export const isRealDefectWaiver = (waiver) => REAL_DEFECT_WAIVER_KINDS.has(waiver?.kind);
+/** Only an author who called the finding wrong vouches for a clean diff; an unknown kind does not. */
+export const isDecoyWaiver = (waiver) => waiver?.kind === 'false-positive';
+
+/** The waiver columns this usage.db has; an older one predates them and its rows use the sink. */
+export const LENS_WAIVER_COLUMNS_SQL = `SELECT name FROM pragma_table_info('commit_review_lenses')
+  WHERE name IN ('waiver_kind', 'waiver_rationale');`;
+export const lensRowsSql = (waiverCols) =>
+  `SELECT ship_id, reviewer, lens, status, disposition, issues_json${waiverCols.map((c) => `, ${c.name}`).join('')} FROM commit_review_lenses;`;
+
+/** A waived lens row's {kind, rationale}. The row's own columns cover ships from any machine; the
+ * sink fills a row usage.db left blank, such as a cached replay on a later ship. */
+export function resolveWaiverFacts(row, sinkFacts) {
+  if (row.waiver_kind == null && row.waiver_rationale == null) return sinkFacts ?? null;
+  return { kind: parseWaiverKind(row.waiver_kind), rationale: row.waiver_rationale ?? null };
+}
 // commit_review_lenses.lens is the items[] lens, which evidence/items.mts caps at this length.
 const LENS_KEY_CHARS = 200;
 
