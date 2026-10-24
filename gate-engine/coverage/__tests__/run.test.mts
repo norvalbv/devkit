@@ -76,26 +76,22 @@ const COV = { '/x/a.ts': FILE };
 describe('computePercentages — istanbul/V8 aggregation', () => {
   it('computes statements/functions/branches/lines from a file entry', () => {
     expect(computePercentages(COV)).toEqual({
-      statements: 50,
-      functions: 100,
-      branches: 50,
-      lines: 50,
+      pct: { statements: 50, functions: 100, branches: 50, lines: 50 },
+      executable: true,
     });
   });
 
-  it('an entry with no counts is 100% (nothing to cover, no divide-by-zero)', () => {
+  it('an entry with no counts is 100% but not executable, so the gate refuses it', () => {
     expect(computePercentages({ '/x/empty.ts': {} })).toEqual({
-      statements: 100,
-      functions: 100,
-      branches: 100,
-      lines: 100,
+      pct: { statements: 100, functions: 100, branches: 100, lines: 100 },
+      executable: false,
     });
   });
 
   it('aggregates across files (a fully-covered second file lifts the total)', () => {
     const full = { statementMap: { '0': { start: { line: 1 } } }, s: { '0': 1 }, f: {}, b: {} };
     // file A: 1/2 statements; file B: 1/1 → 2/3 ≈ 66.7%
-    expect(computePercentages({ '/x/a.ts': FILE, '/x/b.ts': full }).statements).toBeCloseTo(
+    expect(computePercentages({ '/x/a.ts': FILE, '/x/b.ts': full }).pct.statements).toBeCloseTo(
       66.7,
       1,
     );
@@ -268,6 +264,48 @@ describe('runCoverage — fail-closed gate', () => {
     const s = spy();
     expect(runCoverage(root)).toBe(1);
     expect(text(s.err)).toMatch(/measured no files/);
+  });
+
+  it('files whose every counter is empty → FAIL, the same vacuous 100% as no files', () => {
+    const root = makeRoot();
+    writeConfig(root, { coverage: { statements: 80 } });
+    const empty = { s: {}, f: {}, b: {} };
+    writeCoverage(root, { '/x/types.ts': empty, '/x/index.ts': empty });
+    const s = spy();
+    expect(runCoverage(root)).toBe(1);
+    expect(text(s.err)).toContain('measured no executable code (2 files)');
+    expect(text(s.err)).toContain('GUARD_COVERAGE_OK=1');
+    expect(text(s.err)).toContain('"coverage": false in guard.config.json');
+    expect(text(s.log)).not.toMatch(/passed/i);
+  });
+
+  it('an entry with no counter keys fails even with no thresholds', () => {
+    const root = makeRoot();
+    writeCoverage(root, { '/x/a.ts': {} });
+    const s = spy();
+    expect(runCoverage(root)).toBe(1);
+    expect(text(s.err)).toContain('measured no executable code (1 file)');
+  });
+
+  it('code that never ran is measured, not empty: it is judged by the floor', () => {
+    const root = makeRoot();
+    const cold = { statementMap: { '0': { start: { line: 1 } } }, s: { '0': 0 }, f: { '0': 0 } };
+    writeCoverage(root, { '/x/a.ts': cold });
+    const s = spy();
+    expect(runCoverage(root)).toBe(0);
+    writeConfig(root, { coverage: { statements: 1 } });
+    expect(runCoverage(root)).toBe(1);
+    expect(text(s.err)).toContain('statements: 0% (min 1%)');
+    expect(text(s.err)).not.toContain('no executable code');
+  });
+
+  it('an empty entry beside a measured one passes exactly as the measured one alone', () => {
+    const root = makeRoot();
+    writeConfig(root, { coverage: { statements: 40 } });
+    writeCoverage(root, { ...COV, '/x/types.ts': { s: {}, f: {}, b: {} } });
+    const s = spy();
+    expect(runCoverage(root)).toBe(0);
+    expect(text(s.log)).toMatch(/✓ Coverage gate passed \(statements 50%; 2 files\)/);
   });
 
   it('parseable but malformed shape (garbage entry) → FAIL, never a silent 100% pass', () => {
