@@ -343,7 +343,7 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
   try {
     // Inside the try on purpose: an argv a codex model cannot express (no prompt) surfaces as ONE
     // outage warning carrying the translation error, keeping this function's never-throws contract.
-    ws = prepareCodexSandbox(args, opts.codexReadOnly === true, cwd ?? process.cwd());
+    ws = prepareCodexSandbox(args, opts.codexReadOnly === true, cwd ?? process.cwd(), env);
     const cli = spawnFor(args, mcp, ws);
     opts.onMcpPrepared?.(mcp.capabilityFingerprint, spawnDegradedCause(mcp, cli.mcpInjected));
     const out = execFileSync(cli.bin, cli.argv, {
@@ -351,7 +351,7 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
       // Never the caller's env verbatim: git leaks an ABSOLUTE GIT_INDEX_FILE/GIT_DIR into every
       // hook run in a linked worktree (how ship commits), and a tool-using judge that touches
       // another repo would write ITS index over the ship's staged diff. See withoutGitEnv.
-      env: { ...withoutGitEnv(env), ...cli.extraEnv },
+      env: { ...withoutGitEnv(env), ...cli.extraEnv, ...ws.env },
       input,
       encoding: 'utf8',
       timeout,
@@ -441,7 +441,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
     try {
       // See the sync twin: routing inside the try keeps the never-rejects contract when argv
       // translation itself throws.
-      ws = prepareCodexSandbox(args, opts.codexReadOnly === true, cwd ?? process.cwd());
+      ws = prepareCodexSandbox(args, opts.codexReadOnly === true, cwd ?? process.cwd(), env);
       const cli = spawnFor(args, mcp, ws);
       opts.onMcpPrepared?.(mcp.capabilityFingerprint, spawnDegradedCause(mcp, cli.mcpInjected));
       const child = execFile(
@@ -450,7 +450,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
         {
           cwd,
           // env: see the execJudge twin — the git-env scrub applies to every judge spawn.
-          env: { ...withoutGitEnv(env), ...cli.extraEnv },
+          env: { ...withoutGitEnv(env), ...cli.extraEnv, ...ws.env },
           encoding: 'utf8',
           timeout,
           // See the execJudge twin: SIGKILL so the cap is a guaranteed kill, not a trappable request.
