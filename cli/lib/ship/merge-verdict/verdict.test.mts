@@ -363,6 +363,11 @@ const ROWS: Row[] = [
       config({ consumerSurface: ['[ab]/**'] }),
       'mergeVerdict.consumerSurface.0',
     ],
+    [
+      'an extglob group',
+      config({ consumerSurface: ['src/@(a|b)/**'] }),
+      'mergeVerdict.consumerSurface.0',
+    ],
     ['malformed JSON', '{', 'guard.config.json is not valid JSON'],
   ].map(([name, text, prefix]): Row => ({
     name: `config-invalid: ${name}`,

@@ -3,7 +3,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, win32 } from 'node:path';
 import { parseJsonObject } from '../../../../gate-engine/config-json.mts';
-import { compileRepoGlob } from '../../../../skills/_devkit/review-roots.mjs';
+import {
+  compileRepoGlob,
+  hasUnsupportedGlobSyntax,
+} from '../../../../skills/_devkit/review-roots.mjs';
 import { z } from 'zod';
 import { isDevkitRepo } from '../../husky/self-host.mts';
 
@@ -39,13 +42,12 @@ const UNSAFE_CHAR = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 const UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 const DEVKIT_RUNNER = /^devkit(?=\s)/;
 const NEEDS_QUOTING = /[\s"\\]/;
-const UNSUPPORTED_SYNTAX = /[[\]{}]/;
 
 function isRepoRelativeGlob(glob: string): boolean {
   return !(
     glob === '' ||
     UNSAFE_CHAR.test(glob) ||
-    UNSUPPORTED_SYNTAX.test(glob) ||
+    hasUnsupportedGlobSyntax(glob) ||
     glob.includes('\\') ||
     isAbsolute(glob) ||
     win32.isAbsolute(glob) ||
