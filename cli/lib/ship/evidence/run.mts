@@ -229,8 +229,12 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<Pu
   const write = () => publishBody(repo, pr, head, (body) => replaceKeepingSections(body, block));
   const result = withPrEvidenceLock(cwd, { repo, pr }, write, LOCK_WAIT_MS);
   const { status, reason, detail } = produced.outcome;
+  const edit =
+    result === 'written'
+      ? `; edit it with devkit pr-body ${pr} --body-file <f>, not gh pr edit`
+      : '';
   console.error(
-    `evidence: ${status}${reason ? ` (${reason})` : ''}: ${detail} [PR body ${result}]`,
+    `evidence: ${status}${reason ? ` (${reason})` : ''}: ${detail} [PR body ${result}${edit}]`,
   );
   const { outcome, tests } = produced;
   return { outcome, tests, publish: result, verdict: verdict.verdict?.verdict ?? null };

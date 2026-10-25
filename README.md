@@ -67,6 +67,7 @@ Package mode is the default. Standalone gates fail open when the pinned global C
 | `devkit move` | Move or rename source files and rewrite imports safely |
 | `devkit prove-regression` | Capture one exact test command at explicit red/green refs in disposable clones |
 | `devkit ship` | Commit from an isolated worktree and run the configured gate chain |
+| `devkit pr-body` | Replace a PR description without deleting the evidence block ship wrote |
 | `devkit review` | Run the configured gate chain against a trusted checkout without committing |
 | `devkit reconcile` | Refresh a shared checkout after shipped work merges |
 | `devkit clean` | Remove the recorded installation |
