@@ -25,7 +25,7 @@ import {
   prepareCodexSandbox,
 } from '../codex/workspace.mts';
 import { emitGateEvent, type TelemetryStatus } from '../gate-events.mts';
-import { withoutGitEnv } from '../judge-isolation.mts';
+import { CLAUDE_JUDGE_ARGS, CLAUDE_JUDGE_ENV, withoutGitEnv } from '../judge-isolation.mts';
 import {
   type JudgeMcpProfile,
   type PreparedJudgeMcpProfile,
@@ -235,7 +235,9 @@ function salvageUsage(text: string | undefined, args: string[]): JudgeUsage | nu
 // into native `-c mcp_servers.*` config, secrets forwarded through the spawn env by name.
 function spawnFor(args: string[], mcp: PreparedJudgeMcpProfile, ws: CodexSandbox): JudgeCli {
   const cli = judgeCliFor(args, mcp.servers, ws.codexReadOnly, ws.workspace);
-  return cli.codex ? cli : { ...cli, argv: withResultArgs([...mcp.args, ...args]) };
+  if (cli.codex) return cli;
+  const argv = withResultArgs([...mcp.args, ...CLAUDE_JUDGE_ARGS, ...args]);
+  return { ...cli, argv, extraEnv: CLAUDE_JUDGE_ENV };
 }
 
 export function prepareJudgeRun(opts: ExecJudgeOpts): JudgeRun {
