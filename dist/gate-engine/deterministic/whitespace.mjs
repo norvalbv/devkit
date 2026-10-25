@@ -8,7 +8,16 @@ import { exitGate } from './reason.mjs';
 // git's finding line: `<raw path>:<line>: <message>`; some are followed by a `+<content>` line.
 const FINDING_RE = /^(.+):\d+: [^:]+$/;
 // -M: a moved file's old whitespace is not re-judged. --relative: a monorepo package judges itself.
-const DIFF_ARGS = ['diff', '--cached', '--no-color', '--no-ext-diff', '-M', '--relative'];
+// --diff-filter=d: a deletion adds no line, so its blob is never read.
+const DIFF_ARGS = [
+    'diff',
+    '--cached',
+    '--no-color',
+    '--no-ext-diff',
+    '-M',
+    '--relative',
+    '--diff-filter=d',
+];
 // Optional period: the message is matched, not one git version's punctuation of it.
 const CONFLICT_MARKER_RE = /: leftover conflict marker\.?$/;
 export function remedyFor(findings) {
