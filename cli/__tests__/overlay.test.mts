@@ -9,12 +9,14 @@ import { execFileSync } from 'node:child_process';
 // Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
 // fallow-ignore-next-line code-duplication
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -1456,6 +1458,7 @@ describe('overlay hook regeneration (syncOverlayHook + doctor --fix)', () => {
     expect(syncOverlayHook(root, root, cfg, { dryRun: true })).toEqual({
       missing: false,
       drift: true,
+      contentDrift: true,
       commitMsg: { missing: false, drift: false }, // no message judge selected, no repo hook
       siblings: { scriptDir: '.husky', stale: [], foreign: [], unreadable: [] },
     });
@@ -1481,6 +1484,36 @@ describe('overlay hook regeneration (syncOverlayHook + doctor --fix)', () => {
 
     // doctor --fix: regenerates → exit 0, sentinel restored
     expect(await doctorRun(['--fix'], root)).toBe(0);
+    expect(readHook(root)).toContain('devkit-gates: chain start');
+  });
+
+  it('a current hook that lost 0755 is doctor drift (exit 1) that --fix restores, never review drift', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const pre = join(root, '.devkit', 'hooks', 'pre-commit');
+    chmodSync(pre, 0o644); // git skips a non-executable hook
+    const sync = syncOverlayHook(root, root, readCfg(root), { dryRun: true });
+    expect(sync).toMatchObject({ missing: false, drift: true, contentDrift: false });
+    expect(reviewHookDrift(root)).toBeNull(); // review checks the exec bit itself
+    expect(await doctorRun([], root)).toBe(1);
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    expect(statSync(pre).mode & 0o777).toBe(0o755);
+    chmodSync(pre, 0o700); // still executable: no review false-block on a non-0755 mode
+    expect(reviewHookDrift(root)).toBeNull();
+  });
+
+  it('an owner-unreadable pre-commit is drift that --fix replaces, never an EACCES crash', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const pre = join(root, '.devkit', 'hooks', 'pre-commit');
+    chmodSync(pre, 0o100);
+    const cfg = readCfg(root);
+    expect(syncOverlayHook(root, root, cfg, { dryRun: true })).toMatchObject({
+      missing: false,
+      drift: true,
+    });
+    syncOverlayHook(root, root, cfg, { dryRun: false });
+    expect(statSync(pre).mode & 0o777).toBe(0o755);
     expect(readHook(root)).toContain('devkit-gates: chain start');
   });
 
