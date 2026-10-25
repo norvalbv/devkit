@@ -168,6 +168,13 @@ describe('devkit pr-body', () => {
 
     expect(run(dir, ['7', '--body-file', join(bin, 'new.md')]).status).toBe(0);
     expect(body()).toBe('fresh\n');
+    // A second identical run writes nothing, and says so rather than claiming a block was carried.
+    const again = run(dir, ['7', '--body-file', join(bin, 'new.md')]);
+    expect([again.status, again.stdout.trim()]).toEqual([
+      0,
+      'PR #7 description already matched; nothing was written',
+    ]);
+    expect(edits()).toHaveLength(1);
   });
 
   it('refuses without writing when the PR cannot be read', () => {
