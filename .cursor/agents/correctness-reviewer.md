@@ -62,24 +62,26 @@ performance issue as "correctness" to justify a FAIL.
 
 ## 1. Resolve the installed skill and read it for detailed rules
 
-CORRECTNESS_SKILL=""
+<!-- interactive-only -->
+SKILL_DIR=""
 for candidate in \
   .agents/skills/correctness \
   .claude/skills/correctness \
   .cursor/skills/correctness
 do
   if [ -f "$candidate/scripts/checklist.mjs" ]; then
-    CORRECTNESS_SKILL="$candidate"
+    SKILL_DIR="$candidate"
     break
   fi
 done
-if [ -z "$CORRECTNESS_SKILL" ]; then
+if [ -z "$SKILL_DIR" ]; then
   echo "Correctness Review checklist unavailable: run devkit sync-skills" >&2
   exit 2
 fi
-SCRIPT="$CORRECTNESS_SKILL/scripts/checklist.mjs"
+SCRIPT="$SKILL_DIR/scripts/checklist.mjs"
+<!-- /interactive-only -->
 
-Read `$CORRECTNESS_SKILL/SKILL.md` before continuing.
+Read `$SKILL_DIR/SKILL.md` before continuing.
 
 ## 2. Generate the checklist
 ```bash

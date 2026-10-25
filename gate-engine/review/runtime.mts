@@ -101,7 +101,7 @@ export const deniedCalls = (denied: string[]): string =>
 /** Why a PASS left no artifact, from the spawn's measured denials; unmeasured keeps the bare text. */
 function missingArtifactCause(denied?: string[] | null): string {
   if (denied?.length)
-    return `${deniedCalls(denied)}; run the checklist commands exactly as written`;
+    return `${deniedCalls(denied)}; run each checklist command as its own plain node call, with no chains, loops or variables`;
   return `the judge skipped the checklist workflow${denied ? ' (no tool call was denied)' : ''}`;
 }
 
