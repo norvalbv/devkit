@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { legacyDevkitBaselines, reportRatchetBaselineMigration, } from '../../../../gate-engine/ratchets/baseline-paths.mjs';
-import { cmpSemver } from '../../../commands/update.mjs';
+import { cmpSemver } from '../../../../gate-engine/devkit-version.mjs';
 import { detectGitRoot } from '../../detect-git-root.mjs';
 import { check } from '../check-result.mjs';
 import { installedAt, readConfig } from './runner-identity.mjs';

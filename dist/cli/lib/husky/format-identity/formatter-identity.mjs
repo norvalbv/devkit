@@ -3,26 +3,18 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, posix } from 'node:path';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mjs';
 import { defaultSelection } from '../../components.mjs';
-import { OVERLAY_ENTRY_REL, OXFMT_CONFIGS, OXLINT_CONFIGS } from '../../install/oxc/lifecycle.mjs';
 import { patchPackageJson } from '../../install/package-json.mjs';
 import { parseJsonc } from './jsonc.mjs';
 import { CONSUMER_FORMATTER, renderAgentHookLines, } from '../format-fragment.mjs';
 const FRAGMENT_REL = 'cli/lib/husky/format-fragment.mts';
 const SCRIPTS_REL = 'cli/lib/install/package-json.mts';
-const PRESET_DIR = 'biome';
 export const AGENT_HOOKS = ['agents-hooks/format-after-edit.sh', 'agents-hooks/lint-check.sh'];
 // Formatters other than the consumer's; one appearing on a non-comment line of an agent hook is drift.
 const OTHER_FORMATTERS = ['biome', 'oxfmt', 'prettier', 'dprint', 'rome', 'deno fmt'];
-/** Paths Oxc's lifecycle writes itself, so their presence is never evidence of a consumer choice. */
-export const DEVKIT_WRITTEN_CONFIGS = [
-    ...OXFMT_CONFIGS,
-    ...OXLINT_CONFIGS,
-    OVERLAY_ENTRY_REL,
-];
 /** A shell line without its comment: an unquoted `#` opening a word or after ;&|( runs to EOL. */
 export function withoutComment(line) {
     let quote = '';
@@ -61,14 +53,10 @@ function logicalLines(lines) {
 export function checkFormatterIdentity(input) {
     const { formatter: f } = input;
     const out = [];
-    for (const p of f.configProbes.filter((p) => DEVKIT_WRITTEN_CONFIGS.includes(posix.normalize(p))))
-        out.push(`CONSUMER_FORMATTER gates on ${p}, which devkit init writes itself (sc-1964) — not a consumer choice`);
-    if (input.writtenDevDependency !== f.package.range)
-        out.push(`${SCRIPTS_REL} installs ${f.package.name}@${JSON.stringify(input.writtenDevDependency)}, not CONSUMER_FORMATTER's ${f.package.range}`);
     for (const name of ['lint', 'format'])
         if (input.writtenScripts[name] !== f.scripts[name])
             out.push(`${SCRIPTS_REL} writes ${name}: ${JSON.stringify(input.writtenScripts[name])}, not CONSUMER_FORMATTER's \`${f.scripts[name]}\``);
-    const rendered = renderAgentHookLines(f);
+    const rendered = renderAgentHookLines();
     const others = OTHER_FORMATTERS.filter((t) => t !== f.tool);
     // Any code line naming the formatter must be one the descriptor renders, verbatim — so a bare
     // `biome check`, a `command biome` or a backslash-continued invocation cannot slip past.
@@ -88,80 +76,38 @@ export function checkFormatterIdentity(input) {
         for (const t of others.filter((t) => new RegExp(`\\b${t}\\b`).test(code)))
             out.push(`${path} names ${t} outside a comment while the consumer formatter is ${f.tool}`);
     }
-    if (!input.presets.some((p) => p.path === `${PRESET_DIR}/base.jsonc`))
-        out.push(`${PRESET_DIR}/base.jsonc is missing from the commit — the shipped preset is governed`);
-    for (const p of input.presets) {
-        if (p.formatterEnabled === null)
-            out.push(`${p.path} does not parse as jsonc`);
-        else if (f.tool !== 'biome' && p.formatterEnabled !== false)
-            out.push(`${p.path} leaves the biome formatter on while ${FRAGMENT_REL} formats with ${f.tool}`);
-    }
     return out;
 }
 function git(root, args) {
     const r = spawnSync('git', args, { cwd: root, env: commitIndexEnv(root), encoding: 'utf8' });
     return r.status === 0 ? r.stdout : null;
 }
-/** What patchPackageJson writes into a fresh consumer with biome selected. */
-function writtenConsumer() {
+/** The lint/format scripts patchPackageJson writes into a fresh consumer. */
+function writtenScripts() {
     const dir = mkdtempSync(join(tmpdir(), 'devkit-fmt-identity-'));
     const log = console.log;
     try {
         writeFileSync(join(dir, 'package.json'), '{"name":"probe"}\n');
         console.log = () => { };
-        const sel = { ...defaultSelection(), biome: true };
-        patchPackageJson(dir, 'probe', 'probe', sel, false, false, 'generic');
+        patchPackageJson(dir, 'probe', 'probe', defaultSelection(), false, false, 'generic');
         const pkg = parseJsonc(readFileSync(join(dir, 'package.json'), 'utf8'));
-        const deps = Object.entries(pkg?.devDependencies ?? {});
-        return {
-            scripts: { lint: pkg?.scripts?.lint, format: pkg?.scripts?.format },
-            devDependency: deps.find(([name]) => name === CONSUMER_FORMATTER.package.name)?.[1],
-        };
+        return { lint: pkg?.scripts?.lint, format: pkg?.scripts?.format };
     }
     finally {
         console.log = log;
         rmSync(dir, { recursive: true, force: true });
     }
 }
-/** The live input: presets and agent hooks as ONE immutable snapshot of the commit's index holds them. */
+/** The live input: the agent hooks as ONE immutable snapshot of the commit's index holds them. */
 export function currentFormatterIdentityInput(root, tree) {
-    const listed = git(root, [
-        'ls-tree',
-        '-r',
-        '-z',
-        '--name-only',
-        tree,
-        '--',
-        `${PRESET_DIR}/`,
-        ...AGENT_HOOKS,
-    ]);
+    const listed = git(root, ['ls-tree', '-r', '-z', '--name-only', tree, '--', ...AGENT_HOOKS]);
     if (listed === null)
         throw new Error('git could not list the index snapshot');
     const inIndex = listed.split('\0').filter(Boolean);
     const read = (path) => inIndex.includes(path) ? git(root, ['show', `${tree}:${path}`]) : null;
-    const presets = inIndex
-        .filter((path) => path.startsWith(`${PRESET_DIR}/`) && /\.jsonc?$/.test(path))
-        .map((path) => {
-        const json = parseJsonc(read(path) ?? '');
-        const enabled = json?.formatter?.enabled;
-        return {
-            path,
-            formatterEnabled: json
-                ? enabled === false
-                    ? false
-                    : enabled === true
-                        ? true
-                        : undefined
-                : null,
-        };
-    });
     return {
         formatter: CONSUMER_FORMATTER,
-        ...(({ scripts, devDependency }) => ({
-            writtenScripts: scripts,
-            writtenDevDependency: devDependency,
-        }))(writtenConsumer()),
-        presets,
+        writtenScripts: writtenScripts(),
         agentHooks: AGENT_HOOKS.map((path) => ({ path, text: read(path) })),
     };
 }
@@ -169,11 +115,7 @@ export function currentFormatterIdentityInput(root, tree) {
 export function isFormatterIdentityPath(rel) {
     return (rel === FRAGMENT_REL ||
         rel === SCRIPTS_REL ||
-        rel === 'cli/lib/install/oxc/lifecycle.mts' ||
-        rel === 'cli/lib/components.mts' ||
-        rel === 'cli/commands/init.mts' ||
         AGENT_HOOKS.includes(rel) ||
-        rel.startsWith(`${PRESET_DIR}/`) ||
         rel.startsWith('cli/lib/husky/format-identity/'));
 }
 /** Gate-source paths the worktree holds differently from the index: unstaged edits and untracked

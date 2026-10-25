@@ -227,6 +227,8 @@ export function printAdvisories(label, advisories, ref) {
     if (ref)
         console.error(`guard-review: ${label} — full reasoning: guard-review transcript ${ref}`);
 }
+/** Why a PASS on an earlier diff stands and how to re-open it, linked so it resolves outside devkit. */
+export const STICKY_RULING = 'by design, devkit ruling judge-verdict-cache-scope: https://github.com/norvalbv/devkit/blob/main/docs/decisions/judge-verdict-cache-scope.md — reword the commit message to re-judge';
 /** A cached PASS line (`tail` = its provenance), marked and reported when it replays MCP-degraded. */
 export function printCachedPass(name, meta, tail) {
     const cause = cachedMcpDegradation(meta);

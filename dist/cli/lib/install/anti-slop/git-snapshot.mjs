@@ -10,8 +10,8 @@ import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_CONFIG_REL, ANTI_SLOP_MANIFEST_REL, p
 import { git, layout, MAX_GIT_OUTPUT, resolveRef, symbolicHead, } from './git-index-lock.mjs';
 export { withStableGitIndex } from './git-index-lock.mjs';
 const LINT_SOURCE = /\.(?:[cm]?[jt]sx?)$/u;
-const FULL_SCAN_FILES = new Set([
-    ANTI_SLOP_BASELINE_REL,
+/** Consumer manifests and Oxlint configs; overlay lints with its own runtime and entry config. */
+const OVERLAY_INERT_FILES = new Set([
     '.oxlintrc.json',
     '.oxlintrc.jsonc',
     'oxlint.config.ts',
@@ -19,6 +19,7 @@ const FULL_SCAN_FILES = new Set([
     'package.json',
     'bun.lock',
 ]);
+const FULL_SCAN_FILES = new Set([ANTI_SLOP_BASELINE_REL, ...OVERLAY_INERT_FILES]);
 function symbolicFullName(root, ref) {
     const result = spawnSync('git', ['rev-parse', '--symbolic-full-name', ref], {
         cwd: root,
@@ -238,7 +239,9 @@ export function gitBaselineEnvelope(cwd, baseRef) {
         relocationSources,
     };
 }
-function requiresFullScan(path) {
+function requiresFullScan(path, overlay) {
+    if (overlay && OVERLAY_INERT_FILES.has(path))
+        return false;
     return (FULL_SCAN_FILES.has(path) ||
         path.startsWith('.devkit/oxc/') ||
         path.startsWith('.devkit/anti-slop/'));
@@ -285,7 +288,7 @@ export function withStagedAntiSlopSnapshot(cwd, action, { overlay = false, baseR
         return path === null ? [] : [{ ...change, path }];
     });
     const changedFiles = packageChanges.map((change) => change.path);
-    const fullScan = changedFiles.some(requiresFullScan);
+    const fullScan = changedFiles.some((path) => requiresFullScan(path, overlay));
     const paths = fullScan
         ? []
         : packageChanges

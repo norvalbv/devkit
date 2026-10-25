@@ -4,8 +4,8 @@
  * work repo never forces teammates to have private-repo access just to `bun install`.
  *
  * What changes vs the package install:
- *   - biome/tsconfig are VENDORED: devkit's base configs are copied into `.devkit/{biome,tsconfig}/`
- *     and the consumer's biome.jsonc / tsconfig.json extend them by RELATIVE path (no package to
+ *   - tsconfig is VENDORED: devkit's base configs are copied into `.devkit/tsconfig/`
+ *     and the consumer's tsconfig.json extends one by RELATIVE path (no package to
  *     resolve). Re-run init to update the vendored copies.
  *   - the hook calls the GLOBAL `guard-*` bins, fail-open (skipped if devkit isn't installed).
  *   - package.json is untouched (no deps, no scripts).
@@ -28,9 +28,7 @@ export const firstLine = (e) => {
     }
     return String(raw).trim().split('\n')[0];
 };
-// Which vendored base each stack extends. component-lib is a React primitives package → react (must
-// stay in lockstep with doctor.mjs's standalone biome map, else a false-DRIFT).
-const biomeVariant = (stack) => ['electron', 'react-app', 'next', 'component-lib'].includes(stack) ? 'react' : 'base';
+// Which vendored base each stack extends (in lockstep with doctor's expectedExtends).
 const tsconfigVariant = (stack) => stack === 'next' ? 'next' : stack === 'node-service' ? 'node' : 'base';
 // Copy every file from a devkit config dir into the consumer's `.devkit/<kind>/` (always
 // overwrite — these are devkit-owned vendored copies, refreshed on every init).
@@ -47,10 +45,10 @@ function vendor(cwd, kind, dryRun) {
     }
     console.log(`  ✓ vendored ${kind}/* → .devkit/${kind}/`);
 }
-// Write a config that extends a vendored base by relative path (biome: array; tsconfig: string).
-function writeExtends(cwd, dest, relPath, asArray, force, dryRun) {
+// Write a config that extends a vendored base by relative path.
+function writeExtends(cwd, dest, relPath, force, dryRun) {
     const target = join(cwd, dest);
-    const content = `${JSON.stringify({ extends: asArray ? [relPath] : relPath }, null, 2)}\n`;
+    const content = `${JSON.stringify({ extends: relPath }, null, 2)}\n`;
     if (dryRun) {
         console.log(`  [dry-run] ${existsSync(target) && !force ? 'skip (exists)' : 'write'} ${dest}`);
         return;
@@ -63,7 +61,7 @@ function writeExtends(cwd, dest, relPath, asArray, force, dryRun) {
     console.log(`  ✓ wrote ${dest} (extends ${relPath})`);
 }
 /**
- * Standalone configs: vendor the biome/tsconfig bases + relative-extends configs + guard.config.
+ * Standalone configs: vendor the tsconfig bases + a relative-extends tsconfig + guard.config.
  * @param cwd consumer package dir
  * @param stack detected stack id
  * @param sel resolved component selection
@@ -71,13 +69,9 @@ function writeExtends(cwd, dest, relPath, asArray, force, dryRun) {
  *   guard.config (carries the `structure` grammar the `guard-structure` gate reads), not the generic one.
  */
 export function installStandaloneConfigs(cwd, stack, sel, force, dryRun, isStructure = false) {
-    if (sel.biome) {
-        vendor(cwd, 'biome', dryRun);
-        writeExtends(cwd, 'biome.jsonc', `./.devkit/biome/${biomeVariant(stack)}.jsonc`, true, force, dryRun);
-    }
     if (sel.tsconfig) {
         vendor(cwd, 'tsconfig', dryRun);
-        writeExtends(cwd, 'tsconfig.json', `./.devkit/tsconfig/${tsconfigVariant(stack)}.json`, false, force, dryRun);
+        writeExtends(cwd, 'tsconfig.json', `./.devkit/tsconfig/${tsconfigVariant(stack)}.json`, force, dryRun);
     }
     // guard.config.json (data). Config-driven structure vendors the STACK template (it carries the
     // `structure` grammar the guard-structure gate reads); otherwise the generic template. isStructure

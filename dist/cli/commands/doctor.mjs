@@ -3,19 +3,21 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { cmpSemver } from '../../gate-engine/devkit-version.mjs';
+import { claudeFamilyKeyLine } from '../../gate-engine/judge/outage/family-override.mjs';
 import { FANOUT_BASELINE, LINES_BASELINE, readRatchetBaseline, SIZE_BASELINE, } from '../../gate-engine/ratchets/baseline-paths.mjs';
 import { RECOMMENDED_GUARD_IDS, structureCmdFor } from '../lib/components.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { checkAgentAssets, checkRegisteredHookTargets, checkRegistrations, } from '../lib/doctor/asset-checks.mjs';
 import { check } from '../lib/doctor/check-result.mjs';
 import { checkExtends, EXTENDS_REPAIRABLE, expectedExtends, repairExtends, } from '../lib/doctor/extends-checks.mjs';
-import { checkGuardConfig, judgeGuardsOf, CODEX_RUNTIME_CHECK, SEARCH_INDEX_CHECK, } from '../lib/doctor/guard-config-checks.mjs';
+import { checkGuardConfig, familyBindRequested, judgeGuardsOf, SEARCH_INDEX_CHECK, } from '../lib/doctor/guard-config-checks.mjs';
 import { bindClaudeFamily } from '../lib/doctor/judge/judge-family.mjs';
 import { printPriorArtAdvisoryHealth } from '../lib/doctor/prior-art-health.mjs';
 import { hookChecks } from '../lib/doctor/hook-checks.mjs';
 import { runOverlayDoctor } from '../lib/doctor/overlay-doctor.mjs';
 import { checkLockPin, checkPin } from '../lib/doctor/pin/pin-checks.mjs';
-import { ALLOW_SKEW_ENV, delegateToPinned, printSkewBanner, runnerSkew, skewCheck, } from '../lib/doctor/pin/runner-identity.mjs';
+import { ALLOW_SKEW_ENV, delegateToPinned, printNewerOverlayNotice, printSkewBanner, runnerSkew, skewCheck, } from '../lib/doctor/pin/runner-identity.mjs';
 import { baselineReaderCheck } from '../lib/doctor/pin/baseline-reader.mjs';
 import { runSelfHostDoctor } from '../lib/doctor/self-host-doctor.mjs';
 import { packageDir, readJson } from '../lib/fs-helpers.mjs';
@@ -28,7 +30,7 @@ import { checkAntiSlopCapability, syncAntiSlopCapability, } from '../lib/install
 import { selectedHookAssets } from '../lib/install/hook-registration-ledger/selection.mjs';
 import { withInitLock } from '../lib/install/init/init-lock.mjs';
 import { checkOxcCapability, syncOxcCapability } from '../lib/install/oxc/lifecycle.mjs';
-import { cmpSemver, fetchLatestTag } from './update.mjs';
+import { fetchLatestTag } from './update.mjs';
 // Devkit modules are .mts in source and .mjs when installed; runtime string paths need the live ext.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 function checkConfig(cwd) {
@@ -93,14 +95,7 @@ export function checkVersion(cwd, env = process.env) {
 // Reproduce the recorded selection rather than the all-on `--yes` default.
 function selectionFlags(sel) {
     const flags = ['--yes'];
-    const toggles = [
-        'biome',
-        'tsconfig',
-        'skills',
-        'agents',
-        'husky',
-        'structure',
-    ];
+    const toggles = ['tsconfig', 'skills', 'agents', 'husky', 'structure'];
     for (const id of toggles) {
         if (sel[id] === false)
             flags.push(`--no-${id}`);
@@ -129,6 +124,8 @@ function selectionFlags(sel) {
     }
     return flags;
 }
+/** --fix runs for any gating finding, and for an advisory one only when --fix can repair it. */
+export const fixRequested = (results) => results.some((r) => r.status !== 'OK' && (!r.advisory || r.fixable));
 // --fix repairs only fixable findings, preserves tuned config content, and never refreezes.
 // Missing files/hooks use init with the recorded selection and install mode.
 // Reason: flat repair orchestration: independent sequential `if (this kind drifted) repair it` steps (extends-repair loop, init re-run, sync-skills, recreate-missing-baseline) with near-zero nesting; high branch COUNT, each a trivial guarded fixup. Splitting scatters the deliberate repair ordering.
@@ -143,11 +140,10 @@ function applyFix(cwd, results, sel, stack, standalone) {
             console.log(`  ✓ repaired ${r.name} extends → ${want[kind]}`);
         }
     }
-    // A fixable codex-runtime DRIFT means the bind preconditions held at check time (claude
-    // resolves, no explicit review.* keys) — bindClaudeFamily re-verifies them before writing.
-    const codexRow = results.find((r) => r.name === CODEX_RUNTIME_CHECK);
-    if (codexRow?.fixable && codexRow.status !== 'OK' && bindClaudeFamily(cwd)) {
-        console.log('  ✓ bound the claude judge family (haiku/opus/sonnet, chunking off) into guard.config.json');
+    // A fixable codex-runtime or family-pin row means the bind (or refresh) preconditions held at
+    // check time — bindClaudeFamily re-verifies them before writing.
+    if (familyBindRequested(results) && bindClaudeFamily(cwd)) {
+        console.log(`  ✓ wrote the claude judge family into guard.config.json (set: ${claudeFamilyKeyLine()}; operator-edited keys kept) — commit it`);
     }
     repairDevkitCacheGitignore(cwd, results);
     // MISSING template files / husky drift → init for the recorded selection (idempotent).
@@ -192,9 +188,9 @@ function applyFix(cwd, results, sel, stack, standalone) {
         });
     }
     if (needsAntiSlopSync)
-        syncAntiSlopCapability(cwd);
+        syncAntiSlopCapability(cwd, { refreshStarters: true });
     if (needsOxcSync && !needsAntiSlopSync)
-        syncOxcCapability(cwd, { antiSlop: sel.antiSlop === true });
+        syncOxcCapability(cwd, { antiSlop: sel.antiSlop === true, refreshStarters: true });
     const skills = results.find((r) => r.name === 'skills');
     if (skills?.fixable && skills.status !== 'OK') {
         execFileSync(process.execPath, [join(packageDir(), 'cli', `index${SELF_EXT}`), 'sync-skills'], {
@@ -213,7 +209,6 @@ function applyFix(cwd, results, sel, stack, standalone) {
 }
 // The default component selection (pre-`components`-block configs, and the all-on fallback).
 const DEFAULT_DOCTOR_SEL = {
-    biome: true,
     tsconfig: true,
     skills: true,
     husky: true,
@@ -234,7 +229,7 @@ async function collectResults(cwd, cfg, configResult) {
     const { gitRoot } = detectGitRoot(cwd);
     const surfaces = resolveExistingAgentProviders(gitRoot, recorded.agentTargets);
     const sel = { ...recorded, agentTargets: surfaces };
-    // Standalone (no-package): biome/tsconfig extend VENDORED relative paths, and there is no devkit
+    // Standalone (no-package): tsconfig extends a VENDORED relative path, and there is no devkit
     // pin to check (the whole point — no package dep).
     const standalone = Boolean(cfg.standalone);
     const stack = cfg.stack ?? 'generic';
@@ -247,13 +242,8 @@ async function collectResults(cwd, cfg, configResult) {
     results.push(checkDevkitCacheGitignore(cwd));
     if (sel.husky && commitMsgGuards(sel.guards ?? []).length)
         results.push(checkCommitMsgHook(cwd, sel.guards ?? []));
-    // biome and tsconfig differ only by filename and expected pointer.
-    for (const [on, file, want] of [
-        [sel.biome, 'biome.jsonc', expected.biome],
-        [sel.tsconfig, 'tsconfig.json', expected.tsconfig],
-    ])
-        if (on)
-            results.push(checkExtends(cwd, file, want, 'extends', overrides.has(file)));
+    if (sel.tsconfig)
+        results.push(checkExtends(cwd, 'tsconfig.json', expected.tsconfig, 'extends', overrides.has('tsconfig.json')));
     if (sel.guards?.length || sel.structure)
         results.push(...(await checkGuardConfig(cwd, sel.guards?.includes('dup') === true, sel.searchCode === true, judgeGuardsOf(sel.guards))));
     if (sel.structure && sel.husky)
@@ -350,6 +340,8 @@ export default async function run(args, cwd) {
     // report 0 where package mode reports 1 for the identical condition.
     const skewed = skew.kind === 'older';
     if (cfg.overlay) {
+        if (skew.kind === 'newer')
+            printNewerOverlayNotice(skew);
         const overlay = () => runOverlayDoctor(cwd, cfg, fix);
         // --fix re-runs install's own steps, so it holds init's lock, as package mode's spawned init does.
         return (await (fix ? withInitLock(cwd, 'doctor --fix', overlay) : overlay())) || +skewed;
@@ -373,7 +365,7 @@ export default async function run(args, cwd) {
     }
     printPriorArtAdvisoryHealth(cwd, sel);
     const drifted = results.some((r) => r.status !== 'OK' && !r.advisory); // see CheckResult.advisory
-    if (fix && drifted) {
+    if (fix && fixRequested(results)) {
         applyFix(cwd, results, sel, cfg.stack ?? 'generic', Boolean(cfg.standalone));
         console.log('\n--fix applied. Re-run `devkit doctor` to confirm.');
     }

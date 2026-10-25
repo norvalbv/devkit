@@ -15,7 +15,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { FILE_OUTCOMES, SUMMARY_NAME, SUMMARY_SCHEMA, fileTestsSchema } from './produce.mjs';
+import { FILE_OUTCOMES, SUMMARY_NAME, SUMMARY_SCHEMA, fileTestsSchema, unhandledRecordSchema, } from './produce.mjs';
 /** Per-test names are optional evidence: malformed, they are dropped and the file answers stand. */
 const testsSchema = z.record(z.string(), fileTestsSchema);
 export class GhUnavailable extends Error {
@@ -180,6 +180,12 @@ export function parseSummary(raw, label) {
         parsed.tests = tests.data;
     else
         delete parsed.tests;
+    // A count from before error lists were recorded proves nothing about which errors, so it is dropped.
+    const unhandled = unhandledRecordSchema.safeParse(parsed.unhandled);
+    if (unhandled.success)
+        parsed.unhandled = unhandled.data;
+    else
+        delete parsed.unhandled;
     return parsed;
 }
 /**
@@ -274,26 +280,35 @@ export function downloadSummary({ cwd, runId, attempt, artifact, }) {
         rmSync(dir, { recursive: true, force: true });
     }
 }
-/** A run's page and each failed `job › step`; a job that failed outside any step is named alone. */
-export function runView(cwd, runId) {
-    const out = gh(['run', 'view', String(runId), '--json', 'url,jobs'], cwd);
-    let view;
+/** One failed job's `job › step` entries, or the job alone when no step failed. */
+function failedSteps(job) {
+    const name = `${job.name}`;
+    const steps = Array.isArray(job.steps) ? job.steps : [];
+    const failed = steps.filter((step) => step?.conclusion === 'failure');
+    if (failed.length === 0)
+        return [{ label: name, job: name, step: null }];
+    return failed.map((step) => ({
+        label: `${name} › ${step.name}`,
+        job: name,
+        step: Number.isSafeInteger(step.number) ? Number(step.number) : null,
+    }));
+}
+/** gh's answer as JSON, or null when it is not JSON at all. */
+function parseView(out) {
     try {
-        view = JSON.parse(out);
+        return JSON.parse(out);
     }
     catch {
-        view = null;
+        return null;
     }
+}
+/** A run's page and each failed `job › step`. */
+export function runView(cwd, runId) {
+    const view = parseView(gh(['run', 'view', String(runId), '--json', 'url,jobs'], cwd));
     if (`${view?.url}` !== view?.url || !Array.isArray(view?.jobs)) {
         throw new GhUnavailable('gh-failed', `gh run view ${runId} returned JSON this reader cannot use`);
     }
-    const failing = view.jobs
-        .filter((job) => job?.conclusion === 'failure')
-        .flatMap((job) => {
-        const steps = Array.isArray(job.steps) ? job.steps : [];
-        const failed = steps.filter((step) => step?.conclusion === 'failure');
-        return failed.length ? failed.map((step) => `${job.name} › ${step.name}`) : [`${job.name}`];
-    });
+    const failing = view.jobs.filter((job) => job?.conclusion === 'failure').flatMap(failedSteps);
     return { url: `${view.url}`, failing };
 }
 /**
@@ -317,7 +332,7 @@ export function commitCi(opts) {
         if (run.conclusion === 'success')
             return { verdict: 'green', detail: '', url, run, failing };
         if (run.conclusion === 'failure') {
-            const detail = failing.join(', ') || 'no failed job named';
+            const detail = failing.map((f) => f.label).join(', ') || 'no failed job named';
             return { verdict: 'red', detail, url, run, failing };
         }
         const detail = `no-usable-run: run ${run.databaseId} concluded ${run.conclusion}`;

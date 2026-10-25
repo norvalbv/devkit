@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mjs';
 import { exitGate } from '../deterministic/reason.mjs';
 import { overlayInstall } from '../overlay-mode.mjs';
-import { readRatchetBaseline, removeRatchetBaseline, SIZE_BASELINE, writeRatchetBaseline, } from './baseline-paths.mjs';
+import { readRatchetBaseline, refuseFreezeThroughLink, removeRatchetBaseline, SIZE_BASELINE, writeRatchetBaseline, } from './baseline-paths.mjs';
 import { fanoutSplitHints } from './folder-fanout.mjs';
 import { hasStagedFiles, indexTreeRef, mergeBaseRef, pullRequestScope, stagedSet, } from './git-index.mjs';
 import { freezeLinesBaseline } from './size-lines-freeze.mjs';
@@ -85,11 +85,8 @@ export function countOversized(root = process.cwd(), scanRoots, maxLines, match,
     }
     return over.sort((a, b) => a.file.localeCompare(b.file));
 }
-// Grandfather the current over-cap source files into the raw-line baseline (size-lines.json).
-// Automatic onboarding stays shrink-only; the explicit CLI refresh may raise a ceiling, but names
-// every increase so legitimate main-branch drift can be reconciled without a silent laundering path.
-// Writes ONLY the line baseline and never touches the disable-count baseline (size.json). Returns
-// the number of files over the cap; deletes a stale baseline when none remain.
+// Grandfather over-cap files into size-lines.json only; onboarding is shrink-only, the CLI refresh
+// names every raise. Returns the over-cap count and deletes a stale baseline when none remain.
 export function freezeLines(root = process.cwd(), mode = 'shrink-only') {
     const cfg = resolveGuardConfig(root);
     if (!cfg.maxLines && !cfg.maxTestLines)
@@ -333,6 +330,7 @@ function runCli(cmd) {
     // Read after the tree walk rather than holding a potentially stale snapshot across the full scan.
     const baseline = readRatchetBaseline(root, BASELINE);
     if (cmd === 'freeze') {
+        refuseFreezeThroughLink(root, 'guard-size', [SIZE_BASELINE, LINES_BASELINE]);
         // Per-file map. Shrink-only: min against the prior per-file count so a --no-verify growth can't be
         // laundered back in. A pre-per-file (or missing) baseline has no per-file prior → this first freeze
         // re-grandfathers current counts (the migration point).

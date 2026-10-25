@@ -1,11 +1,11 @@
 #!/bin/bash
 # PostToolUse hook (Edit|Write|MultiEdit; Cursor: afterFileEdit) — format + lint the just-edited file.
-#   1. Biome `check --write` auto-fixes formatting/lint on the single edited file.
+#   1. Oxfmt formats the single edited file.
 #   2. ESLint surfaces structure/size violations EARLY (before pre-commit blocks). A
 #      non-zero ESLint exit + stderr + exit 2 feeds the message back into the conversation.
 #
 # Portable (W-3): the ESLint gate only applies to files under the consumer's configured
-# scanRoots (from guard.config.json). No hardcoded src/socket-server/vercel paths. Biome + ESLint
+# scanRoots (from guard.config.json). No hardcoded src/socket-server/vercel paths. Oxfmt + ESLint
 # are run via the consumer's own local binaries; each step degrade-skips when its tool/config
 # is absent (a repo without eslint, or without a scanRoot match, is never blocked).
 
@@ -31,7 +31,7 @@ WORKSPACE=$(pwd)
 
 # Only act on files INSIDE this workspace. An agent may edit a sibling checkout (e.g. another repo it
 # is working on in the same session) whose files live outside the workspace and have their own
-# toolchain — running THIS repo's biome/eslint on them errors (eslint resolves its config from the
+# toolchain — running THIS repo's oxfmt/eslint on them errors (eslint resolves its config from the
 # edited file's own tree, not cwd) and spams the conversation. That repo runs its own hooks.
 if [ -n "$CLAUDE_PROJECT_DIR" ] && [[ "$file_path" != "$WORKSPACE"/* ]]; then
   echo '{}'
@@ -52,15 +52,11 @@ if declare -F session_edits_file &>/dev/null; then
   fi
 fi
 
-# Biome format/lint auto-fix on the edited file (silent, best-effort). Gated on a biome CONFIG,
-# not merely the binary: biome is a common transitive dependency, and with no config it formats to
-# its own defaults (tabs, double quotes). In a repo that formats with something else — prettier,
-# oxfmt, dprint — that silently rewrites every edited file into a style the repo's real format gate
-# then rejects, turning one small edit into a whole-file diff.
-if [[ "$file_path" =~ \.(ts|tsx|js|jsx|json|jsonc)$ ]] && { [ -f "biome.json" ] || [ -f "biome.jsonc" ]; }; then
-  if [ -f "package.json" ] && [ -x "./node_modules/.bin/biome" ]; then
-    "./node_modules/.bin/biome" check --write "$file_path" >/dev/null 2>&1 || true
-  fi
+# Oxfmt on the edited file (silent, best-effort), rendered from cli/lib/husky/format-fragment.mts.
+# Gated on an Oxfmt CONFIG, not merely the binary: configless Oxfmt formats to its own defaults,
+# which in a repo formatting with something else turns one small edit into a whole-file diff.
+if [[ "$file_path" =~ \.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$ ]] && { [ -f ".oxfmtrc.json" ] || [ -f ".oxfmtrc.jsonc" ] || [ -f "oxfmt.config.ts" ] || [ -f "oxfmt.config.mts" ]; } && [ -x "./node_modules/.bin/oxfmt" ]; then
+  "./node_modules/.bin/oxfmt" --no-error-on-unmatched-pattern --write "$file_path" >/dev/null 2>&1 || true
 fi
 
 # ESLint structure/size check — scoped to the consumer's configured scanRoots. Resolve them by

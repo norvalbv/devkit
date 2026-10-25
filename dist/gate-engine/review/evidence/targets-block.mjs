@@ -6,14 +6,12 @@
  * (violating one is IN CHARTER). One renderer, two framings: the bytes a judge reads are the
  * contract, so the shape must never fork.
  */
-import { execFileSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { resolveFromCwd, resolveGuardConfig } from '../../config.mjs';
 import { currentTarget, parseDecision } from '../../decisions/decision-format.mjs';
 import { scopedTargets } from '../../decisions/scoped-targets.mjs';
 import { hasChecklist } from '../reviewers.mjs';
-import { headFile, indexFile } from './staged-git.mjs';
+import { dirInRepo, headFile, indexFile } from './staged-git.mjs';
 /** completeness.mts's original bytes, verbatim — its judge must keep reading exactly this. */
 export const COMPLETENESS_TARGETS_FRAMING = Object.freeze({
     header: '## RELEVANT RECORDED TARGETS (authoritative — a recorded decision is NOT a completeness gap)',
@@ -69,19 +67,12 @@ const rulingOf = (markdown) => markdown === null ? null : (currentTarget(parseDe
  */
 export function stagedTargetChanges(files, cwd) {
     const dir = resolveFromCwd(resolveGuardConfig(cwd), 'decisionsDir');
-    if (dir == null)
+    const log = dir == null ? null : dirInRepo(dir, cwd);
+    if (!log)
         return [];
-    let prefix;
-    try {
-        const top = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8' });
-        prefix = path.relative(realpathSync(top.trim()), realpathSync(dir)).split(path.sep).join('/');
-    }
-    catch {
-        return [];
-    }
     const changed = [];
     for (const file of files) {
-        if (path.posix.dirname(file) !== (prefix || '.') || !file.endsWith('.md'))
+        if (path.posix.dirname(file) !== log.rel || !file.endsWith('.md'))
             continue;
         const slug = path.posix.basename(file, '.md');
         if (slug === 'INDEX')

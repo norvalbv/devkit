@@ -4,6 +4,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 /** Written beside the json report, in the run directory only this run may touch. */
 export const UNHANDLED_NAME = 'unhandled.json';
+/** An error's identity: each vitest project reports the same error, and a PR run is diffed by it. */
+export const unhandledKey = (e) => `${e.file}\0${e.message}`;
 export default class UnhandledReporter {
     out = null;
     onInit(vitest) {
@@ -18,28 +20,29 @@ export default class UnhandledReporter {
         }
     }
     onTestRunEnd(_modules, errors) {
-        if (!this.out || errors.length === 0)
+        if (!this.out)
             return;
         try {
             const entries = errors.map((e) => ({
                 file: e.VITEST_TEST_PATH ?? null,
                 message: `${e.name ?? 'Error'}: ${e.message ?? ''}`.split('\n')[0],
             }));
-            writeFileSync(this.out, JSON.stringify(entries));
+            // Written even when empty, so a missing file means the run went unrecorded, not error-free.
+            const unique = new Map(entries.map((e) => [unhandledKey(e), e]));
+            writeFileSync(this.out, JSON.stringify([...unique.values()]));
         }
         catch {
             /* diagnosis is a courtesy, not a guarantee */
         }
     }
 }
-/** The reporter's errors, once each (vitest projects repeat them), or one generic entry when it wrote
- * none: a threshold miss or an empty filter is no error at all, and an older vitest never calls it. */
+/** The reporter's errors, or one generic entry when it recorded none: a threshold miss or an empty
+ * filter is no error at all, and an older vitest never calls it. */
 export function readUnhandled(file, exitCode) {
     try {
         const parsed = JSON.parse(readFileSync(file, 'utf8'));
-        const unique = new Map(parsed.map((e) => [`${e.file}\0${e.message}`, e]));
-        if (unique.size > 0)
-            return [...unique.values()];
+        if (parsed.length > 0)
+            return parsed;
     }
     catch {
         /* absent or torn — fall through to the generic cause */

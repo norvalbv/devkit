@@ -5,9 +5,9 @@ import { lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync 
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { processOwnerIsProvablyGone, processStartIdentity, } from '../../../../gate-engine/judge/process/identity.mjs';
+import { LockHeldError, withProcessLock, } from '../../../../gate-engine/judge/process/process-lock.mjs';
 import { z } from 'zod';
 import { writeFileAtomic } from '../../atomic-write.mjs';
-import { LOCK_TIMEOUT_PREFIX, withQueueLock } from './queue-lock.mjs';
 import { readSlotCount, slotDirs, takeFreeSlot } from './slots.mjs';
 /** An empty claim (acquirer died between mkdir and its holder write) is reclaimable after this. */
 const EMPTY_SLOT_STALE_MS = 60_000;
@@ -34,6 +34,7 @@ export function queueRoot(home = userInfo().homedir) {
     return join(home, '.devkit', 'ship-queue');
 }
 const slotLock = (root) => join(root, 'slot.lock');
+const QUEUE_LOCK = { label: 'queue' };
 const holderFile = (slot) => join(slot, 'holder.json');
 const ticketsDir = (root) => join(root, 'tickets');
 function errnoCode(cause) {
@@ -140,7 +141,7 @@ export function liveTickets(root, probe = DEFAULT_PROBE) {
 }
 /** Every mutation of the slot (claim, reap, release, group update) runs under this one lock. */
 export function withSlotLock(root, fn) {
-    return withQueueLock(slotLock(root), fn);
+    return withProcessLock(slotLock(root), fn, QUEUE_LOCK);
 }
 /** A contended lock is "not now" inside the wait loop: the next poll retries it. */
 function unlessContended(fn) {
@@ -148,7 +149,7 @@ function unlessContended(fn) {
         return fn();
     }
     catch (cause) {
-        if (cause instanceof Error && cause.message.startsWith(LOCK_TIMEOUT_PREFIX))
+        if (cause instanceof LockHeldError)
             return undefined;
         throw cause;
     }
@@ -220,7 +221,7 @@ export function retryBudgetMs(raw) {
  * see an empty queue while an earlier number is still unpublished.
  */
 export function enqueue(root, fields) {
-    return withQueueLock(join(root, 'seq.lock'), () => {
+    return withProcessLock(join(root, 'seq.lock'), () => {
         const counter = join(root, 'seq');
         // Only plain digits count: a negative, fractional or torn counter restarts from the live tickets
         // instead of handing out a number at or below 0 that liveTickets would never see.
@@ -233,7 +234,7 @@ export function enqueue(root, fields) {
         writeFileAtomic(path, JSON.stringify(ticket));
         writeFileAtomic(counter, `${ticket.seq}\n`);
         return { ticket, path };
-    });
+    }, QUEUE_LOCK);
 }
 export function ensureRoot(root) {
     mkdirSync(ticketsDir(root), { recursive: true });

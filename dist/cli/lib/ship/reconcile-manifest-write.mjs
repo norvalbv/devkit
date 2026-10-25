@@ -198,8 +198,8 @@ function fail(msg) {
 }
 /** `--anchors`: "<expect>\0<record>\0<path>\0" triples; a path is written only while its record is unchanged. */
 function readAnchors(file) {
-    const fields = readFileSync(file, 'utf8').split('\0');
     const guards = new Map();
+    const fields = file ? readFileSync(file, 'utf8').split('\0') : [];
     for (let i = 0; i + 2 < fields.length; i += 3) {
         guards.set(fields[i + 2], { expect: fields[i], record: fields[i + 1] });
     }
@@ -213,90 +213,106 @@ function readAnchors(file) {
  * is where blobs are hashed — ship-branch passes the EPHEMERAL commit worktree so the manifest
  * records what the PR actually committed, not a parallel agent's later edit to the shared tree.
  */
-export function recordShip({ root, gitRoot, branch, repo, baseRef, baseSha, tipSha, pr, merge = false, literalPaths = false, anchors, }, paths) {
-    // baseSha is always required (it drives classify); repo/baseRef only when writing a FRESH entry —
-    // in --merge mode they are kept from the existing branch entry (a re-push to an open PR, same metadata).
-    if (!root || !branch || !baseSha)
-        return fail('missing one of --root/--branch/--base-sha');
-    if (!merge && (!repo || !baseRef)) {
-        return fail('missing one of --root/--branch/--repo/--base-ref/--base-sha');
-    }
-    if (literalPaths && !tipSha)
-        return fail('--literal-paths requires --tip-sha');
+export function recordShip(options, paths) {
+    const checked = checkOptions(options);
+    if (!checked.ok)
+        return fail(checked.error);
+    const o = checked.options;
     if (paths.length === 0)
         return fail('no paths given');
-    const hashRoot = gitRoot ?? root; // default to root; ship-branch passes the ephemeral commit worktree
-    let classified;
-    if (literalPaths) {
-        const tip = treeBlobs(hashRoot, tipSha, paths);
-        const base = treeBlobs(hashRoot, baseSha, paths);
-        if (!tip || !base)
-            return fail('could not read the pinned tip/base trees');
-        classified = paths.map((p) => classifyLiteral(p, tip, base));
-    }
-    else
-        classified = paths.map((p) => classify(hashRoot, baseSha, p));
-    const guards = anchors ? readAnchors(anchors) : new Map();
-    const entries = classified
-        .filter((e) => e !== null && guards.get(e.path)?.record !== '')
-        .map((e) => {
-        const [mode, blobSha] = guards.get(e.path)?.record.split(' ') ?? [];
-        return blobSha ? { ...e, mode, blobSha } : e;
-    });
+    const hashRoot = o.gitRoot ?? o.root; // default to root; ship-branch passes the ephemeral commit worktree
+    const classified = classifyPaths(hashRoot, o, paths);
+    if (!classified)
+        return fail('could not read the pinned tip/base trees');
+    const guards = readAnchors(o.anchors);
+    const entries = applyAnchorGuards(classified, guards);
     // Absent at the pinned base and the worktree, and not merely kept at the tip: the caller deleted it too.
-    const gone = merge && !literalPaths
+    const gone = o.merge && !o.literalPaths
         ? paths.filter((p, i) => !classified[i] && guards.get(p)?.record !== '' && !existsSync(join(hashRoot, p)))
         : [];
     // Before the lock (and before the no-entry throw below): an all-unresolvable merge is a benign no-op.
     if (entries.length === 0 && gone.length === 0)
         return fail('no recordable paths (all empty/unresolvable)');
-    const prNumber = pr && PR_DIGITS.test(pr) ? Number(pr) : null;
-    const file = join(root, '.devkit', 'reconcile-manifest.json');
+    return writeRecord(o, entries, gone, guards);
+}
+function checkOptions(o) {
+    // baseSha is always required (it drives classify); repo/baseRef only when writing a FRESH entry —
+    // in --merge mode they are kept from the existing branch entry (a re-push to an open PR, same metadata).
+    if (!o.root || !o.branch || !o.baseSha) {
+        return { ok: false, error: 'missing one of --root/--branch/--base-sha' };
+    }
+    if (!o.merge && (!o.repo || !o.baseRef)) {
+        return { ok: false, error: 'missing one of --root/--branch/--repo/--base-ref/--base-sha' };
+    }
+    if (o.literalPaths && !o.tipSha)
+        return { ok: false, error: '--literal-paths requires --tip-sha' };
+    return { ok: true, options: { ...o, root: o.root, branch: o.branch, baseSha: o.baseSha } };
+}
+/** Classify each path against the base; null when a pinned `--literal-paths` tree is unreadable. */
+function classifyPaths(hashRoot, o, paths) {
+    if (!o.literalPaths)
+        return paths.map((p) => classify(hashRoot, o.baseSha, p));
+    const tip = treeBlobs(hashRoot, o.tipSha, paths);
+    const base = treeBlobs(hashRoot, o.baseSha, paths);
+    if (!tip || !base)
+        return null;
+    return paths.map((p) => classifyLiteral(p, tip, base));
+}
+/** Drop the paths an anchor keeps untouched (`record` ""), and record a "<mode> <blob>" override. */
+function applyAnchorGuards(classified, guards) {
+    return classified
+        .filter((e) => e !== null && guards.get(e.path)?.record !== '')
+        .map((e) => {
+        const [mode, blobSha] = guards.get(e.path)?.record.split(' ') ?? [];
+        return blobSha ? { ...e, mode, blobSha } : e;
+    });
+}
+/** A concurrent ship that already replaced the record this one anchored on wins. */
+function isFresh(byPath, guards, p) {
+    const cur = byPath.get(p);
+    const token = cur ? `${cur.op}:${cur.mode}:${cur.blobSha}` : '-';
+    return (guards.get(p)?.expect ?? token) === token;
+}
+/** A --pr re-push overlays this commit's paths onto the SAME PR's entry by path: a re-shipped path takes
+ * its branch-tip blob, a new path is added, a renamed-away path's `modify` becomes its `delete`. */
+function mergeEntry(existing, branch, entries, gone, guards) {
+    if (!existing)
+        throw new Error(`no manifest entry for ${branch} to merge into`);
+    const byPath = new Map(existing.paths.map((e) => [e.path, e]));
+    let changed = 0;
+    for (const e of entries.filter((e) => isFresh(byPath, guards, e.path))) {
+        byPath.set(e.path, e);
+        changed++;
+    }
+    for (const p of gone) {
+        const prev = byPath.get(p);
+        if (!prev || prev.op === 'delete' || !isFresh(byPath, guards, p))
+            continue;
+        byPath.set(p, { ...prev, op: 'delete' });
+        changed++;
+    }
+    if (changed === 0)
+        throw new Error('no recordable paths');
+    return { ...existing, shippedAt: new Date().toISOString(), paths: [...byPath.values()] };
+}
+/** Write the branch entry under the manifest lock; 1 (recording nothing) when the locked write fails. */
+function writeRecord(o, entries, gone, guards) {
+    const prNumber = o.pr && PR_DIGITS.test(o.pr) ? Number(o.pr) : null;
+    const file = join(o.root, '.devkit', 'reconcile-manifest.json');
     mkdirSync(dirname(file), { recursive: true });
     try {
         withLock(`${file}.lock`, () => {
             const manifest = readManifest(file);
-            const existing = manifest.branches[branch];
-            if (merge) {
-                // A --pr re-push extends the SAME PR's entry: overlay this commit's paths by path (replace a
-                // re-shipped path with its branch-tip blob, add new paths, supersede a renamed-away path's stale
-                // `modify` with its `delete`), keep the PR metadata, refresh shippedAt.
-                if (!existing)
-                    throw new Error(`no manifest entry for ${branch} to merge into`);
-                const byPath = new Map(existing.paths.map((e) => [e.path, e]));
-                // A concurrent ship that already replaced the record this one anchored on wins.
-                const fresh = (p) => {
-                    const cur = byPath.get(p);
-                    const token = cur ? `${cur.op}:${cur.mode}:${cur.blobSha}` : '-';
-                    return (guards.get(p)?.expect ?? token) === token;
-                };
-                let changed = 0;
-                for (const e of entries.filter((e) => fresh(e.path))) {
-                    byPath.set(e.path, e);
-                    changed++;
-                }
-                for (const p of gone) {
-                    const prev = byPath.get(p);
-                    if (!prev || prev.op === 'delete' || !fresh(p))
-                        continue;
-                    byPath.set(p, { ...prev, op: 'delete' });
-                    changed++;
-                }
-                if (changed === 0)
-                    throw new Error('no recordable paths');
-                manifest.branches[branch] = {
-                    ...existing,
-                    shippedAt: new Date().toISOString(),
-                    paths: [...byPath.values()],
-                };
-            }
-            else if (repo && baseRef) {
-                // repo/baseRef are guaranteed defined here (validated above when !merge); the guard also narrows the optionals to string.
-                manifest.branches[branch] = {
+            const existing = manifest.branches[o.branch];
+            if (o.merge)
+                manifest.branches[o.branch] = mergeEntry(existing, o.branch, entries, gone, guards);
+            else if (o.repo && o.baseRef) {
+                // repo/baseRef are guaranteed defined here (checkOptions requires them when !merge); the guard also narrows the optionals to string.
+                manifest.branches[o.branch] = {
                     prNumber,
-                    repo,
-                    baseRef,
-                    baseSha,
+                    repo: o.repo,
+                    baseRef: o.baseRef,
+                    baseSha: o.baseSha,
                     shippedAt: new Date().toISOString(),
                     paths: entries,
                 };

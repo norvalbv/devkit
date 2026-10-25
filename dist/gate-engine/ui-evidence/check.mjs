@@ -1,9 +1,12 @@
 /**
- * At every commit, remind the agent to add before/after PR screenshots when the UI can change.
+ * At every commit, remind the agent to show a UI change in the PR (screenshots or a machine run).
  * Advisory: always exits 0. UI extensions speak free; any other code diff asks the light judge.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { z } from 'zod';
 import { matchesRepoGlob } from '../../skills/_devkit/review-roots.mjs';
-import { resolveGuardConfig } from '../config.mjs';
+import { CONFIG_FILENAME, resolveGuardConfig } from '../config.mjs';
 import { git, stagedFiles } from '../decisions/git-io.mjs';
 import { emitAdvisoryResult } from '../judge/advisory/emit.mjs';
 import { resolveReviewModel } from '../review/reviewers.mjs';
@@ -75,8 +78,23 @@ function uiEvidenceReason(cwd) {
         ? `the staged diff could change what users see${verdict.why ? `: ${verdict.why}` : ''}`
         : null;
 }
+const recipeSchema = z.object({
+    machine: z.object({ command: z.array(z.string()).min(1) }).optional(),
+});
+/** True when guard.config.json declares a `devkit machine` recipe, so the agent can record it working. */
+export function declaresMachine(cwd) {
+    try {
+        const raw = JSON.parse(readFileSync(join(cwd, CONFIG_FILENAME), 'utf8'));
+        return recipeSchema.parse(raw).machine !== undefined;
+    }
+    catch {
+        return false;
+    }
+}
 /** Action first: the ship digest cuts a detail at 140 characters, so only the reason may be lost. */
-export const instruction = (reason) => `Add before (base branch) and after (this branch) screenshots when you open or update the PR, or say there that nothing visible changed — ${reason}`;
+export const instruction = (reason, machine = false) => machine
+    ? `Record it working: \`devkit machine up\` + \`run <flow>\`, then \`devkit machine attach <pr>\`; or say in the PR nothing visible changed — ${reason}`
+    : `Add before (base branch) and after (this branch) screenshots when you open or update the PR, or say there that nothing visible changed — ${reason}`;
 /** The gate. Every unreadable input means silence: a reminder that cannot tell stays quiet. */
 export function runUiEvidence(env = process.env, cwd = process.cwd()) {
     if (env.DEVKIT_RUN_MODE === 'review' || env.DEVKIT_RUN_MODE === 'dry-gates')
@@ -90,7 +108,7 @@ export function runUiEvidence(env = process.env, cwd = process.cwd()) {
     }
     if (!reason)
         return 0;
-    const text = instruction(reason);
+    const text = instruction(reason, declaresMachine(cwd));
     console.error(`📸 ${UI_EVIDENCE}: ${text}`);
     emitAdvisoryResult(UI_EVIDENCE, 'finding', text);
     return 0;

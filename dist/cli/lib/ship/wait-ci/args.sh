@@ -41,7 +41,7 @@ ship_validate_wait_ci() {
 # "did not run" from "the ship died before it could".
 ship_wait_ci_not_run() {
   echo "ship: ci-outcome=not-run pr=${1:-?} reason=$2" >&2
-  [ "${WAIT_CI_STRICT:-0}" -eq 0 ] || WAIT_CI_STATUS=5
+  [ "${WAIT_CI_STRICT:-0}" -eq 0 ] || { WAIT_CI_STATUS=5; SHIP_END_CAUSE=ci_not_green; }
 }
 
 # ship_run_wait_ci <pr-number> <repo> <timeout> <pr-url> [<required>]
@@ -64,5 +64,6 @@ ship_run_wait_ci() {
   # Only 0 and the documented 130/143 signals survive; a crash or kill must not read as another code.
   case "$rc" in 0|130|143) ;; *) rc=5 ;; esac
   WAIT_CI_STATUS=$rc
+  [ "$rc" -ne 5 ] || SHIP_END_CAUSE=ci_not_green
   [ "$rc" -ne 5 ] || echo "ship: --wait-ci-strict exits 5 — the PR is open at $url; its CI is not known green. Do NOT --resume." >&2
 }

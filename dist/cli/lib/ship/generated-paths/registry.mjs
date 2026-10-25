@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, win32 } from 'node:path';
 import { parseJsonObject } from '../../../../gate-engine/config-json.mjs';
-import { compileRepoGlob } from '../../../../skills/_devkit/review-roots.mjs';
+import { compileRepoGlob, hasUnsupportedGlobSyntax, } from '../../../../skills/_devkit/review-roots.mjs';
 import { z } from 'zod';
 import { isDevkitRepo } from '../../husky/self-host.mjs';
 export const SYNC_SKILLS = 'devkit sync-skills';
@@ -12,6 +12,8 @@ export const SYNC_AGENTS = 'devkit sync-agents';
 export const DEVKIT_GENERATED = Object.freeze([
     { glob: '.devkit/skills-manifest.json', command: SYNC_SKILLS },
     { glob: '.devkit/agents-manifest.json', command: SYNC_AGENTS },
+    // Not `devkit sync-hooks`: it installs every hook script, ignoring the recorded selection.
+    { glob: '.devkit/agent-hooks-manifest.json', command: 'devkit init' },
 ]);
 const LEADING_DOT_SLASH = /^(?:\.\/)+/;
 // Controls, format (bidi, zero-width) and line/paragraph separators: invisible or line-breaking.
@@ -19,11 +21,10 @@ const UNSAFE_CHAR = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 const UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 const DEVKIT_RUNNER = /^devkit(?=\s)/;
 const NEEDS_QUOTING = /[\s"\\]/;
-const UNSUPPORTED_SYNTAX = /[[\]{}]/;
 function isRepoRelativeGlob(glob) {
     return !(glob === '' ||
         UNSAFE_CHAR.test(glob) ||
-        UNSUPPORTED_SYNTAX.test(glob) ||
+        hasUnsupportedGlobSyntax(glob) ||
         glob.includes('\\') ||
         isAbsolute(glob) ||
         win32.isAbsolute(glob) ||

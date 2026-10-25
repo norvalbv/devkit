@@ -190,8 +190,8 @@ export function renderTarget(date, options) {
             throw new Error(err);
         lines.push(`**Category:** ${options.category}`);
     }
-    if (options.supersedes)
-        lines.push(`**Supersedes:** ${options.supersedes}`);
+    if (options.supersedes?.trim())
+        lines.push(`**Supersedes:** ${options.supersedes.trim()}`);
     lines.push(`**Source:** ${[options.source || 'manual', options.ref].filter(Boolean).join(' · ')}`);
     // Trimmed on both sides of the test: a whitespace-only value must not render a hollow
     // `**Evidence-change:**` line, which parseTargetFields reads back as an empty (not absent) field.

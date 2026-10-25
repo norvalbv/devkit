@@ -1,12 +1,4 @@
-/** The format-staged-files step: biome when selected; overlay also runs the repo's own Oxfmt. */
-export const CONSUMER_FORMATTER = {
-    tool: 'biome',
-    configProbes: ['biome.json', 'biome.jsonc'],
-    stepArgs: 'format --write',
-    agentArgs: { afterEdit: 'check --write', lintCheck: 'check --no-errors-on-unmatched' },
-    package: { name: '@biomejs/biome', range: '^2.5.0' },
-    scripts: { lint: 'biome check .', format: 'biome check --write .' },
-};
+/** The format-staged-files step: Oxfmt where an Oxfmt config exists, from devkit or the repo. */
 // Exactly the names Oxfmt discovers; the Oxc lifecycle manages the same set.
 export const OXFMT_CONFIGS = [
     '.oxfmtrc.json',
@@ -14,37 +6,37 @@ export const OXFMT_CONFIGS = [
     'oxfmt.config.ts',
     'oxfmt.config.mts',
 ];
-// Overlay writes no Oxfmt config, so one present is the repo's own; outside formatter-identity.
+export const OXFMT_WRITE_ARGS = '--no-error-on-unmatched-pattern --write';
+export const OXFMT_CHECK_ARGS = '--no-error-on-unmatched-pattern --check';
+const SCRIPT_GLOB = "'**/*.{ts,tsx,js,jsx,mts,cts,mjs,css,json,jsonc}'";
+// The consumer formatter, stated once: the package-mode step and package.json scripts render from it.
+// devkit writes this config, so devkit's pinned Oxfmt runs it: no devDependency, no hoisted bin.
+export const CONSUMER_FORMATTER = {
+    tool: 'oxfmt',
+    bin: 'devkit',
+    configProbes: OXFMT_CONFIGS,
+    stepArgs: `oxc fmt ${OXFMT_WRITE_ARGS}`,
+    scripts: {
+        lint: `devkit oxc fmt --check --no-error-on-unmatched-pattern ${SCRIPT_GLOB} && devkit oxc lint`,
+        format: `devkit oxc fmt --no-error-on-unmatched-pattern ${SCRIPT_GLOB}`,
+    },
+};
+/** Overlay: the repo owns its formatter, so its own pinned Oxfmt runs its own config. */
 export const OXFMT_STEP = {
     tool: 'oxfmt',
+    bin: 'oxfmt',
     configProbes: OXFMT_CONFIGS,
-    stepArgs: '--no-error-on-unmatched-pattern --write',
+    stepArgs: OXFMT_WRITE_ARGS,
 };
-/** Overlay's formatters in priority order: biome only when selected, then the repo's own Oxfmt. */
-export const overlayFormatters = (selection) => selection.biome ? [CONSUMER_FORMATTER, OXFMT_STEP] : [OXFMT_STEP];
 // The three constants toSelfHost re-points (tool setup, failure policy, scope) are interpolated
 // below, so its search strings are the emitted bytes by construction, not a hand-copied duplicate.
-/**
- * Run the formatter only where its CONFIG exists, the rule 10bcb1a7 already applied to the agent
- * hooks. Configless biome formats to its own defaults, rewriting bytes a repo's real gate rejects.
- */
-export function renderToolSetup(f, binDir = '$__dk_package_bin_dir') {
-    const bin = `"${binDir}/${f.tool}"`;
-    return `    if ${f.configProbes.map((p) => `[ ! -f ${p} ]`).join(' && ')}; then
-        echo "🎨 No ${f.tool} config here (${f.configProbes.join(' / ')}) — staged files left as authored."
-        return 0
-    fi
-    FMT_TOOL=${f.tool}; FMT_BIN=${bin}
-    __dk_fmt_run() { xargs -0 ${bin} ${f.stepArgs}; }`;
-}
-export const FORMAT_TOOL_SETUP = renderToolSetup(CONSUMER_FORMATTER);
 /** The first formatter whose config exists wins; a missing binary stands down rather than fail. */
 export function renderToolChain(fs, binDir) {
     const arms = fs.map((f) => {
-        const bin = `"${binDir}/${f.tool}"`;
+        const bin = `"${binDir}/${f.bin}"`;
         return `if ${f.configProbes.map((p) => `[ -f ${p} ]`).join(' || ')}; then
         if [ ! -x ${bin} ]; then
-            echo "🎨 Found the ${f.tool} config but ${binDir}/${f.tool} is missing — install this repo's dependencies; staged files left as authored."
+            echo "🎨 Found the ${f.tool} config but ${binDir}/${f.bin} is missing — install this repo's dependencies; staged files left as authored."
             return 0
         fi
         FMT_TOOL=${f.tool}; FMT_BIN=${bin}
@@ -57,20 +49,20 @@ export function renderToolChain(fs, binDir) {
         return 0
     fi`;
 }
-export function renderAgentHookLines(f) {
-    const gate = `{ ${f.configProbes.map((p) => `[ -f "${p}" ]`).join(' || ')}; }`;
-    const path = `./node_modules/.bin/${f.tool}`;
-    const bin = `[ -x "${path}" ]`;
+/** The agent hooks run the repo's own Oxfmt bin: devkit's hoisted pin in package mode, the repo's
+ *  own in overlay. Standalone has none there, so the hooks skip and the commit step formats. */
+export function renderAgentHookLines(f = OXFMT_STEP) {
+    const bin = `./node_modules/.bin/${f.bin}`;
+    const gate = `{ ${f.configProbes.map((p) => `[ -f "${p}" ]`).join(' || ')}; } && [ -x "${bin}" ]`;
     return {
         'agents-hooks/format-after-edit.sh': [
-            `if [[ "$file_path" =~ \\.(ts|tsx|js|jsx|json|jsonc)$ ]] && ${gate}; then`,
-            `  if [ -f "package.json" ] && ${bin}; then`,
-            `    "${path}" ${f.agentArgs.afterEdit} "$file_path" >/dev/null 2>&1 || true`,
+            `if [[ "$file_path" =~ ${FORMAT_EXTENSIONS} ]] && ${gate}; then`,
+            `  "${bin}" ${OXFMT_WRITE_ARGS} "$file_path" >/dev/null 2>&1 || true`,
         ],
         'agents-hooks/lint-check.sh': [
-            `if ${bin} && ${gate}; then`,
-            `    lint_output=$("${path}" ${f.agentArgs.lintCheck} "\${biome_files[@]}" 2>&1)`,
-            `      echo "Run '${path} ${f.agentArgs.afterEdit} <file>' to auto-fix." >&2`,
+            `if ${gate}; then`,
+            `    lint_output=$("${bin}" ${OXFMT_CHECK_ARGS} "\${oxfmt_files[@]}" 2>&1)`,
+            `      echo "Run '${bin} --write <file>' to auto-fix." >&2`,
         ],
     };
 }
@@ -78,7 +70,8 @@ export function renderAgentHookLines(f) {
  * Extension-only: devkit cannot know a consumer's authored-file boundary, and NOT derived from
  * `sourceExtensions`, whose edits would then each be a hook-drift event. self-host swaps in a scope.
  */
-export const FORMAT_EXTENSION_FILTER = "grep -E '\\.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$'";
+export const FORMAT_EXTENSIONS = '\\.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$';
+export const FORMAT_EXTENSION_FILTER = `grep -E '${FORMAT_EXTENSIONS}'`;
 /**
  * Consumer policy: REPORT, never block — the bin dir belongs to the consumer, so a hoisting quirk
  * must not become a commit outage. self-host replaces this whole branch with a hard `exit 1`.
@@ -90,8 +83,10 @@ export const FORMAT_FAILURE_REPORT = `        if [ "$FMT_RC" -eq 127 ]; then
         elif [ "$FMT_RC" -ne 0 ]; then
             echo "🎨 $FMT_TOOL failed over $FMT_N staged file(s) (xargs exit $FMT_RC) — some may be UNFORMATTED; its diagnostics are above. This commit continues."
         fi`;
-/** The format step, running the consumer formatter from `binDir`, the consumer's own bin dir. */
-export const formatFragment = (binDir, chain) => `# devkit:biome-format
+/** The package-mode tool setup, which toSelfHost swaps for devkit's own pinned Oxfmt. */
+export const FORMAT_TOOL_SETUP = renderToolChain([CONSUMER_FORMATTER], '$__dk_package_bin_dir');
+/** The format step, running `chain`'s first configured formatter from the mode's `binDir`. */
+export const formatFragment = (binDir, chain) => `# devkit:format
 # Format staged files, then re-stage exactly those (scoped — never a blanket \`git add -u\`, which
 # would sweep unrelated working-tree changes into the commit). Only re-add files with NO unstaged
 # edits, so partially-staged files commit exactly as staged.
@@ -114,7 +109,7 @@ export const formatFragment = (binDir, chain) => `# devkit:biome-format
 # A function so the "no formatter here" arm is an early \`return\`, not a branch wrapping the whole
 # body — self-host replaces the setup outright, and an unreachable arm must not survive into it.
 __dk_format_staged() {
-${chain ? renderToolChain(chain, binDir) : renderToolSetup(CONSUMER_FORMATTER, binDir)}
+${renderToolChain(chain, binDir)}
 STAGED_FMT=$(git diff --cached --name-only -z --diff-filter=ACM | tr '\\0' '\\n' | ${FORMAT_EXTENSION_FILTER} || true)
 if [ -z "$STAGED_FMT" ]; then
     echo "🎨 $FMT_TOOL: no staged formattable path — nothing to format."
@@ -146,4 +141,4 @@ ${FORMAT_FAILURE_REPORT}
 fi
 }
 __dk_format_staged
-# /devkit:biome-format`;
+# /devkit:format`;

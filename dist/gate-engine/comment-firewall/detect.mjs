@@ -10,7 +10,7 @@ import { commitIndexEnv } from '../ratchets/commit-index.mjs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { resolveGuardConfig, sourceMatchers } from '../config.mjs';
-import { gitPrefix } from '../ratchets/git-index.mjs';
+import { gitPrefix, nameStatusRecords, renamesFrom, splitNul, } from '../ratchets/git-index.mjs';
 import { anchorContext, anchorFor, changedTextLineCount, emptyInventory, hunkIntersects, hunkTouches, recordParagraph, textLineCount, } from './inventory.mjs';
 import { commentTouchLines, parsePatchHunks } from './patch.mjs';
 import { loadCommentPolicy } from './policy.mjs';
@@ -41,9 +41,6 @@ function git(cwd, args) {
         stdio: ['ignore', 'pipe', 'pipe'],
     });
 }
-function splitNul(value) {
-    return value.split('\0').filter(Boolean);
-}
 function stagedPaths(cwd, ref) {
     const args = [
         'diff',
@@ -73,19 +70,17 @@ function stagedRenames(cwd, ref) {
     ];
     if (ref)
         args.push(ref);
-    const fields = splitNul(git(cwd, args));
     const prefix = gitPrefix(cwd);
     const renamed = new Map();
-    for (let i = 0; i < fields.length;) {
-        const status = fields[i++] ?? '';
-        const from = fields[i++];
-        const newPath = fields[i++];
-        if (!from || !newPath?.startsWith(prefix))
+    for (const [newPath, { from, pure }] of renamesFrom(nameStatusRecords(git(cwd, args)))) {
+        if (!newPath.startsWith(prefix))
             continue;
-        const entry = { from: path.posix.relative(prefix, from), pure: status === 'R100' };
-        renamed.set(newPath.slice(prefix.length), entry);
+        renamed.set(newPath.slice(prefix.length), { from: path.posix.relative(prefix, from), pure });
     }
     return renamed;
+}
+function isPure(renames, file) {
+    return renames?.get(file)?.pure === true;
 }
 /** Merge resolutions are attributed only when they differ from both parents. Paths are read before
  * renames, so an edit staged in between widens the set instead of hiding behind a stale R100. */
@@ -95,11 +90,11 @@ function changedPaths(cwd) {
     try {
         const mergeParent = stagedPaths(cwd, 'MERGE_HEAD');
         const merge = stagedRenames(cwd, 'MERGE_HEAD');
-        const files = firstParent.filter((file) => mergeParent.has(file) && !(head.get(file)?.pure && merge.get(file)?.pure));
+        const files = firstParent.filter((file) => mergeParent.has(file) && !(isPure(head, file) && isPure(merge, file)));
         return { files, head, merge };
     }
     catch {
-        return { files: firstParent.filter((file) => !head.get(file)?.pure), head, merge: null };
+        return { files: firstParent.filter((file) => !isPure(head, file)), head, merge: null };
     }
 }
 function patch(cwd, file, ref, from) {
@@ -302,6 +297,13 @@ function findingFor(file, extension, source, paragraph, hunks) {
         textLines,
     };
 }
+/** One parent's added-line hunks and comment-touch lines, diffing a moved file from its old path. */
+function parentAttribution(cwd, file, renames, ref) {
+    const from = renames?.get(file)?.from;
+    const hunks = parsePatchHunks(patch(cwd, file, ref, from));
+    const fragments = commentFragmentsAt(cwd, from ?? file, ref ?? 'HEAD');
+    return { hunks, fragments, touch: commentTouchLines(hunks, new Set(fragments.keys())) };
+}
 export function detectChangedComments(cwd = process.cwd(), only) {
     const cfg = resolveGuardConfig(cwd);
     const roots = cfg.scanRoots.map((root) => normalizedRoot(cwd, root));
@@ -326,28 +328,24 @@ export function detectChangedComments(cwd = process.cwd(), only) {
             continue;
         }
         inventory.files += 1;
-        const headFrom = headRenames.get(file)?.from;
-        const first = parsePatchHunks(patch(cwd, file, undefined, headFrom));
-        let effective = first;
-        const headFragments = commentFragmentsAt(cwd, headFrom ?? file, 'HEAD');
-        let touchLines = commentTouchLines(first, new Set(headFragments.keys()));
+        const first = parentAttribution(cwd, file, headRenames);
+        let effective = first.hunks;
+        let touchLines = first.touch;
         try {
-            const mergeFrom = mergeRenamed?.get(file)?.from;
-            const second = parsePatchHunks(patch(cwd, file, 'MERGE_HEAD', mergeFrom));
-            const secondLines = new Set(second.flatMap((hunk) => [...hunk.addedLines]));
-            const secondTouch = commentTouchLines(second, new Set(commentFragmentsAt(cwd, mergeFrom ?? file, 'MERGE_HEAD').keys()));
-            effective = first.map((hunk) => ({
+            const second = parentAttribution(cwd, file, mergeRenamed, 'MERGE_HEAD');
+            const secondLines = new Set(second.hunks.flatMap((hunk) => [...hunk.addedLines]));
+            effective = first.hunks.map((hunk) => ({
                 ...hunk,
                 addedLines: new Set([...hunk.addedLines].filter((line) => secondLines.has(line))),
             }));
-            touchLines = new Set([...touchLines].filter((line) => secondTouch.has(line)));
+            touchLines = new Set([...touchLines].filter((line) => second.touch.has(line)));
         }
         catch {
             // Ordinary commit: the first-parent staged patch is the complete attribution set.
         }
         const source = stagedBlob(cwd, file);
         const tokens = scanCommentTokens(source, extension);
-        cited.push(...refFindings({ file, tokens, hunks: effective, headFragments }, policy.refs));
+        cited.push(...refFindings({ file, tokens, hunks: effective, headFragments: first.fragments }, policy.refs));
         const paragraphs = changedParagraphs(file, source, tokens, effective, touchLines, inventory);
         for (const paragraph of paragraphs) {
             findings.push(findingFor(file, extension, source, paragraph, effective));

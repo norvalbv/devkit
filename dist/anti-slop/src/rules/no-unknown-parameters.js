@@ -1,36 +1,17 @@
 import { defineRule } from "@oxlint/plugins";
-function parameterAnnotation(parameter) {
-    if (parameter.type === "TSParameterProperty") {
-        return parameterAnnotation(parameter.parameter);
-    }
-    if (parameter.type === "RestElement") {
-        return parameter.typeAnnotation ?? parameterAnnotation(parameter.argument);
-    }
-    if (parameter.type === "AssignmentPattern") {
-        return parameter.typeAnnotation ?? parameter.left.typeAnnotation;
-    }
-    return parameter.typeAnnotation;
-}
-function parameterName(parameter, sourceText) {
-    if (parameter.type === "TSParameterProperty") {
-        return parameterName(parameter.parameter, sourceText);
-    }
-    if (parameter.type === "AssignmentPattern") {
-        return parameterName(parameter.left, sourceText);
-    }
-    if (parameter.type === "RestElement") {
-        return parameterName(parameter.argument, sourceText);
-    }
-    return parameter.type === "Identifier"
-        ? parameter.name
-        : sourceText.replace(/\s*:\s*unknown\s*$/u, "");
+import { containsUnknownType, functionParameterBindingName, functionParameterTypeAnnotation, } from "../shared/function-parameters.js";
+function isTypePredicateSubject(owner, parameterName) {
+    const predicate = owner.returnType?.typeAnnotation;
+    return (predicate?.type === "TSTypePredicate" &&
+        predicate.parameterName.type === "Identifier" &&
+        predicate.parameterName.name === parameterName);
 }
 /** Disallow unknown inputs except explicitly named error-cause enrichment. */
 export const noUnknownParametersRule = defineRule({
     meta: {
         type: "problem",
         docs: {
-            description: "Disallow explicitly unknown function parameters except `cause`; decode unknown input at its I/O boundary instead.",
+            description: "Disallow explicitly unknown function parameters except `cause` and type-predicate subjects; decode unknown input at its I/O boundary instead.",
         },
         messages: {
             unknownParameter: "Parameter `{{parameter}}` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
@@ -39,11 +20,13 @@ export const noUnknownParametersRule = defineRule({
     createOnce(context) {
         const checkParameters = (node) => {
             for (const parameter of node.params) {
-                const annotation = parameterAnnotation(parameter);
-                if (annotation?.typeAnnotation.type !== "TSUnknownKeyword")
+                const annotation = functionParameterTypeAnnotation(parameter);
+                if (annotation === null || annotation === undefined)
                     continue;
-                const name = parameterName(parameter, context.sourceCode.getText(parameter));
-                if (name === "cause")
+                if (!containsUnknownType(annotation.typeAnnotation))
+                    continue;
+                const name = functionParameterBindingName(parameter, context.sourceCode);
+                if (name === "cause" || isTypePredicateSubject(node, name))
                     continue;
                 context.report({
                     node: annotation.typeAnnotation,

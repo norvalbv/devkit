@@ -18,6 +18,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { cmpSemver } from '../../gate-engine/devkit-version.mjs';
 import { packageDir, readJson } from '../lib/fs-helpers.mjs';
 export const DEP = '@norvalbv/devkit';
 /**
@@ -33,33 +34,6 @@ const BUN_REF = repoUrl();
 const TAG_RE = /refs\/tags\/v(\d+\.\d+\.\d+)\^?\{?\}?\s*$/;
 const GIT_PREFIX_RE = /^git\+/; // git ls-remote wants a bare URL (https:// / ssh://), not the git+ prefix
 const PIN_RE = /#v(\d+\.\d+\.\d+)/; // the #vX.Y.Z tag pinned on the devkit dep in package.json
-/** -1 / 0 / 1 comparing two x.y.z strings numerically. */
-export function cmpSemver(a, b) {
-    const pa = a.split('.');
-    const pb = b.split('.');
-    for (let i = 0; i < 3; i++) {
-        // BigInt, not Number: a component above Number.MAX_SAFE_INTEGER rounds, so two DISTINCT
-        // versions can compare equal — and "equal" is the permissive answer everywhere this is used
-        // (an older runner would read as in-sync and be allowed to publish managed state). Unparseable
-        // input keeps the old arithmetic's unordered outcome rather than throwing at a call site that
-        // has never had to handle one.
-        let left;
-        let right;
-        try {
-            left = BigInt(pa[i] ?? '0');
-            right = BigInt(pb[i] ?? '0');
-        }
-        catch {
-            // NaN, NOT 0 — the exact value the previous arithmetic produced. Not every caller is
-            // sign-only: `update` tests `cmpSemver(latest, current) <= 0`, where 0 means "already up to
-            // date" and silently skips the update, while NaN fails that comparison and proceeds.
-            return Number.NaN;
-        }
-        if (left !== right)
-            return left < right ? -1 : 1;
-    }
-    return 0;
-}
 /**
  * The version `update` compares against the latest published tag. Package mode measures what the REPO
  * resolves (its node_modules dep, else the #v tag pinned in package.json) — NOT the running CLI, so a

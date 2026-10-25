@@ -1,8 +1,7 @@
 /** Typed parsing of the installed devkit components and review profile. */
 import { isAbsolute } from 'node:path';
-import { DEFAULT_REVIEW_DECISIONS_DIR, GUARD_IDS, normalizeReviewProfile, normalizeSelection, REVIEWABLE_GUARD_IDS, } from '../../components.mjs';
+import { GUARD_IDS, normalizeReviewProfile, normalizeSelection, REVIEWABLE_GUARD_IDS, } from '../../components.mjs';
 import { reviewGuardIssues } from '../../install/flags/review-profile.mjs';
-import { normalizeSafeReviewRelativePath } from './runtime-paths.mjs';
 import { fail, objectValue } from './shared/common.mjs';
 export const REVIEW_SETUP_DOCTOR = "run 'devkit doctor --fix'.";
 export const REVIEW_SETUP_INIT = "in the target checkout, run 'devkit init --overlay --review' for local-only overlay mode, or 'devkit init --review' for a normal install.";
@@ -91,16 +90,9 @@ function parseReviewProfile(config, installed) {
     if (!enabled)
         fail("disabled by .devkit/config.json — run 'devkit init --review'.");
     const requested = parseRequestedGuards(settings, installed);
-    const decisionsDir = stringField(settings.decisionsDir, '.devkit/config.json review.decisionsDir');
-    if (decisionsDir !== undefined && !decisionsDir.trim()) {
-        fail(`.devkit/config.json review.decisionsDir must not be empty — ${REVIEW_SETUP_DOCTOR}`);
-    }
-    const normalizedDecisionsDir = decisionsDir === undefined
-        ? DEFAULT_REVIEW_DECISIONS_DIR
-        : normalizeSafeReviewRelativePath(decisionsDir);
-    if (normalizedDecisionsDir === null)
-        fail(`.devkit/config.json review.decisionsDir must be repository-relative — ${REVIEW_SETUP_DOCTOR}`);
-    return normalizeReviewProfile({ enabled, guards: requested, decisionsDir: normalizedDecisionsDir }, installed, { enabledDefault: true });
+    return normalizeReviewProfile({ enabled, guards: requested }, installed, {
+        enabledDefault: true,
+    });
 }
 export function parseReviewSetupProfile(raw) {
     const config = parseConfigJson(raw);

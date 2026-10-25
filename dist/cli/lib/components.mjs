@@ -26,21 +26,19 @@ export const RECOMMENDED_GUARD_IDS = [
  * a consumer opts in with `--guards …,review,sentry,coverage` or the wizard.
  */
 export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review', 'sentry', 'coverage'];
+/** The interactive wizard's pre-checked guards: review joins, beside its visible model-spend hint. */
+export const WIZARD_GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review'];
 export function disabledGuardsFor(selected, disabled = []) {
     return GUARD_IDS.filter((guard) => disabled.includes(guard) && !selected.includes(guard));
 }
 /** Guards that can execute in a pre-commit review (excludes commit-msg-only Sentry capture). */
 export const REVIEWABLE_GUARD_IDS = GUARD_IDS.filter((guard) => guard !== 'sentry');
-export const DEFAULT_REVIEW_DECISIONS_DIR = 'docs/decisions';
 export function normalizeReviewProfile(partial, installedGuards, { enabledDefault = false, available = true } = {}) {
     const installed = installedGuards.filter((g) => REVIEWABLE_GUARD_IDS.includes(g));
     const requested = Array.isArray(partial?.guards) ? partial.guards : installed;
     return {
         enabled: available && (partial?.enabled ?? enabledDefault),
         guards: installed.filter((g) => requested.includes(g)),
-        decisionsDir: typeof partial?.decisionsDir === 'string' && partial.decisionsDir.trim()
-            ? partial.decisionsDir.trim()
-            : DEFAULT_REVIEW_DECISIONS_DIR,
     };
 }
 /** Stacks whose structure rules are compiled from guard.config.json by devkit itself. */
@@ -61,7 +59,6 @@ export const AGENT_TARGETS = [...FRESH_DEFAULT_AGENT_PROVIDERS];
  * stack-gated one (offered iff a structure template exists — currently electron only).
  */
 export const COMPONENTS = [
-    { id: 'biome', label: 'Biome', hint: 'shared formatter + linter config', recommended: true },
     {
         id: 'tsconfig',
         label: 'TypeScript',
@@ -132,7 +129,7 @@ export const GUARD_OPTIONS = [
     {
         id: 'ui-evidence',
         label: 'ui-evidence',
-        hint: 'at every commit, remind the agent to add before/after screenshots to the PR when UI changed (never blocks)',
+        hint: 'at every commit, remind the agent to show a UI change in the PR: screenshots, or a devkit machine recording (never blocks)',
     },
     {
         id: 'coverage',
@@ -142,7 +139,6 @@ export const GUARD_OPTIONS = [
 ];
 /** Recorded component flags whose truthy values count as installed on a config-backed repo. */
 export const RECORDED_COMPONENT_IDS = [
-    'biome',
     'tsconfig',
     'skills',
     'agents',
@@ -158,7 +154,6 @@ export const RECORDED_COMPONENT_IDS = [
 /** What `--yes` and a non-TTY run select. Per-field exceptions are noted at each field. */
 export function defaultSelection() {
     return {
-        biome: true,
         tsconfig: true,
         skills: true,
         agents: true,
@@ -210,10 +205,11 @@ export function overlayStructureNotice(stack) {
 /** Normalise a (possibly partial) selection to a full one — missing keys take recommended defaults. */
 export function normalizeSelection(partial = {}) {
     const base = defaultSelection();
-    // SAFETY: runtime config JSON may contain the retired `oxc` key even though Selection no longer
-    // exposes it; the widened local copy exists only so that key can be deleted before normalising.
+    // SAFETY: runtime config JSON may contain the retired `oxc`/`biome` keys even though Selection no
+    // longer exposes them; the widened local copy exists only so those keys can be deleted first.
     const supported = { ...partial };
     delete supported.oxc;
+    delete supported.biome;
     return {
         ...base,
         ...supported,

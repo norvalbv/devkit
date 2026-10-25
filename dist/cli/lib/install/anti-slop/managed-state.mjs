@@ -11,17 +11,23 @@ function moduleFiles(root, ext) {
         .map((entry) => relative(root, join(entry.parentPath, entry.name)).slice(0, -ext.length))
         .sort();
 }
+function sameUpstream(pkg) {
+    const built = join(pkg, 'dist', 'anti-slop', 'UPSTREAM.md');
+    const source = join(pkg, 'anti-slop', 'UPSTREAM.md');
+    return existsSync(built) && readFileSync(built).equals(readFileSync(source));
+}
 export function antiSlopPluginSource(pkg = packageDir()) {
     const root = join(pkg, 'anti-slop', 'src');
     if (existsSync(join(root, 'index.mjs')))
         return { root, entry: './plugin/index.mjs' };
     if (existsSync(join(root, 'index.js')))
         return { root, entry: './plugin/index.js' };
-    // A source checkout projects its tracked dist build, the committed .js form, while that build
-    // still mirrors source; a rule added since the release falls back to the .ts source.
+    // A source checkout projects its tracked dist build while it mirrors source; a module added or
+    // an upstream re-pin since the release (dist keeps the old UPSTREAM.md) falls back to .ts source.
     const built = join(pkg, 'dist', 'anti-slop', 'src');
     if (existsSync(join(built, 'index.js')) &&
-        moduleFiles(built, '.js').join('\0') === moduleFiles(root, '.ts').join('\0')) {
+        moduleFiles(built, '.js').join('\0') === moduleFiles(root, '.ts').join('\0') &&
+        sameUpstream(pkg)) {
         return { root: built, entry: './plugin/index.js' };
     }
     if (existsSync(join(root, 'index.ts')))

@@ -1,13 +1,11 @@
 {
   "name": "@norvalbv/devkit",
-  "version": "0.73.0",
+  "version": "0.74.0",
   "private": true,
   "type": "module",
   "license": "MIT",
   "description": "Single source-of-truth devkit: shared lint/TS configs + portable governance gate-engine + setup-wizard CLI. Consumed via `bun add git+ssh://git@github.com/norvalbv/devkit.git#<tag>`.",
   "exports": {
-    "./biome/base": "./dist/biome/base.jsonc",
-    "./biome/react": "./dist/biome/react.jsonc",
     "./tsconfig/base": "./dist/tsconfig/base.json",
     "./tsconfig/next": "./dist/tsconfig/next.json",
     "./tsconfig/node": "./dist/tsconfig/node.json",
@@ -59,7 +57,7 @@
     "test:run": "vitest run",
     "test:linux-bash": "bash scripts/test-linux-bash.sh",
     "test:run:report": "node cli/index.mts test-report-run",
-    "test:run:coverage:changed": "DEVKIT_COVERAGE_CHANGED=1 vitest run --changed=${COVERAGE_BASE:-origin/main} --coverage.enabled --coverage.include='{cli,gate-engine,anti-slop}/**/*.mts' --coverage.reportOnFailure --coverage.reportsDirectory=coverage/.changed/$$",
+    "test:run:coverage:changed": "for d in coverage/.changed/*/; do node -e 'try{process.kill(+process.argv[1],0)}catch(e){process.exit(/ESRCH/.test(e.code)?1:0)}' \"$(basename \"$d\")\" || rm -rf \"${d%/}\"; done; trap 'rm -rf coverage/.changed/$$' EXIT; DEVKIT_COVERAGE_CHANGED=1 vitest run --changed=${COVERAGE_BASE:-origin/main} --coverage.enabled --coverage.include='{cli,gate-engine,anti-slop}/**/*.mts' --coverage.reportOnFailure --coverage.reportsDirectory=coverage/.changed/$$",
     "test:e2e": "vitest run -c vitest.e2e.config.mjs",
     "playground": "bun scripts/playground.mts",
     "lint": "bun run lint:oxlint",
@@ -71,41 +69,43 @@
     "benchmarks:render": "node gate-engine/eval/cli.mts render",
     "benchmarks:typecheck": "node ./node_modules/@typescript/native/bin/tsc -p gate-engine/eval/tsconfig.json --noEmit",
     "search-eval:check": "node gate-engine/search-tool/eval/eval.mts --fail",
-    "format": "oxfmt --write 'cli/**/*.{ts,tsx,js,jsx,mts,mjs,css,json,jsonc}' 'gate-engine/**/*.{ts,tsx,js,jsx,mts,mjs,css,json,jsonc}' 'tsconfig/**/*.{json,jsonc}' 'biome/**/*.{json,jsonc}' 'skills/**/*.mjs' 'templates/**/*.mjs' .co-occurrence-allowlist.json .fallowrc.jsonc .oxfmtrc.json eslint.config.mjs guard.config.example.json guard.config.json package.json search-code.config.json tsconfig.build.json tsconfig.json vitest.config.mjs vitest.e2e.config.mjs vitest.global-setup.mjs vitest.setup.mjs",
-    "format:check": "oxfmt --check 'cli/**/*.{ts,tsx,js,jsx,mts,mjs,css,json,jsonc}' 'gate-engine/**/*.{ts,tsx,js,jsx,mts,mjs,css,json,jsonc}' 'tsconfig/**/*.{json,jsonc}' 'biome/**/*.{json,jsonc}' 'skills/**/*.mjs' 'templates/**/*.mjs' .co-occurrence-allowlist.json .fallowrc.jsonc .oxfmtrc.json eslint.config.mjs guard.config.example.json guard.config.json package.json search-code.config.json tsconfig.build.json tsconfig.json vitest.config.mjs vitest.e2e.config.mjs vitest.global-setup.mjs vitest.setup.mjs",
+    "format": "oxfmt --write 'cli/**/*.{ts,tsx,js,jsx,mts,mjs,css,json,jsonc}' 'gate-engine/**/*.{ts,tsx,js,jsx,mts,mjs,css,json,jsonc}' 'tsconfig/**/*.{json,jsonc}' 'oxc/**/*.json' 'skills/**/*.mjs' 'templates/**/*.mjs' .co-occurrence-allowlist.json .fallowrc.jsonc .oxfmtrc.json eslint.config.mjs guard.config.example.json guard.config.json package.json search-code.config.json tsconfig.build.json tsconfig.json vitest.config.mjs vitest.e2e.config.mjs vitest.global-setup.mjs vitest.setup.mjs",
+    "format:check": "oxfmt --check 'cli/**/*.{ts,tsx,js,jsx,mts,mjs,css,json,jsonc}' 'gate-engine/**/*.{ts,tsx,js,jsx,mts,mjs,css,json,jsonc}' 'tsconfig/**/*.{json,jsonc}' 'oxc/**/*.json' 'skills/**/*.mjs' 'templates/**/*.mjs' .co-occurrence-allowlist.json .fallowrc.jsonc .oxfmtrc.json eslint.config.mjs guard.config.example.json guard.config.json package.json search-code.config.json tsconfig.build.json tsconfig.json vitest.config.mjs vitest.e2e.config.mjs vitest.global-setup.mjs vitest.setup.mjs",
     "typecheck": "node ./node_modules/@typescript/native/bin/tsc -p tsconfig.json --noEmit",
     "prepare": "husky",
     "guard:freeze": "node gate-engine/ratchets/folder-fanout.mjs freeze && node gate-engine/ratchets/size-disable.mjs freeze",
     "build": "node ./node_modules/@typescript/native/bin/tsc -p tsconfig.build.json && node scripts/copy-dist-assets.mjs"
   },
   "devDependencies": {
-    "@babel/core": "^8.0.0",
-    "@babel/eslint-parser": "^8.0.0",
-    "@babel/plugin-syntax-jsx": "^8.0.0",
-    "@babel/preset-typescript": "^8.0.0",
-    "@types/node": "^25.9.3",
+    "@babel/core": "^8.0.9",
+    "@babel/eslint-parser": "^8.0.7",
+    "@babel/plugin-syntax-jsx": "^8.0.1",
+    "@babel/preset-typescript": "^8.0.7",
+    "@types/node": "^25.9.9",
     "@typescript/native": "npm:typescript@7.0.2",
-    "@vitest/coverage-v8": "^5.0.3",
+    "@vitest/coverage-v8": "^5.0.5",
     "husky": "^9.1.7",
     "typescript": "^6.0.3",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.5"
   },
   "optionalDependencies": {
-    "jscpd": "^4.2.4"
+    "jscpd": "^4.3.0"
   },
   "dependencies": {
-    "@clack/prompts": "^1.5.1",
+    "@clack/prompts": "^1.8.1",
     "@oxlint/plugins": "1.78.0",
-    "@typescript-eslint/parser": "^8.0.0",
-    "es-module-lexer": "^2.1.0",
-    "eslint": "^10.5.0",
-    "eslint-plugin-project-structure": "^3.14.3",
-    "mdast-util-from-markdown": "^2.0.3",
+    "@typescript-eslint/parser": "^8.72.0",
+    "es-module-lexer": "^2.3.2",
+    "eslint": "^10.13.0",
+    "eslint-plugin-project-structure": "^3.14.5",
+    "get-port": "7.2.0",
+    "mdast-util-from-markdown": "^2.1.0",
     "oxfmt": "0.63.0",
     "oxlint": "1.78.0",
+    "playwright-core": "1.63.0",
     "ts-morph": "^28.0.0",
-    "unbash": "^4.0.11",
-    "zod": "4.5.4"
+    "unbash": "^4.0.12",
+    "zod": "4.6.7"
   },
   "engines": {
     "node": ">=23.6"

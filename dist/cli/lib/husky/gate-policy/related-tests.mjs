@@ -1,15 +1,22 @@
 /**
  * Self-host `related-tests` extra gate: runs the tests vitest's import graph relates to the
- * commit's staged paths, so a test broken by the change blocks before any AI judge runs.
+ * commit's staged paths (its argv, from extraGates' `{staged}`), so a broken test blocks early.
  */
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mjs';
-import { stagedSet } from '../../../../gate-engine/ratchets/git-index.mjs';
 // Runs with every selection: it fails when a module is left unreachable to `vitest related` itself.
 const REACH_TEST = 'cli/__tests__/test-graph-reach.test.mts';
+// The env-scrub test reads these from disk, so no import edge selects it. The ship-script pattern
+// mirrors that test's own top-level scan of cli/lib/ship.
+const SCRUB_TEST = 'cli/__tests__/vitest-setup-env-scrub.test.mts';
+const SCRUB_INPUT_RE = /^cli\/lib\/ship\/[^/]+\.sh$|^vitest\.setup\.mjs$|^vitest(\.e2e)?\.config\.mjs$/;
+/** The disk-reading tests a staged path selects, which `vitest related` would never run. */
+export function forcedTests(staged) {
+    return [...staged].some((p) => SCRUB_INPUT_RE.test(p)) ? [SCRUB_TEST] : [];
+}
 // vitest's forceRerunTriggers (**/package.json, **/{vitest,vite}.config.*, setupFiles) select the
 // whole suite, which CI already runs.
 const RERUN_TRIGGER_RE = /(^|\/)(package\.json|(vitest|vite)\.config\.[^/]*)$|^vitest\.setup\.mjs$/;
@@ -67,9 +74,11 @@ export function noteUnmapped(root, paths, grep = gitGrepTests) {
         if (!unmapped.length)
             return;
         const hits = grep(root, [...new Set(unmapped.map((p) => basename(p)))]);
+        const forced = new Set(forcedTests(paths));
         const lines = unmapped.flatMap((p) => {
             const stem = basename(p, extname(p));
             const tests = [...(hits.get(basename(p)) ?? [])]
+                .filter((t) => !forced.has(t))
                 .map((t) => basename(t))
                 .sort((a, b) => nameRank(a, stem) - nameRank(b, stem));
             if (!tests.length)
@@ -87,15 +96,23 @@ export function noteUnmapped(root, paths, grep = gitGrepTests) {
     }
 }
 /** Exit code of the related-tests run: 0 when nothing is selected, vitest's status otherwise. */
-export function runRelatedTests(root, opts = {}) {
-    const paths = relatedPaths(('staged' in opts ? opts.staged : stagedSet(root)) ?? []);
-    if (!paths.length) {
+export function runRelatedTests(root, opts) {
+    const staged = [...opts.staged];
+    const paths = relatedPaths(staged);
+    // From the raw set: relatedPaths drops vitest.setup.mjs, which the env-scrub test binds.
+    const forced = forcedTests(staged);
+    if (!paths.length && !forced.length) {
         console.log('related-tests: none selected');
         return 0;
     }
-    console.log(`related-tests: ${paths.length} staged path(s)`);
+    console.log(`related-tests: ${paths.length} staged path(s)${forced.length ? `, ${forced.length} forced` : ''}`);
     const vitest = join(root, 'node_modules', '.bin', 'vitest');
-    const args = ['related', '--run', '--reporter=dot', ...new Set([...paths, REACH_TEST])];
+    const args = [
+        'related',
+        '--run',
+        '--reporter=dot',
+        ...new Set([...paths, ...forced, REACH_TEST]),
+    ];
     const result = (opts.exec ?? spawnSync)(vitest, args, { cwd: root, stdio: 'inherit' });
     if (result.error)
         console.error(`✗ related-tests could not run vitest: ${result.error.message}`);
@@ -103,7 +120,15 @@ export function runRelatedTests(root, opts = {}) {
     return result.status ?? 1;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-    const code = runRelatedTests(process.cwd());
-    noteUnmapped(process.cwd(), relatedPaths(stagedSet(process.cwd()) ?? []));
-    process.exitCode = code;
+    const staged = process.argv.slice(2);
+    // devkit never spawns a `{staged}` gate with nothing staged, so no paths means a dropped token.
+    if (!staged.length) {
+        console.error('✗ related-tests got no paths: run it as an extraGates command ending in {staged}');
+        process.exitCode = 1;
+    }
+    else {
+        process.exitCode = runRelatedTests(process.cwd(), { staged });
+        // The raw set, not relatedPaths: a staged vitest.setup.mjs must still mark its forced test as run.
+        noteUnmapped(process.cwd(), staged);
+    }
 }

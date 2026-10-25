@@ -9,6 +9,7 @@
  * blocked: the shell settled that and published it on this ship's ship_result row, which this
  * reader consumes, so the two can never disagree.
  */
+import { STICKY_RULING } from '../../../../gate-engine/review/evidence/base-context.mjs';
 import { blockingFindings, judgeFinding } from './blocking.mjs';
 import { count, oneLine, textOf } from './fields.mjs';
 import { scanBackward } from './tail.mjs';
@@ -114,12 +115,12 @@ export function summarise(events, shipId) {
     const results = mine.filter((e) => e.type === 'ship_result');
     const result = results[results.length - 1];
     const blocked = result?.blocked_gate ?? '';
-    // 'unknown' is what the shell records when the run failed and none of its prose greps matched
-    // (sc-2520); an absent ship_result is a --dry-gates rehearsal, which emits none. Either way the
-    // blocking gate is not knowable, and saying "did NOT block this run" about a finding would state
-    // something this digest cannot know. A run that exited 0 attributes trivially: nothing blocked.
+    // 'unknown': the run failed and none of the shell's prose greps matched. 'interrupted':
+    // a signal stopped the chain. No ship_result at all: a --dry-gates rehearsal. Either way the
+    // blocking gate is not knowable, and "did NOT block this run" would state something this digest
+    // cannot know. A run that exited 0 attributes trivially: nothing blocked.
     const exitCode = result?.exit_code ?? null;
-    const unattributed = (blocked === '' || blocked === 'unknown') && exitCode !== 0;
+    const unattributed = ['', 'unknown', 'interrupted'].includes(blocked) && exitCode !== 0;
     // Findings and could-not-runs share one list because BOTH can be the blocker: under
     // GUARD_DETERMINISTIC_STRICT=1 an opted-out gate is labelled could-not-run and exits 1, so
     // hard-coding these rows non-blocking misattributes the run to whatever else it found.
@@ -269,7 +270,7 @@ export function summarise(events, shipId) {
 const cacheGate = (e) => e.judge === `review:${COMPLETENESS}` ? COMPLETENESS : (e.judge ?? 'unknown');
 /** A PASS reused across a reshaped diff (sc-3175), or ''. `=== false`: an absent field covers it. */
 const earlierDiffDetail = (e) => e.diff_matches === false
-    ? 'cached PASS judged an earlier diff — this diff was not re-judged'
+    ? `cached PASS judged an earlier diff — this diff was not re-judged (${STICKY_RULING})`
     : '';
 /** A PASS judged on an earlier base whose reviewed paths moved (sc-3468), or ''. An absent
  * base_state (non-review emitters) or 'moved-clear' stays a ✓ — base-drift-surfaced-at-read-time (b). */

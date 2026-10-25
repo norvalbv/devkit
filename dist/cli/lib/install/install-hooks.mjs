@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { AGENT_TARGETS } from '../components.mjs';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../fs-helpers.mjs';
 import { bundledNames, findConflicts, removeManifested, } from '../sync-manifest.mjs';
-import { assertLegacyAssetWriterCompatible, nextLegacyManifestGeneratedAt, } from './agent-asset-manifest/compatibility.mjs';
+import { assertLegacyAssetWriterCompatible } from './agent-asset-manifest/compatibility.mjs';
 import { findProviderNativeAssetConflicts, isSafeAgentAssetPath, removeProviderNativeAssets, requiresProviderNativeLifecycle, syncProviderNativeAssets, } from './agent-asset-manifest/lifecycle.mjs';
 import { readAgentAssetManifest, resolveLegacyProviderTargets, } from './agent-asset-manifest/reader.mjs';
 import { agentAssetDir } from './agent-assets/agent-assets.mjs';
@@ -131,10 +131,8 @@ export function syncHookScripts(root, { dryRun = false, targets = AGENT_TARGETS,
                 chmodSync(dest, 0o755);
             }
         }
-        const generatedAt = nextLegacyManifestGeneratedAt(prev, devkitRef, files);
         const manifest = {
             devkitRef,
-            generatedAt,
             targets: [...targets],
             files,
         };

@@ -137,32 +137,23 @@ function decodeV1(fields, kind, budget) {
     if (new Set(targets).size !== targets.length)
         throw new Error('sync manifest v1 targets contain duplicates');
     const devkitRef = optionalString(fields, 'devkitRef', 'sync manifest v1', budget);
-    const generatedAt = fields.get('generatedAt');
-    if (fields.has('generatedAt') && typeof generatedAt !== 'string')
-        throw new Error('sync manifest v1.generatedAt must be a string');
-    if (typeof generatedAt === 'string')
-        accountText(budget, generatedAt, 'sync manifest v1.generatedAt', MAX_METADATA_BYTES);
     return {
         version: 1,
         manifest: {
             files,
             targets: [...targets],
             ...(devkitRef !== undefined ? { devkitRef } : {}),
-            ...(typeof generatedAt === 'string' ? { generatedAt } : {}),
         },
     };
 }
 function decodeV2(fields, kind, budget) {
-    exactFields(fields, ['schemaVersion', 'kind', 'devkitRef', 'generatedAt', 'files', 'providers'], ['schemaVersion', 'kind', 'devkitRef', 'generatedAt', 'files', 'providers'], 'sync manifest v2');
+    // generatedAt is accepted and dropped: a timestamp in a committed record conflicts every merge.
+    exactFields(fields, ['schemaVersion', 'kind', 'devkitRef', 'generatedAt', 'files', 'providers'], ['schemaVersion', 'kind', 'devkitRef', 'files', 'providers'], 'sync manifest v2');
     if (fields.get('schemaVersion') !== 2)
         throw new Error('unsupported sync manifest schemaVersion');
     if (fields.get('kind') !== kind)
         throw new Error(`sync manifest v2 kind is not ${kind}`);
     const devkitRef = optionalString(fields, 'devkitRef', 'sync manifest v2', budget);
-    const generatedAt = fields.get('generatedAt');
-    if (typeof generatedAt !== 'string')
-        throw new Error('sync manifest v2.generatedAt must be a string');
-    accountText(budget, generatedAt, 'sync manifest v2.generatedAt', MAX_METADATA_BYTES);
     const files = shaRecord(fields.get('files'), 'sync manifest v2 files', budget, (rel) => safeLogicalRel(kind, rel));
     const providerFields = dataFields(fields.get('providers'), 'sync manifest v2 providers', budget);
     const providers = {};
@@ -202,7 +193,6 @@ function decodeV2(fields, kind, budget) {
             schemaVersion: 2,
             kind,
             devkitRef: devkitRef ?? null,
-            generatedAt,
             files,
             providers,
         },

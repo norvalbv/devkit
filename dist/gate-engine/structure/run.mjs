@@ -24,7 +24,7 @@ import { pathToFileURL } from 'node:url';
 import { ESLint } from 'eslint'; // devkit's OWN eslint (now a dependency), never the consumer's
 import { z } from 'zod';
 import { resolveGuardConfig } from '../config.mjs';
-import { gitPrefix, splitNul } from '../ratchets/git-index.mjs';
+import { gitPrefix, nameStatusRecords, splitNul } from '../ratchets/git-index.mjs';
 import { buildStructureConfigs } from './eslint-config.mjs';
 import { eslintNodeFlags, LINKED_ISOLATED_STORE, linkedIsolatedStore, } from './eslint-node-flags.mjs';
 import { clean, combineStructureResults, couldNotRun, violations, withStructureConfigGaps, } from './verdict.mjs';
@@ -100,22 +100,12 @@ function untrackedPaths(cwd) {
     return gitPaths(cwd, ['ls-files', '--full-name', '--others', '--exclude-standard', '-z']);
 }
 function destructivePaths(cwd) {
-    const fields = splitNul(execFileSync('git', ['diff', '--cached', '--name-status', '-z', '--diff-filter=DR'], {
+    const records = nameStatusRecords(execFileSync('git', ['diff', '--cached', '--name-status', '-z', '--diff-filter=DR'], {
         cwd,
         env: commitIndexEnv(cwd),
         encoding: 'buffer',
     }).toString());
-    const paths = [];
-    for (let index = 0; index < fields.length;) {
-        const status = fields[index++] ?? '';
-        if (status.startsWith('R')) {
-            paths.push(fields[index++] ?? '', fields[index++] ?? '');
-        }
-        else if (status.startsWith('D')) {
-            paths.push(fields[index++] ?? '');
-        }
-    }
-    return paths.filter(Boolean);
+    return records.flatMap((record) => [record.from ?? '', record.path]).filter(Boolean);
 }
 function toCwdPaths(paths, prefix) {
     if (!prefix)

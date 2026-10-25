@@ -143,6 +143,10 @@ Usage:
                       summaries of the PR run and of the run on the commit CI merged it onto. "new"
                       means not failing on that base run, so a flake reads as new; unknown names a
                       reason= or counts unsure= files whose test names cannot settle it.
+                      A running Actions job with an already-failed step is red at once, named by
+                      failed-steps=<job › step>.
+                      A red that ends the wait while any check still runs says attribution=unknown
+                      reason=run-in-progress: the unfinished run may still add failures.
                       The verdict NEVER reaches the exit code (unless --wait-ci-strict): a red PR is
                       not a failed ship, and an agent reading non-zero would retry --resume against a
                       record the push deleted.
@@ -151,10 +155,12 @@ Usage:
                       than describing what shipped, so re-request it on the retry.
   --wait-ci-required  With --wait-ci only: wait on the branch-protection REQUIRED checks alone, so
                       an advisory check (a review bot) neither holds the wait open nor turns it red.
-                      gh lists only required checks that have already REPORTED (cli/cli#8855): one
-                      that has not started yet is invisible. A branch without protection, or whose
-                      required checks have not reported, therefore ends in no-checks — never passed.
-                      The verdict line carries \`scope=required\`. NOT replayed by --resume.
+                      gh lists only required checks that have already REPORTED (cli/cli#8855), so
+                      the wait also reads the base branch's required contexts (rulesets and classic
+                      protection) and holds each unreported one as pending. A required check that
+                      never runs ends timed-out: set --wait-ci-timeout above your CI's duration. A
+                      base that requires nothing ends in no-checks — never passed. The verdict line
+                      carries \`scope=required required-contexts=<n>\`. NOT replayed by --resume.
   --wait-ci-strict    With --wait-ci only: exit 5 unless the verdict is passed — failed, cancelled,
                       no-checks, timed-out, unavailable and not-run all exit 5, as does a crashed
                       wait. Exit 5 means the PR is open (or SHIP_DRY_RUN committed) and CI is not

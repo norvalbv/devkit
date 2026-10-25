@@ -1,7 +1,7 @@
 import { z } from 'zod';
-// Paths and lenses may hold spaces or shell metacharacters. `#` is always quoted: zsh's
-// extendedglob reads a bare mid-word `#` as a glob operator.
-const SHELL_SAFE_WORD_RE = /^[\w@%+=:,./-]+$/;
+// Paths and lenses may hold spaces or shell metacharacters. zsh's extendedglob reads a bare `#` as
+// a glob operator and its EQUALS option expands a leading `=` to a command path, so both are quoted.
+const SHELL_SAFE_WORD_RE = /^(?!=)[\w@%+=:,./-]+$/;
 /** One shell word for a pasteable command: a plain word stays byte-identical, anything else is
  * single-quoted. Shared by blockingNote, the ship digest and the diff-evidence hint. */
 export const shellWord = (word) => SHELL_SAFE_WORD_RE.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;

@@ -1,3 +1,8 @@
+/**
+ * Which of a red PR's failures its base already had: the PR run's per-file summary against the run
+ * on its merge commit's first parent. Never guesses; an unreadable input is a named reason.
+ */
+import { unhandledKey, } from '../../../gate-engine/coverage/unhandled-reporter.mjs';
 import { GhUnavailable, commitCi, gh, runView } from './gh.mjs';
 import { loadSummary, workflowSelector } from './query.mjs';
 import { configuredSource } from './source.mjs';
@@ -29,11 +34,56 @@ export function compareSummaries(pr, base) {
     }
     return out;
 }
-/** `inherited-only` is earned: no new or unsure file, no new failing step, no check left unread. */
-export function attributionToken(files, newSteps, unattributed) {
-    if (files.fresh.length > 0 || newSteps.length > 0)
+/** `inherited-only` is earned: no new or unsure file, no new failing step or outside-test error, no
+ * check left unread. `extraUnhandled` is null when either run did not record its errors. */
+export function attributionToken(files, newSteps, unattributed, extraUnhandled) {
+    if ([files.fresh, newSteps, extraUnhandled ?? []].some((list) => list.length > 0))
         return 'new';
-    return files.unsure.length > 0 || unattributed.length > 0 ? 'unknown' : 'inherited-only';
+    const unread = extraUnhandled === null || [files.unsure, unattributed].some((l) => l.length > 0);
+    return unread ? 'unknown' : 'inherited-only';
+}
+/**
+ * The PR's outside-test errors its base lacks, by file + message. Null when that is unproven: either
+ * run unrecorded, the base list truncated, or nothing new among a truncated PR list's shown errors.
+ */
+export function newUnhandled(pr, base) {
+    const { unhandled: p } = pr;
+    if (p?.errors.length === 0 && !p.truncated)
+        return [];
+    return p && base.unhandled && !base.unhandled.truncated ? unlisted(p, base.unhandled) : null;
+}
+/** `pr`'s errors missing from a complete `base` list; null when only a truncated tail could hold one. */
+function unlisted(pr, base) {
+    const known = new Set(base.errors.map(unhandledKey));
+    const fresh = pr.errors.filter((e) => !known.has(unhandledKey(e)));
+    return fresh.length > 0 || !pr.truncated ? fresh : null;
+}
+/** A shard of `shardJob` (GitHub names each `<job> (<matrix values>)`) keys on its step number, so a
+ * failure that moved shard matches whatever the step is named; any other step keys on its label. */
+export function stepKey(step, shardJob) {
+    const shard = step.job.startsWith(`${shardJob} (`) && step.step !== null;
+    return shard ? `${shardJob} › #${step.step}` : step.label;
+}
+/**
+ * The PR's failing steps the base did not fail. A shard that moved may match one unmatched base
+ * failure of its key, once per inherited file not already explaining an exact match.
+ */
+export function newFailingSteps(pr, base, inheritedFiles, shardJob) {
+    const exact = new Set(base.map((b) => b.label).filter((l) => pr.some((p) => p.label === l)));
+    const spare = base.filter((b) => !exact.has(b.label)).map((b) => stepKey(b, shardJob));
+    const exactShards = pr.filter((p) => exact.has(p.label) && stepKey(p, shardJob) !== p.label);
+    let moves = inheritedFiles - exactShards.length;
+    return pr
+        .filter((step) => !exact.has(step.label))
+        .filter((step) => {
+        const at = moves > 0 ? spare.indexOf(stepKey(step, shardJob)) : -1;
+        if (at !== -1) {
+            spare.splice(at, 1);
+            moves--;
+        }
+        return at === -1;
+    })
+        .map((step) => step.label);
 }
 /** One verdict-line value: whitespace collapsed (the line is grepped line-wise), capped, or `none`. */
 export function capped(values) {
@@ -42,6 +92,15 @@ export function capped(values) {
     const shown = values.slice(0, LIST_CAP).map((v) => v.replace(/\s+/g, ' ').trim());
     const rest = values.length - shown.length;
     return rest > 0 ? `${shown.join(',')},+${rest}` : shown.join(',');
+}
+/** The verdict-line field for outside-test errors: absent when the PR added none. `truncated` marks a
+ * comparison a capped list cut short, or a new count that is only a floor. */
+function unhandledField(extra, pr, base) {
+    if (extra === null)
+        return pr && base ? ' unhandled=truncated' : ' unhandled=unrecorded';
+    if (extra.length === 0)
+        return '';
+    return ` unhandled=+${extra.length}${pr?.truncated ? ',truncated' : ''}`;
 }
 const unknown = (reason, base = '') => ({
     token: 'unknown',
@@ -72,7 +131,7 @@ function workflowRun(cwd, failures, workflow) {
  * runs and the base run can never come from two different remotes.
  */
 export function attributeFailures({ cwd, pr, failures, }) {
-    const { workflow, artifact } = configuredSource(cwd);
+    const { workflow, artifact, shardJob } = configuredSource(cwd);
     let base = ''; // named once known, so a later unreadable artifact still reports the base's state
     try {
         const run = workflowRun(cwd, failures, workflow);
@@ -90,10 +149,12 @@ export function attributeFailures({ cwd, pr, failures, }) {
         if (!ci.run || !ci.failing)
             return unknown(`base-${ci.verdict}`);
         base = ` base-run=${ci.run.databaseId} base-ci=${ci.verdict}`;
-        const files = compareSummaries(prSummary, loadSummary({ cwd, run: ci.run, artifact }));
-        const baseSteps = ci.failing;
-        const newSteps = runView(cwd, run.databaseId).failing.filter((s) => !baseSteps.includes(s));
-        const token = attributionToken(files, newSteps, unattributed);
+        const baseSummary = loadSummary({ cwd, run: ci.run, artifact });
+        const files = compareSummaries(prSummary, baseSummary);
+        const prSteps = runView(cwd, run.databaseId).failing;
+        const newSteps = newFailingSteps(prSteps, ci.failing, files.inherited.length, shardJob);
+        const extraUnhandled = newUnhandled(prSummary, baseSummary);
+        const token = attributionToken(files, newSteps, unattributed, extraUnhandled);
         const unsure = files.unsure.length > 0 ? ` unsure=${files.unsure.length}` : '';
         const other = unattributed.length > 0 ? ` unattributed=${capped(unattributed)}` : '';
         return {
@@ -101,7 +162,8 @@ export function attributeFailures({ cwd, pr, failures, }) {
             inherited: files.inherited.length,
             fresh: files.fresh.length,
             line: `attribution=${token} inherited=${files.inherited.length} new=${files.fresh.length}${unsure}` +
-                ` new-failing=${capped(files.fresh)} new-steps=${capped(newSteps)}${other}${base}`,
+                ` new-failing=${capped(files.fresh)} new-steps=${capped(newSteps)}` +
+                `${unhandledField(extraUnhandled, prSummary.unhandled, baseSummary.unhandled)}${other}${base}`,
         };
     }
     catch (e) {

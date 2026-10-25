@@ -30,17 +30,21 @@ names:
 
   - run: npm run test:run:report          # or bun / pnpm
   - if: always()
-    uses: actions/upload-artifact@v4
+    uses: actions/upload-artifact@v7
     with:
       name: test-report-summary
       path: ${RUNS_DIR}/*/${SUMMARY_NAME}
       include-hidden-files: true           # .devkit is a dot-folder: without this, nothing uploads
   - if: always()
-    uses: actions/upload-artifact@v4
+    uses: actions/upload-artifact@v7
     with:
       name: test-report
       path: ${RUNS_DIR}/*/${REPORT_NAME}
       include-hidden-files: true
+
+Sharded CI: each shard job runs \`vitest run --shard=<i>/<N> --reporter=blob\` and uploads its blob;
+one job downloads them all and runs \`devkit test-report-run --mergeReports\`. Check first that every
+shard's blob arrived: vitest merges a partial set without complaint, and that would publish a green.
 
 The console summary and the GitHub PR annotations are preserved — the json reporter is added
 alongside them, never in place of them. Vitest-only; \`devkit baseline-status\` is not.`,

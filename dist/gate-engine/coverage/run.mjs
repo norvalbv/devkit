@@ -27,6 +27,7 @@ const isRecord = (v) => typeof v === 'object' && v !== null && !Array.isArray(v)
  * Validates the shape and THROWS on parseable-but-malformed input (a non-object root, a null/array/
  * non-object entry, a non-array branch counter) so the caller's catch fails CLOSED with a clean
  * message — rather than crashing on a TypeError, or silently reading garbage as 100%.
+ * `executable` is false when every total is 0: the artifact counted no code at all.
  */
 export function computePercentages(cov) {
     if (!isRecord(cov))
@@ -53,10 +54,13 @@ export function computePercentages(cov) {
         cl += [...lineHit.values()].filter(Boolean).length;
     }
     return {
-        statements: pct(cs, ts),
-        functions: pct(cf, tf),
-        branches: pct(cb, tb),
-        lines: pct(cl, tl),
+        pct: {
+            statements: pct(cs, ts),
+            functions: pct(cf, tf),
+            branches: pct(cb, tb),
+            lines: pct(cl, tl),
+        },
+        executable: ts + tf + tb + tl > 0,
     };
 }
 /** Run the coverage gate against `cwd`. Returns the exit code (0 pass/bypass, 1 fail, 2 review-only
@@ -116,13 +120,14 @@ export function runCoverage(cwd = process.cwd()) {
     // (computePercentages throws on the latter). Either way, corrupt data is not verification →
     // fail CLOSED with a clean message instead of crashing or reading garbage as coverage.
     let computed;
+    let executable;
     let artifact;
     let fileCount;
     let files;
     try {
         artifact = readArtifact(file);
         const parsed = JSON.parse(artifact.bytes);
-        computed = computePercentages(parsed);
+        ({ pct: computed, executable } = computePercentages(parsed));
         fileCount = Object.keys(artifactKeysSchema.parse(parsed)).length;
         files = `${fileCount} file${fileCount === 1 ? '' : 's'}`;
     }
@@ -134,11 +139,12 @@ export function runCoverage(cwd = process.cwd()) {
             console.error(line);
         return 1;
     }
-    // pct() scores an empty total as 100%, so a report that measured nothing would clear any floor.
-    if (fileCount === 0) {
+    // pct() scores an empty total as 100%, so a report that counted no code would clear any floor.
+    if (!executable) {
+        const empty = fileCount === 0 ? 'measured no files' : `measured no executable code (${files})`;
         if (reviewMode)
-            return reviewNotMeasuredEmpty();
-        failLine(`🚫 Coverage gate FAILED — ${COVERAGE_FILE} measured no files.`);
+            return reviewNotMeasuredEmpty(empty);
+        failLine(`🚫 Coverage gate FAILED — ${COVERAGE_FILE} ${empty}.`);
         console.error(artifactLine(file));
         console.error("   An empty report verifies nothing. Check the runner's coverage include, then re-run `bun run test:run:coverage`.");
         for (const line of BYPASS_REMEDY)

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readGitPaths } from '../ratchets/git-paths.mjs';
+import { splitGitPaths } from '../ratchets/git-paths.mjs';
 import { commitIndexEnv } from '../ratchets/commit-index.mjs';
 // Splits the MATCHER_CHANGED_FILES comma/newline list into individual paths.
 const PATH_SEP = /[\n,]/;
@@ -9,7 +9,7 @@ const split = (raw) => raw
     .filter(Boolean);
 const gitPaths = (args, cwd) => {
     try {
-        return readGitPaths(execFileSync('git', args, { cwd, env: commitIndexEnv(cwd) }));
+        return splitGitPaths(execFileSync('git', args, { cwd, env: commitIndexEnv(cwd) }));
     }
     catch {
         return null;
@@ -27,7 +27,8 @@ const gitPaths = (args, cwd) => {
  * scoped gate honest, but means partially-staged files are explicitly not semantically verified;
  * callers that require that coverage must stage the whole file before committing.
  *
- * A git failure or a non-UTF-8 name → empty set (nothing scoped in).
+ * A git failure → empty set (nothing scoped in). A name that is not valid UTF-8 is dropped on
+ * its own; a dropped staged name is reported on stderr, since neither gate judges it.
  * @param cwd repo root for the git fallback.
  */
 export function loadChangedSet(cwd) {
@@ -38,6 +39,9 @@ export function loadChangedSet(cwd) {
     const unstaged = gitPaths(['diff', '--name-only', '-z'], cwd);
     if (!staged || !unstaged)
         return new Set();
-    const dirty = new Set(unstaged);
-    return new Set(staged.filter((f) => !dirty.has(f)));
+    if (staged.undecodable > 0) {
+        console.error(`changed-files: ${staged.undecodable} staged path(s) not valid UTF-8, not dup/clone-checked`);
+    }
+    const dirty = new Set(unstaged.paths);
+    return new Set(staged.paths.filter((f) => !dirty.has(f)));
 }

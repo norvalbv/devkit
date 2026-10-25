@@ -1,41 +1,45 @@
-/** `devkit follow-up`: file the follow-ups a story deferred, and start one of them (see `help`). */
+/** `devkit follow-up`: file the follow-ups a story deferred, start one, and list the open ones. */
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
-import { AUTO_START_PREFIX, decideStart, FOLLOW_UP_TYPES, isDepthCapped, isPrUrl, normalisedTitle, parseRecord, RECORD_LABEL, renderRecord, } from '../../lib/follow-up/record.mjs';
-import { archiveStory, assignStory, createStory, defaultStateId, linkStories, readStory, renameStory, runShort, } from '../../lib/follow-up/shortcut-cli.mjs';
+import { decideStart, FOLLOW_UP_TYPES, isDepthCapped, isPrUrl, normalisedTitle, openFollowUps, parseRecord, RECORD_LABEL, renderRecord, } from '../../lib/follow-up/record.mjs';
+import { archiveStory, assignStory, createStory, defaultStateId, linkStories, readStory, runShort, } from '../../lib/follow-up/shortcut-cli.mjs';
 import { errorMessage } from '../../lib/ship/review/shared/common.mjs';
 const USAGE = `Usage:
   devkit follow-up file --parent <story> [--pr <url>]   < items.json
-  devkit follow-up start --parent <story> [--owner <member>]`;
+  devkit follow-up start --parent <story> [--owner <member>]
+  devkit follow-up status --parent <story>`;
 export const meta = {
     name: 'follow-up',
-    agentFacing: false,
-    notRoutedBecause: "Called by a Flow's closing steps after a story ships: frink-work's Track Follow-ups agent pipes " +
-        'the deferred items into `file`, then its Start Follow-up node runs `start`. `start` queues paid ' +
-        'agent work and narrows the human gate on follow-ups, so it is not routed to agents by hand.',
-    summary: 'File the follow-ups a story deferred (linked, unowned), or start one builds-on follow-up of it.',
-    help: `devkit follow-up — file the follow-ups a story deferred, and start one of them.
+    agentFacing: true,
+    unroutedSubcommands: {
+        start: "Run by a Flow's Start Follow-up node after a story ships. It queues paid agent work and " +
+            'narrows the human gate on follow-ups, so an agent never runs it by hand.',
+    },
+    summary: 'File the follow-ups a story deferred, start one builds-on follow-up of it, or list the open ones.',
+    help: `devkit follow-up — file the follow-ups a story deferred, start one, and list the open ones.
 
 ${USAGE}
 
-  --parent <story>   The story the follow-ups come from (7315 or sc-7315).
+  --parent <story>   The story the follow-ups come from (7315 or sc-7315). status: the story whose
+                     PR this is, which may itself be a follow-up.
   --pr <url>         file: the parent's pull request. Without it the record names no PR.
   --owner <member>   start: who to assign to. Default: the parent's first owner.
 
 file reads a JSON array on stdin, one object per deferred item:
   {"title": "...", "followUpType": "builds-on", "storyType": "feature", "project": "devkit", "body": "..."}
 
-  followUpType  blocks-done: the parent's acceptance criteria are not met without it, or the parent
-                left a defect a user would hit. builds-on: the parent is complete and this extends or
-                hardens it. discovery: a pre-existing problem unrelated to the parent.
+  followUpType  blocks-done: work the parent needs that its own PR could not build (an owner
+                decision, another repo, or overflow). builds-on: the parent is complete and this
+                extends it. discovery: code the parent's PR did not touch.
   storyType     bug for a defect that still exists, otherwise feature or chore.
   project       The name of the repo that owns this fix, which can differ from the parent's.
   body          The problem, why it was deferred, the files involved, and acceptance criteria.
                 It must not contain a record line such as **Stack on:**.
 
 Every item is validated before anything is written. Each story is filed unowned, in the parent's
-team and its workflow's default state, then linked "relates to" the parent. Its description starts:
+team and its workflow's default state, then linked "relates to" the parent. Its description is the
+body, then a blank line, then this footer:
   **Project:** <project>
   **Follow-up of:** sc-<parent> · <pr url>
   **Follow-up type:** <followUpType>
@@ -45,11 +49,17 @@ so running it again after a run ends is safe. A story that cannot be linked is a
 one JSON line, also when filing stops early:
   {"followups":[{"id":7555,"status":"new","type":"builds-on"}]}
 
-start assigns at most one builds-on follow-up of the parent: open, carrying **Stack on:** with the
-parent's PR when it had one. The lowest qualifying id is renamed "${AUTO_START_PREFIX} <title>" and
-then assigned, which fires a story-assigned trigger. Nothing starts when the parent is itself a
-follow-up, or once an ${AUTO_START_PREFIX} follow-up of it is assigned or closed. Prints
-{"started":true,"story":<id>} or {"started":false,"reason":"..."}.
+start assigns the lowest-id builds-on follow-up of the parent that is open, unowned and carries
+**Stack on:** with the parent's PR when it had one; assigning fires a story-assigned trigger. Nothing
+starts when the parent is itself a follow-up (it carries **Follow-up of:**), or once any follow-up of
+it other than a discovery is owned or completed. Titles are never changed. Prints
+{"started":true,"story":<id>} or {"started":false,"reason":"..."}. start is run by a Flow step
+after a story ships, never by hand.
+
+status lists the open follow-ups that hold the story's feature back: blocks-done, builds-on and
+untyped ones (type null) that are neither done nor archived; discovery ones never count. When the
+story is itself a follow-up, its parent's other open follow-ups count too. Writes nothing. Prints
+  {"open":[{"id":7801,"type":"blocks-done"}],"featureDone":false}
 
 Exits 1 on bad input, or when Shortcut cannot be read or written.`,
     valueFlags: ['--parent', '--owner', '--pr'],
@@ -66,21 +76,26 @@ export function startFollowUp(parentId, owner, run = runShort) {
     const assignee = owner ?? parent.ownerIds[0];
     if (!assignee)
         throw new Error(`sc-${parentId} has no owner to give its follow-up to; pass --owner`);
-    const { story } = decision;
-    if (decision.rename)
-        renameStory(run, story.id, `${AUTO_START_PREFIX} ${story.name}`);
-    assignStory(run, story.id, assignee);
-    return { started: true, story: story.id };
+    assignStory(run, decision.story.id, assignee);
+    return { started: true, story: decision.story.id };
+}
+/** Open follow-ups of the story and, when it is itself a follow-up, its parent's other open ones. */
+export function followUpStatus(storyId, run = runShort) {
+    const story = readStory(run, storyId);
+    const children = story.linkedIds.map((id) => readStory(run, id));
+    const open = openFollowUps(storyId, children);
+    const parentId = parseRecord(story.description)?.parent;
+    if (parentId !== undefined && parentId !== storyId) {
+        const parent = children.find((child) => child.id === parentId) ?? readStory(run, parentId);
+        const siblings = parent.linkedIds.map((id) => readStory(run, id));
+        open.push(...openFollowUps(parentId, siblings, storyId));
+    }
+    open.sort((a, b) => a.id - b.id);
+    return { open, featureDone: open.length === 0 };
 }
 const ONE_LINE = /^[^\r\n\u2028\u2029]*$/;
 const ITEM = z.object({
-    title: z
-        .string()
-        .trim()
-        .min(1)
-        .max(512)
-        .regex(ONE_LINE, 'must be one line')
-        .refine((title) => !title.startsWith(AUTO_START_PREFIX), `must not start ${AUTO_START_PREFIX}`),
+    title: z.string().trim().min(1).max(512).regex(ONE_LINE, 'must be one line'),
     followUpType: z.enum(FOLLOW_UP_TYPES),
     storyType: z.enum(['feature', 'bug', 'chore']),
     project: z
@@ -122,7 +137,7 @@ function fileOne(run, parent, stateId, prUrl, item) {
     const record = renderRecord(item.project, parent.id, item.followUpType, prUrl);
     const id = createStory(run, {
         name: item.title,
-        description: `${record}\n\n${item.body}`,
+        description: [item.body.trimEnd(), record].filter(Boolean).join('\n\n'),
         storyType: item.storyType,
         stateId,
         teamId: parent.teamId,
@@ -197,6 +212,9 @@ function parseInvocation(args) {
         return { verb, parentId, pr: values.pr };
     if (verb === 'start' && values.pr === undefined)
         return { verb, parentId, owner: values.owner };
+    if (verb === 'status' && values.pr === undefined && values.owner === undefined) {
+        return { verb, parentId };
+    }
     return null;
 }
 export default function followUp(args, _cwd, run = runShort, readInput = () => readFileSync(0, 'utf8')) {
@@ -208,6 +226,10 @@ export default function followUp(args, _cwd, run = runShort, readInput = () => r
     try {
         if (invocation.verb === 'file') {
             return fileCommand(invocation.parentId, invocation.pr, readInput(), run);
+        }
+        if (invocation.verb === 'status') {
+            console.log(JSON.stringify(followUpStatus(invocation.parentId, run)));
+            return 0;
         }
         console.log(JSON.stringify(startFollowUp(invocation.parentId, invocation.owner, run)));
         return 0;

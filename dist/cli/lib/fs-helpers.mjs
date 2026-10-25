@@ -4,9 +4,10 @@
  * `packageDir()` (devkit's own dir, the source of templates + skills).
  */
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync, } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeFileAtomic } from './atomic-write.mjs';
 /**
  * Resolve devkit's OWN package root from this module's URL. cli/lib/fs-helpers.mjs is
  * two dirs below the package root, so go up twice. This is the ONE place keyed to the
@@ -18,7 +19,6 @@ export function packageDir() {
 /** What the build mirrors verbatim into dist/. Lives here, not scripts/, because the ship preflight
  * needs it and scripts/ never ships; scripts/shipped-assets.mjs re-exports it. */
 export const PACKAGED_ROOT_DIRS = [
-    'biome',
     'tsconfig',
     'oxc',
     'templates',
@@ -74,7 +74,8 @@ function isSymlink(path) {
 }
 /**
  * Write `content` to `path` only if the file is absent (idempotent create). With
- * `{ force: true }` it overwrites. Creates parent dirs. Returns one of:
+ * `{ force: true }` it replaces the file atomically, keeping its mode. Creates parent dirs.
+ * Returns one of:
  *   'created'   — file did not exist, written
  *   'forced'    — file existed, overwritten (force)
  *   'exists'    — file existed, left untouched (no force)
@@ -94,6 +95,11 @@ export function writeIfAbsent(path, content, { force = false } = {}) {
     mkdirSync(dir, { recursive: true });
     if (isSymlink(path))
         rmSync(path, { force: true });
-    writeFileSync(path, content);
+    // Replace via temp + rename, so a crash or a concurrent reader never sees a truncated file.
+    const st = statSync(path, { throwIfNoEntry: false });
+    if (st)
+        writeFileAtomic(path, content, st.mode & 0o777);
+    else
+        writeFileSync(path, content);
     return present ? 'forced' : 'created';
 }

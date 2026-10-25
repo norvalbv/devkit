@@ -23,7 +23,8 @@
 import { execFileSync } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
-import { cmpSemver, DEP } from '../../../commands/update.mjs';
+import { cmpSemver } from '../../../../gate-engine/devkit-version.mjs';
+import { DEP } from '../../../commands/update.mjs';
 import { detectGitRoot } from '../../detect-git-root.mjs';
 import { canonicalPath, packageDir, readJson } from '../../fs-helpers.mjs';
 import { isDevkitRepo } from '../../husky/self-host.mjs';
@@ -202,6 +203,10 @@ export function skewCheck(skew) {
 export function printSkewBanner(skew) {
     console.log(`\n  ⚠ devkit runner skew: you are running ${skew.running}, this repo pins ${skew.pinned}.`);
     console.log('    An older devkit rewrites .devkit/oxc in ITS shape, which the pinned gate then reports as stale.');
+}
+/** Overlay only: a newer global is the normal state after any sibling overlay upgrades it. */
+export function printNewerOverlayNotice(skew) {
+    console.log(`  ℹ devkit runner: global devkit ${skew.running} is newer than this overlay's devkitRef v${skew.pinned} — commits here are judged by ${skew.running}. Run \`devkit upgrade\` to re-sync the pin.`);
 }
 /**
  * Re-run this invocation under the repo's pinned devkit. Returns its exit code, or null when there

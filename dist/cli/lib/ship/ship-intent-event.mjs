@@ -1,5 +1,6 @@
 import { emitGateEvent } from '../../../gate-engine/judge/gate-events.mjs';
 import { redactSecrets, shQuote } from './redact-secrets.mjs';
+import { runDirectReviewCli } from './review/run-direct.mjs';
 /**
  * The node-side attempt event. `command` is the replayable invocation (paths included — the
  * warehouse `command` column documents exactly this, and the sink is personal-scale); `pr_body` is
@@ -42,3 +43,18 @@ export function emitShipIntentEvent(intent, resumed) {
         resumed,
     });
 }
+/** The HUP, INT, QUIT and TERM statuses review/process/gate-signal-handoff.sh exits with. */
+const SIGNAL_EXITS = new Set([129, 130, 131, 143]);
+/**
+ * The ship's terminal row: ship_result describes only the gate chain, so a preflight refusal, a
+ * failed push or a failed PR create had no outcome row. Null cause on success.
+ */
+export function shipEndRow(rc, cause = '') {
+    const fallback = SIGNAL_EXITS.has(rc) ? 'interrupted' : 'aborted';
+    return { type: 'ship_end', exit_code: rc, cause: rc === 0 ? null : cause || fallback };
+}
+// CLI: `node ship-intent-event.mjs end <rc> [cause]`, from ship-branch.sh's EXIT trap. Best-effort.
+runDirectReviewCli(import.meta.url, ([kind, rc = '', cause]) => {
+    if (kind === 'end' && /^\d+$/.test(rc))
+        emitGateEvent(shipEndRow(Number(rc), cause));
+});

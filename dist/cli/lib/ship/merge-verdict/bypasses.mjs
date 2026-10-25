@@ -25,9 +25,9 @@ export const BYPASS_FLAGS = [
     'DECISION_CHECKS_OK',
 ];
 /** Set to any value, these re-aim a gate or the verdict's own path classes. */
-const REAIM_FLAGS = ['REVIEW_SKIP', 'DECISIONS_DIR', 'ALLOWLIST_PATH'];
+export const REAIM_FLAGS = ['REVIEW_SKIP', 'DECISIONS_DIR', 'ALLOWLIST_PATH'];
 /** Hard by default; an explicit =0 softens the gate to a warning. */
-const SOFTEN_FLAGS = ['COMPLETENESS_HARD', 'SENTRY_HARD'];
+export const SOFTEN_FLAGS = ['COMPLETENESS_HARD', 'SENTRY_HARD'];
 /** review_skipped reasons a one-run control causes, under the control's own name. */
 const SKIP_CONTROLS = new Map([
     ['gate_disabled', 'GUARD_NO_REVIEW'],

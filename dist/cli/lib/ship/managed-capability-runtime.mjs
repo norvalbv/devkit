@@ -23,14 +23,17 @@
  * check compares against, so copying from it would pass only by coincidence — and it would drag `gh`
  * into a flow that deliberately supports non-GitHub origins and dry runs.
  *
+ * devkit's own worktree is skipped: its gates run from its own source, which its tracked state matches.
+ *
  * Usage:  managed-capability-runtime.mjs project <worktree> <consumer-root>
  * Always exits 0 for a projection OR a named skip: skipping only removes a FALSE NEGATIVE, since the
  * capability gate itself still runs in the worktree and still fails closed. Exit 1 is argv misuse.
  */
-import { existsSync, lstatSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { readJson } from '../fs-helpers.mjs';
+import { isDevkitPackageJson } from '../husky/self-host.mjs';
 import { ANTI_SLOP_CONFIG_REL, ANTI_SLOP_MANAGED_REL, ANTI_SLOP_MANIFEST_REL, } from '../install/anti-slop/constants.mjs';
 import { syncAntiSlopCapability } from '../install/anti-slop/lifecycle.mjs';
 import { syncOxcCapability } from '../install/oxc/lifecycle.mjs';
@@ -73,6 +76,15 @@ function devkitDirIsLinked(wt) {
         return false; // absent → a fresh managed install below, not a link
     }
 }
+/** The worktree's package.json text, or null when unreadable — which counts as a consumer. */
+function readPackageJson(wt) {
+    try {
+        return readFileSync(join(wt, 'package.json'), 'utf8');
+    }
+    catch {
+        return null;
+    }
+}
 function skip(reason) {
     console.error(`  ↳ shipping: managed capability refresh skipped — ${reason}`);
 }
@@ -94,6 +106,11 @@ export function projectManagedCapability(wt, root) {
     }
     if (devkitDirIsLinked(physicalWt)) {
         skip('overlay mode links .devkit from the caller — already current');
+        return;
+    }
+    // devkit's own worktree runs gate code from its own source, which its tracked managed state matches.
+    if (isDevkitPackageJson(readPackageJson(physicalWt))) {
+        skip("self-host — using the worktree's own tracked managed state");
         return;
     }
     const antiSlop = antiSlopSelected(physicalRoot, physicalWt);

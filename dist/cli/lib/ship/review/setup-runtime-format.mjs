@@ -4,11 +4,9 @@ import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { isSafeReviewRelativePath } from './runtime-paths.mjs';
 import { isReviewSetupHash, REVIEW_SETUP_ABSENT } from './setup-manifest-format.mjs';
+import { fail, objectValue } from './shared/common.mjs';
 export const REVIEW_SETUP_RUNTIME_VERSION = 1;
-export const REVIEW_SETUP_RUNTIME_PROTOCOL = 'devkit-review-setup-v1';
-function fail(message) {
-    throw new Error(`devkit review: ${message}`);
-}
+export const REVIEW_SETUP_RUNTIME_PROTOCOL = 'devkit-review-setup-v2';
 function verifyExactKeys(value, expected, message) {
     if (Object.keys(value).length !== expected.length)
         fail(message);
@@ -70,21 +68,12 @@ export function reviewSetupRuntimeHash(value) {
 }
 function parseFields(value) {
     const fields = runtimeRecord(value, 'fields');
-    const keys = [
-        'targetRelativePath',
-        'hooksPath',
-        'overlay',
-        'enabled',
-        'decisionsDir',
-        'chainHook',
-        'guards',
-    ];
+    const keys = ['targetRelativePath', 'hooksPath', 'overlay', 'enabled', 'chainHook', 'guards'];
     verifyExactKeys(fields, keys, 'invalid setup runtime fields.');
     verifyStringField(fields, 'targetRelativePath');
     verifyStringField(fields, 'hooksPath');
     verifyBooleanField(fields, 'overlay');
     verifyBooleanField(fields, 'enabled');
-    verifyStringField(fields, 'decisionsDir');
     verifyStringField(fields, 'chainHook');
     verifyGuardFields(fields.guards);
     return fields;
@@ -108,9 +97,7 @@ export function parseReviewSetupRuntimeManifest(path) {
     catch {
         return fail('could not read setup runtime manifest.');
     }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
-        fail('invalid setup runtime manifest.');
-    const raw = parsed;
+    const raw = objectValue(parsed, 'invalid setup runtime manifest.');
     if (raw.version !== REVIEW_SETUP_RUNTIME_VERSION ||
         !isReviewSetupHash(raw.setupHash) ||
         typeof raw.destinationGitRoot !== 'string' ||
@@ -139,7 +126,6 @@ export function encodeReviewSetupRuntimeFields(fields) {
         fields.hooksPath,
         fields.overlay ? '1' : '0',
         fields.enabled ? '1' : '0',
-        fields.decisionsDir,
         fields.chainHook,
         String(fields.guards.length),
         ...fields.guards,

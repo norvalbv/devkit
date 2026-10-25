@@ -218,7 +218,7 @@ function printReferenceCheckouts(json) {
     return 0;
 }
 /** The hook-shell gates that block with no node process of their own to report the verdict. */
-const SHELL_GATES = new Set(['fallow', 'eslint-overlay', 'biome-overlay']);
+const SHELL_GATES = new Set(['fallow', 'eslint-overlay']);
 /**
  * `guard-review record-gate <gate>` — the generated hook's narration after a shell gate blocked.
  * No `family`: the digest then matches the row against the gate's own blocked_gate token.
@@ -306,7 +306,7 @@ async function run(argv) {
         '[--cost-usd <n>] [--session-id <dispatched-agent-session>] [--billing subscription] | ' +
         'record-feedback prior-art --run <invocation_id> --claimed-verdict <V> [--claimed-framing <F>] ' +
         '[--supersedes <feedback_id>] --source root|user --reason "<why>" | ' +
-        'record-gate fallow|eslint-overlay|biome-overlay | reference-checkouts [--json]');
+        'record-gate fallow|eslint-overlay | reference-checkouts [--json]');
     return 2;
 }
 run(process.argv.slice(2)).then((code) => process.exit(code), (e) => {

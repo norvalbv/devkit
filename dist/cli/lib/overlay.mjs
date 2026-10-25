@@ -5,7 +5,7 @@
  * `git ci`, re-running overlay init, or the optional global commit gate restores it.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONFIG_FILENAME, resolveGuardConfig } from '../../gate-engine/config.mjs';
 import { FALLOW_CACHE, OVERLAY_WRITTEN } from '../../gate-engine/deterministic/gate-inputs.mjs';
@@ -18,7 +18,7 @@ import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mjs';
 import { cutStructureBaselines } from './generate/cut-structure-baselines.mjs';
 import { isTracked, trackedPathPredicate } from './git-tracked.mjs';
 import { buildOverlayHook } from './husky/husky-block.mjs';
-import { describeOverlayCommitMsg, syncOverlaySiblingHooks } from './husky/overlay/commit-msg.mjs';
+import { describeForeignHook, describeOverlayCommitMsg, describeUnreadableHook, syncOverlaySiblingHooks, } from './husky/overlay/commit-msg.mjs';
 import { installHealAlias } from './husky/overlay/heal-alias.mjs';
 import { isOverlayHooksValue, LOCAL_HOOKS, overlayHooksPath, projectionPrelude, } from './husky/overlay/overlay-home.mjs';
 import { ADHD_SKILL_DIR, syncAdhdSkill } from './install/adhd-skill.mjs';
@@ -31,31 +31,12 @@ import { installHookRegistrations, removeHookRegistrations, removeHookScripts, s
 import { DECISIONS_INDEX_IGNORES } from './install/gitignore-cache.mjs';
 import { installSearchCode, SEARCH_CODE_WRITTEN } from './install/install-search-code.mjs';
 import { overlayAssetExcludes } from './install/overlay-asset-excludes.mjs';
-import { writeBiomeOverlay, writeEslintOverlay } from './install/overlay-lint-configs.mjs';
+import { writeEslintOverlay } from './install/overlay-lint-configs.mjs';
 import { addToGitExclude, overlayExcludeLines } from './install/overlay-excludes.mjs';
 import { firstLine } from './standalone.mjs';
 import { removeAgents, removeSkills } from './sync-manifest.mjs';
 // husky sets core.hooksPath to `.husky/_`; the real committed script is the parent's hook.
 const HUSKY_UNDERSCORE_RE = /\/_$/;
-// Standard git hook names — used to pick the repo's real hooks out of a hooks dir (ignoring
-// husky internals / .sample files / stray entries).
-const GIT_HOOKS = new Set([
-    'applypatch-msg',
-    'pre-applypatch',
-    'post-applypatch',
-    'pre-commit',
-    'pre-merge-commit',
-    'prepare-commit-msg',
-    'commit-msg',
-    'post-commit',
-    'pre-rebase',
-    'post-checkout',
-    'post-merge',
-    'pre-push',
-    'post-rewrite',
-    'post-update',
-    'pre-auto-gc',
-]);
 // The raw core.hooksPath (the repo's CURRENT hooks setting), '' if unset. Captured BEFORE we
 // override it so `devkit clean` can restore exactly what was there.
 function readHooksPath(gitRoot) {
@@ -95,18 +76,18 @@ export function overlayHookScriptDir(origHooksPath) {
     }
     return '.git/hooks';
 }
-// The repo's own hooks we must keep running once we take over core.hooksPath. `.git/hooks` names
-// git's own dir in the COMMON dir — the one chainWord runs at commit time, linked worktrees included.
+// Where the repo's own hooks live once we take over core.hooksPath. `.git/hooks` names git's own
+// dir in the COMMON dir — the one chainWord runs at commit time, linked worktrees included.
 function repoHooks(gitRoot, origHooksPath) {
     const scriptDir = overlayHookScriptDir(origHooksPath);
     const native = /^(?:\.\/)?\.git\/hooks\/*$/.test(scriptDir);
     const scriptsAbs = native ? nativeHooksDir(gitRoot) : hooksDir(gitRoot, scriptDir);
+    if (!scriptsAbs && !existsSync(join(gitRoot, '.git')))
+        throw new Error(`${gitRoot} is not a git repository`);
     // Never "no hooks" on an unanswerable git: that would silently drop the repo's own hooks.
     if (!scriptsAbs)
         throw new Error(`could not resolve the git common dir of ${gitRoot}; retry`);
-    const names = existsSync(scriptsAbs) ? readdirSync(scriptsAbs) : [];
-    const gitRuns = !HUSKY_UNDERSCORE_RE.test(origHooksPath);
-    return { scriptDir, scriptsAbs, gitRuns, existing: names.filter((f) => GIT_HOOKS.has(f)) };
+    return { scriptDir, scriptsAbs, gitRuns: !HUSKY_UNDERSCORE_RE.test(origHooksPath) };
 }
 /** The overlay pre-commit as written: the gates plus the linked-worktree prelude (sc-4157), whose
  * projection check is rendered from the gate inputs of the overlay installed at `root`. */
@@ -119,34 +100,38 @@ export function buildOverlayPreCommit(sel, chainTarget, pkgRel, opts) {
     return buildOverlayHook({ ...sel, structureCmd }, chainTarget, pkgRel, hookOpts);
 }
 // Take over core.hooksPath (at the GIT ROOT — repo-wide) and write our hooks dir. CRITICAL: git
-// then runs ONLY our dir, so we wrap EVERY hook the repo already had (pre-push, commit-msg, …) as
+// then runs ONLY our dir, so we wrap EVERY git hook name, present or not (pre-push, …) as
 // a pass-through, or they'd silently stop. pre-commit additionally runs devkit's gates (cd'd into
 // the package for a monorepo) before chaining to the repo's pre-commit.
 function installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun, { fallow, stack }) {
-    const { scriptDir, scriptsAbs, gitRuns, existing } = repoHooks(gitRoot, origHooksPath);
-    const preCommitChain = existing.includes('pre-commit') ? `${scriptDir}/pre-commit` : '';
-    const passthrough = existing.filter((h) => h !== 'pre-commit' && h !== 'commit-msg');
-    const siblings = { gitRoot, scriptDir, scriptsAbs, gitRuns, existing, selection: sel, pkgRel };
-    const commitMsgLine = describeOverlayCommitMsg(syncOverlaySiblingHooks(siblings, { dryRun: true }).plan);
+    const { scriptDir, scriptsAbs, gitRuns } = repoHooks(gitRoot, origHooksPath);
+    const preCommitChain = `${scriptDir}/pre-commit`;
+    const siblings = { gitRoot, scriptDir, scriptsAbs, gitRuns, selection: sel, pkgRel };
+    const planned = syncOverlaySiblingHooks(siblings, { dryRun: true });
+    const commitMsgLine = describeOverlayCommitMsg(planned.plan);
+    for (const h of planned.siblings.foreign)
+        console.log(`  · ${describeForeignHook(h, scriptDir)}`);
+    for (const h of planned.siblings.unreadable)
+        console.log(`  ⚠ ${describeUnreadableHook(h)}`);
     const hooksPath = overlayHooksPath(gitRoot);
+    const passthrough = `other git hooks pass through to ${scriptDir}`;
     if (dryRun) {
-        console.log(`  [dry-run] git config core.hooksPath ${hooksPath}; pre-commit (gates${preCommitChain ? ` → ${preCommitChain}` : ''}${fallow ? ' + fallow' : ''})${passthrough.length ? `; pass-through: ${passthrough.join(', ')}` : ''}${commitMsgLine ? `; ${commitMsgLine}` : ''}`);
+        console.log(`  [dry-run] git config core.hooksPath ${hooksPath}; pre-commit (gates → ${preCommitChain}${fallow ? ' + fallow' : ''}); ${passthrough}${commitMsgLine ? `; ${commitMsgLine}` : ''}`);
         return;
     }
     const dir = join(gitRoot, LOCAL_HOOKS);
     mkdirSync(dir, { recursive: true });
-    // pre-commit: devkit gates (+ optional fallow gate) + chain to the repo's pre-commit (if any).
+    // pre-commit: devkit gates (+ optional fallow gate) + chain to the repo's pre-commit (if present).
     const pre = join(dir, 'pre-commit');
     writeFileSync(pre, buildOverlayPreCommit(sel, preCommitChain, pkgRel, { root: gitRoot, fallow, stack, gitRuns }));
     chmodSync(pre, 0o755);
-    // every OTHER existing hook → pass-through (commit-msg: devkit's message judges, sc-1794).
+    // every OTHER hook name → pass-through (commit-msg also runs devkit's message judges).
     syncOverlaySiblingHooks(siblings, { dryRun: false });
     if (commitMsgLine)
         console.log(`  ✓ ${commitMsgLine}`);
     try {
         execFileSync('git', ['config', 'core.hooksPath', hooksPath], { cwd: gitRoot });
-        const extra = passthrough.length ? ` (+ pass-through: ${passthrough.join(', ')})` : '';
-        console.log(`  ✓ core.hooksPath → ${hooksPath} (local) — pre-commit + your hooks preserved${extra}`);
+        console.log(`  ✓ core.hooksPath → ${hooksPath} (local) — pre-commit + your hooks preserved (${passthrough})`);
     }
     catch (e) {
         console.log(`  ! could not set core.hooksPath: ${firstLine(e)}`);
@@ -159,7 +144,8 @@ function installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun, { fallo
  * (e.g. one predating a new ship gate) until re-init. This lets `devkit doctor --fix` refresh it
  * without a manual `devkit init --overlay`. Pass-through wrappers are refreshed alongside (idempotent).
  * `core.hooksPath` is left untouched — the `git ci` alias owns it and doctor reports it separately.
- * Returns the pre-commit { missing, drift } (what review reads) plus commitMsg, observed BEFORE any write.
+ * Returns the pre-commit { missing, drift } (what review reads) plus commitMsg and siblings, observed
+ * BEFORE any write.
  */
 export function syncOverlayHook(gitRoot, cwd, cfg, { dryRun }) {
     // Raw `structure`: normalizeSelection defaults it on, which would gate an overlay never baselined.
@@ -169,9 +155,8 @@ export function syncOverlayHook(gitRoot, cwd, cfg, { dryRun }) {
     // Use the RECORDED origHooksPath — post-install core.hooksPath is devkit's own, so reading it
     // live would chain the overlay to ITSELF. Fall back to the same recovery init uses.
     const origHooksPath = cfg.origHooksPath ?? captureOrigHooksPath(gitRoot, cwd);
-    const { scriptDir, scriptsAbs, gitRuns, existing } = repoHooks(gitRoot, origHooksPath);
-    const preCommitChain = existing.includes('pre-commit') ? `${scriptDir}/pre-commit` : '';
-    const expected = buildOverlayPreCommit(sel, preCommitChain, pkgRel, {
+    const { scriptDir, scriptsAbs, gitRuns } = repoHooks(gitRoot, origHooksPath);
+    const expected = buildOverlayPreCommit(sel, `${scriptDir}/pre-commit`, pkgRel, {
         root: gitRoot,
         fallow,
         stack: cfg.stack,
@@ -187,8 +172,13 @@ export function syncOverlayHook(gitRoot, cwd, cfg, { dryRun }) {
         chmodSync(pre, 0o755);
     }
     // Siblings sync on their own: a stale commit-msg must heal even when pre-commit is current.
-    const cm = syncOverlaySiblingHooks({ gitRoot, scriptDir, scriptsAbs, gitRuns, existing, selection: sel, pkgRel }, { dryRun });
-    return { missing, drift, commitMsg: { missing: cm.missing, drift: cm.drift } };
+    const cm = syncOverlaySiblingHooks({ gitRoot, scriptDir, scriptsAbs, gitRuns, selection: sel, pkgRel }, { dryRun });
+    return {
+        missing,
+        drift,
+        commitMsg: { missing: cm.missing, drift: cm.drift },
+        siblings: { scriptDir, ...cm.siblings },
+    };
 }
 // Sync the agent-half (skills + agents + agentHooks) into the git root's selected surfaces, skipping
 // any path git already TRACKS (C2 — exclude can't hide a tracked file), and return the git-root-
@@ -308,7 +298,7 @@ export async function installOverlay(cwd, sel, stack, force, dryRun, { interacti
     // absent file hides nothing, and the list stays the registry's.
     const excludes = new Set([
         ...overlayExcludeLines('', { path: LOCAL_HOOKS, kind: 'dir' }), // at the git root
-        ...overlayExcludeLines(pfx, { path: '.devkit', kind: 'dir' }), // config + vendored biome
+        ...overlayExcludeLines(pfx, { path: '.devkit', kind: 'dir' }), // config + devkit state
         ...OVERLAY_WRITTEN.flatMap((input) => overlayExcludeLines(pfx, input)),
         // Any `guard-decisions query` writes it, whatever the guard selection.
         ...DECISIONS_INDEX_IGNORES.map((line) => `${pfx}${line}`),
@@ -350,10 +340,8 @@ export async function installOverlay(cwd, sel, stack, force, dryRun, { interacti
             for (const l of overlayExcludeLines(pfx, input))
                 excludes.add(l);
     }
-    // ours-extends-theirs lint overlays, in the package.
-    console.log('  lint overlays (extend the repo config)');
-    if (sel.biome)
-        writeBiomeOverlay(cwd, stack, force, dryRun);
+    // ours-extends-theirs lint overlay, in the package.
+    console.log('  lint overlay (extends the repo config)');
     writeEslintOverlay(cwd, force, dryRun);
     // Resolve fallow before rendering the hook; an unavailable binary aborts only that component.
     let fallowWired = false;
