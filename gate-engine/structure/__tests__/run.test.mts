@@ -12,7 +12,7 @@ import {
   runStagedStructureGate,
   runStructureGate,
 } from '../run.mts';
-import { withStructureConfigGaps } from '../verdict.mts';
+import { preExisting, withStructureConfigGaps } from '../verdict.mts';
 
 const DEVKIT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -495,6 +495,83 @@ describe('guard-structure staged execution', () => {
     await expect(runStagedStructureGate(root)).resolves.toMatchObject({ code: 0 });
   });
 
+  describe('debt already at HEAD', () => {
+    const git = (root: string, ...args: string[]) => execFileSync('git', args, { cwd: root });
+    function debtRepo(files: string[]) {
+      const root = repo();
+      write(root, 'guard.config.json', JSON.stringify(config));
+      for (const file of files) write(root, file);
+      initializeGit(root);
+      git(root, 'add', '-A');
+      git(root, 'commit', '-qm', 'debt');
+      return root;
+    }
+    const head = (root: string) => git(root, 'rev-parse', '--short', 'HEAD').toString().trim();
+
+    it('an edited file whose violation exists at HEAD passes with an advisory naming HEAD', async () => {
+      const root = debtRepo(['src/bad-name.ts']);
+      write(root, 'src/bad-name.ts', 'export const y = 2;\n');
+      git(root, 'add', '--', 'src/bad-name.ts');
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(0);
+      expect(result.text).toContain(`pre-existing structure violation(s) at ${head(root)}`);
+      expect(result.text).toContain('bad-name.ts');
+    });
+
+    it('a file the change adds still blocks on a base with debt', async () => {
+      const root = debtRepo(['src/bad-name.ts']);
+      write(root, 'src/also-bad.ts');
+      git(root, 'add', '--', 'src/also-bad.ts');
+      expect((await runStagedStructureGate(root)).code).toBe(1);
+    });
+
+    it('an added file cannot hide behind an edited debt file in the same broken folder', async () => {
+      const root = debtRepo(['src/junk/Old.ts']);
+      write(root, 'src/junk/Old.ts', 'export const y = 2;\n');
+      write(root, 'src/junk/New.ts');
+      git(root, 'add', '--', 'src/junk');
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(1);
+      expect(result.text).toContain('New.ts');
+    });
+
+    it('a file added from a package subdirectory still blocks, not misread as an edit', async () => {
+      const root = repo();
+      const pkg = join(root, 'packages', 'lib');
+      write(pkg, 'guard.config.json', JSON.stringify(config));
+      write(pkg, 'src/bad-name.ts');
+      initializeGit(root);
+      git(root, 'add', '-A');
+      git(root, 'commit', '-qm', 'debt');
+      write(pkg, 'src/bad-name.ts', 'export const y = 2;\n');
+      write(pkg, 'src/also-bad.ts');
+      git(root, 'add', '-A');
+      const result = await runStagedStructureGate(pkg);
+      expect(result.code).toBe(1);
+      expect(result.text).toContain('also-bad.ts');
+      expect(result.text).toContain(`pre-existing structure violation(s) at ${head(root)}`);
+    });
+
+    it.each([
+      [
+        'a structure policy edit',
+        (root: string) => write(root, 'guard.config.json', `${JSON.stringify(config)}\n`),
+      ],
+      ['a deletion', (root: string) => git(root, 'rm', '-q', '--', 'src/Other.ts')],
+      // A rename destination is a new placement, never an edit of HEAD's debt.
+      [
+        'a rename into an invalid name',
+        (root: string) => git(root, 'mv', 'src/Other.ts', 'src/moved-bad.ts'),
+      ],
+    ])('%s staged with the edit keeps the edited debt blocking', async (_label, stage) => {
+      const root = debtRepo(['src/bad-name.ts', 'src/Other.ts']);
+      write(root, 'src/bad-name.ts', 'export const y = 2;\n');
+      stage(root);
+      git(root, 'add', '--', 'guard.config.json', 'src/bad-name.ts');
+      expect((await runStagedStructureGate(root)).code).toBe(1);
+    });
+  });
+
   it('exit 2, not 1, when the electron path has no locally pinned eslint binary', async () => {
     const root = repo({ scanRoots: ['src'], sourceExtensions: ['ts'] });
     write(root, 'src/whatever.ts');
@@ -510,14 +587,38 @@ describe('guard-structure staged execution', () => {
 // sc-3149: the preset is a stub eslint.js that logs its argv and fails any "Bad" path — this pins the
 // leg wiring; the real electron template's rules are pinned by cli/__tests__/electron-*.test.mts.
 describe('guard-structure mixed electron preset + grammar trees', () => {
-  const STUB = `const { appendFileSync, readdirSync, statSync } = require('node:fs');
-const files = process.argv.slice(process.argv.indexOf('--') + 1);
-appendFileSync(require('node:path').join(process.cwd(), 'preset-calls.log'), JSON.stringify(files) + '\\n');
-const flags = process.argv.slice(2, process.argv.indexOf('--'));
-appendFileSync(require('node:path').join(process.cwd(), 'preset-flags.log'), JSON.stringify(flags) + '\\n');
-const names = files.flatMap((f) => (statSync(f).isDirectory() ? readdirSync(f, { recursive: true }) : [f]));
-if (names.some((f) => String(f).includes('Crash'))) { console.error('Oops! Something went wrong!'); process.exit(2); }
-if (names.some((f) => String(f).includes('Bad'))) { console.log('PRESET-VIOLATION'); process.exit(1); }
+  // The stub answers like `eslint --format json`: a "Bad" path is a folder-structure error, and a
+  // `WALL:<x>` or `SIZE:<n>` line is an import-wall or max-lines error, read from the file or stdin.
+  const STUB = `const { appendFileSync, readdirSync, readFileSync, statSync } = require('node:fs');
+const { join, resolve } = require('node:path');
+const argv = process.argv.slice(2);
+const log = (name, value) => appendFileSync(join(process.cwd(), name), JSON.stringify(value) + '\\n');
+const stdinAt = argv.indexOf('--stdin-filename');
+const files = stdinAt >= 0 ? [] : argv.slice(argv.indexOf('--') + 1);
+if (stdinAt >= 0) log('preset-stdin.log', argv[stdinAt + 1]);
+else { log('preset-calls.log', files); log('preset-flags.log', argv.slice(0, argv.indexOf('--'))); }
+const read = (f) => { try { return readFileSync(f, 'utf8'); } catch { return ''; } };
+const inputs = stdinAt >= 0
+  ? [[argv[stdinAt + 1], readFileSync(0, 'utf8')]]
+  : files.flatMap((f) => (statSync(f).isDirectory() ? readdirSync(f, { recursive: true }).map((n) => join(f, String(n))) : [f])).map((f) => [f, read(f)]);
+if (inputs.some(([f, text]) => f.includes('Crash') || text.includes('HEADCRASH'))) { console.error('Oops! Something went wrong!'); process.exit(2); }
+if (inputs.some(([f]) => f.includes('Garbled'))) { console.log('PRESET-VIOLATION'); process.exit(1); }
+if (inputs.some(([f]) => f.includes('Silent'))) { console.log('[]'); process.exit(1); }
+const results = inputs.map(([f, text]) => {
+  const messages = [];
+  if (f.includes('Bad')) messages.push({ ruleId: 'project-structure/folder-structure', severity: 2, message: 'File name is invalid', line: 1, column: 1 });
+  text.split('\\n').forEach((l, i) => {
+    const wall = /^WALL:(\\S+)/.exec(l);
+    if (wall) messages.push({ ruleId: 'project-structure/independent-modules', severity: 2, message: 'Forbidden import', line: i + 1, column: 6, endLine: i + 1, endColumn: 6 + wall[1].length });
+    if (l.startsWith('WARN:')) messages.push({ ruleId: 'demo/warn', severity: 1, message: 'Prefer a named export', line: i + 1, column: 1 });
+    const size = /^SIZE:(\\d+)/.exec(l);
+    if (size) messages.push({ ruleId: 'max-lines', severity: 2, message: 'File has too many lines (' + size[1] + '). Maximum allowed is 500', line: i + 1, column: 1, endLine: i + 2, endColumn: 1 });
+  });
+  const errorCount = messages.filter((m) => m.severity === 2).length;
+  return { filePath: resolve(f), messages, errorCount, warningCount: messages.length - errorCount, fatalErrorCount: 0, fixableErrorCount: 0, fixableWarningCount: 0 };
+});
+console.log(JSON.stringify(results));
+process.exit(results.some((r) => r.errorCount) ? 1 : 0);
 `;
   const cliTree = {
     name: 'cli',
@@ -531,7 +632,7 @@ if (names.some((f) => String(f).includes('Bad'))) { console.log('PRESET-VIOLATIO
     const root = repo(config);
     if (stack !== null) write(root, '.devkit/config.json', JSON.stringify({ stack }));
     if (preset) write(root, 'node_modules/eslint/bin/eslint.js', STUB);
-    write(root, '.gitignore', 'node_modules/\npreset-calls.log\npreset-flags.log\n');
+    write(root, '.gitignore', 'node_modules/\npreset-*.log\n');
     initializeGit(root);
     commitAll(root); // policy files committed, so the staged plan sees only what a test stages
     return root;
@@ -555,6 +656,157 @@ if (names.some((f) => String(f).includes('Bad'))) { console.log('PRESET-VIOLATIO
       return [];
     }
   }
+
+  it('prints preset warnings on a passing run, as the inherited eslint output did', async () => {
+    const root = electronRepo();
+    write(root, 'src/warn.ts', 'WARN:x\n');
+    execFileSync('git', ['add', '--', 'src/warn.ts'], { cwd: root });
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(0);
+    expect(result.text).toContain('Prefer a named export');
+  });
+
+  describe('debt already at HEAD on the preset leg', () => {
+    const git = (root: string, ...args: string[]) =>
+      execFileSync('git', args, { cwd: root }).toString().trim();
+    function debtRepo(files: Record<string, string>) {
+      const root = electronRepo();
+      for (const [file, body] of Object.entries(files)) write(root, file, body);
+      commitAll(root);
+      return root;
+    }
+    function edit(root: string, file: string, body: string) {
+      write(root, file, body);
+      git(root, 'add', '--', file);
+    }
+    const advisory = (root: string) =>
+      `pre-existing structure violation(s) at ${git(root, 'rev-parse', '--short', 'HEAD')}`;
+    // combineStructureResults prints blocking text before advisories.
+    const blocking = (text = '') => text.split('pre-existing structure violation(s)')[0];
+
+    it('an edited file whose folder-structure error exists at HEAD passes with an advisory', async () => {
+      const root = debtRepo({ 'src/Bad.ts': 'export const x = 1;\n' });
+      edit(root, 'src/Bad.ts', 'export const y = 2;\n');
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(0);
+      expect(result.text).toContain(advisory(root));
+      expect(result.text).toContain('Bad.ts');
+    });
+
+    it('a file the change adds still blocks on a base with debt', async () => {
+      const root = debtRepo({ 'src/Bad.ts': 'export const x = 1;\n' });
+      stage(root, 'src/BadNew.ts');
+      expect((await runStagedStructureGate(root)).code).toBe(1);
+    });
+
+    it('an added file cannot hide behind an edited debt file: they lint in separate runs', async () => {
+      const root = debtRepo({ 'src/BadOld.ts': 'export const x = 1;\n' });
+      edit(root, 'src/BadOld.ts', 'export const y = 2;\n');
+      stage(root, 'src/BadNew.ts');
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(1);
+      expect(blocking(result.text)).toContain('BadNew.ts');
+      expect(presetCalls(root)).toEqual([['src/BadNew.ts'], ['src/BadOld.ts']]);
+    });
+
+    it('an import-wall crossing already at HEAD passes when the edit leaves it alone', async () => {
+      const root = debtRepo({ 'src/view.ts': 'WALL:a\n' });
+      edit(root, 'src/view.ts', 'WALL:a\nexport const y = 2;\n');
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(0);
+      expect(result.text).toContain(advisory(root));
+    });
+
+    it('a new import-wall crossing in an edited file blocks; only the old one is advisory', async () => {
+      const root = debtRepo({ 'src/view.ts': 'WALL:a\n' });
+      edit(root, 'src/view.ts', 'WALL:a\nWALL:b\n');
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(1);
+      expect(blocking(result.text)).toContain('2:6');
+      expect(blocking(result.text)).not.toContain('1:6');
+      expect(result.text).toContain(advisory(root));
+    });
+
+    it('swapping one forbidden import for another blocks, though the message text is identical', async () => {
+      const root = debtRepo({ 'src/view.ts': 'WALL:a\n' });
+      edit(root, 'src/view.ts', 'WALL:b\n');
+      expect((await runStagedStructureGate(root)).code).toBe(1);
+    });
+
+    it.each(['505', '515'])(
+      'size debt at HEAD stays advisory at %s lines (guard-size owns growth)',
+      async (n) => {
+        const root = debtRepo({ 'src/big.ts': 'SIZE:510\n' });
+        edit(root, 'src/big.ts', `SIZE:${n}\n`);
+        const result = await runStagedStructureGate(root);
+        expect(result.code).toBe(0);
+        expect(result.text).toContain(advisory(root));
+      },
+    );
+
+    it.each([
+      ['a deletion', (root: string) => git(root, 'rm', '-q', '--', 'src/Other.ts')],
+      ['a structure policy edit', (root: string) => stage(root, 'eslint.config.mjs')],
+    ])('%s staged with the edit keeps the edited debt blocking', async (_label, also) => {
+      const root = debtRepo({ 'src/Bad.ts': 'export const x = 1;\n', 'src/Other.ts': 'x\n' });
+      edit(root, 'src/Bad.ts', 'export const y = 2;\n');
+      also(root);
+      expect((await runStagedStructureGate(root)).code).toBe(1);
+    });
+
+    it.each([
+      ['output that is not ESLint json', 'src/Garbled.ts'],
+      ['exit 1 that names no error', 'src/Silent.ts'],
+    ])('%s on exit 1 blocks, never reads as clean or as debt', async (_label, file) => {
+      const root = debtRepo({ [file]: 'export const x = 1;\n' });
+      edit(root, file, 'export const y = 2;\n');
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(1);
+      expect(result.text).toContain('local eslint failed');
+    });
+
+    it('blocks and says so when the HEAD copy cannot be linted', async () => {
+      const root = debtRepo({ 'src/view.ts': 'WALL:a\nHEADCRASH\n' });
+      edit(root, 'src/view.ts', 'WALL:a\n');
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(1);
+      expect(result.text).toContain('HEAD comparison could not run for src/view.ts');
+    });
+
+    it("one file's HEAD crossing never excuses the same crossing newly added to another file", async () => {
+      const root = debtRepo({ 'src/a.ts': 'WALL:x\n', 'src/b.ts': 'export const b = 1;\n' });
+      edit(root, 'src/a.ts', 'WALL:x\nexport const y = 2;\n');
+      edit(root, 'src/b.ts', 'WALL:x\n');
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(1);
+      expect(blocking(result.text)).toContain('b.ts');
+      expect(blocking(result.text)).not.toContain('a.ts');
+    });
+
+    it('a second identical crossing in the same file blocks (HEAD debt is counted, not a set)', async () => {
+      const root = debtRepo({ 'src/view.ts': 'WALL:a\n' });
+      edit(root, 'src/view.ts', 'WALL:a\nWALL:a\n');
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(1);
+      expect(blocking(result.text)).toContain('2:6');
+    });
+
+    it('reads HEAD relative to a package subdirectory cwd', async () => {
+      const root = repo();
+      const pkg = join(root, 'packages', 'app');
+      write(pkg, 'guard.config.json', JSON.stringify(mixedConfig));
+      write(pkg, '.devkit/config.json', JSON.stringify({ stack: 'electron' }));
+      write(pkg, 'node_modules/eslint/bin/eslint.js', STUB);
+      write(pkg, 'src/view.ts', 'WALL:a\n');
+      write(root, '.gitignore', 'node_modules/\npreset-*.log\n');
+      initializeGit(root);
+      commitAll(root);
+      edit(root, 'packages/app/src/view.ts', 'WALL:a\nexport const y = 2;\n');
+      const result = await runStagedStructureGate(pkg);
+      expect(result.code).toBe(0);
+      expect(result.text).toContain('pre-existing structure violation(s) at');
+    });
+  });
 
   it('still runs the preset over a staged scanRoots file once a grammar tree is declared', async () => {
     const root = electronRepo();
@@ -904,6 +1156,35 @@ describe('combineStructureResults', () => {
     expect(combined).toMatchObject({ code: 1, errorCount: 3 });
     expect(combined.text).toContain('first');
     expect(combined.text).toContain('second');
+  });
+});
+
+describe('preExisting advisories', () => {
+  const advisory = preExisting({ code: 1, errorCount: 2, text: 'src/bad.ts' }, 'abc1234');
+
+  it('turns a violation into a passing advisory naming the HEAD sha', () => {
+    expect(advisory).toMatchObject({ code: 0, errorCount: 0 });
+    expect(advisory.text).toContain('2 pre-existing structure violation(s) at abc1234');
+    expect(advisory.text).toContain('src/bad.ts');
+    expect(preExisting({ code: 2, errorCount: 0, text: 'x' }, 'abc1234').code).toBe(2);
+  });
+
+  it.each([
+    ['clean', [], 0],
+    ['fail-open', [{ code: 2 as const, errorCount: 0, text: 'leg did NOT run' }], 2],
+    ['violation', [{ code: 1 as const, errorCount: 1, text: 'new.ts' }], 1],
+  ])('survives a %s fold', (_label, others, code) => {
+    const combined = combineStructureResults([...others, advisory]);
+    expect(combined.code).toBe(code);
+    expect(combined.text).toContain('at abc1234');
+  });
+
+  it('survives a declared but uncompiled wall', () => {
+    const wall = { pattern: 'src/**', allowImportsFrom: ['src/**'] };
+    const root = repo({ scanRoots: ['src'], structure: { trees: [], walls: [wall] } });
+    const result = withStructureConfigGaps(root, advisory);
+    expect(result.code).toBe(2);
+    expect(result.text).toContain('at abc1234');
   });
 });
 
