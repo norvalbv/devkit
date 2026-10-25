@@ -15,6 +15,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { parseJsonObject } from '../../gate-engine/config-json.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
 
 // One entry in a migration plan: a devkit file to reconcile, plus the write() that applies it.
@@ -62,7 +63,10 @@ function guardConfigChange(cwd: string, stack: string): MigrationChange | null {
   );
   if (!existsSync(dest) || !tpl) return null;
   // guard.config.json is external data: a JSON object of arbitrary top-level keys.
-  const have: Record<string, unknown> = JSON.parse(readFileSync(dest, 'utf8'));
+  const have = parseJsonObject<Record<string, unknown>>(
+    readFileSync(dest, 'utf8'),
+    'guard.config.json',
+  );
   const missing = Object.keys(tpl).filter((k) => !k.startsWith('//') && !(k in have));
   if (!missing.length) return null;
   return {

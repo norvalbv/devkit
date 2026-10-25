@@ -134,6 +134,14 @@ describe('line-growth block enabler', () => {
     expect(setMaxLines(root)).toBe(false);
   });
 
+  it('setMaxLines leaves a duplicate-key guard.config.json untouched instead of erasing a block', () => {
+    const root = makeRoot();
+    const dup = '{\n  "extraGates": { "a": "x" },\n  "extraGates": { "b": "y" }\n}\n';
+    writeFileSync(join(root, 'guard.config.json'), dup);
+    expect(setMaxLines(root)).toBe(false);
+    expect(readFileSync(join(root, 'guard.config.json'), 'utf8')).toBe(dup);
+  });
+
   it('enableLineGrowth skips gracefully on a malformed guard.config.json (no crash, not enabled)', () => {
     const root = makeRoot();
     writeFileSync(join(root, 'guard.config.json'), '{ broken');

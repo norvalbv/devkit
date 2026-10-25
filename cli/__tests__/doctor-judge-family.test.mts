@@ -195,6 +195,19 @@ describe('bindClaudeFamily', () => {
     expect(readFileSync(join(repo, 'guard.config.json'), 'utf8')).toBe(before);
   });
 
+  it('a key declared twice refuses the bind, so the rewrite cannot erase the first block', () => {
+    const repo = repoWith(TEMPLATE_CONFIG);
+    const file = join(repo, 'guard.config.json');
+    const dup = readFileSync(file, 'utf8').replace(
+      /^\{/,
+      '{\n  "extraGates": { "a": "x" },\n  "extraGates": { "b": "y" },',
+    );
+    writeFileSync(file, dup);
+    process.env.PATH = binDir('claude');
+    expect(bindClaudeFamily(repo)).toBe(false);
+    expect(readFileSync(file, 'utf8')).toBe(dup);
+  });
+
   it('an existing //judgeFamily key — even an operator note — blocks the bind', () => {
     const repo = repoWith({
       ...TEMPLATE_CONFIG,

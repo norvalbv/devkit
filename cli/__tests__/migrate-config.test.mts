@@ -67,6 +67,16 @@ describe('computeMigration (react-app: 0.12-era snapshot → current model)', ()
     write(root, 'guard.config.json', tpl);
     expect(computeMigration(root, 'react-app')).toEqual([]);
   });
+
+  it('refuses a guard.config that declares a key twice instead of rewriting away the first', () => {
+    const root = tmpRepo();
+    const dup = '{\n  "extraGates": { "a": "x" },\n  "extraGates": { "b": "y" }\n}\n';
+    write(root, 'guard.config.json', dup);
+    expect(() => computeMigration(root, 'react-app')).toThrow(
+      /declares "extraGates" twice \(lines 2 and 3\)/,
+    );
+    expect(readFileSync(join(root, 'guard.config.json'), 'utf8')).toBe(dup);
+  });
 });
 
 // The electron eslint.config is regenerated wholesale on migrate, but WHICH backends it
