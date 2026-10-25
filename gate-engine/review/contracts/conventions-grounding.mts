@@ -91,6 +91,8 @@ interface FileChange {
   /** Runs of consecutive removed lines, so a quote the judge wrapped across lines still matches. */
   removedRuns: string[][];
   grew: boolean;
+  /** No HEAD blob at this path. A rename destination reads its source as HEAD, so it is not new. */
+  isNew: boolean;
 }
 
 /** A judge may wrap one statement across lines; its parser joins them with a space. */
@@ -120,6 +122,7 @@ function fileChange(source: GroundingSource, file: string): FileChange {
     removedRuns,
     // A new file is wholly this change's; otherwise only growth makes existing lines this change's.
     grew: staged !== null && (head === null || countLines(staged) > countLines(head)),
+    isNew: staged !== null && head === null,
   };
 }
 
@@ -164,9 +167,19 @@ function inStagedWindow(cited: number, quote: string, change: FileChange): boole
   return false;
 }
 
-function isGrounded(finding: ConventionFinding, forms: QuoteForms, change: FileChange): boolean {
-  const staged = (quote: string | null) =>
-    quote !== null && inStagedWindow(finding.offendingLine, quote, change);
+function isGrounded(
+  finding: ConventionFinding,
+  forms: QuoteForms,
+  change: FileChange,
+  path: string,
+): boolean {
+  const line = finding.offendingLine;
+  // A whole-file citation quotes the file's own name, and only a file this change adds can break it.
+  if (line === null) {
+    const quote = normalizeCitedPath(forms.plain);
+    return change.isNew && (quote === path || quote === path.split('/').at(-1));
+  }
+  const staged = (quote: string | null) => quote !== null && inStagedWindow(line, quote, change);
   const removed = (quote: string | null) => quote !== null && inRemoved(quote, change);
   return (
     staged(forms.plain) ||
@@ -232,7 +245,8 @@ export function groundConventionFindings(
       changes.set(path, change);
     }
     // Canonical path out, so every spelling of one citation shares one lens (and one waiver).
-    if (isGrounded(finding, forms, change)) grounded.push({ ...finding, offendingPath: path });
+    if (isGrounded(finding, forms, change, path))
+      grounded.push({ ...finding, offendingPath: path });
   }
   return grounded;
 }
