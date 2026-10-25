@@ -117,6 +117,7 @@ export const HOOK_GENERATOR_FILES = [
     '.husky/pre-commit',
     '.devkit/config.json',
     'package.json',
+    'cli/lib/atomic-write.mts',
     'cli/lib/components.mts',
     'cli/lib/fs-helpers.mts',
     'cli/lib/install/agent-assets/agent-providers.mts',

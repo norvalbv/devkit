@@ -2,6 +2,7 @@
  * change, and its VIOLATION quotes a rule from a CLAUDE.md that governs that file. */
 import { execFileSync } from 'node:child_process';
 import { parsePatchHunks } from '../../comment-firewall/patch.mjs';
+import { nameStatusRecords, renamesFrom } from '../../ratchets/git-index.mjs';
 import { countLines } from '../../ratchets/size-line-authority.mjs';
 import { ancestorDirs } from '../claude-md.mjs';
 import { conventionRuleFile, dedupeConventionFindings, normalizeCitedPath, parseConventionFindingCandidates, } from '../evidence/conventions.mjs';
@@ -200,19 +201,8 @@ function git(cwd, args) {
 }
 /** Rename sources (new path → base path) between two trees, so a moved file keeps its old self. */
 function renamesBetween(cwd, base, tree) {
-    const renames = new Map();
-    const fields = safe(() => git(cwd, ['diff', '-M', '--name-status', '-z', '--no-color', base, tree]), '').split('\0');
-    for (let index = 0; index < fields.length; index += 1) {
-        const status = fields[index];
-        if (/^[RC]\d*$/.test(status)) {
-            if (status.startsWith('R') && fields[index + 1] && fields[index + 2])
-                renames.set(fields[index + 2], fields[index + 1]);
-            index += 2;
-        }
-        else if (status)
-            index += 1;
-    }
-    return renames;
+    const raw = safe(() => git(cwd, ['diff', '-M', '--name-status', '-z', '--no-color', base, tree]), '');
+    return renamesFrom(nameStatusRecords(raw));
 }
 function memo(read) {
     const cache = new Map();
@@ -244,7 +234,7 @@ export function stagedGroundingSource(cwd, files, pinnedTree) {
         return UNREADABLE;
     const base = head.startsWith('unborn:') ? EMPTY_TREE : head;
     let renames = null;
-    const renameSource = (file) => (renames ??= renamesBetween(cwd, base, tree)).get(file);
+    const renameSource = (file) => (renames ??= renamesBetween(cwd, base, tree)).get(file)?.from;
     const blob = (rev, file) => safe(() => git(cwd, ['cat-file', 'blob', `${rev}:${file}`]), null);
     const literal = (file) => `:(top,literal)${file}`;
     return {

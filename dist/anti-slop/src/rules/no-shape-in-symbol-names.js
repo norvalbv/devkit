@@ -3,6 +3,13 @@ const FORBIDDEN_SYMBOL_NAME = "shape";
 function containsForbiddenSymbolName(name) {
     return name.toLowerCase().includes(FORBIDDEN_SYMBOL_NAME);
 }
+/** Return whether an identifier names a statically accessed member owned by another value. */
+function isBorrowedMemberName(node) {
+    const parent = node.parent;
+    if (parent === null || parent.type !== "MemberExpression")
+        return false;
+    return parent.property === node && parent.computed === false;
+}
 /** Ban the case-insensitive substring "shape" in every JavaScript and TypeScript symbol name. */
 export const noForbiddenTermInSymbolNamesRule = defineRule({
     meta: {
@@ -16,7 +23,7 @@ export const noForbiddenTermInSymbolNamesRule = defineRule({
     },
     createOnce(context) {
         const reportForbiddenSymbolName = (node) => {
-            if (!containsForbiddenSymbolName(node.name))
+            if (!containsForbiddenSymbolName(node.name) || isBorrowedMemberName(node))
                 return;
             context.report({
                 node,

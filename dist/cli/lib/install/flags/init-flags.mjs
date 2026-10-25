@@ -95,7 +95,7 @@ export function parseFlags(args) {
 }
 export function selectionFromFlags(flags, recorded) {
     const sel = recorded ? normalizeSelection(recorded) : defaultSelection();
-    for (const id of ['biome', 'tsconfig', 'skills', 'agents', 'husky', 'structure']) {
+    for (const id of ['tsconfig', 'skills', 'agents', 'husky', 'structure']) {
         if (flags.no.has(id))
             sel[id] = false;
     }
@@ -168,9 +168,6 @@ export function resolveFlagSelection(cwd, args, flags) {
             'skills',
             'agents',
         ]);
-    }
-    if (recorded?.overlay && recordedComponents && recordedComponents.biome === undefined) {
-        recordedComponents.biome = existsSync(join(cwd, 'biome.devkit.jsonc'));
     }
     if (flags.stack &&
         recorded?.stack &&

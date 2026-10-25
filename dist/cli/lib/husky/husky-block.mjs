@@ -13,7 +13,7 @@ import { GUARD_FRAGMENTS } from './ai-guard-fragments.mjs';
 import { BIN_DIRS, DK_DETERMINISTIC_GATE_HELPER, gateBlockPrelude, REVIEW_FAILURE_FINALIZER, shipRehearsalHint, } from './gate-policy/block-helpers.mjs';
 import { buildPreCommitExit, PRE_COMMIT_PASS_EXIT } from './gate-policy/commit-gate-log.mjs';
 import { FALLOW_STAGED, FALLOW_STAGED_BLOCK, indent } from './gate-policy/fallow-staged.mjs';
-import { formatFragment, overlayFormatters } from './format-fragment.mjs';
+import { CONSUMER_FORMATTER, formatFragment, OXFMT_STEP, } from './format-fragment.mjs';
 import { markEnd, markStart } from './husky.mjs';
 import { DK_COMMIT_INDEX_CAPTURE, selectedFragment } from './review-fragments.mjs';
 import { sentryShipPrewarmFragment } from './sentry-fragments.mjs';
@@ -77,11 +77,11 @@ export function wantsDeterministic(selection) {
 }
 /** The ONE gate body for every install mode: format (the prefix-cache key hashes the post-format
  *  index) → deterministic → preAi → AI guards → postGuards. */
-export function buildGuardBlock(selection, pkgRel = '', { binDir = 'package', preAi, postGuards, formatChain } = {}) {
+export function buildGuardBlock(selection, pkgRel = '', { binDir = 'package', preAi, postGuards, formatChain = [CONSUMER_FORMATTER] } = {}) {
     const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
     const pieces = [buildPreCommitExit(handoff), ...gateBlockPrelude(BIN_DIRS[binDir].open)];
     // First so a first-gate block still records the run's terminal (the trap covers every exit path).
-    if (!pkgRel && (selection.biome || formatChain))
+    if (!pkgRel)
         pieces.push(formatFragment(BIN_DIRS[binDir].formatter, formatChain));
     if (wantsDeterministic(selection))
         pieces.push(DK_DETERMINISTIC_GATE_HELPER, deterministicFragment(selection.structureCmd, selection.extras));
@@ -118,19 +118,20 @@ export function wrapGuardBlock(body, pkgRel, prelude, gap) {
 export function buildFullHook(selection, pkgRel = '', binDir = 'package') {
     return `${HOOK_PREAMBLE}\n${buildGuardBlock(selection, pkgRel, { binDir })}\n\nexit 0\n`;
 }
-// The eslint/biome overlay steps — run the LOCAL devkit configs (which extend the repo's) over
+// The eslint overlay step — run the LOCAL devkit configs (which extend the repo's) over
 // STAGED files only (so new changes are checked without flooding on the team's existing code,
 // which can't be grandfathered invisibly). Each fires when its local config is present; the binary
 // is the repo's own, so its absence is a visible skip line, never a silent one.
 // `--relative` makes `git diff` emit paths relative to the CURRENT dir, so this works whether
-// the hook runs at the repo root or cd'd into a monorepo package (eslint/biome + their configs
+// the hook runs at the repo root or cd'd into a monorepo package (eslint + its configs
 // are then resolved package-locally). `-M100%` lists an edited rename as an add at its new path;
 // an exact move stays `R` and is skipped, so a pure `git mv` never blocks on debt it did not add.
-const overlayLintStep = (tool, label, exts, config, run, failHint = '') => `DK_STAGED=$(git diff --cached --name-only --relative -M100% --diff-filter=ACM | grep -E '\\.(${exts})$' || true)
-if [ -n "$DK_STAGED" ] && [ -f ${config} ]; then
+// Paths stay NUL-delimited from git to the tool, so `café.ts` and `a b.ts` arrive as one argument.
+const STAGED_Z = 'git diff --cached --name-only -z --relative -M100% --diff-filter=ACM';
+const overlayLintStep = (tool, label, exts, config, run, failHint = '') => `if [ -f ${config} ] && ${STAGED_Z} | grep -zqE '\\.(${exts})$'; then
     if [ -x node_modules/.bin/${tool} ]; then
         echo "${label}"
-        echo "$DK_STAGED" | xargs ${run} || {
+        ${STAGED_Z} | grep -zE '\\.(${exts})$' | xargs -0 -r ${run} || {
 ${failHint}${shipRehearsalHint('            ')}
             __dk_block_deterministic ${tool}-overlay
         }
@@ -144,7 +145,6 @@ const OVERLAY_ESLINT_STAGED = overlayLintStep('eslint', '🧱 devkit eslint over
                 echo "   ${ESLINT_OVERLAY_FILE} derives from an outdated devkit template — run \\\`devkit doctor\\\` for the fix" >&2
             fi
 `);
-const OVERLAY_BIOME = overlayLintStep('biome', '🎨 devkit biome overlay (staged)...', 'tsx?|jsx?|css|jsonc?', 'biome.devkit.jsonc', 'node_modules/.bin/biome check --config-path biome.devkit.jsonc');
 // Shell twin of eslintNodeFlags: keep a linked node_modules' path so a plugin roots at this worktree.
 // Never for an isolated store (eslint itself linked): the flag breaks its dependency resolution.
 const ESLINT_PRESERVE_SYMLINKS = `DK_ESLINT=node_modules/.bin/eslint
@@ -155,18 +155,18 @@ const ESLINT_PRESERVE_SYMLINKS = `DK_ESLINT=node_modules/.bin/eslint
 const overlayStagedGates = (fallow) => `# devkit lint overlay — STAGED files only, against configs that EXTEND the repo's (git-ignored).
 if [ "\${DEVKIT_RUN_MODE:-}" != "review" ]; then
 ${indent(ESLINT_PRESERVE_SYMLINKS)}
-${indent(OVERLAY_ESLINT_STAGED)}
-${indent(OVERLAY_BIOME)}${fallow ? `\n    # devkit fallow gate (overlay)\n${indent(FALLOW_STAGED)}` : ''}
+${indent(OVERLAY_ESLINT_STAGED)}${fallow ? `\n    # devkit fallow gate (overlay)\n${indent(FALLOW_STAGED)}` : ''}
 fi`;
 /** Under the global husky shim (cli/lib/overlay-global-hook.mts) an overlay hook stops before its
  * chain: husky's _/h runs the repo's own hook itself, so chaining would run it twice. */
 export const GATES_ONLY_STOP = '[ -n "${DEVKIT_VIA_HUSKY_INIT:-}" ] && exit 0';
+/** Every pass-through carries this line; the overlay sync uses it to tell devkit's wrappers apart. */
+export const PASSTHROUGH_MARKER = '# devkit overlay pass-through';
 // Review is diagnostic: its merge-base baselines exit on a finding, so they stay AFTER the guards
 // and a lint finding never hides the reviewer's report.
 const overlayReviewBaseline = (fallow) => `# devkit lint overlay — review mode, merge-base baselines.
 if [ "\${DEVKIT_RUN_MODE:-}" = "review" ]; then
-    __dk_review_baseline_gate eslint || exit 1
-${indent(OVERLAY_BIOME)}${fallow ? '\n    __dk_review_baseline_gate fallow || exit 1' : ''}
+    __dk_review_baseline_gate eslint || exit 1${fallow ? '\n    __dk_review_baseline_gate fallow || exit 1' : ''}
 fi`;
 /**
  * Build the OVERLAY hook — a complete, self-contained file devkit fully owns (written to a
@@ -182,7 +182,7 @@ export function buildOverlayHook(selection, chainTarget = '.husky/pre-commit', p
         binDir: 'global',
         preAi: overlayStagedGates(fallow),
         postGuards: overlayReviewBaseline(fallow),
-        formatChain: overlayFormatters(selection),
+        formatChain: [OXFMT_STEP],
     });
     return `${HOOK_PREAMBLE}
 # devkit OVERLAY (LOCAL, git-ignored). Runs devkit's gates + lint overlay on this commit, then
@@ -232,7 +232,7 @@ export function chainWord(target) {
  */
 export function buildPassthroughHook(chainScript, gitRuns = false) {
     return `${HOOK_PREAMBLE}
-# devkit overlay pass-through — git now runs this dir, so we forward to the repo's own hook
+${PASSTHROUGH_MARKER} — git now runs this dir, so we forward to the repo's own hook
 # unchanged (devkit adds nothing to it).
 ${GATES_ONLY_STOP}
 ${chainExec(chainScript, gitRuns)}
@@ -255,7 +255,7 @@ export function extractGuardBlock(hookContent, pkgRel = '') {
  * Remove a single per-id fragment (`# devkit:<id>` … `# /devkit:<id>`) from a hook,
  * trimming the blank line that joined it. Returns { content, removed }.
  *
- * `id` is one of GUARD_FRAGMENTS keys or 'biome-format'.
+ * `id` is one of GUARD_FRAGMENTS keys.
  */
 export function removeFragment(hookContent, id) {
     const open = `# devkit:${id}`;

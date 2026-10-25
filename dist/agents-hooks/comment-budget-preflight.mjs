@@ -23,6 +23,21 @@ function real(target) {
   }
 }
 
+/** `git rev-parse` output lines for `dir`, or [] when it is not inside a git work tree. */
+function revParse(dir, ...args) {
+  const run = spawnSync('git', ['-C', dir, 'rev-parse', ...args], { encoding: 'utf8' });
+  return run.status === 0 ? run.stdout.split('\n') : [];
+}
+
+/** The project's directory inside the worktree holding `file`, when that is one of its repository's worktrees. */
+function workspaceRoot(file, project) {
+  const at = ['--path-format=absolute', '--show-toplevel', '--git-common-dir'];
+  const [top, common] = revParse(path.dirname(file), ...at);
+  const [projectTop, projectCommon] = revParse(project, ...at);
+  if (!common || common !== projectCommon) return project;
+  return real(path.join(top, path.relative(real(projectTop), project)));
+}
+
 function readInput() {
   try {
     return JSON.parse(readFileSync(0, 'utf8'));
@@ -84,13 +99,14 @@ function main() {
   if (!input || !MUTATING_TOOLS.has(input.tool_name)) return;
   const raw = String(input.tool_input?.file_path ?? '');
   if (!CHECKED_EXTENSIONS.has(path.extname(raw).toLowerCase())) return;
-  const root = real(process.env.CLAUDE_PROJECT_DIR || process.cwd());
-  const file = real(path.resolve(root, raw));
+  const project = real(process.env.CLAUDE_PROJECT_DIR || process.cwd());
+  const file = real(path.resolve(project, raw));
+  const root = workspaceRoot(file, project);
   const rel = path.relative(root, file);
   if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return;
 
   const cwd = packageDirOf(file, root);
-  const bin = resolveBin([cwd, root]);
+  const bin = resolveBin([cwd, root, project]);
   const result = bin && check(bin, cwd, file);
   if (!result) return;
   const unseen = result.items.filter((item) => !existsSync(stampOf(input.session_id, item.key)));

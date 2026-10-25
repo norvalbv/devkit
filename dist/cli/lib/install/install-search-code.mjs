@@ -6,8 +6,9 @@
  * The engine indexes a repo IFF it finds `search-code.config.json` at the root (its opt-in gate),
  * so writing that file is what "enables search-code here" means.
  */
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { withGitignoreLock } from './gitignore-cache.mjs';
 export const SEARCH_CODE_CONFIG = 'search-code.config.json';
 const INDEX_LINE = '.search-code/';
 const INDEX_PATH = '.search-code/index.db';
@@ -26,15 +27,22 @@ const STARTER = `{
 `;
 const INDEXPATH_VALUE_RE = /("indexPath"\s*:\s*)(?:null|"[^"]*")/;
 const OPEN_BRACE_RE = /^(\s*\{\s*\n)/;
+// Append, never rewrite: an edit landing after the read survives, and the lock keeps devkit's own
+// whole-file .gitignore rewriters (cache ensure, prune, repair) from overwriting the append.
 function ensureGitignoreLine(cwd, line, dryRun) {
+    if (dryRun)
+        appendMissingLine(cwd, line, true);
+    else
+        withGitignoreLock(cwd, () => appendMissingLine(cwd, line, false));
+}
+function appendMissingLine(cwd, line, dryRun) {
     const p = join(cwd, '.gitignore');
     const existing = existsSync(p) ? readFileSync(p, 'utf8') : '';
     if (existing.split('\n').some((l) => l.trim() === line))
         return;
     const sep = existing && !existing.endsWith('\n') ? '\n' : '';
-    const next = `${existing}${sep}${line}\n`;
     if (!dryRun)
-        writeFileSync(p, next);
+        appendFileSync(p, `${sep}${line}\n`);
     console.log(`  ${dryRun ? '[dry-run] ensure' : '✓ ensured'} ${line} in .gitignore`);
 }
 // Point guard-dup's matcher at the index via guard.config.json `indexPath` (null = opted out). The

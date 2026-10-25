@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { writeFileAtomic } from './atomic-write.mjs';
 import { currentTarget, hasTargetFields, parseDecision, parseIndex, parseTargetFields, renderDecision, renderIndex, renderNote, renderTarget, foldLines, sanitizeCell, today, warnIfFolded, whyHook, } from './decision-format.mjs';
-import { noteTextWithRelation } from './recall/note-relations.mjs';
+import { noteTextWithRelation, validateTargetSupersedes } from './recall/note-relations.mjs';
 import { effectiveScope } from './recall/retrieval.mjs';
 const TRAILING_WS_RE = /\s*$/;
 const TIMELINE_ENTRY_RE = /^(?:## Target · \d{4}-\d{2}-\d{2}\b.*|- \d{4}-\d{2}-\d{2}\s+—\s+.*)$/gm;
@@ -250,6 +250,7 @@ export function amendDecision(slug, options, paths) {
             'and replacing the Target would drop it');
     }
     const gap = trailing.length ? span.slice(span.replace(TRAILING_WS_RE, '').length) : '\n';
+    validateTargetSupersedes(options.supersedes, before, slug);
     const body = `${before}\n\n${renderTarget(date, options)}${gap}${source.slice(end)}`;
     writeFileAtomic(file, renderDecision({ slug, created: workingParsed.fm.created || date }, body));
     regenerateIndex(paths);

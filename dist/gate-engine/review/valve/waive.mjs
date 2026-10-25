@@ -172,7 +172,7 @@ export function runWaive(rest, cwd = process.cwd(), resolveAuthor = resolveWaive
             `${kind ? ` (got "${stripVTControlCharacters(kind)}")` : ''}:\n${KIND_HELP}`);
     if (badRationale || !waiverKind)
         return 2;
-    // The lock is try-once (a held lock throws, not queues), so no telemetry I/O may run inside it —
+    // Other writers wait on this lock (5 s at most), so no telemetry I/O may run inside it —
     // the closure only decides and stamps. Telemetry counts DECISIONS: an identical re-run returns
     // null and adds no second ledger row. Append order across concurrent waives is unordered by
     // design; recorded_at (the store entry's own timestamp) is the authoritative decision time, and

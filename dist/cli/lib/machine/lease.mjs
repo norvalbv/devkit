@@ -15,7 +15,8 @@ const DEFAULT_SLOTS = 3;
 const MAX_SLOTS = 8;
 /** A lease no `devkit machine` command has touched for this long is reaped by the next `up`. */
 export const IDLE_MS = 30 * 60 * 1000;
-const leaseSchema = z.strictObject({
+// Loose, so a lease rewritten here keeps the keys another devkit version on this Mac wrote.
+const leaseSchema = z.looseObject({
     id: z.string().min(1),
     slot: z.number().int().nonnegative(),
     worktree: z.string().min(1),
@@ -23,7 +24,17 @@ const leaseSchema = z.strictObject({
     pgid: z.number().int().positive().nullable(),
     identity: z.string().nullable(),
     seeded: z.boolean(),
-    starter: z.strictObject({ pid: z.number().int().positive(), identity: z.string() }).nullable(),
+    starter: z.looseObject({ pid: z.number().int().positive(), identity: z.string() }).nullable(),
+    /** Full mode's container and the host ports of its live view and DevTools. */
+    box: z
+        .looseObject({
+        name: z.string().min(1),
+        view: z.number().int(),
+        cdp: z.number().int(),
+        password: z.string(),
+    })
+        .nullable()
+        .default(null),
     touchedAt: z.number(),
 });
 const configSchema = z.object({ slots: z.number().int().min(1).max(MAX_SLOTS) });
@@ -69,10 +80,10 @@ export function findLease(root, worktree) {
 }
 // Atomic, because status, run and down read holder files without the lock.
 const writeLease = (root, lease) => writeFileAtomic(holderFile(root, lease.slot), `${JSON.stringify(lease, null, 2)}\n`);
-/** Stop a lease's process group (by the caller's `kill`) and delete its slot directory. */
+/** Stop a lease's processes (by the caller's `kill`) and delete its slot directory. */
 function reap(root, slot, lease, kill) {
-    if (lease?.pgid)
-        kill(lease.pgid, lease.identity);
+    if (lease)
+        kill(lease);
     rmSync(slotDir(root, slot), { recursive: true, force: true });
 }
 /** The live leases left once abandoned ones (worktree gone, unreadable, idle past IDLE_MS) are
@@ -113,7 +124,7 @@ export function acquireLease(worktree, { root, kill, now = Date.now() }) {
         const slot = lowestFree(live);
         mkdirSync(slotDir(root, slot), { recursive: true });
         const port = PORT_BASE + slot * PORTS_PER_SLOT;
-        const blank = { pgid: null, identity: null, seeded: false, starter: null };
+        const blank = { pgid: null, identity: null, seeded: false, starter: null, box: null };
         const lease = { id: randomUUID(), slot, worktree, port, ...blank, touchedAt: now };
         writeLease(root, lease);
         return { lease, fresh: true };
@@ -135,18 +146,20 @@ export function updateLease(root, ref, patch) {
         return next;
     });
 }
-/** Under the lock, claim the right to start this slot's app. A starter that died is taken over. */
+/** Under the lock, claim the right to start this slot's app and box. A starter that died is taken
+ * over. */
 export function claimStart(root, ref, running) {
     return withSlotsLock(root, () => {
         const lease = readOwn(root, ref);
         if (!lease)
             return 'released';
-        if (lease.pgid && running(lease.pgid, lease.identity))
-            return 'running';
+        // A live starter comes first: what it is starting may already look up while it is not ready.
         const { starter } = lease;
         if (starter &&
             !processOwnerIsProvablyGone({ pid: starter.pid, processStart: starter.identity }))
             return 'busy';
+        if (running(lease))
+            return 'running';
         const me = { pid: process.pid, identity: processStartIdentity() };
         writeLease(root, { ...lease, starter: me, touchedAt: Date.now() });
         return 'claimed';

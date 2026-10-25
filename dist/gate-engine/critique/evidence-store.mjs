@@ -1,5 +1,6 @@
 import { assertPlanCritiquePayloadRefs, canonicalPlanCritiqueRecordJson, derivePlanCritiqueId, PLAN_CRITIQUE_EXACT_RESPONSE_MAX_BYTES, PLAN_CRITIQUE_INELIGIBLE_REASONS, PLAN_CRITIQUE_PROJECTION_MAX_BYTES, PLAN_CRITIQUE_PROVIDERS, PLAN_CRITIQUE_STATUSES, PLAN_CRITIQUE_TRANSCRIPT_MAX_BYTES, PLAN_CRITIQUE_VERDICTS, assertPlanCritiqueRecordValue as requireValue, sha256Bytes, snapshotPlanCritiquePayloads, } from './evidence-record.mjs';
 import { hasDurableRecordBlobs, persistPlanCritiqueRecordAtRoot, readStoredBlob, validatePersistedParent, } from './evidence-store-internal.mjs';
+import { isRecord } from '../eval/schema.mjs';
 import { listPrivateFiles, managedPath, readPrivateFile } from './immutable-file.mjs';
 import { resolvePlanCritiqueEvidenceRoot, withPlanCritiquePersistenceLock, } from './persistence-lock.mjs';
 export { derivePlanCritiqueId, PLAN_CRITIQUE_EXACT_RESPONSE_MAX_BYTES, PLAN_CRITIQUE_PROJECTION_MAX_BYTES, } from './evidence-record.mjs';
@@ -10,9 +11,8 @@ const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const RECORD_FILE = /^pc1_[0-9a-f]{64}\.json$/;
 const MAX_METADATA_BYTES = 4 * 1024;
 const MAX_CRITICAL_FINDINGS = 50;
-const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 function exactObject(value, fields, at, optionalFields = []) {
-    requireValue(isObject(value), at);
+    requireValue(isRecord(value), at);
     const object = value;
     const prototype = Object.getPrototypeOf(object);
     requireValue(prototype === Object.prototype || prototype === null, at);
@@ -67,8 +67,8 @@ function nonnegativeInteger(value, at, max = Number.MAX_SAFE_INTEGER) {
         Number(value) <= max, at);
     return value;
 }
-function validateRef(value, at, maxBytes = PLAN_CRITIQUE_TRANSCRIPT_MAX_BYTES) {
-    const ref = exactObject(value, ['sha256', 'byteLength', 'ref'], at);
+function validateRef(value, at, maxBytes = PLAN_CRITIQUE_TRANSCRIPT_MAX_BYTES, extraFields = []) {
+    const ref = exactObject(value, ['sha256', 'byteLength', 'ref', ...extraFields], at);
     const hash = sha256(ref.sha256, `${at}.sha256`);
     nonnegativeInteger(ref.byteLength, `${at}.byteLength`, maxBytes);
     requireValue(ref.ref === `blobs/sha256/${hash}`, `${at}.ref`);
@@ -183,13 +183,15 @@ function validateEvidenceRefs(root, capturedAt) {
     validateRef(root.exactResponse, '$.exactResponse', PLAN_CRITIQUE_EXACT_RESPONSE_MAX_BYTES);
     if (root.sanitizedProjection !== null) {
         const projection = exactObject(root.sanitizedProjection, ['sha256', 'byteLength', 'ref', 'projectionSchemaVersion'], '$.sanitizedProjection');
-        validateRef({ sha256: projection.sha256, byteLength: projection.byteLength, ref: projection.ref }, '$.sanitizedProjection', PLAN_CRITIQUE_PROJECTION_MAX_BYTES);
+        validateRef(root.sanitizedProjection, '$.sanitizedProjection', PLAN_CRITIQUE_PROJECTION_MAX_BYTES, ['projectionSchemaVersion']);
         requireValue(projection.projectionSchemaVersion === 1, '$.sanitizedProjection.projectionSchemaVersion');
     }
     if (root.opaqueTranscript === null)
         return;
     const transcript = exactObject(root.opaqueTranscript, ['sha256', 'byteLength', 'ref', 'expiresAt'], '$.opaqueTranscript');
-    validateRef({ sha256: transcript.sha256, byteLength: transcript.byteLength, ref: transcript.ref }, '$.opaqueTranscript', PLAN_CRITIQUE_TRANSCRIPT_MAX_BYTES);
+    validateRef(root.opaqueTranscript, '$.opaqueTranscript', PLAN_CRITIQUE_TRANSCRIPT_MAX_BYTES, [
+        'expiresAt',
+    ]);
     const expiresAt = timestamp(transcript.expiresAt, '$.opaqueTranscript.expiresAt');
     requireValue(Date.parse(expiresAt) > Date.parse(capturedAt), '$.opaqueTranscript.expiresAt');
 }

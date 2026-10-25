@@ -1,5 +1,4 @@
 import { execFileSync } from 'node:child_process';
-import { CONSUMER_FORMATTER } from '../lib/husky/format-fragment.mjs';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { confirm, isCancel, outro } from '@clack/prompts';
@@ -27,7 +26,7 @@ import { lockedCommand } from '../lib/install/init/init-lock.mjs';
 import { applyScanRoots } from '../lib/install/init/scan-roots.mjs';
 import { reviewPlanFromFlags } from '../lib/install/flags/review-profile.mjs';
 import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mjs';
-import { ensureFallowGitignore, installFallow } from '../lib/install/install-fallow.mjs';
+import { installFallow } from '../lib/install/install-fallow.mjs';
 import { installSearchCode } from '../lib/install/install-search-code.mjs';
 import * as oxcLifecycle from '../lib/install/oxc/lifecycle.mjs';
 import { patchPackageJson } from '../lib/install/package-json.mjs';
@@ -61,8 +60,6 @@ const STRUCTURE_TEMPLATE_FILES = {
         ['_shared/exempt.mjs', STRUCTURE_EXEMPT],
     ],
 };
-const BIOME_DEV_DEPS = [CONSUMER_FORMATTER.package.name];
-const BIOME_SCRIPTS = Object.keys(CONSUMER_FORMATTER.scripts);
 // Which components are currently wired? Read the recorded set first (authoritative), then
 // fall back to on-disk detection for a pre-wizard repo with no `components` block.
 export function detectInstalled(cwd) {
@@ -82,8 +79,6 @@ export function detectInstalled(cwd) {
     }
     // Per-package configs live in cwd; the hook + skills are at the git root (monorepo) or cwd
     // (single-package, where gitRoot === cwd).
-    if (existsSync(join(cwd, 'biome.jsonc')))
-        installed.add('biome');
     if (existsSync(join(cwd, 'tsconfig.json')))
         installed.add('tsconfig');
     if (existsSync(join(cwd, 'eslint.config.mjs')))
@@ -126,8 +121,6 @@ function logWrite(action, label) {
 function installConfigs(cwd, sel, force, dryRun) {
     const tplDir = join(packageDir(), 'templates', 'generic');
     const items = [];
-    if (sel.biome)
-        items.push(['biome.jsonc', 'biome.jsonc']);
     if (sel.tsconfig)
         items.push(['tsconfig.json', 'tsconfig.json']);
     // guard.config.json is needed whenever ANY gate runs (guards or structure).
@@ -146,10 +139,8 @@ function installConfigs(cwd, sel, force, dryRun) {
 function installStructureFiles(cwd, stack, sel, plan) {
     const { force, dryRun } = plan;
     const tplDir = join(packageDir(), 'templates', stack);
-    // Structure-stack biome.jsonc / tsconfig.json supersede the generic ones (stack rules).
+    // A structure stack's tsconfig.json supersedes the generic one (stack rules).
     const items = [...STRUCTURE_TEMPLATE_FILES[stack]];
-    if (sel.biome)
-        items.push(['biome.jsonc', 'biome.jsonc']);
     if (sel.tsconfig)
         items.push(['tsconfig.json', 'tsconfig.json']);
     items.push(['guard.config.json', 'guard.config.json']);
@@ -276,14 +267,12 @@ function runFallowInit(cwd, dryRun) {
         return `! fallow init skipped: ${firstLine(e)}`;
     }
 }
-// Reason: flat fail-open steps (install → gitignore → optional init → gate line), no nesting
+// Reason: flat fail-open steps (install → optional init → gate line), no nesting
 // fallow-ignore-next-line complexity
 async function applyFallow(cwd, dryRun, interactive, gateLine) {
     // The gate is the staged audit in devkit's hook block (step 3); fallow's installer is never run.
     const r = installFallow({ cwd, dryRun });
     console.log(`  ${r.ok ? '✓' : '!'} ${r.message}`);
-    ensureFallowGitignore({ cwd, dryRun });
-    console.log(`  ${dryRun ? '[dry-run] ensure' : '✓ ensured'} .fallow/ in .gitignore`);
     const doInit = await subConfirm('Run `fallow init`? (optional — fallow is zero-config)', {
         interactive,
         fallback: false,
@@ -318,19 +307,6 @@ function removeFromPkg(cwd, devDeps, scripts, dryRun) {
     if (removed.length && !dryRun)
         writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
     return removed;
-}
-function removeBiome(cwd, dryRun) {
-    const file = join(cwd, 'biome.jsonc');
-    if (existsSync(file)) {
-        console.log(`  ${dryRun ? '[dry-run] delete' : '✓ deleted'} biome.jsonc`);
-        if (!dryRun)
-            rmSync(file);
-    }
-    const pkgRemoved = removeFromPkg(cwd, BIOME_DEV_DEPS, BIOME_SCRIPTS, dryRun);
-    if (pkgRemoved.length)
-        console.log(`  ${dryRun ? '[dry-run]' : '✓'} package.json: -${pkgRemoved.join(', -')}`);
-    // The format step is the biome component's, so removing biome removes it — the consumer's opt-out.
-    removeHuskyPiece(cwd, '', 'biome-format', dryRun);
 }
 // Remove ONLY the devkit `extends` from tsconfig — never delete a tsconfig with user content.
 // Reason: the branches ARE the safe-strip decision tiers: unparseable → bail, no-devkit-extends → bail, array-extends → filter, scalar-extends → delete; each guard exists to NEVER delete a tsconfig devkit didn't author
@@ -384,7 +360,7 @@ function removeHusky(hookRoot, pkgRel, dryRun) {
     writeFileSync(hookPath, content);
     console.log('  ✓ removed devkit-guards block from .husky/pre-commit');
 }
-// Remove a single fragment (one guard, or the biome step) from THIS package's block. Scoped via
+// Remove a single fragment (one guard) from THIS package's block. Scoped via
 // extract→removeFragment→replace so a shared sentinel in another package's block is untouched.
 function removeHuskyPiece(hookRoot, pkgRel, id, dryRun) {
     const hookPath = join(hookRoot, '.husky', 'pre-commit');
@@ -450,8 +426,6 @@ function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun) {
         for (const g of GUARD_IDS)
             removeHuskyPiece(gitRoot, pkgRel, `guard-${g}`, dryRun);
     }
-    if (remove.includes('biome'))
-        removeBiome(cwd, dryRun);
     if (remove.includes('tsconfig'))
         removeTsconfig(cwd, dryRun);
     if (remove.includes('skills'))
@@ -494,7 +468,6 @@ async function applyOverlay(cwd, plan, pkgRel, devkitRef) {
     // Recorded so clean/doctor are selection-aware; fallow and antiSlop carry the ACTUAL outcome, so
     // an aborted install records false and stays in step with the rendered hook.
     const overlayComponents = dropUndecided({
-        biome: Boolean(selection.biome),
         tsconfig: Boolean(selection.tsconfig),
         husky: Boolean(selection.husky),
         guards: [...(selection.guards ?? [])],
@@ -595,7 +568,7 @@ export async function applyInit(cwd, plan) {
     console.log(`  components: ${on.join(', ') || '(none)'}\n`);
     console.log('1. configs');
     if (selfHost) {
-        // biome.jsonc / tsconfig.json / guard.config.json are hand-owned + committed in the devkit
+        // tsconfig.json / guard.config.json are hand-owned + committed in the devkit
         // repo (its tsconfig extends the LOCAL base, not @norvalbv/devkit) — never overwrite them.
         console.log('  • self-host: configs are hand-owned — leaving them untouched');
     }
@@ -679,10 +652,11 @@ export async function applyInit(cwd, plan) {
     // Oxc repository state is core in every tracked install mode. Anti-slop remains the optional
     // policy layer and selects the extended managed base; overlay returned before this apply path.
     // `overlay: false` ASSERTED: the on-disk marker is still stale here (step 9 rewrites it below).
+    const oxcOpts = { dryRun, overlay: false, refreshStarters: true };
     if (selection.antiSlop)
-        antiSlopLifecycle.syncAntiSlopCapability(cwd, { dryRun, overlay: false });
+        antiSlopLifecycle.syncAntiSlopCapability(cwd, oxcOpts);
     else
-        oxcLifecycle.syncOxcCapability(cwd, { dryRun, antiSlop: false, overlay: false });
+        oxcLifecycle.syncOxcCapability(cwd, { ...oxcOpts, antiSlop: false });
     // The vendored i-have-adhd skill, into devkit's own tree rather than the agent skills dirs — so it
     // no longer depends on the `skills` component. Called unconditionally: a false selection reclaims a
     // previously-installed copy, and syncSurfaces above has already reclaimed the `.claude/skills/`
@@ -698,7 +672,6 @@ export async function applyInit(cwd, plan) {
         ? [...selection.guards]
         : selection.guards.filter((guard) => guard === 'decisions');
     const components = {
-        biome: selection.biome,
         tsconfig: selection.tsconfig,
         skills: selection.skills,
         agents: Boolean(selection.agents),
@@ -817,13 +790,12 @@ async function run(args, cwd) {
         disabledGuards = recorded?.components?.disabledGuards;
     }
     else if (interactive) {
-        const installed = detectInstalled(cwd);
         const result = await runWizard({
             detectedStack,
             detectedMode,
             structureAvailable: STRUCTURE_STACKS.has(detectedStack),
-            installed,
-            existingReview: recorded?.review,
+            installed: detectInstalled(cwd),
+            recorded: recorded?.components,
         });
         if (!result)
             return 0; // cancelled — nothing written

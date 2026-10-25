@@ -8,6 +8,8 @@ import { CONFIG_FILENAME } from '../../../gate-engine/config.mjs';
 import { parseJsonObject } from '../../../gate-engine/config-json.mjs';
 import { detectGitRoot } from '../detect-git-root.mjs';
 import { DEFAULT_ARTIFACT, DEFAULT_WORKFLOW, workflowSelector } from './query.mjs';
+/** gate.yml's sharded test job. */
+const DEFAULT_SHARD_JOB = 'tests';
 /**
  * The nearest guard.config.json up to the git root — an agent's shell may sit in a package or
  * subfolder, and reading only `cwd` would silently query the default workflow instead.
@@ -35,8 +37,9 @@ function named(value, fallback) {
  */
 export function configuredSource(cwd) {
     const dir = configDir(cwd);
-    if (dir === null)
-        return { workflow: DEFAULT_WORKFLOW, artifact: DEFAULT_ARTIFACT };
+    if (dir === null) {
+        return { workflow: DEFAULT_WORKFLOW, artifact: DEFAULT_ARTIFACT, shardJob: DEFAULT_SHARD_JOB };
+    }
     const path = join(dir, CONFIG_FILENAME);
     const block = parseJsonObject(readFileSync(path, 'utf8'), `${CONFIG_FILENAME} at ${path}`).baselineStatus;
     // Normalised HERE, like the --workflow flag: a path that names no file is a typo, not a default.
@@ -44,5 +47,9 @@ export function configuredSource(cwd) {
     if (!workflow) {
         throw new Error(`${CONFIG_FILENAME} at ${path}: baselineStatus.workflow names no workflow file`);
     }
-    return { workflow, artifact: named(block?.artifact, DEFAULT_ARTIFACT) };
+    return {
+        workflow,
+        artifact: named(block?.artifact, DEFAULT_ARTIFACT),
+        shardJob: named(block?.shardJob, DEFAULT_SHARD_JOB),
+    };
 }

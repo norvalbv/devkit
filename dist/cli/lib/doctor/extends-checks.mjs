@@ -1,5 +1,5 @@
 /**
- * The `extends`-pointer half of `devkit doctor`: what biome.jsonc / tsconfig.json SHOULD extend for
+ * The `extends`-pointer half of `devkit doctor`: what tsconfig.json SHOULD extend for
  * a given stack and install mode, whether they do, and the one in-place repair `--fix` performs.
  *
  * Split out of doctor.mts, which is at its line budget — the same reason self-host-doctor.mts lives
@@ -25,14 +25,9 @@ function readJsonc(path) {
         return null;
     }
 }
-// Expected extends are shared by check and repair. Package Biome presets mirror templates by stack;
-// standalone uses separately vendored .devkit paths, so keep its stack list aligned with standalone.
-const PKG_REACT_BIOME = new Set(['react-app', 'component-lib']);
+// Expected extends are shared by check and repair; standalone points at its vendored .devkit copy.
 export function expectedExtends(stack, standalone) {
     return {
-        biome: standalone
-            ? `./.devkit/biome/${['electron', 'react-app', 'next', 'component-lib'].includes(stack) ? 'react' : 'base'}.jsonc`
-            : `@norvalbv/devkit/biome/${PKG_REACT_BIOME.has(stack) ? 'react' : 'base'}`,
         tsconfig: standalone
             ? `./.devkit/tsconfig/${stack === 'next' ? 'next' : stack === 'node-service' ? 'node' : 'base'}.json`
             : '@norvalbv/devkit/tsconfig/base',
@@ -70,7 +65,6 @@ export function checkExtends(cwd, file, expected, key = 'extends', overridden = 
 // setIndexPath step that wrote the key originally. The rule is "no bespoke doctor-side edits of a
 // consumer config", not "this file is never written".
 export const EXTENDS_REPAIRABLE = {
-    'biome.jsonc': 'biome',
     'tsconfig.json': 'tsconfig',
 };
 // Replace only the devkit extends token, preserving comments and consumer deltas.

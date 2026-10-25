@@ -18,8 +18,9 @@ ship_resume_brief() {
 
 # ship_resume_extras_notice — EXIT-trap hook reading the caller's BR and RESUME_EXTRA_PATHS. Silent
 # unless the exit is a failure and RESUME_EXTRAS_UNRECORDED is still armed (no record write tried).
+# A caller that has already consumed $? passes the exit status as $1.
 ship_resume_extras_notice() {
-  local rc=$? p n=0 quoted=
+  local rc=${1-$?} p n=0 quoted=
   [ "$rc" -ne 0 ] && [ "${RESUME_EXTRAS_UNRECORDED:-0}" -eq 1 ] || return 0
   RESUME_EXTRAS_UNRECORDED=0
   for p in "${RESUME_EXTRA_PATHS[@]}"; do

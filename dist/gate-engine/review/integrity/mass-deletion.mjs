@@ -1,6 +1,7 @@
 // Review-gate clobbered-index tripwire (sc-3400): blocks a staged set that deletes most of HEAD.
 import { execFileSync } from 'node:child_process';
 import { commitIndexEnv } from '../../ratchets/commit-index.mjs';
+import { nameStatusRecords } from '../../ratchets/git-index.mjs';
 import { envFlag } from '../../config.mjs';
 import { emitGateBypass } from '../../judge/gate-events.mjs';
 import { headHash } from '../evidence/staged-git.mjs';
@@ -17,20 +18,11 @@ export function massDeletionVerdict({ deleted, added, headTracked }) {
 }
 /** Count D and A records in `git diff --name-status -z` output. R/C records carry TWO paths. */
 export function parseNameStatus(z) {
-    const fields = z.split('\0');
-    let deleted = 0;
-    let added = 0;
-    for (let i = 0; i < fields.length;) {
-        const status = fields[i] ?? '';
-        if (status === '')
-            break;
-        if (status === 'D')
-            deleted += 1;
-        else if (status === 'A')
-            added += 1;
-        i += /^[RC]/.test(status) ? 3 : 2;
-    }
-    return { deleted, added };
+    const statuses = nameStatusRecords(z).map((record) => record.status);
+    return {
+        deleted: statuses.filter((status) => status === 'D').length,
+        added: statuses.filter((status) => status === 'A').length,
+    };
 }
 const gitZ = (cwd, args) => execFileSync('git', args, {
     cwd,

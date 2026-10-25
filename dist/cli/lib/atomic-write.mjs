@@ -14,12 +14,21 @@
  * its own copy to stay independently vendorable (no cross-engine import), whereas cli/ has one home.
  */
 import { randomUUID } from 'node:crypto';
-import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, } from 'node:fs';
 import { dirname, join } from 'node:path';
-export function writeFileAtomic(path, contents) {
+/** `mode` is applied to the temp before the rename (chmod ignores umask); a failed write leaves no temp. */
+export function writeFileAtomic(path, contents, mode) {
     const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-    writeFileSync(tmp, contents, 'utf8');
-    renameSync(tmp, path);
+    try {
+        writeFileSync(tmp, contents, 'utf8');
+        if (mode !== undefined)
+            chmodSync(tmp, mode);
+        renameSync(tmp, path);
+    }
+    catch (e) {
+        rmSync(tmp, { force: true });
+        throw e;
+    }
 }
 const LOCK_STALE_MS = 60_000; // age below which a lock is presumed live regardless of its holder
 const LOCK_WAIT_MS = 5_000; // total time to retry a contended lock before throwing (never write unlocked)

@@ -23,8 +23,10 @@ function ownDataValue(record, key) {
     }
 }
 function opaqueIdentifier(value) {
-    if (typeof value !== 'string' ||
-        value.length === 0 ||
+    return typeof value === 'string' && opaqueIdentifierText(value);
+}
+function opaqueIdentifierText(value) {
+    if (value.length === 0 ||
         value.length > CLAUDE_PLAN_CRITIQUE_IDENTITY_MAX_BYTES ||
         Buffer.byteLength(value, 'utf8') > CLAUDE_PLAN_CRITIQUE_IDENTITY_MAX_BYTES ||
         value.trim().length === 0)
@@ -41,7 +43,7 @@ function tupleHash(domain, values) {
 }
 /** Stable turn identity shared by Claude SubagentStop capture and future Stop observation. */
 export function deriveClaudePlanCritiqueWorkId(sessionId, promptId) {
-    if (!opaqueIdentifier(sessionId) || !opaqueIdentifier(promptId))
+    if (!opaqueIdentifierText(sessionId) || !opaqueIdentifierText(promptId))
         throw new Error('invalid Claude plan critique work identity');
     return `pcw1_${tupleHash('claude_plan_critique_work', [sessionId, promptId])}`;
 }

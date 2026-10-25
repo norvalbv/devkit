@@ -10,13 +10,11 @@
  * fallback. dryRun prints every external command and runs none of them.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { writeIfAbsent } from '../fs-helpers.mjs';
 /**
  * Pinned fallow version. NEVER @latest — a floating tag makes the gate non-deterministic
- * and can drift below FALLOW_GATE_MIN_VERSION. 3.10.0 sits well above the default floor
+ * and can drift below FALLOW_GATE_MIN_VERSION. 3.35.0 sits well above the default floor
  * (2.46.0), so a pinned install always satisfies the gate's version check.
  *
  * The floor here is >=3.4.2, not just "newer is nicer". Through 2.x, `fallow audit`
@@ -34,14 +32,7 @@ import { writeIfAbsent } from '../fs-helpers.mjs';
  * fallow 3.0.0 is a platform milestone, NOT a breaking change: CLI flags, config, and the
  * `audit --format json` contract the staged gate reads are unchanged across the major.
  */
-export const FALLOW_PINNED_VERSION = '3.10.0';
-// The three per-analysis baselines `fallow audit` consumes (--dead-code-baseline etc.).
-// Each maps a sub-analysis save command to its file under fallow-baselines/.
-const BASELINES = [
-    { cmd: 'dead-code', file: 'dead-code.json' },
-    { cmd: 'health', file: 'health.json' },
-    { cmd: 'dupes', file: 'dupes.json' },
-];
+export const FALLOW_PINNED_VERSION = '3.35.0';
 /**
  * Single spawn seam. Every external command in this module funnels through here so dryRun
  * print-and-skip and the test mock have ONE place to intercept. Inherits stdio by default
@@ -126,57 +117,12 @@ export function installFallow({ cwd, dryRun } = {}) {
     return { ok: false, method: null, message: 'no package manager could install fallow' };
 }
 /**
- * Idempotently ensure `.fallow/` is gitignored (fallow's local cache dir). Appends the
- * line only when absent; creates .gitignore if the repo has none.
- *
- */
-export function ensureFallowGitignore({ cwd, dryRun } = {}) {
-    const path = join(cwd ?? process.cwd(), '.gitignore');
-    const line = '.fallow/';
-    const existing = existsSync(path) ? readFileSync(path, 'utf8') : '';
-    if (existing.split('\n').includes(line))
-        return;
-    if (dryRun) {
-        console.log(`[dry-run] append "${line}" to ${path}`);
-        return;
-    }
-    if (!existing) {
-        writeIfAbsent(path, `${line}\n`);
-        return;
-    }
-    writeIfAbsent(path, `${existing}${existing.endsWith('\n') ? '' : '\n'}${line}\n`, {
-        force: true,
-    });
-}
-/**
- * Save the three per-analysis baselines into fallow-baselines/ so `fallow audit` only
- * fails on genuinely NEW issues (pre-existing debt is grandfathered). Fail-open per save.
- * Only the overlay install calls this.
- */
-export function saveFallowBaselines({ cwd, dryRun } = {}) {
-    let ok = true;
-    for (const { cmd, file } of BASELINES) {
-        const target = join('fallow-baselines', file);
-        // capture (not inherit): the baseline file is written regardless, and we DON'T want fallow's
-        // full health/dupes/dead-code report flooding the install terminal — the caller prints a
-        // one-line "saved baselines" summary instead.
-        const { status } = run('fallow', [cmd, '--save-baseline', target], {
-            cwd,
-            dryRun,
-            capture: true,
-        });
-        if (status !== 0)
-            ok = false;
-    }
-    return { ok };
-}
-/**
- * Resolve fallow for an OVERLAY install: detect → install-if-missing → save baselines so a legacy
- * repo's debt is grandfathered. Returns whether to wire the gate; fail-open — abort, never block.
+ * Resolve fallow for an OVERLAY install: detect → install-if-missing. Returns whether to wire the
+ * gate; fail-open — abort, never block.
  */
 export function resolveOverlayFallow(cwd, dryRun) {
     if (dryRun) {
-        console.log('  [dry-run] fallow: detect → install-if-missing → save baselines → gate in hook');
+        console.log('  [dry-run] fallow: detect → install-if-missing → gate in hook');
         return true;
     }
     const det = detectFallow({ cwd });
@@ -192,11 +138,9 @@ export function resolveOverlayFallow(cwd, dryRun) {
         }
         console.log(`  ✓ ${r.message}`);
     }
-    const saved = saveFallowBaselines({ cwd });
-    console.log(`  ${saved.ok ? '✓ saved' : '! some'} fallow baselines → fallow-baselines/ (grandfather debt)`);
     return true;
 }
-// CLI smoke entry: `node install-fallow.mjs [detect|install|baselines]`. Helps verify
+// CLI smoke entry: `node install-fallow.mjs [detect|install]`. Helps verify
 // the helper by hand without the wizard.
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     const sub = process.argv[2] ?? 'detect';
@@ -205,8 +149,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
         console.log(JSON.stringify(detectFallow({ cwd })));
     else if (sub === 'install')
         console.log(JSON.stringify(installFallow({ cwd })));
-    else if (sub === 'baselines')
-        console.log(JSON.stringify(saveFallowBaselines({ cwd })));
     else
         console.error(`unknown subcommand: ${sub}`);
 }

@@ -57,7 +57,7 @@ import { currentTarget, hasTargetFields, parseDecision, parseIndex, renderDecisi
 import { warnNearestAxes } from './dedupe.mjs';
 import { runDrift } from './drift.mjs';
 import { assertFullNotJson, printFull, printRanked, renderSpine } from './recall/full-print.mjs';
-import { noteTextWithRelation } from './recall/note-relations.mjs';
+import { noteTextWithRelation, validateTargetSupersedes } from './recall/note-relations.mjs';
 import { rankAxes as rankAxesIn, reindexAll } from './recall/retrieval.mjs';
 export { currentTarget, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, upsertRow, } from './decision-format.mjs';
 // The recall path lives in retrieval.mts; re-exported so consumers and tests keep one entry point.
@@ -127,8 +127,9 @@ function addTarget(slug, o, p) {
     const date = today();
     let fm;
     let body;
-    if (exists) {
-        const parsed = parseDecision(readFileSync(file, 'utf8'));
+    const parsed = exists ? parseDecision(readFileSync(file, 'utf8')) : null;
+    validateTargetSupersedes(o.supersedes, parsed?.body ?? '', slug);
+    if (parsed) {
         // Re-target guard: a Target moves only on an evidence-state change, never on impl pain. Trimmed
         // so the CLI cannot write a hollow field that integrity/checks.mts would then flag as missing.
         if (currentTarget(parsed.body) && !o.evidenceChange?.trim()) {
