@@ -80,6 +80,9 @@ describe('checklist spelling', () => {
   it('never re-reads a substituted path for a placeholder it happens to contain', () => {
     const script = '/tmp/$SKILL_DIR/skills/correctness/scripts/checklist.mjs';
     expect(gateBrief('node $SCRIPT generate', script)).toBe(`node '${script}' generate`);
+    expect(gateBrief('Read .claude/skills/correctness/SKILL.md', script)).toBe(
+      'Read /tmp/$SKILL_DIR/skills/correctness/SKILL.md',
+    );
   });
 
   it('prints a path holding replacement-pattern characters byte for byte', () => {
