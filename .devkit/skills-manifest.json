@@ -28,14 +28,14 @@
     "frontend-security/scripts/checklist.mjs": "c4fa9d4827054b719417ae67edb84efa846d3ea31541040b0464e7d4018ab7d9",
     "parallel-neon-migration/SKILL.md": "b2c2d90ff77fe8bd4eb6e2dda074dd0c8b5adfc1b179ac136689445a4d2c981e",
     "prior-art/SKILL.md": "59fede5315336a58a2dec980094566b89292c7ce18f311ef4da34885cbd71249",
-    "structure-governance/SKILL.md": "b8324f7e2cc6aa6fdba1a92e7b8c80587273b59b5b648d98d09d3da385d6dd03",
+    "structure-governance/SKILL.md": "a2743e087be71dbd7cd1d55cd15e182c52500d04357bd047a1f14722e8db4312",
     "structure-governance/references/fixing-lint-errors.md": "710d3f91a4a21c1ae6bcd6338673f38e3d28f04368bcb0329f95035fe51ad556",
     "structure-governance/references/walls.md": "6abf951adaf7aa71d1d0827bcddc2e9fdc517e622f86c40aa1ffde6deb4e5ecb",
     "testing/SKILL.md": "5b6833ac86bb0746df7c45e8bc8806e5e5e7df9b76a2a1bc7ee70b4e6cfff228",
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "744453a7997d6499863e81b3167980dd3c35e22a3ea2dddb45db5768a920f252"
+    "using-devkit/SKILL.md": "1cc5414bc065601ea6550e5314645245c61e2bef00df68dc6c425d0e8d057ee1"
   },
   "providers": {
     "claude": {
@@ -65,14 +65,14 @@
         "frontend-security/scripts/checklist.mjs": "c4fa9d4827054b719417ae67edb84efa846d3ea31541040b0464e7d4018ab7d9",
         "parallel-neon-migration/SKILL.md": "b2c2d90ff77fe8bd4eb6e2dda074dd0c8b5adfc1b179ac136689445a4d2c981e",
         "prior-art/SKILL.md": "59fede5315336a58a2dec980094566b89292c7ce18f311ef4da34885cbd71249",
-        "structure-governance/SKILL.md": "b8324f7e2cc6aa6fdba1a92e7b8c80587273b59b5b648d98d09d3da385d6dd03",
+        "structure-governance/SKILL.md": "a2743e087be71dbd7cd1d55cd15e182c52500d04357bd047a1f14722e8db4312",
         "structure-governance/references/fixing-lint-errors.md": "710d3f91a4a21c1ae6bcd6338673f38e3d28f04368bcb0329f95035fe51ad556",
         "structure-governance/references/walls.md": "6abf951adaf7aa71d1d0827bcddc2e9fdc517e622f86c40aa1ffde6deb4e5ecb",
         "testing/SKILL.md": "5b6833ac86bb0746df7c45e8bc8806e5e5e7df9b76a2a1bc7ee70b4e6cfff228",
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "744453a7997d6499863e81b3167980dd3c35e22a3ea2dddb45db5768a920f252"
+        "using-devkit/SKILL.md": "1cc5414bc065601ea6550e5314645245c61e2bef00df68dc6c425d0e8d057ee1"
       }
     },
     "codex": {
@@ -102,14 +102,14 @@
         "frontend-security/scripts/checklist.mjs": "c4fa9d4827054b719417ae67edb84efa846d3ea31541040b0464e7d4018ab7d9",
         "parallel-neon-migration/SKILL.md": "b2c2d90ff77fe8bd4eb6e2dda074dd0c8b5adfc1b179ac136689445a4d2c981e",
         "prior-art/SKILL.md": "59fede5315336a58a2dec980094566b89292c7ce18f311ef4da34885cbd71249",
-        "structure-governance/SKILL.md": "b8324f7e2cc6aa6fdba1a92e7b8c80587273b59b5b648d98d09d3da385d6dd03",
+        "structure-governance/SKILL.md": "a2743e087be71dbd7cd1d55cd15e182c52500d04357bd047a1f14722e8db4312",
         "structure-governance/references/fixing-lint-errors.md": "710d3f91a4a21c1ae6bcd6338673f38e3d28f04368bcb0329f95035fe51ad556",
         "structure-governance/references/walls.md": "6abf951adaf7aa71d1d0827bcddc2e9fdc517e622f86c40aa1ffde6deb4e5ecb",
         "testing/SKILL.md": "5b6833ac86bb0746df7c45e8bc8806e5e5e7df9b76a2a1bc7ee70b4e6cfff228",
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "744453a7997d6499863e81b3167980dd3c35e22a3ea2dddb45db5768a920f252"
+        "using-devkit/SKILL.md": "1cc5414bc065601ea6550e5314645245c61e2bef00df68dc6c425d0e8d057ee1"
       }
     },
     "cursor": {
@@ -139,14 +139,14 @@
         "frontend-security/scripts/checklist.mjs": "c4fa9d4827054b719417ae67edb84efa846d3ea31541040b0464e7d4018ab7d9",
         "parallel-neon-migration/SKILL.md": "b2c2d90ff77fe8bd4eb6e2dda074dd0c8b5adfc1b179ac136689445a4d2c981e",
         "prior-art/SKILL.md": "59fede5315336a58a2dec980094566b89292c7ce18f311ef4da34885cbd71249",
-        "structure-governance/SKILL.md": "b8324f7e2cc6aa6fdba1a92e7b8c80587273b59b5b648d98d09d3da385d6dd03",
+        "structure-governance/SKILL.md": "a2743e087be71dbd7cd1d55cd15e182c52500d04357bd047a1f14722e8db4312",
         "structure-governance/references/fixing-lint-errors.md": "710d3f91a4a21c1ae6bcd6338673f38e3d28f04368bcb0329f95035fe51ad556",
         "structure-governance/references/walls.md": "6abf951adaf7aa71d1d0827bcddc2e9fdc517e622f86c40aa1ffde6deb4e5ecb",
         "testing/SKILL.md": "5b6833ac86bb0746df7c45e8bc8806e5e5e7df9b76a2a1bc7ee70b4e6cfff228",
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "744453a7997d6499863e81b3167980dd3c35e22a3ea2dddb45db5768a920f252"
+        "using-devkit/SKILL.md": "1cc5414bc065601ea6550e5314645245c61e2bef00df68dc6c425d0e8d057ee1"
       }
     }
   }
