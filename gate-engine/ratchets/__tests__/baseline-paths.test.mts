@@ -428,7 +428,19 @@ describe('ratchet baseline paths', () => {
 
     expect(() =>
       writeRatchetBaseline(worktree, LINES_BASELINE, '{"files":{"src/a.ts":700}}\n'),
-    ).toThrow(`${LINES_BASELINE} is ignored by Git`);
+    ).toThrow(`${join(worktree, '.devkit/config.json')} could not be read`);
+  });
+
+  it('refuses an overlay ship worktree write when the primary checkout config.json does not parse', () => {
+    const { primary, worktree } = shipWorktree('{"overlay":tru');
+
+    // primaryCheckout answers a realpath, which differs from tmpdir() on macOS (/private/var).
+    expect(() =>
+      writeRatchetBaseline(worktree, LINES_BASELINE, '{"files":{"src/a.ts":700}}\n'),
+    ).toThrow('.devkit/config.json could not be read');
+    expect(readFileSync(join(primary, LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/a.ts":900}}\n',
+    );
   });
 
   it('still stops a package ship worktree write when its primary checkout ignores the baseline', () => {
