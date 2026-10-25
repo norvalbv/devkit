@@ -220,6 +220,22 @@ describe('runCompleteness — ship lane reads the refreshed projection', () => {
   });
 });
 
+describe('runCompleteness — the every-gap mandate is the wrapper, not the brief', () => {
+  it("a consumer's own completeness brief still gets the every-gap instruction", async () => {
+    const repo = consumerRepo({ backend: true });
+    withStaleCustomAgents(repo, 'custom/agents');
+    const prompts: string[] = [];
+    const exec = mkExec(async ({ args }) => {
+      prompts.push(args[1]);
+      return 'VERDICT: PASS';
+    });
+
+    expect(await runCompleteness(messageFile(repo, 'feat: own brief'), repo, { exec })).toBe(0);
+    expect(prompts[0]).toContain('STALE brief for feature-completeness-reviewer');
+    expect(prompts[0]).toContain('A found gap does not end the review');
+  });
+});
+
 describe('runCompleteness — a brief missing from the consumer directory', () => {
   it.each([
     ['a strict ship lane', true],
