@@ -8,6 +8,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -104,6 +105,12 @@ describe('readHook — hook changing under the read', () => {
       expect(readHook(path)).toEqual({ content: null, mode: 0o100 });
     },
   );
+
+  it('a self-referencing symlink reads as missing, so --fix can replace it', () => {
+    const path = join(tmpRoot(), 'pre-commit');
+    symlinkSync(path, path);
+    expect(readHook(path)).toBeNull();
+  });
 
   it('any other read failure is not swallowed as missing', () => {
     const eio = () => {

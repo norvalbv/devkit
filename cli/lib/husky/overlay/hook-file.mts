@@ -18,7 +18,8 @@ export function readHook(
     fd = openSync(path, 'r');
   } catch (e) {
     const code = e instanceof Error && 'code' in e ? e.code : undefined;
-    if (code === 'ENOENT') return null;
+    // ELOOP: a self-referencing link is no hook git can run, and the atomic rename replaces it.
+    if (code === 'ENOENT' || code === 'ELOOP') return null;
     // Unreadable devkit hook (e.g. mode 0100): content unknown, so it can only be drift, never clean.
     if (code === 'EACCES') return unreadableHook(path);
     throw e;
