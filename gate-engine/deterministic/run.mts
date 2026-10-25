@@ -170,9 +170,12 @@ export function prefixCacheScope(scope?: string, effectiveIds?: string[]): strin
   // The self-host release-only dist extra judges the tree against the PR base and exempts only a
   // release branch, so a tree's PASS under one base or branch must not authorize another.
   const prBase = process.env.DEVKIT_SHIP_PR_BASE_SHA;
-  return prBase
+  const prScope = prBase
     ? `${extraBase ?? 'devkit-guards'}:pr-base:${prBase}:branch:${process.env.DEVKIT_SHIP_BRANCH ?? ''}`
     : extraBase;
+  // guard-structure judges edited-file debt against HEAD (the ship base), so a PASS is base-bound.
+  const shipBase = process.env.DEVKIT_SHIP_BASE_SHA;
+  return shipBase ? `${prScope ?? 'devkit-guards'}:ship-base:${shipBase}` : prScope;
 }
 
 // What execFileSync throws: `status` when the child exited, `signal` when one ended it, `code` when
