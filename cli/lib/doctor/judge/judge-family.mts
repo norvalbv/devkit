@@ -32,6 +32,7 @@ import {
 } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { z } from 'zod';
+import { parseJsonObject } from '../../../../gate-engine/config-json.mts';
 import { isCodexModel } from '../../../../gate-engine/judge/codex/result.mts';
 import {
   CLAUDE_FAMILY_SET,
@@ -327,16 +328,16 @@ export function bindClaudeFamily(cwd: string): boolean {
   const tmp = `${lock}.${token.replace(':', '-')}.staged`;
   try {
     const snapshot = readFileSync(path, 'utf8');
-    let raw: RawGuardFile | null;
+    let raw: RawGuardFile;
     try {
-      // SAFETY: the parsed shape is range-checked below — a null document, missing review
-      // object, or claimed keys that are not a stale devkit write abort the bind without writing.
-      raw = JSON.parse(snapshot) as RawGuardFile | null;
+      // A non-object or duplicate-key document throws; a missing review object or claimed keys
+      // that are not a stale devkit write abort the bind below, so neither path writes.
+      raw = parseJsonObject<RawGuardFile>(snapshot, 'guard.config.json');
     } catch {
       return false;
     }
-    const review = raw?.review;
-    if (!raw || !review) return false;
+    const review = raw.review;
+    if (!review) return false;
     const fresh = familyKeysAbsent(review);
     const stale = staleFamilyKeys(review);
     if (!fresh && stale.length === 0) return false;

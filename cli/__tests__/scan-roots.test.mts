@@ -45,6 +45,15 @@ describe('applyScanRoots', () => {
     expect(existsSync(cfgPath(bare))).toBe(false);
   });
 
+  it('refuses a guard.config.json that declares a key twice instead of rewriting away the first', () => {
+    const root = mkTmp();
+    const dup = '{\n  "extraGates": { "a": "x" },\n  "extraGates": { "b": "y" }\n}\n';
+    writeFileSync(cfgPath(root), dup);
+
+    expect(() => applyScanRoots(root, ['lib'], false)).toThrow(/declares "extraGates" twice/);
+    expect(readFileSync(cfgPath(root), 'utf8')).toBe(dup);
+  });
+
   it.each([
     ['a root containing `]`', '{ "scanRoots": ["old]root"], "//scanRoots": "keep" }', ['src']],
     ['an escaped quote', '{ "scanRoots": ["a\\"]b"], "//scanRoots": "keep" }', ['src']],

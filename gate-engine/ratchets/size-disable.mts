@@ -12,6 +12,7 @@ import {
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mts';
+import { parseJsonObject } from '../config-json.mts';
 import { exitGate } from '../deterministic/reason.mts';
 import { overlayInstall } from '../overlay-mode.mts';
 import {
@@ -197,9 +198,9 @@ export function setMaxLines(cwd: string, cap = LINE_CAP, testCap = TEST_LINE_CAP
   if (!existsSync(cfgPath)) return false;
   let cfg: Record<string, unknown>;
   try {
-    cfg = JSON.parse(readFileSync(cfgPath, 'utf8')) as Record<string, unknown>;
+    cfg = parseJsonObject<Record<string, unknown>>(readFileSync(cfgPath, 'utf8'), CONFIG_FILENAME);
   } catch {
-    // Unparseable guard.config.json → skip (mirror hasLineCap). A corrupt user-edited file must not
+    // Unparseable or duplicate-key guard.config.json → skip (mirror hasLineCap). A corrupt file must not
     // crash init/upgrade; the gates surface the JSON error separately when they run.
     return false;
   }
