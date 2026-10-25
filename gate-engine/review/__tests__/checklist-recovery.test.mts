@@ -542,6 +542,30 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
     expect(err.mock.calls.flat().join('\n')).not.toContain('were denied');
   });
 
+  // A codex judge may write only this file, so a pass missing it cannot record its checklist.
+  it('grants every judge pass, escalation and lens part its own checklist state file', async () => {
+    delete process.env.GUARD_CORRECTNESS_SPLIT; // the shipped four-way default
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = failingJudge(repo, []);
+    await runReviewGate(repo, { exec });
+    const grants = exec.mock.calls.map(([o]) => [o.label, o.codexWritableFile, o.args[1]]);
+    const target = grants.filter(([label]) => label.startsWith(TARGET));
+    expect(target.map(([label, file]) => [label, file])).toEqual([
+      [TARGET, '.claude/.api-security-review.json'],
+      [`${TARGET}:escalate`, '.claude/.api-security-review.json'],
+    ]);
+    // Every lens part's wave run and its solo retry: each names its own group's file.
+    const lensed = grants.filter(([label]) => label === 'review:correctness-reviewer');
+    const files = lensed.map(([, file, prompt]) => {
+      const group = FOUR_WAY_LENS_GROUPS.find((g) => prompt.includes(g[0]));
+      return [file, group && `.claude/.correctness-review-${lensGroupId(group)}.json`];
+    });
+    expect(new Set(files.map(([, want]) => want)).size).toBe(FOUR_WAY_LENS_GROUPS.length);
+    for (const [file, want] of files) expect(file).toBe(want);
+  });
+
   it('review mode still BLOCKS an exhausted retry at exit 1, unchanged by the widening', async () => {
     const repo = unprojected(consumerRepo({ backend: true }));
     process.env.DEVKIT_RUN_MODE = 'review';

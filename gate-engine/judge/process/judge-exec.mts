@@ -19,7 +19,11 @@ import {
   parseCodexUsage,
   unwrapCodexResult,
 } from '../codex/result.mts';
-import { type CodexSandbox, prepareCodexSandbox } from '../codex/workspace.mts';
+import {
+  type CodexSandbox,
+  type CodexSandboxOpts,
+  prepareCodexSandbox,
+} from '../codex/workspace.mts';
 import { emitGateEvent, type TelemetryStatus } from '../gate-events.mts';
 import { withoutGitEnv } from '../judge-isolation.mts';
 import {
@@ -39,7 +43,7 @@ import { composeTranscript, saveTranscriptUnique } from '../transcript-store.mts
 
 // Options for both execJudge twins. Transcripts are kept by default; `transcript: false` opts out.
 // `timeout` is required: Node reads an omitted or 0 timeout as no cap, defeating the SIGKILL below.
-export interface ExecJudgeOpts {
+export interface ExecJudgeOpts extends CodexSandboxOpts {
   label: string;
   args: string[];
   input?: string;
@@ -55,8 +59,6 @@ export interface ExecJudgeOpts {
   onMcpPrepared?: (capabilityFingerprint: string, degradedCause?: string) => void;
   /** Trusted-registry project roots; isolated fixtures supply the consumer root they represent. */
   mcpProjectRoots?: readonly string[];
-  /** Tool-equipped, write-free Codex judge; required without staged-tree tamper detection. */
-  codexReadOnly?: boolean;
   /** Split-reviewer lens group for judge_exec spend attribution; all parts share one judge label. */
   lens?: string;
   /** Fires once per measured claude spawn with the tool calls its permission gate refused. */
@@ -256,7 +258,7 @@ export function cleanupJudgeRun(run: JudgeRun): void {
 /** Route the argv to its binary and build the spawn options. Callers run it inside their try, so
  *  an argv a codex model cannot express settles as ONE outage instead of throwing. */
 export function routeJudge(opts: ExecJudgeOpts, run: JudgeRun) {
-  run.ws = prepareCodexSandbox(opts.args, opts.codexReadOnly === true, opts.cwd ?? process.cwd());
+  run.ws = prepareCodexSandbox(opts.args, opts, opts.cwd ?? process.cwd());
   const cli = spawnFor(opts.args, run.mcp, run.ws);
   opts.onMcpPrepared?.(run.mcp.capabilityFingerprint, spawnDegradedCause(run.mcp, cli.mcpInjected));
   const spawnOptions = {
