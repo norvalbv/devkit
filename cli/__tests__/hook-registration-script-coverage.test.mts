@@ -30,6 +30,7 @@ const SCRIPT_OWNING_COMPONENTS = [
   'priorArtGate',
   'baseDrift',
   'antiSlop',
+  'fanout',
 ] as const;
 
 /** A selection with exactly ONE component on — notably agentHooks OFF for every other component. */
@@ -41,6 +42,7 @@ const only = (component: string) => ({
   priorArtGate: component === 'priorArtGate',
   baseDrift: component === 'baseDrift',
   antiSlop: component === 'antiSlop',
+  fanout: component === 'fanout',
 });
 
 /** The hook-dir script a registration command invokes, or null for an engine-bin command. */
@@ -69,6 +71,7 @@ describe('hook registrations resolve to installable scripts', () => {
       baseDrift: true,
       antiSlop: true,
       comments: true,
+      fanout: true,
     });
     const dangling = Object.values(HOOK_REGISTRATIONS)
       .flat()
