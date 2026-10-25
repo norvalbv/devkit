@@ -57,8 +57,6 @@ function envBypasses(): string[] {
     ...BYPASS_FLAGS.filter((name) => envBool(name)).map((name) => `GUARD_${name}`),
     ...REAIM_FLAGS.filter((name) => envVar(name)?.trim()).map((name) => `GUARD_${name}`),
     ...SOFTEN_FLAGS.filter((name) => envBool(name) === false).map((name) => `GUARD_${name}=0`),
-    // Husky's runner exits 0 before any hook runs.
-    ...(process.env.HUSKY === '0' ? ['HUSKY=0'] : []),
   ];
 }
 
