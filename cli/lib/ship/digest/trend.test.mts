@@ -307,6 +307,21 @@ describe('summariseTrend — streak boundaries', () => {
     expect(text).toContain(`${CR}: 3 blocking rounds`);
   });
 
+  it('reads the evidence row a finished ship writes inside the next attempt as no foreigner', () => {
+    const [marker, ...rest] = attempt('s3', [fail(4)]);
+    const events = [
+      ...attempt('s1', [fail(4)]),
+      ...attempt('s2', [fail(4)]),
+      marker,
+      // s2's evidence step runs after its result, while s3 is already open on the same branch.
+      { type: 'ship_evidence', ship_id: 's2', ...where },
+      ...rest,
+    ];
+    const text = trendOf(events, 's3');
+    expect(text).toContain(`${CR}: 3 blocking rounds`);
+    expect(text).toContain('4 → 4 → 4 findings');
+  });
+
   it('goes silent when a killed attempt with a new-id retry writes a late row inside that retry', () => {
     const events = [
       ...attempt('s1', [fail(4)]),
