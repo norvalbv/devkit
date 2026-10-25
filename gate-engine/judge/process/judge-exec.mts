@@ -237,7 +237,7 @@ function spawnFor(args: string[], mcp: PreparedJudgeMcpProfile, ws: CodexSandbox
   const cli = judgeCliFor(args, mcp.servers, ws.codexReadOnly, ws.workspace);
   if (cli.codex) return cli;
   const argv = withResultArgs([...mcp.args, ...CLAUDE_JUDGE_ARGS, ...args]);
-  return { ...cli, argv, extraEnv: CLAUDE_JUDGE_ENV };
+  return { ...cli, argv, extraEnv: { ...cli.extraEnv, ...CLAUDE_JUDGE_ENV } };
 }
 
 export function prepareJudgeRun(opts: ExecJudgeOpts): JudgeRun {
