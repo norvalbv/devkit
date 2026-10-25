@@ -74,6 +74,13 @@ describe('guard-fanout preflight', () => {
     expect(r.out).toContain('src/pile: 12→13/12 impl files — blocks: split into a subfolder');
   });
 
+  it('names the blocked folder’s existing subfolders, skipping test and build dirs', () => {
+    const root = makeRepo({ pile: 12, 'pile/b': 1, 'pile/a': 1, 'pile/__tests__': 1 });
+    const r = preflight(root, 'src/pile/new.ts');
+    expect(r.status).toBe(1);
+    expect(r.out).toContain('blocks: split into a subfolder (existing: a, b)');
+  });
+
   // Catches a remedy that omits registration: a subfolder of a domain-gated folder fails structure lint unregistered.
   it('adds the libDomains registration step when the full folder is domain-gated', () => {
     const grammar = { folders: { pile: { domainGate: 'pile' } } };
