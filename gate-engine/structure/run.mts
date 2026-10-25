@@ -7,6 +7,7 @@
 //
 //   guard-structure gate     # lint all declared structure roots (CI/manual)
 //   guard-structure staged   # lint only staged structure input (generated pre-commit hook)
+//   guard-structure preflight -- <path...>   # would these (possibly new) paths be rejected?
 //
 // PARAMETERIZED (W-3): the trees / roots / grammar / baselines all come from resolveGuardConfig(cwd)
 // — the consumer's guard.config.json under the consumer cwd, never the package dir. Grandfathering is
@@ -18,16 +19,15 @@
 
 import { execFileSync } from 'node:child_process';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ESLint, type Linter } from 'eslint'; // devkit's OWN eslint (now a dependency), never the consumer's
+import type { ESLint } from 'eslint'; // devkit's OWN eslint (now a dependency), never the consumer's
 import { z } from 'zod';
 import { resolveGuardConfig } from '../config.mts';
 import { gitPrefix, nameStatusRecords, splitNul } from '../ratchets/git-index.mts';
 import { lintAttributed } from './attribution.mts';
-import { buildStructureConfigs } from './eslint-config.mts';
+import { noGrammarResult, preflightStructure, withStructureLinter } from './preflight.mts';
 import { runPresetAttributed, runPresetLint } from './preset-lint.mts';
 import {
   clean,
@@ -362,32 +362,21 @@ async function structureLegs(cwd: string, targets?: string[]): Promise<Structure
 async function runGrammarLint(cwd: string, targets?: string[]): Promise<StructureGateResult> {
   try {
     const cfg = resolveGuardConfig(cwd);
-    const baseConfig = await buildStructureConfigs(cwd);
-    if (!baseConfig.length)
-      return couldNotRun(
-        'no structure.trees[].grammar declared (preset-only consumer); the electron preset leg runs only for an electron stack (recorded, else detected)',
-      );
     // Only GRAMMAR roots, and only those on disk: a preset root enclosing a grammar root would lint
     // that grammar root a second time.
     const trees: StructureTree[] = cfg.structure?.trees ?? [];
     const grammarRoots = trees.flatMap((tree) => (tree.grammar && tree.root ? [tree.root] : []));
     const roots = (targets ?? grammarRoots).filter((target) => existsSync(join(cwd, target)));
-    if (!roots.length)
-      return couldNotRun(
-        'no structure root is both declared in guard.config.json and present on disk',
-      );
-
-    // The plugin's error cache drops a message already cached for another filename; persisted in the
-    // repo root it silences the next run (sc-2309), so it lives for this run only.
-    const cacheDir = mkdtempSync(join(tmpdir(), 'devkit-structure-cache-'));
-    try {
-      return await lintStructureRoots(cwd, roots, [
-        ...baseConfig,
-        { settings: { 'project-structure/cache-location': cacheDir } },
-      ]);
-    } finally {
-      rmSync(cacheDir, { recursive: true, force: true });
-    }
+    const result = await withStructureLinter(cwd, (eslint) =>
+      roots.length
+        ? lintStructureRoots(eslint, roots)
+        : Promise.resolve(
+            couldNotRun(
+              'no structure root is both declared in guard.config.json and present on disk',
+            ),
+          ),
+    );
+    return result ?? noGrammarResult();
   } catch (e: unknown) {
     // Fail OPEN (exit 2), like the ratchet gates when their baseline is missing — a structure gate
     // that can't run must never wedge a commit. guard-deterministic treats 2 as fail-open (continue).
@@ -396,12 +385,7 @@ async function runGrammarLint(cwd: string, targets?: string[]): Promise<Structur
   }
 }
 
-async function lintStructureRoots(
-  cwd: string,
-  roots: string[],
-  baseConfig: Linter.Config[],
-): Promise<StructureGateResult> {
-  const eslint = new ESLint({ cwd, overrideConfigFile: true, baseConfig });
+async function lintStructureRoots(eslint: ESLint, roots: string[]): Promise<StructureGateResult> {
   // Lint each root INDEPENDENTLY: a batched lintFiles fail-fasts on the first empty/all-ignored root
   // and would mask a sibling's violation; per-root, that root is its own "clean".
   const allResults = [];
@@ -422,8 +406,12 @@ async function lintStructureRoots(
 }
 
 export async function runCli(cmd = 'gate') {
+  const paths = process.argv.slice(4);
+  if (cmd === 'preflight' && process.argv[3] === '--' && paths.length > 0) {
+    process.exit(await preflightStructure(process.cwd(), paths));
+  }
   if (cmd !== 'gate' && cmd !== 'staged') {
-    console.error('usage: guard-structure <gate|staged>');
+    console.error('usage: guard-structure <gate|staged|preflight -- path...>');
     process.exit(2);
   }
   const { code, text } =

@@ -98,6 +98,18 @@ export const HOOK_REGISTRATIONS: Record<string, HookRegistration[]> = {
       cursorMatcher: 'Write',
     },
   ],
+  // Write-time advisory that a NEW file would fail guard-structure or guard-fanout at commit. Owned
+  // by either folder gate (selection.mts placementSelected); additionalContext only, never a denial.
+  placement: [
+    {
+      registrationId: 'placement:brief',
+      event: 'PreToolUse',
+      matcher: 'Write',
+      command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/placement-brief.mjs"',
+      cursorEvent: 'preToolUse',
+      cursorMatcher: 'Write',
+    },
+  ],
   // story 15 — search-code steering: PreToolUse guard + PostToolUse counter (engine bins).
   searchSteering: [
     {

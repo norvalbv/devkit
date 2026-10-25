@@ -21,7 +21,10 @@ import {
   resolveExistingAgentProviders,
   SUPPORTED_AGENT_PROVIDERS,
 } from '../../lib/install/agent-assets/agent-providers.mts';
-import { hookScriptsFor } from '../../lib/install/hook-registration-ledger/selection.mts';
+import {
+  hookScriptsFor,
+  placementSelected,
+} from '../../lib/install/hook-registration-ledger/selection.mts';
 import { syncHookScripts } from '../../lib/install/install-hooks.mts';
 
 // The relevant slice of `.devkit/config.json` this command reads.
@@ -34,6 +37,8 @@ interface DevkitConfig {
     priorArtGate?: boolean;
     baseDrift?: boolean;
     antiSlop?: boolean;
+    husky?: boolean;
+    structure?: boolean;
     guards?: string[];
   };
 }
@@ -95,6 +100,8 @@ export default function run(args: string[], cwd: string): number {
   // And for the anti-slop preflight hook, owned by the antiSlop component.
   const antiSlop = cfg?.components?.antiSlop ?? false;
   const fanout = cfg?.components?.guards?.includes('fanout') ?? false;
+  // And for the placement brief, owned by the fanout guard or the structure component.
+  const placement = placementSelected(cfg?.components ?? {});
   const explicitTargets = listFlag(args, '--targets');
   const targets =
     explicitTargets ??
@@ -118,6 +125,7 @@ export default function run(args: string[], cwd: string): number {
     baseDrift,
     antiSlop,
     fanout,
+    placement,
   });
   syncHookScripts(gitRoot, {
     dryRun: args.includes('--dry-run'),
