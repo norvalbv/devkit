@@ -6,9 +6,13 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
-/** The slice of vitest's undocumented results cache this reader depends on. */
+/** The slice of vitest's undocumented results cache (format 1, vitest 5.0.4+) read here. */
 const resultsCacheSchema = z.object({
-  results: z.array(z.tuple([z.string(), z.object({ failed: z.boolean() })])),
+  version: z.literal(1),
+  projects: z.record(
+    z.string(),
+    z.object({ files: z.record(z.string(), z.object({ failed: z.boolean() })).optional() }),
+  ),
 });
 
 // The cache is cumulative across this checkout's vitest runs, so a file counts only when every named
@@ -20,14 +24,14 @@ export function readFailingTestFiles(
 ): string[] {
   try {
     if (statSync(resultsPath).mtimeMs < notBeforeMs) return [];
-    const { results } = resultsCacheSchema.parse(JSON.parse(readFileSync(resultsPath, 'utf8')));
+    const { projects } = resultsCacheSchema.parse(JSON.parse(readFileSync(resultsPath, 'utf8')));
     const verdicts = new Map<string, boolean>();
-    for (const [key, { failed }] of results) {
-      const separator = key.indexOf(':');
-      if (separator <= 0) continue;
-      const file = key.slice(separator + 1);
-      // A file moved between projects keeps its old key, so one passing entry makes it ambiguous.
-      verdicts.set(file, failed && (verdicts.get(file) ?? true));
+    for (const [project, { files = {} }] of Object.entries(projects)) {
+      if (project === '') continue;
+      // A file moved between projects keeps its old entry, so one passing entry makes it ambiguous.
+      for (const [file, { failed }] of Object.entries(files)) {
+        verdicts.set(file, failed && (verdicts.get(file) ?? true));
+      }
     }
     return [...verdicts]
       .filter(([file, failed]) => failed && existsSync(join(root, file)))

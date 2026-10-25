@@ -4,6 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import config from '../../vitest.config.mjs';
+import e2eConfig from '../../vitest.e2e.config.mjs';
 import { SCRUBBED_ENV } from '../../vitest.setup.mjs';
 import { testSpawnSync } from './_helpers.mts';
 
@@ -71,6 +72,15 @@ describe('devkit vitest config under vitest 5', () => {
     const projects = config.test?.projects ?? [];
     expect(projects.length).toBeGreaterThan(0);
     for (const project of projects) expect(project).toMatchObject({ extends: false });
+  });
+
+  // vitest 5.0.4 turned it on by default, inside the node_modules that linked worktrees share.
+  it('keeps the transformed-module cache off in the root and every project', () => {
+    expect(config.test).toMatchObject({ fsModuleCache: false });
+    for (const project of config.test?.projects ?? []) {
+      expect(project).toMatchObject({ test: { fsModuleCache: false } });
+    }
+    expect(e2eConfig.test).toMatchObject({ fsModuleCache: false });
   });
 
   it('attaches v8 coverage to spawned child processes', () => {

@@ -64,6 +64,9 @@ const SHARED_TEST_CONFIG = {
   // terminated after 90s and may use up to 30s more to reap their process tree; leave enough margin
   // for that cleanup to finish and report exit 124 instead of racing Vitest's own timeout.
   testTimeout: 150_000,
+  // Off, as before vitest 5.0.4: the module cache lives in a node_modules that worktrees and test
+  // fixtures share, and a run that sees a different lockfile deletes it under the others.
+  fsModuleCache: false,
 };
 // One value for both projects: vitest throws when one groupOrder mixes maxWorkers.
 // Leaves headroom for concurrent local development; VITEST_MAX_WORKERS overrides it per run.
