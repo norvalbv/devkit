@@ -228,4 +228,24 @@ describe('model-unavailable through execJudge', () => {
       outage_detail: CLAUDE_SENTENCE,
     });
   });
+
+  // The async twin reads stderr from its execFile callback, not from the thrown error.
+  it('the async twin classifies a stderr-only refusal identically', async () => {
+    fakeClaude('', `${REFUSAL}\n`);
+    const seen: JudgeOutage[] = [];
+    const out = await execJudgeAsync({
+      label: 'review:correctness',
+      args: ['-p', '--model', 'opus', 'q'],
+      timeout: 20_000,
+      onOutage: (o) => seen.push(o),
+    });
+    expect(out).toBeNull();
+    expect(seen).toEqual([
+      expect.objectContaining({ kind: 'model-unavailable', permanent: true, model: 'opus' }),
+    ]);
+    expect(judgeExecEvent()).toMatchObject({
+      outcome: 'model-unavailable',
+      outage_detail: expect.stringContaining('is not supported'),
+    });
+  });
 });
