@@ -161,10 +161,15 @@ export interface ReviewItem {
   rationale?: string;
   /** The waiver's kind beside its rationale, null when the waiver has none. */
   kind?: RecordedWaiver['kind'];
+  /** Issues past the per-lens cap that `issues` does not carry; absent when none were dropped. */
+  issues_omitted?: number;
 }
 
 /** Private terminal artifact snapshot; original positions and strings never ride the event. */
-export interface ReviewCaptureItem extends Omit<ReviewItem, 'issues' | 'rationale' | 'kind'> {
+export interface ReviewCaptureItem extends Omit<
+  ReviewItem,
+  'issues' | 'rationale' | 'kind' | 'issues_omitted'
+> {
   itemIndex: number;
   issues: string[];
 }
