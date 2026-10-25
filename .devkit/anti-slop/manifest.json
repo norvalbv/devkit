@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "devkitVersion": "0.71.0",
+  "devkitVersion": "0.74.0",
   "upstreamCommit": "e8c4880471b23ab7f216fba7b27d173a6ef07d4c",
   "pluginApiVersion": "1.78.0",
   "ruleIds": [
@@ -22,8 +22,8 @@
     "anti-slop/no-unsafe-external-record-access",
     "anti-slop/no-unsafe-external-record-enumeration"
   ],
-  "pluginDigest": "3377f9ebac21a39c70d34eef61736cc567483d758f7f5cdd1f1dcec307577b08",
-  "configDigest": "d581c9a980514d229f6c9c806dd980bb382c9a607adf0f4ec4ec05d66e37e0df",
+  "pluginDigest": "987afb1b14334ad4bd7a5665d6e6d5f152f2b3b81ea265f7042ef2afcbf70298",
+  "configDigest": "50ad2d1deb51ce96445be08275533d8e502efe9dc9788b2148709cc06a1525da",
   "probeDigest": "bf2c2181804ac4004aed98aa41133e080068be9b2e9bf9d47a459ce75c6cdb87",
   "probeConfigDigest": "b9bfbd93519b843df6bd175b91f5742bb67be649cac5c82492621e5a7bbd7604"
 }

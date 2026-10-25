@@ -21,6 +21,9 @@
     "afterFileEdit": [
       {
         "command": ".cursor/hooks/anti-slop-preflight.sh"
+      },
+      {
+        "command": ".cursor/hooks/comment-budget-preflight.mjs"
       }
     ]
   }
