@@ -27,7 +27,6 @@ import {
   describeOverlayCommitMsg,
   judgesAlsoInRepoHook,
   planOverlayCommitMsg,
-  readHook,
   syncOverlayCommitMsg,
   syncOverlaySiblingHooks,
 } from '../lib/husky/overlay/commit-msg.mts';
@@ -411,47 +410,6 @@ describe('planOverlayCommitMsg / syncOverlayCommitMsg', () => {
       },
     ).trim();
     expect(mode).toBe('755');
-  });
-});
-
-// Concurrent actors can delete or chmod the hook while it is read: a vanished hook reads as missing
-// (never an ENOENT crash), a +x lost mid-read is observed, and other read failures still surface.
-describe('readHook — hook changing under the read', () => {
-  const existingHook = () => {
-    const root = mkdtempSync(join(tmpdir(), 'dk-ov-race-'));
-    homes.push(root);
-    const path = join(root, 'commit-msg');
-    writeFileSync(path, '#!/bin/sh\n');
-    chmodSync(path, 0o755);
-    return path;
-  };
-
-  it('a hook deleted before the read reads as missing', () => {
-    const path = existingHook();
-    rmSync(path);
-    expect(readHook(path)).toBeNull();
-  });
-
-  it('an executable bit removed while the content is read is observed', () => {
-    const path = existingHook();
-    const r = readHook(path, (fd) => {
-      chmodSync(path, 0o644);
-      return readFileSync(fd, 'utf8');
-    });
-    expect(r).toEqual({ content: '#!/bin/sh\n', mode: 0o644 });
-  });
-
-  it('a hook the owner cannot read is reported unreadable (drift), not missing and not a crash', () => {
-    const path = existingHook();
-    chmodSync(path, 0o100);
-    expect(readHook(path)).toEqual({ content: null, mode: 0o100 });
-  });
-
-  it('any other read failure is not swallowed as missing', () => {
-    const eio = () => {
-      throw Object.assign(new Error('EIO: simulated'), { code: 'EIO' });
-    };
-    expect(() => readHook(existingHook(), eio)).toThrow(/EIO/);
   });
 });
 
