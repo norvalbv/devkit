@@ -223,6 +223,9 @@ describe('baseline-status --run', () => {
     const { code, answer } = json('--run', String(PR_RUN));
     expect(code).toBe(0);
     expect(answer).toMatchObject({ runStatus: 'red', ref: '', failingFiles: ['cli/a.test.mts'] });
+    out = [];
+    status('--run', String(PR_RUN));
+    expect(out.join('\n')).toContain('pull_request on (no branch)');
   });
 
   it('reads a null status as a run with no report, not a gh failure', () => {
@@ -239,6 +242,25 @@ describe('baseline-status --run', () => {
       code: 2,
       answer: { reason: 'gh-failed' },
     });
+  });
+
+  it('keeps the provenance error when a later artifact candidate is unreadable', () => {
+    // A mismatched summary, then a directory named summary.json that readFileSync cannot read.
+    const stub = join(fixture, 'gh-download');
+    writeFileSync(
+      stub,
+      `out=""; while [ $# -gt 0 ]; do if [ "$1" = "--dir" ]; then out="$2"; fi; shift; done
+mkdir -p "$out/a" "$out/summary.json"
+cp "$DEVKIT_TEST_FIXTURE/summary-${PR_RUN}.json" "$out/a/summary.json"`,
+    );
+    putRun();
+    putSummary(null, { 'cli/a.test.mts': 'failed' }, 7);
+    process.env.DEVKIT_GH_DOWNLOAD_HOOK = stub;
+    try {
+      expect(json('--run', String(PR_RUN)).answer.detail).toContain('records run 200/attempt 7');
+    } finally {
+      delete process.env.DEVKIT_GH_DOWNLOAD_HOOK;
+    }
   });
 
   it('exits 2 naming the run when GitHub has no such run', () => {

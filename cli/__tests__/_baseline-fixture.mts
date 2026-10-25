@@ -99,6 +99,7 @@ if [ "$1" = "run" ] && [ "$2" = "list" ]; then
 fi
 if [ "$1" = "run" ] && [ "$2" = "download" ]; then
   if [ -n "$DEVKIT_GH_DOWNLOAD_FAIL" ]; then echo "$DEVKIT_GH_DOWNLOAD_FAIL" >&2; exit 1; fi
+  if [ -n "$DEVKIT_GH_DOWNLOAD_HOOK" ]; then exec sh "$DEVKIT_GH_DOWNLOAD_HOOK" "$@"; fi
   id="$3"; out=""
   while [ $# -gt 0 ]; do if [ "$1" = "--dir" ]; then out="$2"; fi; shift; done
   if [ -f "$DEVKIT_TEST_FIXTURE/empty-$id" ]; then exit 0; fi

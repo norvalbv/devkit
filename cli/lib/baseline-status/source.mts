@@ -303,7 +303,7 @@ export function downloadSummary({
         assertProvenance(summary, { runId, attempt }, `run ${runId}'s artifact`);
         return summary;
       } catch (e) {
-        lastError = e instanceof GhUnavailable ? e : undefined;
+        if (e instanceof GhUnavailable) lastError = e; // an unreadable later file must not erase it
       }
     }
     throw (

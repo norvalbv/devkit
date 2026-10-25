@@ -130,7 +130,7 @@ function render(answer: BaselineAnswer, named: boolean): void {
   }
   const icon = answer.runStatus === 'green' ? '✅' : '❌';
   const subject = named
-    ? `run ${answer.runId} · ${answer.event} on ${answer.ref}`
+    ? `run ${answer.runId} · ${answer.event} on ${answer.ref || '(no branch)'}`
     : `${answer.ref} run ${answer.runId}`;
   console.log(`${icon} ${subject} (attempt ${answer.attempt}, ${answer.sha?.slice(0, 8)})`);
   if (answer.testedSha) {
