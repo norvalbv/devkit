@@ -241,6 +241,21 @@ it('records an existing empty artifact as zero items, and an absent one as nothi
   expect(itemFields(absent)).toEqual({});
 });
 
+// Telemetry must tell a truncated item from a complete one, at whatever cap the knob sets.
+it('carries the per-lens drop count onto the event, measured against the configured cap', () => {
+  vi.stubEnv('GUARD_REVIEW_MAX_ISSUES_PER_LENS', '1');
+  const res = outcome();
+  const files = [
+    { path: 'src/dup.ts', status: 'fail', issues: ['a src/dup.ts:1', 'b src/dup.ts:9'] },
+    { path: 'src/one.ts', status: 'fail', issues: ['c src/one.ts:3'] },
+  ];
+  attachItems(res, { files }, new Map());
+  const [truncated, complete] = itemFields(res).items ?? [];
+  expect(truncated).toMatchObject({ lens: 'src/dup.ts', issues: ['a src/dup.ts:1'] });
+  expect(truncated.issues_omitted).toBe(1);
+  expect(complete).not.toHaveProperty('issues_omitted');
+});
+
 // sc-3400: a named skip buys a judge-less PASS, so `skipped` is parsed, never truthiness-checked.
 it.each([
   [{ files: [], skipped: 'deletion-only' }, true],
