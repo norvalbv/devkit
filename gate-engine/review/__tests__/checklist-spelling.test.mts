@@ -77,6 +77,11 @@ describe('checklist spelling', () => {
       expect(contract).toContain(CHECKLIST_SPELLING_RULE);
   });
 
+  it('never re-reads a substituted path for a placeholder it happens to contain', () => {
+    const script = '/tmp/$SKILL_DIR/skills/correctness/scripts/checklist.mjs';
+    expect(gateBrief('node $SCRIPT generate', script)).toBe(`node '${script}' generate`);
+  });
+
   it('prints a path holding replacement-pattern characters byte for byte', () => {
     const script = '/tmp/$&x/skills/correctness/scripts/checklist.mjs';
     const out = gateBrief('node $SCRIPT generate\nRead $SKILL_DIR/SKILL.md', script);
