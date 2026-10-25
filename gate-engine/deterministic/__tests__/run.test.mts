@@ -170,6 +170,92 @@ describe('runDeterministic — aggregation + trichotomy', () => {
   });
 });
 
+// Each gate_result in `sink` as { gate, status }.
+const gateResults = (sink) =>
+  readFileSync(sink, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((e) => e.type === 'gate_result')
+    .map(({ gate, status }) => ({ gate, status }));
+
+describe('runDeterministic — a gate that never reached an exit code', () => {
+  // Throws `fields` (an execFileSync error shape) for the module matching `match`; others pass.
+  const throwing = (match, fields) =>
+    vi.fn((_node, argv) => {
+      if (argv[0].includes(match)) throw Object.assign(new Error('gate'), fields);
+    });
+  const run = (guards, opts) => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(guards);
+    process.env.DEVKIT_GATE_EVENTS = join(d, 'events.jsonl');
+    const rc = runDeterministic(d, opts);
+    return {
+      rc,
+      out: err.mock.calls.flat().join('\n'),
+      results: gateResults(join(d, 'events.jsonl')),
+    };
+  };
+
+  it('a gate killed by a signal blocks under its own label and is could_not_run', () => {
+    const exec = throwing('size-disable', { status: null, signal: 'SIGKILL' });
+    const { rc, out, results } = run(['size'], { exec });
+    expect(rc).toBe(1);
+    expect(out).toContain('deterministic gates failed: guard-size(killed:SIGKILL)\n');
+    expect(out).toContain('not a code finding. Re-run it.');
+    expect(results).toEqual([{ gate: 'size', status: 'could_not_run' }]);
+  });
+
+  it('a real gate process that signals itself is reported as killed', () => {
+    const extra = [{ label: 'die', cmd: "node -e process.kill(process.pid,'SIGTERM')" }];
+    const { rc, out, results } = run([], { extra });
+    expect(rc).toBe(1);
+    expect(out).toContain('deterministic gates failed: die(killed:SIGTERM)');
+    expect(results).toEqual([{ gate: 'die', status: 'could_not_run' }]);
+  });
+
+  it('a missing binary is a spawn failure, never folded into the signal case', () => {
+    const extra = [{ label: 'nobin', cmd: 'devkit-no-such-binary-xyz --check' }];
+    const { rc, out, results } = run([], { extra });
+    expect(rc).toBe(1);
+    expect(out).toContain('deterministic gates failed: nobin(spawn-failed:ENOENT)');
+    expect(out).not.toContain('killed:');
+    expect(out).toContain('devkit-no-such-binary-xyz did not start: check that it exists');
+    expect(out).not.toContain('Re-run it');
+    expect(results).toEqual([{ gate: 'nobin', status: 'could_not_run' }]);
+  });
+
+  it('a gate binary without the execute bit names permission in its remedy, not only PATH', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'guard-det-noexec-'));
+    dirs.push(dir);
+    writeFileSync(join(dir, 'lint.sh'), '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+    const { rc, out, results } = run([], {
+      extra: [{ label: 'noexec', cmd: join(dir, 'lint.sh') }],
+    });
+    expect(rc).toBe(1);
+    expect(out).toContain('deterministic gates failed: noexec(spawn-failed:EACCES)');
+    expect(out).toContain('is executable');
+    expect(results).toEqual([{ gate: 'noexec', status: 'could_not_run' }]);
+  });
+
+  it('an ordinary exit 1 is unchanged: a bare label and a fail verdict', () => {
+    const { rc, out, results } = run(['size'], { exec: mkExec({ 'size-disable': 1 }) });
+    expect(rc).toBe(1);
+    expect(out).toContain('deterministic gates failed: guard-size\n');
+    expect(results).toEqual([{ gate: 'size', status: 'fail' }]);
+  });
+
+  it('a killed fail-open structure gate blocks as killed under strict, never as an opt-out', () => {
+    process.env.GUARD_DETERMINISTIC_STRICT = '1';
+    const exec = throwing('structure', { status: null, signal: 'SIGTERM' });
+    const { rc, out, results } = run([], { exec, structure: 'guard-structure' });
+    expect(rc).toBe(1);
+    expect(out).toContain('deterministic gates failed: structure-lint(killed:SIGTERM)');
+    expect(out).not.toContain('could-not-run)');
+    expect(results).toEqual([{ gate: 'structure-lint', status: 'could_not_run' }]);
+  });
+});
+
 const PROSE_3 =
   '// first line of prose\n// second line of prose\n// third line of prose\nexport const a = 1;\n';
 
