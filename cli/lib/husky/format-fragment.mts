@@ -95,7 +95,7 @@ export function renderAgentHookLines(f: StepFormatter = OXFMT_STEP): AgentHookLi
  * Extension-only: devkit cannot know a consumer's authored-file boundary, and NOT derived from
  * `sourceExtensions`, whose edits would then each be a hook-drift event. self-host swaps in a scope.
  */
-export const FORMAT_EXTENSIONS = '\\.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$';
+export const FORMAT_EXTENSIONS = '\\.(tsx?|jsx?|mts|cts|mjs|cjs|css|jsonc?)$';
 export const FORMAT_EXTENSION_FILTER = `grep -E '${FORMAT_EXTENSIONS}'`;
 
 /**

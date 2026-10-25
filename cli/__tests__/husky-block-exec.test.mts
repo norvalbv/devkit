@@ -625,6 +625,15 @@ describe('format re-stage step (real git)', () => {
       expect(r.stdout).toContain('🎨 oxfmt formatted and re-staged 2 staged file(s).');
     });
 
+    it('hands a staged .cjs file to the formatter', () => {
+      const repo = initRepo();
+      stageFile(repo, 'a.cjs');
+      const r = runInRepo(repo, { devkit: ARGV_STUB });
+      expect(r.status, r.stdout).toBe(0);
+      expect(r.stdout).toContain('🎨 oxfmt formatted and re-staged 1 staged file(s).');
+      expect(argvOf(repo)).toContain('ARG[a.cjs]');
+    });
+
     it('reports a missing devkit bin and lets the commit continue', () => {
       const repo = initRepo();
       stageFile(repo, 'a.mts');
