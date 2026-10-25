@@ -161,6 +161,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Decision brief: rule kept on edit | experimental | accepted | stale | quality | ↑ improved | Rule kept: brief only, agent cannot read on (best-case tasks): 36/40 (90.0%) · Rule kept: brief, agent may read on (best-case tasks): 38/40 (95.0%) |
 | Semantic search retrieval | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Duplication matcher | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
+| Commit-guard reviewer (localized fixture) | shipped | accepted | stale | coverage | → flat | first-pass FAIL recall: 1/1 (100.0%) · first-pass clean pass: 2/2 (100.0%) · block recall: 1/1 (100.0%) · clean pass: 2/2 (100.0%) |
 | Commit-guard retrieval | shipped | evidence-only | unknown | quality | ? unknown | Clone retrieval recall at 10: 59.0% · Semantic retrieval recall at 10: 25.0% |
 | Ship fixture setup cost | experimental | accepted | stale | methodology-reset | ? unknown | Fixture CPU candidate/baseline: 19.0% · Fixture elapsed candidate/baseline: 31.4% |
 
@@ -170,7 +171,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | --- | --- | --- | --- | --- |
 | API security agent | agent | shipped | evidence-only | reviewer-api-security |
 | Backend performance agent | agent | shipped | evidence-only | reviewer-backend-performance |
-| Commit guard agent | agent | shipped | evidence-only | commit-guard-retrieval |
+| Commit guard agent | agent | shipped | evidence-only | reviewer-commit-guard, commit-guard-retrieval |
 | Conventions agent | agent | shipped | accepted | conventions |
 | Correctness agent | agent | shipped | evidence-only | reviewer-correctness |
 | Feature completeness agent | agent | shipped | accepted | completeness |
@@ -198,7 +199,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Backend performance reviewer | reviewer | shipped | evidence-only | reviewer-backend-performance |
 | Frontend security reviewer | reviewer | shipped | evidence-only | reviewer-frontend-security |
 | Frontend performance reviewer | reviewer | shipped | evidence-only | reviewer-frontend-performance |
-| Commit guard reviewer | reviewer | shipped | evidence-only | commit-guard-retrieval |
+| Commit guard reviewer | reviewer | shipped | evidence-only | reviewer-commit-guard, commit-guard-retrieval |
 | Correctness reviewer | reviewer | shipped | evidence-only | reviewer-correctness |
 | Conventions reviewer | reviewer | shipped | accepted | conventions |
 | Feature critique judge | judge | shipped | accepted | critique |
