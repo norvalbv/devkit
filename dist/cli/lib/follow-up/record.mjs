@@ -2,12 +2,12 @@
  * Follow-up records: the description lines a follow-up story carries, and the pure decision of
  * which follow-up `devkit follow-up start` may assign. The tracker is only where the lines live.
  */
-/** Title prefix on a follow-up devkit started; the queue that runs it reads it to prioritise. */
-export const AUTO_START_PREFIX = '[auto-start]';
+/** Title prefix older versions of `start` wrote; only deduplication still strips it. */
+const LEGACY_START_PREFIX = '[auto-start]';
 export const FOLLOW_UP_TYPES = ['blocks-done', 'builds-on', 'discovery'];
 const PR_URL = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/;
 const WHOLE_PR_URL = new RegExp(`^${PR_URL.source}$`);
-/** Any record label; readers take the first match, so free text must never carry one. */
+/** Any record label. Readers take the first match anywhere, so free text must never carry one. */
 export const RECORD_LABEL = /\*\*(Project|Follow-up of|Follow-up type|Stack on):\*\*/;
 export function isPrUrl(value) {
     return WHOLE_PR_URL.test(value);
@@ -46,14 +46,16 @@ export function renderRecord(project, parent, type, prUrl) {
         lines.push(`**Stack on:** ${prUrl}`);
     return lines.join('\n');
 }
-/** A title compared for duplicates: case, spacing and the start marker do not make it new. */
+/** A title compared for duplicates: case, spacing and the legacy start marker do not make it new. */
 export function normalisedTitle(name) {
-    const unmarked = name.startsWith(AUTO_START_PREFIX) ? name.slice(AUTO_START_PREFIX.length) : name;
+    const unmarked = name.startsWith(LEGACY_START_PREFIX)
+        ? name.slice(LEGACY_START_PREFIX.length)
+        : name;
     return unmarked.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 /** Depth is capped at one hop: a story that is itself a follow-up never starts follow-ups. */
 export function isDepthCapped(story) {
-    return story.name.startsWith(AUTO_START_PREFIX) || parseRecord(story.description) !== null;
+    return parseRecord(story.description) !== null;
 }
 /** Why a linked story may not be auto-started, or null when it qualifies. */
 export function ineligibleReason(child, parentId) {
@@ -68,23 +70,29 @@ export function ineligibleReason(child, parentId) {
         return 'no Stack on line for the parent PR';
     return null;
 }
+/** Open follow-ups holding the parent's feature back: any type but discovery, untyped included. */
+export function openFollowUps(parentId, children, excludeId) {
+    return children.flatMap((child) => {
+        const record = parseRecord(child.description);
+        if (record?.parent !== parentId || child.closed || child.id === excludeId)
+            return [];
+        return record.type === 'discovery' ? [] : [{ id: child.id, type: record.type }];
+    });
+}
 /**
- * At most one follow-up per parent ever starts, so a marked follow-up that is assigned or closed
- * ends it. An open, unassigned marked one (an earlier assign failed) is resumed before a new pick.
+ * A non-discovery follow-up that is owned or completed means one already started, by `start`, a
+ * consumer's agent or a human, so a rerun assigns nothing. An archived, uncompleted one is ignored.
  */
 export function decideStart(parentId, children) {
     const ofParent = children.filter((child) => parseRecord(child.description)?.parent === parentId);
-    const started = ofParent.find((child) => child.name.startsWith(AUTO_START_PREFIX) && (child.ownerIds.length > 0 || child.closed));
+    const started = ofParent.find((child) => parseRecord(child.description)?.type !== 'discovery' &&
+        ((child.ownerIds.length > 0 && !child.closed) || child.completed));
     if (started)
         return { action: 'none', reason: `sc-${started.id} was already started` };
-    const eligible = ofParent
+    const fresh = ofParent
         .filter((child) => ineligibleReason(child, parentId) === null)
-        .sort((a, b) => a.id - b.id);
-    const marked = eligible.find((child) => child.name.startsWith(AUTO_START_PREFIX));
-    if (marked)
-        return { action: 'assign', story: marked, rename: false };
-    const fresh = eligible.find((child) => child.ownerIds.length === 0);
+        .sort((a, b) => a.id - b.id)[0];
     return fresh
-        ? { action: 'assign', story: fresh, rename: true }
+        ? { action: 'assign', story: fresh }
         : { action: 'none', reason: 'no unowned builds-on follow-up qualifies' };
 }

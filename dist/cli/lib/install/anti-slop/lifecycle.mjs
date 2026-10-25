@@ -123,7 +123,7 @@ function syncUnlocked(cwd, dryRun) {
 }
 /** Install/upgrade the managed plugin without fetching or changing a consumer dependency stack. */
 export function syncAntiSlopCapability(cwd, opts = {}) {
-    const { dryRun = false, pinRoot, overlay } = opts;
+    const { dryRun = false, pinRoot, overlay, refreshStarters } = opts;
     if (dryRun) {
         assertOxcCapabilityReady(cwd, { overlay });
         syncUnlocked(cwd, true);
@@ -139,7 +139,7 @@ export function syncAntiSlopCapability(cwd, opts = {}) {
             if (!replacement)
                 throw new Error('anti-slop managed replacement was not prepared');
             try {
-                syncOxcCapability(cwd, { antiSlop: true, pinRoot, overlay });
+                syncOxcCapability(cwd, { antiSlop: true, pinRoot, overlay, refreshStarters });
                 replacement.commit();
                 console.log(`  ✓ anti-slop: ${replacement.manifest.ruleIds.length} rules @ ${replacement.manifest.upstreamCommit.slice(0, 12)}`);
             }

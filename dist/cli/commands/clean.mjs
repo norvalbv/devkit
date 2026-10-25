@@ -5,14 +5,14 @@
  *   - package/standalone → remove devkit-created configs, the husky devkit-guards block, skills,
  *                baselines, .devkit, and the @norvalbv/devkit dep + devkit scripts.
  *
- * Safe: only touches what devkit created (biome/tsconfig are removed ONLY if they still extend
- * devkit). Confirms first unless --yes; --dry-run prints every action and writes nothing.
+ * Safe: only touches what devkit created (tsconfig is removed ONLY if it still extends devkit). Confirms first unless --yes; --dry-run prints every action and writes nothing.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { confirm, isCancel } from '@clack/prompts';
 import { CONFIG_FILENAME } from '../../gate-engine/config.mjs';
+import { CONSUMER_FORMATTER } from '../lib/husky/format-fragment.mjs';
 import { OVERLAY_WRITTEN, readableGateInputs, } from '../../gate-engine/deterministic/gate-inputs.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { packageDir, readJson } from '../lib/fs-helpers.mjs';
@@ -67,25 +67,22 @@ function rmUntrackedIn(cwd, gitRoot, dryRun) {
             announceTracked(`${pfx}${rel}`);
     };
 }
-// A biome/tsconfig is devkit-created only if it still extends devkit (the package subpath, the
-// vendored .devkit/ base, or an overlay sibling) — never remove a config the user owns.
+// A tsconfig is devkit-created only if it still extends devkit (the package subpath, the vendored
+// .devkit/ base, or an overlay sibling) — never remove a config the user owns.
 function extendsDevkit(path) {
     if (!existsSync(path))
         return false;
     const raw = readFileSync(path, 'utf8');
     return (raw.includes('@norvalbv/devkit') ||
-        raw.includes('.devkit/biome') ||
         raw.includes('.devkit/tsconfig') ||
-        raw.includes('biome.devkit') ||
         raw.includes('eslint.config.devkit'));
 }
 // Overlay leftovers when the config (and maybe the manifests) are gone — an orphaned or partial
 // clean. The tell-tale is a devkit-BUNDLED skill dir present-and-UNTRACKED under a surface (package
-// mode commits its skills, so a tracked one isn't a stray), or a surviving .devkit / fallow-baselines.
+// mode commits its skills, so a tracked one isn't a stray), or a surviving .devkit.
 function hasOverlayStrays(gitRoot) {
-    if (existsSync(join(gitRoot, '.devkit')) || existsSync(join(gitRoot, 'fallow-baselines'))) {
+    if (existsSync(join(gitRoot, '.devkit')))
         return true;
-    }
     if (hasOrphanExcludeBlock(gitRoot))
         return true;
     const skillsSrc = join(packageDir(), 'skills');
@@ -141,7 +138,15 @@ function cleanOverlayStrays(cwd, gitRoot, dryRun) {
     removeOverlayWritten(cwd, gitRoot, dryRun);
     rmUntrackedIn(cwd, gitRoot, dryRun)('eslint/baselines', 'eslint/baselines/');
     cleanUntrackedDevkitState(gitRoot, dryRun);
+    noteFallowBaselines(cwd, gitRoot);
     pruneGitExclude(gitRoot, dryRun);
+}
+// Older overlays wrote fallow-baselines/; fallow's docs make it the consumer's committed home, so
+// clean leaves it and says so once it stops being hidden.
+function noteFallowBaselines(cwd, gitRoot) {
+    const pfx = cwd === gitRoot ? '' : `${relative(gitRoot, cwd)}/`;
+    if (existsSync(join(cwd, 'fallow-baselines')) && !isTracked(gitRoot, `${pfx}fallow-baselines`))
+        console.log('  · fallow-baselines/ left in place (devkit no longer manages it) — commit or delete it');
 }
 function restoreHooksPath(gitRoot, orig, dryRun) {
     // A poisoned origHooksPath (devkit's own dir — from a pre-0.8.1 re-overlay) can't be restored
@@ -227,10 +232,11 @@ function cleanOverlay(cwd, cfg, dryRun) {
     if (comp.searchCode && existsSync(join(cwd, '.search-code')))
         console.log('  · .search-code/ index left in place (git now shows it) — delete it if unwanted');
     rm(join(cwd, 'eslint', 'baselines'), 'eslint/baselines/', dryRun);
+    noteFallowBaselines(cwd, gitRoot);
     pruneGitExclude(gitRoot, dryRun);
 }
 // Remove the @norvalbv/devkit dep + devkit-only scripts from package.json (leave public deps the
-// user may have had — biome/husky/eslint — untouched).
+// user may have had — husky/eslint — untouched). lint/format go only while devkit's own values.
 // Reason: selective package.json key pruning: one guarded delete per devkit-owned dependency/script key, near-zero nesting; high branch COUNT (loops × per-key existence guards), each trivial
 // fallow-ignore-next-line complexity
 function depesc(cwd, dryRun) {
@@ -253,13 +259,19 @@ function depesc(cwd, dryRun) {
             changed = true;
         }
     }
+    for (const [s, value] of Object.entries(CONSUMER_FORMATTER.scripts)) {
+        if (scripts?.[s] === value) {
+            delete scripts[s];
+            changed = true;
+        }
+    }
     if (!changed)
         return;
     console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} @norvalbv/devkit dep + devkit scripts`);
     if (!dryRun)
         writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 }
-// Remove a single line devkit added to .gitignore (e.g. fallow's `.fallow/` cache dir). Leaves the
+// Remove a single line devkit added to .gitignore (search-code's `.search-code/`). Leaves the
 // rest of the file untouched; no-ops if the line isn't present.
 function pruneGitignoreLine(root, line, dryRun) {
     const giPath = join(root, '.gitignore');
@@ -309,10 +321,8 @@ function cleanPackage(cwd, cfg, dryRun) {
     ].filter((id) => Boolean(id));
     removeHookRegistrations(gitRoot, { dryRun, targets, legacyOwnedComponentIds });
     // devkit-created configs/data in the package.
-    for (const f of ['biome.jsonc', 'tsconfig.json']) {
-        if (extendsDevkit(join(cwd, f)))
-            rm(join(cwd, f), f, dryRun);
-    }
+    if (extendsDevkit(join(cwd, 'tsconfig.json')))
+        rm(join(cwd, 'tsconfig.json'), 'tsconfig.json', dryRun);
     // Read before guard.config.json goes, since it may relocate the allowlist.
     const allowlist = readableGateInputs(cwd, (message) => console.log(`  ⚠ ${message} — the allowlist it configures was left in place`)).find((input) => input.field === 'allowlistPath');
     rm(join(cwd, CONFIG_FILENAME), CONFIG_FILENAME, dryRun);
@@ -320,10 +330,6 @@ function cleanPackage(cwd, cfg, dryRun) {
     rm(join(cwd, 'eslint'), 'eslint/ (domains + baselines)', dryRun);
     if (allowlist)
         rm(join(cwd, allowlist.path), allowlist.path, dryRun);
-    // fallow component: devkit added the `.fallow/` gitignore line (install-fallow); its staged gate
-    // lives in the hook block removed above. A .fallowrc is the consumer's, never devkit-created.
-    if (cfg.components?.fallow)
-        pruneGitignoreLine(gitRoot, '.fallow/', dryRun);
     // search-code: remove the devkit-written opt-in config + the `.search-code/` gitignore line.
     // The index dir itself is the engine's data — left in place.
     if (cfg.components?.searchCode) {
@@ -340,7 +346,7 @@ function cleanPackage(cwd, cfg, dryRun) {
     pruneDevkitCacheGitignore(cwd, dryRun);
     rm(join(cwd, '.devkit'), '.devkit/', dryRun);
     depesc(cwd, dryRun);
-    console.log('  (left your own biome/husky/eslint deps and any fallow config in place)');
+    console.log('  (left your own husky/eslint deps and any fallow config in place)');
 }
 export const meta = {
     name: 'clean',
@@ -386,7 +392,7 @@ export default async function run(args, cwd) {
             // unset
         }
         // Orphaned/partial overlay: the config is gone, but core.hooksPath may still point at our
-        // (deleted) dir AND/OR synced agent-half files + fallow-baselines may be stranded. Recover the
+        // (deleted) dir AND/OR synced agent-half files may be stranded. Recover the
         // full overlay footprint, not just the hook — the agent-half is removed by bundled-name fallback
         // since the manifests may be gone too (the old recovery removed `.devkit/` without them).
         const ours = isOverlayHooksValue(hp, gitRoot);

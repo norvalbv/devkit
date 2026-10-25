@@ -36,7 +36,7 @@ export { renderTargets } from './evidence/targets-block.mjs';
 import { emitCacheHit, emitGateBypass, emitGateEvent, emitGateInfraFailure, emitIntentCacheHit, finishGateTiming, } from '../judge/gate-events.mjs';
 import { JUDGE_ISOLATION, JUDGE_READ_TOOLS } from '../judge/judge-isolation.mjs';
 import { judgeMcpCapabilityFingerprint, judgeMcpMissingServers, namedAgentMcpProfile, trackMcpSpawns, withNamedAgentMcpTools, } from '../judge/mcp/profile.mjs';
-import { printCachedPass, reportMcpDegraded } from './evidence/base-context.mjs';
+import { STICKY_RULING, printCachedPass, reportMcpDegraded } from './evidence/base-context.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, remedyCause, strictRemedy, } from '../judge/run-judge.mjs';
 import { loadCache, savePasses } from './cache.mjs';
@@ -246,7 +246,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
             const diffMatches = stagedIdentity !== null && sticky.diff_sha === stagedIdentity;
             printCachedPass('completeness', sticky, diffMatches
                 ? `(same branch + message + staged diff) — message ${messageId}`
-                : `(same branch + message; judged on an earlier diff, which is not re-judged) — message ${messageId}`);
+                : `(same branch + message; judged on an earlier diff, which is not re-judged) — message ${messageId}; ${STICKY_RULING}`);
             const stickyDuration = typeof sticky.duration_ms === 'number' ? sticky.duration_ms : undefined;
             // The resolved model, not the stored one: the sticky key already includes it, so they agree.
             emitIntentCacheHit({

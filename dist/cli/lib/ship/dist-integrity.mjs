@@ -12,10 +12,10 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { treeBlobsAtRef } from '../../../gate-engine/ratchets/tree-blobs.mjs';
-import { assignedNames, ownDirVars, scanShellScript } from '../doctor/hook-gate-scan.mjs';
 import { commitIndexEnv } from '../../../gate-engine/ratchets/commit-index.mjs';
 import { failLine } from '../../../gate-engine/deterministic/reason.mjs';
 import { inspectReleaseOnlyDist, printReleaseOnlyDist } from './preflight/release-only-dist.mjs';
+import { shellSourceEdges } from './preflight/shell-source-edges.mjs';
 import { staleNewDist } from './preflight/stale-new-dist.mjs';
 import { ANTI_SLOP_FILES, isDevOnly, MIRRORED_EXT, PACKAGED_ROOT_DIRS, PACKAGED_ROOT_FILES, } from '../fs-helpers.mjs';
 const CLEAN_REPORT = {
@@ -132,78 +132,81 @@ export async function moduleImportEdges(root, importer, source) {
     }
     return edges;
 }
-/** The literal inline spelling of "my own directory", used without a variable. */
-const SCRIPT_DIR_LITERAL = '$(dirname "${BASH_SOURCE[0]}")';
-/** A leading underscore is real here — review/submodules.sh uses `_REVIEW_SUBMODULE_LIB_DIR`. */
-const VAR_EXPANSION = /^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$/;
-/** Rooted outside the package tree: a real runtime dependency, but never on a dist artifact. */
-const EXTERNAL_ROOT = /^\$\{?(?:HOME|TMPDIR|XDG_[A-Z_]+)\}?$/;
-const BARE_VAR = /^\$[A-Za-z_][A-Za-z0-9_]*/;
-/** `$( )` and `${ }` nest, so a scan to the FIRST closer takes the wrong span for `$(x "$(y)")`. */
-function expansionEnd(operand) {
-    const open = operand[1];
-    if (open !== '(' && open !== '{') {
-        return operand.startsWith('$') ? (BARE_VAR.exec(operand)?.[0].length ?? -1) : -1;
-    }
-    const close = open === '(' ? ')' : '}';
-    let depth = 0;
-    for (let i = 1; i < operand.length; i++) {
-        if (operand[i] === open)
-            depth++;
-        else if (operand[i] === close && --depth === 0)
-            return i + 1;
-    }
-    return -1;
+/** A briefed path ships as the caller's file; every unbriefed one lands exactly as BASE has it. */
+function willShip(view, file) {
+    if (!view.briefed.has(file))
+        return view.atBase.has(file);
+    return !view.deleted.has(file) && existsSync(path.join(view.root, file));
 }
-function unwrapQuotes(operand) {
-    const quoted = operand.startsWith('"') && operand.length > 1 && operand.endsWith('"');
-    return quoted ? operand.slice(1, -1) : operand;
+function walkable(file) {
+    return file.endsWith('.mjs') || file.endsWith('.sh');
 }
-/** Repo path, `null` when deliberately outside the dist closure, `undefined` when opaque. */
-function shellTarget(importer, operand, dirVars, assigned) {
-    const bare = unwrapQuotes(operand);
-    // An absolute system path (`. /etc/os-release`) is a real dependency, never a dist artifact.
-    if (bare.startsWith('/'))
-        return null;
-    const end = expansionEnd(bare);
-    if (end === -1)
+/** The bytes this ship commits for `importer`; `undefined` when there are none to read. */
+function importerText(view, importer) {
+    // A deleted artifact is deliberately not a discovery root: its dependencies are leaving with it,
+    // not candidates to add back.
+    if (view.deleted.has(importer))
         return undefined;
-    const expansion = bare.slice(0, end);
-    const tail = bare.slice(end);
-    if (!tail.startsWith('/'))
-        return undefined;
-    const named = VAR_EXPANSION.exec(expansion);
-    if (!(named ? dirVars.has(named[1]) : expansion === SCRIPT_DIR_LITERAL)) {
-        // External root only for a name this script never assigns: a reassigned `HOME` is not $HOME,
-        // whatever it now holds, so it cannot be waved through as living outside the package.
-        const inherited = named === null || !assigned.has(named[1]);
-        return inherited && EXTERNAL_ROOT.test(expansion) ? null : undefined;
+    if (!view.briefed.has(importer)) {
+        const committed = view.atBase.get(importer)?.toString('utf8');
+        if (committed !== undefined)
+            return committed;
     }
-    // Returned even when it climbs out of dist/: `willShip` then names the exact edge, which is
-    // what an .mjs import above dist already gets. The requeue guard keeps the WALK inside dist.
-    return path.posix.normalize(path.posix.join(path.posix.dirname(importer), tail));
+    const absolute = path.join(view.root, importer);
+    return view.physicalSet.has(importer) && existsSync(absolute)
+        ? readFileSync(absolute, 'utf8')
+        : undefined;
+}
+/** Shell walks transitively too: ship-branch.sh -> review/worktrees.sh -> its own siblings. */
+function enqueueable(view, target) {
+    const present = view.physicalSet.has(target) || Boolean(view.atBase.get(target));
+    return walkable(target) && present && !view.deleted.has(target);
 }
 /**
- * Shell `source` edges of ONE shipped script — moduleImportEdges' shape and its `undefined` =
- * unverified = BLOCKS contract. See docs/decisions/typescript-source-prebuilt-mjs.md (sc-2522).
+ * Follow the dist import graph from `seeds`, through every reachable physical dist module, so one
+ * report names the whole omitted closure. `reached` holds every edge target the walk saw.
  */
-export async function shellSourceEdges(importer, source) {
-    // Dev-only in the same sense as es-module-lexer above: consumers short-circuit before this runs.
-    const { parse } = await import('unbash');
-    const scan = scanShellScript(source, parse);
-    if (scan === undefined)
-        return undefined;
-    const edges = [];
-    for (const { text, at } of scan.operands) {
-        // Only the nearest preceding assignment counts: `DIR=<own>; DIR=/tmp; . "$DIR/x"` is untrusted.
-        const target = shellTarget(importer, text, ownDirVars(scan, at), assignedNames(scan));
-        if (target === null)
+async function walkDistGraph(view, seeds) {
+    const reached = new Set();
+    const unresolved = [];
+    const unlexable = [];
+    const queue = [...seeds].filter(walkable).sort();
+    const queued = new Set(queue);
+    for (let i = 0; i < queue.length; i++) {
+        const importer = queue[i];
+        const text = importerText(view, importer);
+        if (text === undefined)
             continue;
-        if (target === undefined)
-            return undefined;
-        edges.push({ importer, specifier: text, target });
+        const edges = importer.endsWith('.sh')
+            ? await shellSourceEdges(importer, text)
+            : await moduleImportEdges(view.root, importer, text);
+        if (edges === undefined) {
+            // Recorded, not thrown: it still blocks via `unlexable`, and finishing the queue lets one
+            // report name the file instead of main()'s catch aborting with a message naming nothing.
+            unlexable.push(importer);
+            continue;
+        }
+        for (const { specifier, target } of edges) {
+            reached.add(target);
+            if (!willShip(view, target))
+                unresolved.push({ importer, specifier, target });
+            if (!queued.has(target) && enqueueable(view, target)) {
+                queued.add(target);
+                queue.push(target);
+            }
+        }
     }
-    return edges;
+    return { reached, unresolved, unlexable };
+}
+/** A briefed source on disk whose artifact is nowhere was never built. A source absent from disk is
+ *  a deletion, whose stale artifact waits for the release. */
+function neverBuilt(view) {
+    return [...view.briefed]
+        .filter((file) => !file.startsWith('dist/') && existsSync(path.join(view.root, file)))
+        .map(distArtifact)
+        .filter((file) => file !== undefined && !view.physicalSet.has(file))
+        .filter((file) => !willShip(view, file))
+        .sort();
 }
 /**
  * Inspect the caller's physical dist tree, Git index, and ship briefing.
@@ -213,7 +216,6 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
     if (packageName(root) !== '@norvalbv/devkit')
         return { ...CLEAN_REPORT };
     const physical = filesUnder(root, 'dist');
-    const physicalSet = new Set(physical);
     const briefed = new Set(briefedPaths.map(briefPath));
     // A briefed DELETION is not committed (ship-branch.sh skips its force-add). Judged at the fork point
     // staging anchors at (patch-anchor.sh), not BASE: an append's BASE is the PR tip, new dist and all.
@@ -224,63 +226,15 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
     // Index membership is not the property that matters — presence in the commit this ship is about
     // to create is. ship-branch.sh and reship.sh `git add -f` every briefed path, so briefing one IS
     // shipping it, and demanding it be pre-staged rejects the artifact a release just generated.
-    // Every unbriefed path lands exactly as BASE has it, whatever the caller's index or disk says.
-    const shipping = (file) => briefed.has(file) && !deleted.has(file);
     const atBase = treeBlobsAtRef(root, base, ['dist']);
     if (atBase === null)
         throw new Error(`cannot read dist/ at ${base}`);
-    const willShip = (file) => briefed.has(file) ? shipping(file) && existsSync(path.join(root, file)) : atBase.has(file);
+    const view = { root, briefed, deleted, atBase, physicalSet: new Set(physical) };
     // Shared checkouts can contain another agent's generated output. Seed the scan from this ship's
     // explicit source/dist paths, then follow only their reachable physical dist import graph.
-    const required = new Set([...briefed].map(distArtifact).filter((file) => file !== undefined));
-    const unresolved = [];
-    const unlexable = [];
-    const walkable = (file) => file.endsWith('.mjs') || file.endsWith('.sh');
-    const queue = [...required].filter(walkable).sort();
-    const queued = new Set(queue);
-    const parsed = new Set();
-    let queueIndex = 0;
-    while (queueIndex < queue.length) {
-        const importer = queue[queueIndex++];
-        if (parsed.has(importer))
-            continue;
-        parsed.add(importer);
-        const absolute = path.join(root, importer);
-        // Keep discovery inside the explicit roots, but continue through every reachable physical dist
-        // module so one report names the whole omitted closure. A deleted artifact is deliberately not
-        // a discovery root: its dependencies are leaving with it, not candidates to add back.
-        if (deleted.has(importer))
-            continue;
-        const onDisk = physicalSet.has(importer) && existsSync(absolute);
-        const committed = briefed.has(importer) ? undefined : atBase.get(importer)?.toString('utf8');
-        const text = committed ?? (onDisk ? readFileSync(absolute, 'utf8') : undefined);
-        if (text === undefined)
-            continue;
-        const edges = importer.endsWith('.sh')
-            ? await shellSourceEdges(importer, text)
-            : await moduleImportEdges(root, importer, text);
-        if (edges === undefined) {
-            // Recorded, not thrown: it still blocks via `unlexable`, and finishing the queue lets one
-            // report name the file instead of main()'s catch aborting with a message naming nothing.
-            unlexable.push(importer);
-            continue;
-        }
-        for (const { specifier, target } of edges) {
-            required.add(target);
-            if (!willShip(target))
-                unresolved.push({ importer, specifier, target });
-            if (
-            // Shell walks transitively too: ship-branch.sh -> review/worktrees.sh -> its own siblings.
-            // Omitting .sh here would report the first hop of a new chain and stop.
-            walkable(target) &&
-                (physicalSet.has(target) || Boolean(atBase.get(target))) &&
-                !deleted.has(target) &&
-                !queued.has(target)) {
-                queued.add(target);
-                queue.push(target);
-            }
-        }
-    }
+    const seeds = new Set([...briefed].map(distArtifact).filter((file) => file !== undefined));
+    const { reached, unresolved, unlexable } = await walkDistGraph(view, seeds);
+    const required = new Set([...seeds, ...reached]);
     const added = git(root, [
         'diff-index',
         '--name-only',
@@ -293,16 +247,8 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
     // A file already staged needs briefing, not `git add -f`, so `unbriefed` alone names it.
     const staged = new Set(added);
     // `willShip`, never `required`: a briefed source maps its dist into `required` without shipping it.
-    const untracked = physical.filter((file) => required.has(file) && !willShip(file) && !staged.has(file));
+    const untracked = physical.filter((file) => required.has(file) && !willShip(view, file) && !staged.has(file));
     const unbriefed = added.filter((file) => required.has(file) && !briefed.has(file)).sort();
-    // `untracked` sees only built files. A source on disk whose artifact is nowhere was never built;
-    // a source absent from disk is a deletion, whose stale artifact waits for the release.
-    const missing = [...briefed]
-        .filter((file) => !file.startsWith('dist/') && existsSync(path.join(root, file)))
-        .map(distArtifact)
-        .filter((file) => file !== undefined && !physicalSet.has(file))
-        .filter((file) => !willShip(file))
-        .sort();
     unresolved.sort((a, b) => `${a.importer}\0${a.specifier}`.localeCompare(`${b.importer}\0${b.specifier}`));
     return {
         active: true,
@@ -310,8 +256,8 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
         unbriefed,
         untracked,
         unlexable: unlexable.sort(),
-        missing,
-        stale: staleNewDist(root, [...briefed].filter(shipping), atBase, distArtifact),
+        missing: neverBuilt(view),
+        stale: staleNewDist(root, [...briefed].filter((file) => !deleted.has(file)), atBase, distArtifact),
     };
 }
 export function shellQuote(value) {

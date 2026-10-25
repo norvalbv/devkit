@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { writeFileAtomic } from '../../atomic-write.mjs';
-import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_UPSTREAM } from './constants.mjs';
+import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_PRIOR_UPSTREAMS, ANTI_SLOP_UPSTREAM, } from './constants.mjs';
 /** Completion receipts are append-only; removing one reopens a finished zero-debt migration. */
 export function removedBaselineMigrationReceipts(base, candidate) {
     const candidateReceipts = new Set(candidate.migrationReceipts ?? []);
@@ -57,7 +57,7 @@ export function parseBaseline(json, source = ANTI_SLOP_BASELINE_REL) {
     }
     const baseline = value;
     if (baseline.schemaVersion !== 1 ||
-        baseline.upstreamCommit !== ANTI_SLOP_UPSTREAM ||
+        ![ANTI_SLOP_UPSTREAM, ...ANTI_SLOP_PRIOR_UPSTREAMS].some((pin) => pin === baseline.upstreamCommit) ||
         (baseline.migrationReceipts !== undefined &&
             (!Array.isArray(baseline.migrationReceipts) ||
                 !baseline.migrationReceipts.every((receipt) => String(receipt) === receipt && String(receipt).length > 0) ||
@@ -73,7 +73,7 @@ export function parseBaseline(json, source = ANTI_SLOP_BASELINE_REL) {
     const migrationReceipts = [...(baseline.migrationReceipts ?? [])].sort((a, b) => a.localeCompare(b));
     const parsed = {
         schemaVersion: 1,
-        upstreamCommit: baseline.upstreamCommit,
+        upstreamCommit: ANTI_SLOP_UPSTREAM,
         entries: sorted,
     };
     if (migrationReceipts.length > 0)

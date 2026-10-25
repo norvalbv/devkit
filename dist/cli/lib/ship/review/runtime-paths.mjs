@@ -10,19 +10,6 @@ export function isSafeReviewRelativePath(path) {
         !win32.isAbsolute(path) &&
         segments.every((segment) => Boolean(segment) && segment !== '.' && segment !== '..'));
 }
-/** Canonicalize harmless dot/slash syntax while rejecting traversal and absolute paths. */
-export function normalizeSafeReviewRelativePath(path) {
-    const value = path.trim();
-    if (!value || value.includes('\0') || value.includes('\\') || isAbsolute(value))
-        return null;
-    if (win32.isAbsolute(value))
-        return null;
-    const segments = value.split('/');
-    if (segments.includes('..'))
-        return null;
-    const normalized = segments.filter((segment) => segment && segment !== '.').join('/');
-    return isSafeReviewRelativePath(normalized) ? normalized : null;
-}
 /** True when candidate is root itself or a descendant, never a lexical sibling. */
 export function reviewPathWithin(root, candidate) {
     const rel = relative(root, candidate);

@@ -162,6 +162,26 @@ export function hasStagedFiles(root) {
 export function splitNul(out) {
     return out.split('\0').filter((line) => line.length > 0);
 }
+/** Decode `git diff --name-status -z`: R and C records carry their source path first. */
+export function nameStatusRecords(out) {
+    const fields = out.split('\0');
+    const records = [];
+    for (let i = 0; fields[i];) {
+        const status = fields[i++];
+        const from = /^[RC]/.test(status) ? fields[i++] : undefined;
+        records.push({ status, from, path: fields[i++] ?? '' });
+    }
+    return records;
+}
+/** Renames keyed by destination; R100 is a pure move. Copies are not renames. */
+export function renamesFrom(records) {
+    const renames = new Map();
+    for (const { status, from, path } of records) {
+        if (status.startsWith('R') && from && path)
+            renames.set(path, { from, pure: status === 'R100' });
+    }
+    return renames;
+}
 function mergeInProgress(root) {
     return (spawnSync('git', ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'], {
         cwd: root,

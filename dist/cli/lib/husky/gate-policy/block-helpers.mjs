@@ -47,7 +47,7 @@ fi
 // Where a hook's gates find devkit's bins, what a missing one prints, and where the consumer's own
 // formatter lives. Every gate reads the one variable, so the three modes render the same gate body.
 const GLOBAL_MISSING = (bin) => `${bin} is missing from devkit's install — reinstall devkit`;
-// A global devkit's bin dir holds only devkit's bins; the consumer's formatter is in its own.
+// Overlay: the repo owns its formatter, whose bin sits in the repo's own dir, not devkit's.
 const CONSUMER_BIN = 'node_modules/.bin';
 export const BIN_DIRS = {
     // Package mode: the version pinned in the consumer's own dependencies.
@@ -77,7 +77,8 @@ if __dk_package_bin_dir=$(command -v guard-deterministic); then
 __dk_package_bin_dir=\${__dk_package_bin_dir%/*}`,
         close: 'fi',
         missing: GLOBAL_MISSING,
-        formatter: CONSUMER_BIN,
+        // devkit writes standalone's Oxfmt config, so the global devkit's pinned Oxfmt formats it.
+        formatter: '$__dk_package_bin_dir',
     },
 };
 /**

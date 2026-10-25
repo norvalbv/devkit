@@ -9,7 +9,7 @@
  * Ctrl-C / Esc at any prompt aborts cleanly via clack's isCancel (nothing is written).
  */
 import { cancel, confirm, intro, isCancel, multiselect, note, select } from '@clack/prompts';
-import { AGENT_TARGETS, COMPONENTS, CONFIG_DRIVEN_STRUCTURE, DEFAULT_REVIEW_DECISIONS_DIR, GUARD_OPTIONS, OPTIONAL_COMPONENTS, RECOMMENDED_GUARD_IDS, REVIEWABLE_GUARD_IDS, } from './components.mjs';
+import { AGENT_TARGETS, COMPONENTS, CONFIG_DRIVEN_STRUCTURE, GUARD_IDS, GUARD_OPTIONS, OPTIONAL_COMPONENTS, REVIEWABLE_GUARD_IDS, WIZARD_GUARD_IDS, } from './components.mjs';
 // The components that sync into an agent surface. Drives whether the wizard
 // asks the surface picker at all — no point choosing surfaces if none of these are selected.
 const AGENT_SURFACE_COMPONENTS = [
@@ -86,6 +86,15 @@ const BASE_DRIFT_OPTION = {
 // The line-growth block rides the guards multiselect as this pseudo-id, then is split back into
 // selection.lineGrowth (it's a guard.config.json knob, not a husky guard fragment).
 const LINE_GROWTH_ID = 'line-growth';
+// A re-run keeps what the repo recorded: a recorded guard stays on, a declined one stays off, and a
+// wizard default the repo was never asked about (fresh, --yes-inited, newly bundled) is pre-checked.
+function guardInitialValues(recorded) {
+    const guards = GUARD_IDS.filter((guard) => recorded?.guards?.includes(guard) ||
+        (WIZARD_GUARD_IDS.includes(guard) && !recorded?.disabledGuards?.includes(guard)));
+    // A husky-off run records lineGrowth false without ever showing this box, so that is no decline.
+    const declinedLineGrowth = recorded?.husky && recorded.lineGrowth === false;
+    return declinedLineGrowth ? guards : [...guards, LINE_GROWTH_ID];
+}
 // Abort the wizard the moment clack reports a cancel (Ctrl-C / Esc). A TS type guard, so a
 // non-cancelled value narrows to its real type after `if (bail(x)) return null`.
 function bail(value) {
@@ -119,7 +128,7 @@ const MODES = [
 ];
 // Reason: flat clack wizard orchestration: sequential numbered steps (mode→stack→components→guards→removal→summary→apply) each guarded by `if (bail(x)) return null`; the branch COUNT is high but every branch is near-flat, and the untested-complexity is acceptable because this is an interactive TTY prompt flow exercised end-to-end, not unit-tested
 // fallow-ignore-next-line complexity
-export async function runWizard({ detectedStack, detectedMode = 'package', structureAvailable, installed, existingReview, }) {
+export async function runWizard({ detectedStack, detectedMode = 'package', structureAvailable, installed, recorded, }) {
     intro('◆ devkit setup');
     // 1. Mode — package / standalone / overlay. Drives every later step.
     const mode = await select({
@@ -231,7 +240,7 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
                     hint: 'cap files at 500 lines — current giants grandfathered, new growth blocked (needs size)',
                 },
             ],
-            initialValues: [...RECOMMENDED_GUARD_IDS, LINE_GROWTH_ID],
+            initialValues: guardInitialValues(recorded),
             required: false,
         });
         if (bail(guards))
@@ -271,7 +280,6 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
     const review = {
         enabled: Boolean(reviewEnabled),
         guards: reviewGuards,
-        decisionsDir: existingReview?.decisionsDir?.trim() || DEFAULT_REVIEW_DECISIONS_DIR,
     };
     // 5. Removal: package/standalone only (overlay is local-only — a re-run just overwrites).
     const remove = [];
@@ -314,7 +322,6 @@ function summarize(mode, selection, structureAvailable, deselected) {
             'overlay — everything git-ignored, nothing committed:',
             `✓ guards${g}`,
             '✓ local hook → chains to the repo’s own',
-            `${on('biome')} biome overlay (extends the repo, staged files)`,
             `${on('structure')} structure lint · ${on('searchCode')} ${SEARCHCODE_OPTION.label}`,
             `${on('skills')} skills · ${on('agents')} agents → ${surfaces} (skipping anything git tracks)`,
             `${on('agentHooks')} agent hooks → ${surfaces} provider settings (tracked files preserved)`,

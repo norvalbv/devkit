@@ -16,6 +16,7 @@ import { checkAntiSlopCapability, syncAntiSlopCapability, } from '../install/ant
 import { selectedHookAssets } from '../install/hook-registration-ledger/selection.mjs';
 import { checkOxcCapability, syncOxcCapability } from '../install/oxc/lifecycle.mjs';
 import { commitMsgGuards } from '../husky/commit-msg-block.mjs';
+import { describeForeignHook, describeUnreadableHook } from '../husky/overlay/commit-msg.mjs';
 import { hasOwnOverlay, LOCAL_HOOKS, overlayHome, ownsOverlayConfig, overlayHooksPath, worktrees, } from '../husky/overlay/overlay-home.mjs';
 import { copiedFrom, copiedOverlayRow } from '../husky/overlay/copied-overlay.mjs';
 import { listed, printProjectionGaps } from '../husky/overlay/projection-report.mjs';
@@ -69,6 +70,7 @@ export async function runOverlayDoctor(cwd, cfg, fix) {
     const worktreesOk = printLinkedWorktrees(home, pkgRel, fix);
     printLegacyEslintOverlays(home, pkgRel);
     const judgesWired = printCommitMsgRow(cfg, fix, sync.commitMsg);
+    printSiblingHooksRow(fix, sync.siblings);
     if (judgesWired && !pathOk && !globalHookInstalled())
         console.log(`    commit-msg judges run only via \`git ${HEAL_ALIAS_NAME}\` / \`devkit ship\` while husky owns core.hooksPath`);
     // Advisory only — never affects the exit code (hook + path are the real health signal).
@@ -161,7 +163,9 @@ export async function runOverlayDoctor(cwd, cfg, fix) {
         console.log('    overlay contract: blocks NEW findings against your local baseline; no committed base, so no shrink-only ratchet, rename receipts, or CI monotonicity');
     }
     // A stale hook is unhealthy (exit 1) so CI/agents notice; --fix having just regenerated it heals this run.
-    const hookCurrent = fix || (!sync.drift && !sync.commitMsg.drift);
+    // An unreadable wrapper stays unhealthy under --fix: only restoring its read permission clears it.
+    const hookCurrent = (fix || (!sync.drift && !sync.commitMsg.drift && !sync.siblings.stale.length)) &&
+        !sync.siblings.unreadable.length;
     return hookOk && pathOk && worktreesOk && agentsOk && hookCurrent ? 0 : 1;
 }
 /** The synced agent half: skills, agents, agent-hook scripts and their registrations. */
@@ -243,4 +247,16 @@ function printCommitMsgRow(cfg, fix, state) {
     }
     console.log(`  ✓ .devkit/hooks/commit-msg: ${what} ${state.drift ? 'regenerated' : 'wired'}`);
     return wanted.length > 0;
+}
+// A missing or stale pass-through means a repo hook of that name would not run: unhealthy, healed by
+// --fix. A file devkit did not write is only named: --fix must not touch it, so it cannot fail exit.
+function printSiblingHooksRow(fix, { scriptDir, stale, foreign, unreadable, }) {
+    if (stale.length)
+        console.log(fix
+            ? `  ✓ .devkit/hooks pass-through wrappers refreshed (${stale.join(', ')})`
+            : `  ⚠ .devkit/hooks: ${stale.length} pass-through wrapper(s) missing or stale (${stale.join(', ')}) — a repo hook of those names would not run; run \`devkit doctor --fix\``);
+    for (const h of foreign)
+        console.log(`  · ${describeForeignHook(h, scriptDir)}`);
+    for (const h of unreadable)
+        console.log(`  ⚠ ${describeUnreadableHook(h)}`);
 }

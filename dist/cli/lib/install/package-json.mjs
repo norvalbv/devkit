@@ -57,8 +57,6 @@ export function patchPackageJson(cwd, devkitRef, repoUrl, sel, isStructure, dryR
     const electronPreset = isStructure && stack === 'electron';
     const devDeps = {};
     devDeps['@norvalbv/devkit'] = `${repoUrl}#${devkitRef}`;
-    if (sel.biome)
-        devDeps[CONSUMER_FORMATTER.package.name] = CONSUMER_FORMATTER.package.range;
     Object.assign(devDeps, {
         ...(sel.husky ? { husky: '^9.1.7' } : {}),
         ...(electronPreset
@@ -70,8 +68,8 @@ export function patchPackageJson(cwd, devkitRef, repoUrl, sel, isStructure, dryR
             : {}),
     });
     const scripts = {};
-    if (sel.biome)
-        Object.assign(scripts, CONSUMER_FORMATTER.scripts);
+    // Oxc is core in every tracked install, so its lint/format scripts are too.
+    Object.assign(scripts, CONSUMER_FORMATTER.scripts);
     Object.assign(scripts, {
         ...(sel.husky ? { prepare: PREPARE_SCRIPT } : {}),
         ...(sel.guards?.includes('fanout') || sel.guards?.includes('size')

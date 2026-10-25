@@ -62,12 +62,12 @@ function removeIfEmpty(dir) {
     }
 }
 /** One attempt: move a directory holding our nonce file onto `dir`. Fails while `dir` is held. */
-function tryTake(dir, nonce) {
+function tryTake(dir, { nonce, owner }) {
     // Sibling names end in `.lock` so a consumer's `.devkit/*.lock` ignore also hides crash litter.
     const staged = `${dir}.new-${nonce}.lock`;
     mkdirSync(staged, { recursive: true }); // a parent that can never exist throws here, at once
     try {
-        writeFileSync(join(staged, nonce), `${process.pid}\n${ownIdentity()}`);
+        writeFileSync(join(staged, nonce), `${owner.pid}\n${owner.identity}`);
         renameSync(staged, dir);
         return true;
     }
@@ -90,8 +90,8 @@ export function reapIfDead(dir, isGone = processOwnerIsProvablyGone) {
     }
 }
 /** Take the lock, or on contention reap a dead holder (first time, then every REAP_EVERY_MS). */
-function poll(dir, nonce, isGone, reapedAt) {
-    if (tryTake(dir, nonce))
+function poll(dir, attempt, isGone, reapedAt) {
+    if (tryTake(dir, attempt))
         return 'taken';
     if (Date.now() - reapedAt < REAP_EVERY_MS)
         return reapedAt;
@@ -99,20 +99,30 @@ function poll(dir, nonce, isGone, reapedAt) {
     return Date.now();
 }
 const heldError = (dir, label) => new LockHeldError(dir, label, readHolder(dir)?.pid ?? null);
-/** Run `fn` under the lock at `dir`. Throws LockHeldError rather than ever running unlocked. */
-export function withProcessLock(dir, fn, { label, waitMs = WAIT_MS, isGone = processOwnerIsProvablyGone }) {
-    if (held.has(dir))
-        throw heldError(dir, label);
-    const nonce = randomUUID();
+/** Take the lock for `owner` and return its nonce. Throws LockHeldError rather than ever running unlocked. */
+export function acquireProcessLock(dir, { label, waitMs = WAIT_MS, isGone = processOwnerIsProvablyGone, owner }) {
+    const attempt = {
+        nonce: randomUUID(),
+        owner: owner ?? { pid: process.pid, identity: ownIdentity() },
+    };
     const deadline = Date.now() + waitMs;
     let reapedAt = Number.NEGATIVE_INFINITY;
-    for (let step = poll(dir, nonce, isGone, reapedAt); step !== 'taken';) {
+    for (let step = poll(dir, attempt, isGone, reapedAt); step !== 'taken';) {
         reapedAt = step;
         if (Date.now() > deadline)
             throw heldError(dir, label);
         sleepSync(RETRY_MS);
-        step = poll(dir, nonce, isGone, reapedAt);
+        step = poll(dir, attempt, isGone, reapedAt);
     }
+    return attempt.nonce;
+}
+/** Release only the acquisition `nonce` names; a lock re-taken by anyone else is untouched. */
+export const releaseProcessLock = removeHolder;
+/** Run `fn` under the lock at `dir`. Throws LockHeldError rather than ever running unlocked. */
+export function withProcessLock(dir, fn, options) {
+    if (held.has(dir))
+        throw heldError(dir, options.label);
+    const nonce = acquireProcessLock(dir, options);
     held.add(dir);
     try {
         const result = fn();
@@ -123,6 +133,6 @@ export function withProcessLock(dir, fn, { label, waitMs = WAIT_MS, isGone = pro
     }
     finally {
         held.delete(dir);
-        removeHolder(dir, nonce);
+        releaseProcessLock(dir, nonce);
     }
 }

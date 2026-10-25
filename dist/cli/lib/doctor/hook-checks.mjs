@@ -15,6 +15,7 @@ import { REVIEWABLE_GUARD_IDS } from '../components.mjs';
 import { detectGitRoot } from '../detect-git-root.mjs';
 import { markEnd, markStart } from '../husky/husky.mjs';
 import { extractGuardBlock, hookStages, UI_EVIDENCE_ID, wantsDeterministic, } from '../husky/husky-block.mjs';
+import { HUSKY_HOOKS } from '../husky/overlay/commit-msg.mjs';
 import { installHealAlias } from '../husky/overlay/heal-alias.mjs';
 import { overlayHooksPath } from '../husky/overlay/overlay-home.mjs';
 import { firstLine } from '../standalone.mjs';
@@ -107,22 +108,7 @@ const RUNNER = 'hook runner (worktree-safe)';
 const OWNER = 'hooksPath owner';
 /** Git's hook names — the same set husky generates stubs for. Used to tell a real hook apart from
  * an unrelated file sitting in the hooks directory. */
-const GIT_HOOKS = new Set([
-    'applypatch-msg',
-    'pre-applypatch',
-    'post-applypatch',
-    'pre-commit',
-    'pre-merge-commit',
-    'prepare-commit-msg',
-    'commit-msg',
-    'post-commit',
-    'pre-rebase',
-    'post-checkout',
-    'post-merge',
-    'pre-push',
-    'pre-auto-gc',
-    'post-rewrite',
-]);
+const GIT_HOOKS = new Set(HUSKY_HOOKS);
 function gitSucceeds(gitRoot, args) {
     try {
         execFileSync('git', ['-C', gitRoot, ...args], { stdio: 'ignore' });

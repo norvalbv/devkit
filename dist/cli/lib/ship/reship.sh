@@ -230,8 +230,11 @@ ORIGIN_URL=$(git config --get remote.origin.url || git remote get-url origin)
 REPO=$(printf '%s\n' "$ORIGIN_URL" | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git$##')
 
 REWRITE=0
+PR_MERGE_BASE=
+NOTES_MODE=""   # a rewrite re-judges the whole change, so its reviewer notes replace the old ones
 if [ -n "$BASE_FLAG" ]; then
   REWRITE=1
+  NOTES_MODE=replace
   BASE_REF=${BASE_FLAG#origin/}
   [ -n "$BASE_REF" ] || { echo "--base requires a branch" >&2; exit 1; }
   # Git reports old-PR scope in repository-canonical form. Normalize the harmless spelling Git
@@ -300,7 +303,7 @@ REQUIRED_SCOPE_FILE=""
 REWRITE_FETCH_ERR=""
 FINAL_SCOPE_FILE=""
 REWRITE_PUBLISH_LOCK=""
-REWRITE_PUBLISH_STAMP=""
+REWRITE_PUBLISH_NONCE=""
 REWRITE_PUBLISH_OWNED=0
 rewrite_ref_cleanup() {
   ship_resume_extras_notice # first: it reads the exit status
@@ -317,15 +320,15 @@ rewrite_ref_cleanup() {
   [ -z "$REWRITE_FETCH_ERR" ] || rm -f "$REWRITE_FETCH_ERR"
 }
 
-# Serialize a rewrite's destructive publication/bookkeeping window and every explicit PR-body
-# publication with the matching head push. Gates still run in parallel. Atomic mkdir supplies
-# exclusion; the holder PID makes a killed publisher reclaimable.
-# Keyed on the GIT COMMON DIR, not $ROOT (sc-2476): linked worktrees of one clone publish the same
-# origin/$BR, so a per-checkout lock let a paused publisher overwrite a sibling's newer PR body. Not
-# $TMPDIR either — it differs per process (sandboxed agents), which would fail open silently. The
-# branch is hashed: a sanitised name maps a/b and a-b to one lock.
+# Serialize each rewrite publication and explicit PR-body edit with its head push; gates stay
+# parallel. publish-lock.mts holds a process-lock.mts lock for THIS bash ($$) until it exits.
+
+# Keyed on the git common dir: linked worktrees publish one origin/$BR, and $TMPDIR differs per
+# process. The branch is hashed because a sanitised name maps a/b and a-b to one lock.
+REWRITE_PUBLISH_LOCK_CLI="$SCRIPT_DIR/reship/publish-lock.mts"
+[ -f "$REWRITE_PUBLISH_LOCK_CLI" ] || REWRITE_PUBLISH_LOCK_CLI="$SCRIPT_DIR/reship/publish-lock.mjs"
 rewrite_publish_lock_acquire() {
-  local lock_root holder owner owner_start current_start attempts=0
+  local lock_root rc=0
   lock_root=$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
     [ -n "$lock_root" ] || {
     echo "reship rejected: could not resolve the git common dir for the publication lock" >&2
@@ -337,49 +340,23 @@ rewrite_publish_lock_acquire() {
     echo "reship rejected: cannot create the publication lock directory $lock_root" >&2
     return 1
   }
-  REWRITE_PUBLISH_LOCK="$lock_root/$(printf '%s' "$BR" | git hash-object --stdin).lock"
-  owner_start=$(ps -o lstart= -p $$ 2>/dev/null | git hash-object --stdin)
-  REWRITE_PUBLISH_STAMP="$$:$owner_start:$(date +%s)"
-  while ! mkdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null; do
-    holder=$(cat "$REWRITE_PUBLISH_LOCK/holder" 2>/dev/null || true)
-    owner=${holder%%:*}
-    owner_start=${holder#*:}; owner_start=${owner_start%%:*}
-    current_start=""
-    if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
-      current_start=$(ps -o lstart= -p "$owner" 2>/dev/null | git hash-object --stdin)
-    fi
-    if [ -n "$holder" ] && [ "$holder" = "$(cat "$REWRITE_PUBLISH_LOCK/holder" 2>/dev/null || true)" ] && \
-       { [ -z "$current_start" ] || [ "$current_start" != "$owner_start" ]; }; then
-      rm -f "$REWRITE_PUBLISH_LOCK/holder" 2>/dev/null || true
-      rmdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null || true
-      continue
-    fi
-    # An acquirer killed between mkdir and its holder write leaves no PID to prove. Only age may
-    # reclaim that micro-window; a live but paused acquirer younger than a minute remains protected.
-    if [ -z "$holder" ] && [ -n "$(find "$REWRITE_PUBLISH_LOCK" -prune -mmin +1 -print 2>/dev/null)" ]; then
-      rmdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null || true
-      continue
-    fi
-    attempts=$((attempts + 1))
-    [ "$attempts" -lt 300 ] || {
+  # .mutex, not the old .lock: a pre-nonce `holder`-format lock left there could never be reaped.
+  REWRITE_PUBLISH_LOCK="$lock_root/$(printf '%s' "$BR" | git hash-object --stdin).mutex"
+  REWRITE_PUBLISH_NONCE=$(node "$REWRITE_PUBLISH_LOCK_CLI" acquire "$$" "$REWRITE_PUBLISH_LOCK") ||
+    rc=$?
+  case $rc in
+    0) REWRITE_PUBLISH_OWNED=1 ;;
+    75)
       echo "reship rejected: another publisher still owns origin/$BR; resume after it finishes" >&2
       return 1
-    }
-    sleep 0.1
-  done
-  printf '%s' "$REWRITE_PUBLISH_STAMP" > "$REWRITE_PUBLISH_LOCK/holder" || {
-    rmdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null || true
-    return 1
-  }
-  REWRITE_PUBLISH_OWNED=1
+      ;;
+    *) return 1 ;; # publish-lock.mts already named the cause
+  esac
 }
 
 rewrite_publish_lock_release() {
   [ "$REWRITE_PUBLISH_OWNED" -eq 1 ] || return 0
-  if [ "$(cat "$REWRITE_PUBLISH_LOCK/holder" 2>/dev/null || true)" = "$REWRITE_PUBLISH_STAMP" ]; then
-    rm -f "$REWRITE_PUBLISH_LOCK/holder" 2>/dev/null || true
-    rmdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null || true
-  fi
+  node "$REWRITE_PUBLISH_LOCK_CLI" release "$REWRITE_PUBLISH_LOCK" "$REWRITE_PUBLISH_NONCE" || true
   REWRITE_PUBLISH_OWNED=0
 }
 
@@ -605,10 +582,11 @@ else
   ship_refuse_unmatched_paths "$ROOT" "$BASE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1
   # Before the intent write too: no later push can reach a non-open PR, so nothing is worth resuming.
   [ -n "${SHIP_DRY_RUN:-}" ] || reship_refuse_closed_pr "" "nothing pushed" || exit 1
+  PR_MERGE_BASE=$(pr_merge_base "$BASE")
   # Tracked-dist drift is named against the PR's fork point, where CI judges it, not the PR tip,
   # which already carries the PR's own new artifacts. origin/HEAD covers dry runs and an unfetched base.
-  DRIFT_TARGET=
-  for DRIFT_REF in ${PR_SEEN_BASE:+"origin/$PR_SEEN_BASE"} "$(git symbolic-ref -q --short refs/remotes/origin/HEAD || true)"; do
+  DRIFT_TARGET=$PR_MERGE_BASE
+  [ -n "$DRIFT_TARGET" ] || for DRIFT_REF in ${PR_SEEN_BASE:+"origin/$PR_SEEN_BASE"} "$(git symbolic-ref -q --short refs/remotes/origin/HEAD || true)"; do
     [ -n "$DRIFT_REF" ] && DRIFT_TARGET=$(git merge-base "$BASE" "$DRIFT_REF" 2>/dev/null) && break
   done
 fi
@@ -994,8 +972,8 @@ else
 # The pinned parent the worktree was cut from — the PR tip for an append, or the PR base for a
 # rewrite — lets in-chain gates (fallow) diff against it rather than their own main-autodetect.
 export DEVKIT_SHIP_BASE_SHA="$BASE"
-# CI's PR base is known only for a rewrite; an append's PR tip is not it, so the dist extra skips.
-if [ "$REWRITE" -eq 1 ]; then export DEVKIT_SHIP_PR_BASE_SHA="$BASE"; else unset DEVKIT_SHIP_PR_BASE_SHA; fi
+# CI's PR base: a rewrite's worktree is cut from it; an append's PR tip is not it, so GitHub named it.
+if [ "$REWRITE" -eq 1 ]; then export DEVKIT_SHIP_PR_BASE_SHA="$BASE"; elif [ -n "$PR_MERGE_BASE" ]; then export DEVKIT_SHIP_PR_BASE_SHA="$PR_MERGE_BASE"; else unset DEVKIT_SHIP_PR_BASE_SHA; fi
 export DEVKIT_SHIP_SOURCE_HEAD="$CALLER_HEAD"   # pinned above, before staging (sc-2480)
 export DEVKIT_SHIP_MODE=reship   # tags the ship_attempt telemetry (retry onto an existing branch)
 export DEVKIT_RUN_MODE=ship      # never inherit a caller's review allowlist into a real ship
@@ -1219,7 +1197,10 @@ if [ "$UPDATE_PR_BODY" -eq 1 ]; then
     # The commit landed, so its evidence still belongs on the PR; the suggested re-run carries it.
     # Released first, as on the success path: a long capture must not block a same-branch --pr.
     rewrite_publish_lock_release
-    [[ "${PR_URL##*/}" =~ ^[0-9]+$ ]] && publish_evidence_block "$WT" "${PR_URL##*/}" "$REPO" "$SHIP_COMMIT"
+    if [[ "${PR_URL##*/}" =~ ^[0-9]+$ ]]; then
+      publish_reviewer_notes "${PR_URL##*/}" "$REPO" "$SHIP_COMMIT" "$NOTES_MODE"
+      publish_evidence_block "$WT" "${PR_URL##*/}" "$REPO" "$SHIP_COMMIT" "$ROOT"
+    fi
     [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "${PR_NUM:-}" pr-body-publication-failed
     exit "$BODY_UPDATE_STATUS"
   fi
@@ -1233,7 +1214,10 @@ if [ -n "$PR_URL" ]; then
   READY_STATUS=0
   reship_mark_ready "${PR_NUM:-}" || READY_STATUS=1
   echo "$PR_URL"
-  if [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then publish_evidence_block "$WT" "$PR_NUM" "$REPO" "$SHIP_COMMIT"; fi
+  if [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then
+    publish_reviewer_notes "$PR_NUM" "$REPO" "$SHIP_COMMIT" "$NOTES_MODE"
+    publish_evidence_block "$WT" "$PR_NUM" "$REPO" "$SHIP_COMMIT" "$ROOT"
+  fi
   # The wait comes after the ready flip so it observes the check set that flip triggers — but a
   # FAILED flip skips it: the operator has an actionable remedy above, and burying it under up to two
   # hours of polling on a PR that is in the wrong state helps nobody.

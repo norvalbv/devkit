@@ -19,7 +19,7 @@
 #   · post-commit every path staging put in the index must still be in the commit or have been
 #                 normalized exactly back to its base state, and unbriefed DELETIONS must not
 #                 outnumber the briefed set
-# The post-commit check cannot demand exact equality: the biome step reformats and re-stages briefed
+# The post-commit check cannot demand exact equality: the format step reformats and re-stages briefed
 # files, and the ratchet gates stage a lowered baseline so it rides the same commit (see
 # gate-engine/ratchets/git-index.mts). Both may add to the commit; a formatter may also turn a
 # briefed tracked path into a legitimate no-op by restoring its base content.

@@ -1,18 +1,14 @@
 /** The QA-capture section of the evidence block: what `devkit machine run` recorded, the apt part of
  * it uploaded to GitHub through `gh --attach`, and why anything else was left out. */
 import { shotFile } from '../../machine/manifest.mjs';
-import { EVIDENCE_BEGIN, EVIDENCE_END, upsertEvidenceBlock } from './block.mjs';
-export const QA_BEGIN = '<!-- devkit:evidence:qa:begin -->';
-export const QA_END = '<!-- devkit:evidence:qa:end -->';
-const QA = /^<!-- devkit:evidence:qa:begin -->\r?\n[\s\S]*?\n<!-- devkit:evidence:qa:end -->(?=\r?$)/m;
-const BLOCK_END = /^<!-- devkit:evidence:(?:data |end -->)/m;
-/** The evidence block, as block.mts matches it: a QA section outside it is caller text, never ours. */
-const EVIDENCE = new RegExp(`^${EVIDENCE_BEGIN}\\r?\\n[\\s\\S]*?\\n${EVIDENCE_END}(?=\\r?$)`, 'm');
+import { sectionBegin, sectionEnd, sectionOf, withSection } from './block.mjs';
+export const QA_BEGIN = sectionBegin('qa');
+export const QA_END = sectionEnd('qa');
 const ATTACHMENT = /https:\/\/github\.com\/user-attachments\/assets\/[A-Za-z0-9-]+/;
 const SHA_CELL = /· sha `([0-9a-f]{12})` ·/;
 const MB = 1024 * 1024;
 /** GitHub's free-plan video limit is 10 MB and its image limit 10 MB; the margin covers rounding. */
-const VIDEO_CAP = 9 * MB;
+export const VIDEO_CAP = 9 * MB;
 const IMAGE_CAP = 10 * MB;
 const MAX_FILES = 6;
 const MAX_SHOTS = 4;
@@ -55,7 +51,7 @@ export function planMedia(entries, why, uiReason) {
     for (const entry of fits.slice(MAX_FILES))
         notes.push(`\`${entry.file}\`: not uploaded, over ${MAX_FILES} files`);
     if (fits.length === 0 && entries.length === 0 && uiReason)
-        notes.push(`UI changed (${uiReason}); no QA capture recorded: run \`devkit machine up\`, then \`devkit machine run <flow>\``);
+        notes.push(`UI changed (${uiReason}); no QA capture recorded: run \`devkit machine up\`, \`devkit machine run <flow>\`, then \`devkit machine attach <this PR>\``);
     return { picks: fits.slice(0, MAX_FILES), notes };
 }
 function provenanceLine(entry) {
@@ -86,7 +82,7 @@ export function renderQaSection(plan, refs) {
         QA_END,
     ].join('\n');
 }
-export const qaSectionOf = (body) => QA.exec(EVIDENCE.exec(body)?.[0] ?? '')?.[0] ?? null;
+export const qaSectionOf = (body) => sectionOf('qa', body);
 /** Every uploaded capture in `body`, by short sha: the line after a sha cell is its media line. */
 export function uploadedMedia(body) {
     const lines = (qaSectionOf(body) ?? '').split('\n');
@@ -100,20 +96,4 @@ export function uploadedMedia(body) {
     });
     return found;
 }
-/** `body` with `section` as its block's QA section: replaced in place, else placed before the block's
- * data line, else in a block of its own. Bytes outside the block are never touched. */
-export function withQaSection(body, section) {
-    const block = EVIDENCE.exec(body)?.[0];
-    if (!block)
-        return upsertEvidenceBlock(body, [EVIDENCE_BEGIN, section, EVIDENCE_END].join('\n'));
-    if (QA.test(block))
-        return upsertEvidenceBlock(body, block.replace(QA, () => section));
-    const at = BLOCK_END.exec(block)?.index ?? block.length;
-    return upsertEvidenceBlock(body, `${block.slice(0, at)}${section}\n${block.slice(at)}`);
-}
-/** `body` with its evidence block replaced by `block`, keeping the QA section already uploaded. */
-export function replaceKeepingQa(body, block) {
-    const qa = qaSectionOf(body);
-    const replaced = upsertEvidenceBlock(body, block);
-    return qa ? withQaSection(replaced, qa) : replaced;
-}
+export const withQaSection = (body, section) => withSection('qa', body, section);

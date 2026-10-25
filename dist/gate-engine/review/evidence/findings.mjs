@@ -136,7 +136,7 @@ export function renderScopeDriftHints(reviewer, drifts) {
         .join('\n');
 }
 const DEFAULT_DEPS = {
-    loadTargets: () => loadScopedTargets(),
+    loadTargets: () => loadScopedTargets(undefined, 'index'),
     exists: existsSync,
     emit: (ev) => {
         emitGateEvent(ev);

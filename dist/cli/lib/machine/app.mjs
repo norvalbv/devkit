@@ -18,8 +18,8 @@ const IGNORED_KILL_ERRORS = new Set(['ESRCH', 'EPERM']);
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 /** A free port, preferring the slot's block; every local host is probed, so a port held on `::` or
  * `0.0.0.0` by another program never reads as free. */
-export function pickPort(base) {
-    return getPort({ port: portNumbers(base, base + PORTS_PER_SLOT - 1) });
+export function pickPort(base, exclude = []) {
+    return getPort({ port: portNumbers(base, base + PORTS_PER_SLOT - 1), exclude });
 }
 /** The env a slot's processes start from: the caller's, minus ship's own and host-app run mode. */
 export function slotProcessEnv(base, slot) {
@@ -64,13 +64,13 @@ async function answers(url, ms) {
     }
 }
 /** Wait until `url` answers any HTTP response (a dev server compiles its first page here); false
- * when the app's group died or time ran out. */
-export async function waitForHttp(url, pgid, timeoutMs) {
+ * when what serves it died or time ran out. */
+export async function waitForHttp(url, alive, timeoutMs) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         if (await answers(url, Math.max(1, Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now()))))
             return true;
-        if (!groupAlive(pgid))
+        if (!alive())
             return false;
         await sleep(POLL_MS);
     }

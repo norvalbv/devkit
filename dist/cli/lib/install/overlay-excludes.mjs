@@ -16,10 +16,11 @@ export function overlayExcludeLines(pfx, input) {
     const line = `${pfx}${input.path}`;
     return input.kind === 'dir' ? [`${line}/`, line] : [line];
 }
-// Every line devkit writes, plus the legacy `eslint/baselines/`.
+// Every line devkit writes, plus the legacy `eslint/baselines/` and `fallow-baselines` lines.
 const DEVKIT_LINE_FORMS = [
     '.devkit',
     'eslint/baselines/',
+    ...overlayExcludeLines('', { path: 'fallow-baselines', kind: 'dir' }),
     ...DECISIONS_INDEX_IGNORES,
     ...[FALLOW_CACHE, ...OVERLAY_WRITTEN, ...SEARCH_CODE_WRITTEN].flatMap((input) => overlayExcludeLines('', input)),
 ].map(escapeRe);

@@ -8,6 +8,8 @@ import { realpathSync } from 'node:fs';
 import { setTimeout as sleepFor } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { classifyChecksFailure } from './classify.mjs';
+import { requiredSetPoller } from './required.mjs';
+import { withFailedSteps } from './steps.mjs';
 import { recordCiEvent } from './telemetry.mjs';
 /** The five states gh collapses `state` into. Ordered for stable rendering, not by severity. */
 export const CHECK_BUCKETS = ['pass', 'fail', 'pending', 'skipping', 'cancel'];
@@ -60,7 +62,7 @@ export function summarise(rows) {
         failures: rows.filter((r) => r.bucket === 'fail'),
         pending: rows.filter((r) => r.bucket === 'pending'),
         cancelled: rows.filter((r) => r.bucket === 'cancel'),
-        terminal: counts.pending === 0,
+        terminal: counts.pending === 0 || counts.fail > 0, // a red check cannot turn green
         outcome,
     };
 }
@@ -82,12 +84,17 @@ const oneLine = (text) => text.replace(/\s+/g, ' ').trim();
 const named = (rows) => rows.map((r) => oneLine(r.name)).join(',') || 'none';
 const linked = (rows) => rows.map((r) => (r.link ? `${oneLine(r.name)}:${oneLine(r.link)}` : oneLine(r.name))).join(' ') ||
     'none';
+const renderFailedSteps = (rows) => {
+    const steps = rows.flatMap((r) => r.failedSteps ?? []).map(oneLine);
+    return steps.length ? ` failed-steps=${steps.join(',')}` : '';
+};
 /** The one machine-readable line. A caller branches on this, never on ship's exit code. */
 export function verdictLine(result, pr) {
-    const head = `${VERDICT_PREFIX}${result.outcome} pr=${pr}${result.required ? ' scope=required' : ''}`;
+    const contexts = result.requiredContexts === undefined ? '' : ` required-contexts=${result.requiredContexts}`;
+    const head = `${VERDICT_PREFIX}${result.outcome} pr=${pr}${result.required ? ' scope=required' : ''}${contexts}`;
     switch (result.outcome) {
         case 'failed':
-            return `${head} failing=${linked(result.failures)}${result.attribution ? ` ${result.attribution.line}` : ''}`;
+            return `${head} failing=${linked(result.failures)}${renderFailedSteps(result.failures)}${result.attribution ? ` ${result.attribution.line}` : ''}`;
         case 'cancelled':
             return `${head} cancelled=${linked(result.cancelled)}`;
         case 'timed-out':
@@ -243,11 +250,16 @@ export function ghChecksPoller(options) {
     const args = ['pr', 'checks', options.pr, '--repo', options.repo, '--json', CHECKS_JSON_FIELDS];
     if (options.required)
         args.push('--required');
-    const unparseable = (raw) => ({
-        kind: 'unavailable',
-        reason: 'gh-json-unparseable',
-        message: `gh pr checks returned JSON this reader cannot use: ${raw.slice(0, 200)}`,
-    });
+    const read = (raw) => {
+        const rows = parseChecksJson(raw);
+        if (rows)
+            return { kind: 'rows', rows: withFailedSteps(rows, { ...options, exec }) };
+        return {
+            kind: 'unavailable',
+            reason: 'gh-json-unparseable',
+            message: `gh pr checks returned JSON this reader cannot use: ${raw.slice(0, 200)}`,
+        };
+    };
     return () => {
         let raw;
         try {
@@ -258,14 +270,9 @@ export function ghChecksPoller(options) {
             const failure = e;
             // Exit 8 means pending and gh still prints the rows; read them before classifying.
             const out = failure.stdout === undefined ? '' : String(failure.stdout);
-            if (out.trim()) {
-                const rows = parseChecksJson(out);
-                return rows ? { kind: 'rows', rows } : unparseable(out);
-            }
-            return classifyChecksFailure(failure);
+            return out.trim() ? read(out) : classifyChecksFailure(failure);
         }
-        const rows = parseChecksJson(raw);
-        return rows ? { kind: 'rows', rows } : unparseable(raw);
+        return read(raw);
     };
 }
 /** Seconds as an integer inside the floor and ceiling, or null. Mirrors the bash-side refusal. */
@@ -286,19 +293,25 @@ function flagValue(argv, name) {
     const i = argv.indexOf(name);
     return i === -1 ? undefined : argv[i + 1];
 }
+function unknownAttribution(reason) {
+    return {
+        token: 'unknown',
+        inherited: null,
+        fresh: null,
+        line: `attribution=unknown reason=${reason}`,
+    };
+}
 /** Loaded lazily, so a broken import can never cost the verdict line of any outcome. */
-async function attribute(pr, failures) {
+export async function attribute(pr, failures, pending) {
+    // A red that ended the wait early leaves a run unfinished: no summary yet, and more red to come.
+    if (pending.length > 0 || failures.some((f) => f.failedSteps))
+        return unknownAttribution('run-in-progress');
     try {
         const { attributeFailures } = await import('../../baseline-status/attribution.mjs');
         return attributeFailures({ cwd: process.cwd(), pr, failures });
     }
     catch {
-        return {
-            token: 'unknown',
-            inherited: null,
-            fresh: null,
-            line: 'attribution=unknown reason=attribution-error',
-        };
+        return unknownAttribution('attribution-error');
     }
 }
 async function main(argv) {
@@ -315,14 +328,17 @@ async function main(argv) {
         DEFAULT_INTERVAL_MS;
     const settleGraceMs = positiveInt(process.env.DEVKIT_WAIT_CI_SETTLE_MS) ?? DEFAULT_SETTLE_GRACE_MS;
     const required = argv.includes('--required');
+    const [cwd, exec] = [process.cwd(), defaultExec(DEFAULT_EXEC_TIMEOUT_MS)];
+    const checks = ghChecksPoller({ pr, repo, cwd, required, exec });
+    const narrowed = required ? requiredSetPoller(checks, { pr, repo, cwd, exec }) : null;
     const result = await waitForChecks({
-        poll: ghChecksPoller({ pr, repo, cwd: process.cwd(), required }),
+        poll: narrowed?.poll ?? checks,
         timeoutMs: seconds * 1000,
         intervalMs,
         settleGraceMs,
-    }).then((r) => ({ ...r, required }));
+    }).then((r) => ({ ...r, required, requiredContexts: narrowed?.contexts()?.length }));
     if (result.outcome === 'failed')
-        result.attribution = await attribute(pr, result.failures);
+        result.attribution = await attribute(pr, result.failures, result.pending);
     console.error(verdictLine(result, pr));
     recordCiEvent(result, pr);
     // Without --strict the ship already succeeded and this process never speaks for it.

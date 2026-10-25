@@ -25,7 +25,7 @@ import { CONFIG_FILENAME, resolveGuardConfig, resolveTreeExtensions, sourceMatch
 import { exitGate } from '../deterministic/reason.mjs';
 import { overlayInstall } from '../overlay-mode.mjs';
 import { childGrammarNode } from '../structure/walk.mjs';
-import { FANOUT_BASELINE, readRatchetBaseline, removeRatchetBaseline, writeRatchetBaseline, } from './baseline-paths.mjs';
+import { FANOUT_BASELINE, readRatchetBaseline, refuseFreezeThroughLink, removeRatchetBaseline, writeRatchetBaseline, } from './baseline-paths.mjs';
 import { hasStagedFiles, indexFiles, treeFilesAtRef } from './git-index.mjs';
 // Per-repo STATE, resolved against the consumer cwd (never __dirname).
 const BASELINE = FANOUT_BASELINE;
@@ -268,6 +268,7 @@ function runCli(cmd) {
     const cfg = resolveGuardConfig(root);
     const cap = cfg.fanoutCap;
     if (cmd === 'freeze') {
+        refuseFreezeThroughLink(root, 'guard-fanout', [FANOUT_BASELINE]);
         const offenders = overCap(countFanout(root), cap);
         const baseline = readRatchetBaseline(root, BASELINE);
         if (Object.keys(offenders).length > 0) {
@@ -343,7 +344,7 @@ function runCli(cmd) {
             process.exit(0);
         }
         const shrank = Object.entries(frozen.dirs).filter(([dir, n]) => (over[dir] ?? 0) < n);
-        if (shrank.length > 0) {
+        if (shrank.length > 0 && !overlayInstall(root)) {
             console.log(`✓ fan-out debt shrank in ${shrank.length} folder(s) — run \`guard-fanout freeze\` to lock it in.`);
         }
         process.exit(0);

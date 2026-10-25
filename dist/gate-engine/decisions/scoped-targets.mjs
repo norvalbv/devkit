@@ -14,21 +14,20 @@
  * Output: a JSON array of { slug, ruling, scope, via: 'scope-match'|'semantic' }. Empty array when
  * nothing governs. Fail-open: any error → exit 2 with `[]` so the consumer degrades to a SKIP note.
  */
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import path from 'node:path';
+import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { matchesRepoGlob } from '../../skills/_devkit/review-roots.mjs';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
 import { emitGateEvent } from '../judge/gate-events.mjs';
 import { clip, EVENT_BUDGET } from '../judge/odb-probe.mjs';
-import { loadScopedTargets, matchScope } from './check-alignment.mjs';
+import { decisionTexts, matchScope, parseScopedTargets, } from './check-alignment.mjs';
 import { currentTarget, parseDecision, rankAxes } from './decisions.mjs';
 // The current Target's full ruling + scope for an axis, read from its file (not the clamped INDEX row).
-function rulingFor(slug, decisionsDir) {
-    const file = path.join(decisionsDir, `${slug}.md`);
-    if (!existsSync(file))
+function rulingFor(slug, texts) {
+    const text = texts.get(slug);
+    if (text === undefined)
         return null;
-    const t = currentTarget(parseDecision(readFileSync(file, 'utf8')).body);
+    const t = currentTarget(parseDecision(text).body);
     if (!t?.ruling)
         return null;
     return { ruling: t.ruling, scope: t.scope ?? null };
@@ -45,13 +44,15 @@ function codeUnitOrder(x, y) {
  * @param files changed files (scope-match key)
  * @param query free-text (plan terms) for the semantic supplement; '' skips it
  * @param k semantic top-k
+ * @param from 'index' for commit-time gates; the CLI briefs from the worktree draft
  */
-export async function scopedTargets(files, query, k = 6, cwd = process.cwd()) {
+export async function scopedTargets(files, query, k = 6, cwd = process.cwd(), from = 'index') {
     const decisionsDir = resolveFromCwd(resolveGuardConfig(cwd), 'decisionsDir');
     if (decisionsDir == null)
         return []; // fail-open: nothing resolvable → nothing governs
+    const texts = decisionTexts(decisionsDir, from, cwd);
     const scoped = files.length
-        ? loadScopedTargets(decisionsDir)
+        ? parseScopedTargets(texts)
             .filter((t) => matchScope(files, t.scopeGlobs))
             .sort(newestFirst)
         : [];
@@ -72,7 +73,7 @@ export async function scopedTargets(files, query, k = 6, cwd = process.cwd()) {
             for (const r of rows) {
                 if (scopedSlugs.has(r.slug))
                     continue;
-                const rf = rulingFor(r.slug, decisionsDir);
+                const rf = rulingFor(r.slug, texts);
                 if (rf)
                     blocks.push({ slug: r.slug, ruling: rf.ruling, scope: rf.scope, via: 'semantic' });
             }
@@ -155,7 +156,7 @@ export async function main(args) {
     const brief = hookSpec(flag(args, '--brief'), 2, 1);
     const query = flag(args, '--query') ?? '';
     const top = Number.parseInt(flag(args, '--top') ?? '6', 10) || 6;
-    await scopedTargets(files, query, top)
+    await scopedTargets(files, query, top, process.cwd(), 'worktree')
         .then((blocks) => rankBySpecificity(files, blocks))
         .then((blocks) => {
         process.stdout.write(JSON.stringify(blocks));

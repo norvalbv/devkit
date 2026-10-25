@@ -14,6 +14,16 @@ function isInsideTypeGuard(node) {
     }
     return false;
 }
+/** Return whether typeof safely probes for the existence of a possibly absent binding. */
+function isExistenceProbe(node) {
+    const parent = node.parent;
+    if (parent.type !== "BinaryExpression")
+        return false;
+    if (!["===", "!==", "==", "!="].includes(parent.operator))
+        return false;
+    const other = parent.left === node ? parent.right : parent.left;
+    return other.type === "Literal" && other.value === "undefined";
+}
 /** Disallow runtime typeof checks that narrow unparsed values instead of decoding them. */
 export const noRuntimeTypeofRule = defineRule({
     meta: {
@@ -44,6 +54,7 @@ export const noRuntimeTypeofRule = defineRule({
                     !Array.isArray(option) &&
                     option.allowInTypeGuards === true;
                 if (node.operator === "typeof" &&
+                    !isExistenceProbe(node) &&
                     (!allowInTypeGuards || !isInsideTypeGuard(node))) {
                     context.report({ node, messageId: "runtimeTypeof" });
                 }
