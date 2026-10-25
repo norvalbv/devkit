@@ -187,11 +187,10 @@ export function wrapCompleteness(
     'You are running as an automated HEADLESS COMMIT-MESSAGE GATE, not an interactive assistant.\n' +
     `The commit message (the change's stated intent):\n─────\n${message.trim()}\n─────\n` +
     `Staged files: ${files.join(', ')}\n` +
-    'The FULL file/churn map (--stat) followed by per-file diff evidence is on stdin. Evidence is ' +
-    'capped per file and in total; anything the caps dropped is NAMED inline (OMITTED:/[TRUNCATED:) — ' +
-    'nothing is dropped silently. INVESTIGATE before judging: run `git diff --cached -- <file>` for ' +
-    'full hunks, Read surrounding code where needed, and investigate EVERY OMITTED/TRUNCATED entry ' +
-    'before any PASS verdict.\n' +
+    'The FULL file/churn map (--stat) followed by per-file diff evidence is on stdin. Evidence is capped ' +
+    'per file and in total; anything the caps dropped is NAMED inline (OMITTED:/[TRUNCATED:) — nothing is ' +
+    'dropped silently. INVESTIGATE before judging: run `git diff --cached -- <file>` for full hunks, Read ' +
+    'surrounding code where needed, and investigate EVERY OMITTED/TRUNCATED entry before any PASS verdict.\n' +
     'Step 0 is already done — the governing Targets are loaded below; do not run prep scripts. ' +
     'Subagents and meta-judges are unavailable in gate mode — apply their lenses yourself.\n' +
     `${targetsBlock}\n` +
@@ -201,9 +200,10 @@ export function wrapCompleteness(
     '───── BRIEF ─────\n' +
     `${stripFrontmatter(agentBody)}\n` +
     '───── END BRIEF ─────\n' +
-    'Judge ONLY what this commit claims to be (per its message) against what it ships. List the ' +
-    'gaps that matter (one line each); minor nice-to-haves are not findings. END with exactly one line:\n' +
-    'VERDICT: PASS | FAIL — <one-line reason>\n' +
+    'Judge ONLY what this commit claims to be (per its message) against what it ships. A found gap does not end ' +
+    'the review: check every remaining claim and touched surface, then list EVERY gap that matters (one line each, ' +
+    'with its file path, at most 12 lines). Never list to fill; minor nice-to-haves are not findings. END with ' +
+    'exactly one line:\nVERDICT: PASS | FAIL — <one-line reason; on FAIL the most severe gap first, then the gap count>\n' +
     'FAIL only for a gap that makes the shipped change misleading or operationally unsafe.'
   );
 }
