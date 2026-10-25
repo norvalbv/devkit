@@ -70,7 +70,7 @@ function main() {
   const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
   const abs = path.resolve(root, file);
   const rel = path.relative(root, abs).split(path.sep).join('/');
-  if (!rel || rel.startsWith('..') || existsSync(abs)) return;
+  if (!rel || rel === '..' || rel.startsWith('../') || existsSync(abs)) return;
 
   const bin = resolveBin(root);
   if (!bin) return;

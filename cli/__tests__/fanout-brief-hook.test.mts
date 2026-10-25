@@ -84,6 +84,17 @@ describe('fanout-brief', () => {
     expect(run(root, 'src/pile/b.ts')).toContain('src/pile: 11→13/12');
   });
 
+  // Catches an escape test on the raw prefix: a root folder named `..cache` is inside the project.
+  it('judges a scan root whose name starts with two dots', () => {
+    const root = makeRepo({});
+    const cfg = { scanRoots: ['..cache'], sourceExtensions: ['ts'], fanoutCap: 12 };
+    writeFileSync(join(root, 'guard.config.json'), JSON.stringify(cfg));
+    for (let i = 0; i < 12; i++) write(root, `..cache/file-${i}.ts`);
+    execFileSync('git', ['add', '-A'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'pile'], { cwd: root });
+    expect(run(root, '..cache/new.ts')).toContain('..cache: 12→13/12');
+  });
+
   // Claude Code sends an absolute file_path; the fixtures above use the relative form.
   it('judges an absolute file_path inside the project', () => {
     const root = makeRepo({ pile: 12 });
