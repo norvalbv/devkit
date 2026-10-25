@@ -102,20 +102,18 @@ function checklistWorkflow(reviewer: ChecklistReviewer, script: string, assetRoo
 export const scriptCommand = (script: string): string => `node ${shellWord(script)}`;
 
 const INTERACTIVE_ONLY_RE = /<!-- interactive-only -->[\s\S]*?<!-- \/interactive-only -->\n?/g;
-const PROVIDER_SKILL_PREFIXES = ['.agents/skills/', '.claude/skills/', '.cursor/skills/'];
 const SCRIPT_SUFFIX = '/scripts/checklist.mjs';
-// One pass, so a substituted path is never re-scanned for a placeholder it happens to contain.
-const PLACEHOLDER_RE = /node \$SCRIPT|\$SKILL_DIR/g;
+// Provider skill prefixes and placeholders in ONE pass, so no substituted path is ever re-scanned.
+const PLACEHOLDER_RE = /node \$SCRIPT|\$SKILL_DIR|\.(?:agents|claude|cursor)\/skills\//g;
 
 /** A brief as a gate judge sees it: interactive setup gone, every path the granted literal. */
 export function gateBrief(brief: string, script: string): string {
   const skillDir = script.slice(0, -SCRIPT_SUFFIX.length);
   const skillPrefix = skillDir.slice(0, skillDir.lastIndexOf('/') + 1);
-  // Function replacers: a `$` in a consumer's path must not read as a replacement pattern.
-  return PROVIDER_SKILL_PREFIXES.reduce(
-    (body, prefix) => body.replaceAll(prefix, () => skillPrefix),
-    brief.replace(INTERACTIVE_ONLY_RE, ''),
-  ).replace(PLACEHOLDER_RE, (hit) => (hit === '$SKILL_DIR' ? skillDir : scriptCommand(script)));
+  // A function replacer: a `$` in a consumer's path must not read as a replacement pattern.
+  const fill = (hit: string) =>
+    hit === '$SKILL_DIR' ? skillDir : hit === 'node $SCRIPT' ? scriptCommand(script) : skillPrefix;
+  return brief.replace(INTERACTIVE_ONLY_RE, '').replace(PLACEHOLDER_RE, fill);
 }
 
 /**
