@@ -19,6 +19,8 @@ export const ANTI_SLOP_PREFLIGHT_HOOK = 'anti-slop-preflight.sh';
 export const COMMENT_PREFLIGHT_HOOK = 'comment-budget-preflight.mjs';
 /** The pre-write fan-out advisory; owned by the fanout guard whose preflight it relays. */
 export const FANOUT_BRIEF_HOOK = 'fanout-brief.mjs';
+/** The pre-write structure-grammar advisory; owned by the placement group (fanout guard or structure). */
+export const PLACEMENT_BRIEF_HOOK = 'placement-brief.mjs';
 
 export function bundledHookNames(): string[] {
   return readdirSync(join(packageDir(), 'agents-hooks'), {
@@ -42,6 +44,7 @@ export function hookScriptsFor({
   antiSlop = false,
   comments = false,
   fanout = false,
+  placement = false,
 }: {
   agentHooks: boolean;
   decisions: boolean;
@@ -52,6 +55,7 @@ export function hookScriptsFor({
   antiSlop?: boolean;
   comments?: boolean;
   fanout?: boolean;
+  placement?: boolean;
 }): string[] {
   const all = bundledHookNames();
   // Scripts owned by a component OTHER than agentHooks — selecting agent hooks must not drag them
@@ -72,6 +76,7 @@ export function hookScriptsFor({
     ANTI_SLOP_PREFLIGHT_HOOK,
     COMMENT_PREFLIGHT_HOOK,
     FANOUT_BRIEF_HOOK,
+    PLACEMENT_BRIEF_HOOK,
     ...decisionsOwned,
     ...adhdOwned,
     ...baseDriftOwned,
@@ -86,7 +91,8 @@ export function hookScriptsFor({
       (baseDrift && baseDriftOwned.has(name)) ||
       (antiSlop && name === ANTI_SLOP_PREFLIGHT_HOOK) ||
       (comments && name === COMMENT_PREFLIGHT_HOOK) ||
-      (fanout && name === FANOUT_BRIEF_HOOK),
+      (fanout && name === FANOUT_BRIEF_HOOK) ||
+      (placement && name === PLACEMENT_BRIEF_HOOK),
   );
 }
 
@@ -94,6 +100,19 @@ export interface SelectedHookAssets {
   components: string[];
   previouslyOwnedComponents: string[];
   scripts: string[];
+}
+
+/** Structure can be gated without the structure component (self-host), so fanout selects it too.
+ * Neither folder gate runs without husky. */
+export function placementSelected(selection: {
+  husky?: boolean;
+  guards?: readonly string[];
+  structure?: boolean;
+}): boolean {
+  return (
+    selection.husky !== false &&
+    Boolean(selection.guards?.includes('fanout') || selection.structure)
+  );
 }
 
 function hookComponents(selection: Partial<Selection>, searchSteering: boolean): string[] {
@@ -111,6 +130,7 @@ function hookComponents(selection: Partial<Selection>, searchSteering: boolean):
     selection.antiSlop && 'antiSlop',
     comments && 'comments',
     fanout && 'fanout',
+    placementSelected(selection) && 'placement',
   ].filter((value): value is string => Boolean(value));
 }
 
@@ -134,6 +154,7 @@ export function selectedHookAssets(
       antiSlop: Boolean(selection.antiSlop),
       comments: selection.guards?.includes('comments') ?? false,
       fanout: selection.guards?.includes('fanout') ?? false,
+      placement: placementSelected(selection),
     }),
   };
 }

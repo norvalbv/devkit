@@ -212,8 +212,8 @@ describe('doctor decisions hook completeness', () => {
 describe('doctor provider hook ownership', () => {
   it('accepts an exact pre-ledger configuration and migrates it on re-init', () => {
     const root = tmpRepo();
-    // comments:preflight and fanout:new-file-brief postdate the ledger, so no pre-ledger
-    // configuration can carry them.
+    // comments:preflight, fanout:new-file-brief and placement:brief postdate the ledger, so no
+    // pre-ledger configuration can carry them.
     const init = [
       'init',
       '--stack',

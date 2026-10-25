@@ -45,12 +45,13 @@ import {
 
 const overlayAll = () =>
   applyOverlayConstraints({ ...defaultSelection(), agentHooks: true, fallow: true }, 'react-app');
-// comments:preflight and fanout:new-file-brief postdate the hook ledger, so no pre-ledger
-// configuration can carry them.
+// comments:preflight, fanout:new-file-brief and placement:brief (fanout guard, structure) postdate
+// the hook ledger, so no pre-ledger configuration can carry them.
 const preLedgerAll = () => {
   const selection = overlayAll();
   return {
     ...selection,
+    structure: false,
     guards: selection.guards.filter((guard) => guard !== 'comments' && guard !== 'fanout'),
   };
 };
@@ -980,7 +981,8 @@ describe('overlay (local-only) install', () => {
     applyOverlayConstraints({
       ...defaultSelection(),
       agentHooks: false,
-      // decisions, comments and fanout are the guards that own hooks.
+      // decisions, comments and fanout are the guards that own hooks; structure owns one too.
+      structure: false,
       guards: RECOMMENDED_GUARD_IDS.filter(
         (guard) => !['decisions', 'comments', 'fanout'].includes(guard),
       ),
