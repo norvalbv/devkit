@@ -124,6 +124,11 @@ devkit command.
   reviewer advisory, with the commit it was raised at, even when no `evidence` entry is configured.
   A `--pr` re-ship adds its own and keeps the earlier ones; a `--base` rewrite replaces them. Don't
   re-list advisories in your own text — write only what you did about each one.
+- **Change a description after ship with `devkit pr-body <n> --body-file <f>`, never `gh pr edit
+  --body-file`.** gh replaces the whole body and deletes the evidence block; `pr-body` replaces your
+  text, keeps the block, and makes no commit. Text below the block, such as a bot summary, is not
+  carried. While a ship on this machine is still writing that PR's evidence it refuses and changes
+  nothing; rerun it once ship has returned.
 - **`another ship for <branch> is still running` → wait or stop that run; never force-remove it.**
   Ship reclaims the worktree and branch a KILLED ship left behind automatically, so a refusal means
   it proved the owner is alive. When the message says the shell is gone but the gate tree survives,
