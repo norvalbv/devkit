@@ -11,21 +11,7 @@
  * reads "this file passed on main" and ships on it must never have been told that by a fallback.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { z } from 'zod';
-import type { TestReportSummary } from './produce.mts';
-import {
-  FILE_OUTCOMES,
-  SUMMARY_NAME,
-  SUMMARY_SCHEMA,
-  fileTestsSchema,
-  unhandledRecordSchema,
-} from './produce.mts';
-
-/** Per-test names are optional evidence: malformed, they are dropped and the file answers stand. */
-const testsSchema = z.record(z.string(), fileTestsSchema);
 
 /** Every way this can fail to produce data, each distinguishable by a consumer. */
 export type UnknownReason =
@@ -208,6 +194,52 @@ export function runsForCommit({
   return runs.filter((run) => run.headBranch === ref && !run.event.startsWith('pull_request'));
 }
 
+/** GitHub's REST run object, as much of it as RunRef needs; the schema lets three fields be null. */
+const apiRunSchema = z.object({
+  id: z.number().int(),
+  run_attempt: z.number().int(),
+  conclusion: z.string().nullable(),
+  status: z.string().nullable(),
+  head_sha: z.string(),
+  head_branch: z.string().nullable(),
+  event: z.string(),
+  created_at: z.string(),
+  path: z.string(),
+});
+
+/** One run by id, any event or branch, with the workflow file it belongs to. */
+export function runById(cwd: string, id: number): RunRef & { path: string } {
+  const out = gh(['api', `repos/{owner}/{repo}/actions/runs/${id}`], cwd);
+  let parsed;
+  try {
+    parsed = apiRunSchema.safeParse(JSON.parse(out));
+  } catch {
+    parsed = null; // unparseable: rejected below like any other shape this reader cannot use
+  }
+  if (!parsed?.success) {
+    throw new GhUnavailable(
+      'gh-failed',
+      `gh api returned run ${id} in a shape this reader cannot use`,
+    );
+  }
+  const run = parsed.data;
+  return {
+    databaseId: run.id,
+    attempt: run.run_attempt,
+    conclusion: run.conclusion ?? '',
+    status: run.status ?? '',
+    headSha: run.head_sha,
+    headBranch: run.head_branch ?? '',
+    event: run.event,
+    createdAt: run.created_at,
+    // GitHub may suffix the file with the ref the run used (`build.yml@main`).
+    path: run.path.replace(/@.*$/, ''),
+  };
+}
+
+/** A full SHA-1 or SHA-256 commit id, as git and GitHub print it. */
+export const COMMIT_SHA = /^([0-9a-f]{40}|[0-9a-f]{64})$/;
+
 /** The branch head in the repository gh queries, so the head and its runs share one provenance. */
 export function branchHead({ cwd, ref }: { cwd: string; ref: string }): string {
   let out: string;
@@ -227,164 +259,8 @@ export function branchHead({ cwd, ref }: { cwd: string; ref: string }): string {
     throw e;
   }
   const sha = out.trim();
-  if (/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) return sha;
+  if (COMMIT_SHA.test(sha)) return sha;
   throw new GhUnavailable('head-unknown', `gh returned no commit for branch ${ref}`);
-}
-
-/** Admit a summary only if every value in it is one this repo could have written. */
-export function parseSummary(raw: string, label: string): TestReportSummary {
-  let parsed: TestReportSummary;
-  try {
-    // SAFETY: unverified at this point BY DESIGN — the checks below are what admit it.
-    parsed = JSON.parse(raw) as TestReportSummary;
-  } catch (e) {
-    throw new GhUnavailable(
-      'artifact-unreadable',
-      `${label} could not be read: ${e instanceof Error ? e.message : e}`,
-    );
-  }
-  if (parsed?.schema !== SUMMARY_SCHEMA) {
-    throw new GhUnavailable(
-      'schema-mismatch',
-      `${label} is schema ${String(parsed?.schema)}, expected ${SUMMARY_SCHEMA}`,
-    );
-  }
-  // Compared against the two domain values rather than tested for representation: `'false'` is a
-  // string AND truthy, so an unvalidated read reports a red test step as green.
-  if (parsed.testsPassed !== true && parsed.testsPassed !== false) {
-    throw new GhUnavailable('schema-mismatch', `${label} has a non-boolean testsPassed`);
-  }
-  // `Object(x) !== x` rejects primitives: `Object.entries(42)` is empty, so `files: 42` would
-  // otherwise pass every check below.
-  if (!parsed.files || Array.isArray(parsed.files) || Object(parsed.files) !== parsed.files) {
-    throw new GhUnavailable('schema-mismatch', `${label} has no files map`);
-  }
-  const outcomes: readonly string[] = FILE_OUTCOMES;
-  // A non-object `files` survives the guard above but yields entries whose values are not outcomes,
-  // so this loop rejects it too — one check covering both malformed shapes and malformed values.
-  for (const [file, outcome] of Object.entries(parsed.files)) {
-    if (!outcomes.includes(outcome)) {
-      throw new GhUnavailable('schema-mismatch', `${label} records "${outcome}" for ${file}`);
-    }
-  }
-  const tests = testsSchema.safeParse(parsed.tests);
-  if (tests.success) parsed.tests = tests.data;
-  else delete parsed.tests;
-  // A count from before error lists were recorded proves nothing about which errors, so it is dropped.
-  const unhandled = unhandledRecordSchema.safeParse(parsed.unhandled);
-  if (unhandled.success) parsed.unhandled = unhandled.data;
-  else delete parsed.unhandled;
-  return parsed;
-}
-
-/**
- * Fetch one run's summary artifact — never the full report, which is multi-MB for a 270-file suite.
- */
-/**
- * Refuse a summary that does not positively identify itself as the run it is being served for.
- *
- * Both fields must MATCH — absent is not a pass. An artifact fetched from a CI run was produced by
- * that run and therefore carries its identity; one that carries none was produced somewhere else and
- * has no claim to be evidence here. Requiring a match rather than merely the absence of a
- * contradiction is what makes every producer-side race a MISSING answer instead of a wrong one.
- *
- * Attempt as well as id: a re-run keeps the id and only bumps the attempt, so checking the id alone
- * admits attempt 1's results as attempt 2's — the staleness the runId+attempt cache key exists for.
- */
-export function assertProvenance(
-  summary: TestReportSummary,
-  want: { runId: number; attempt: number },
-  label: string,
-): void {
-  if (summary.runId !== want.runId || summary.attempt !== want.attempt) {
-    throw new GhUnavailable(
-      'schema-mismatch',
-      `${label} records run ${summary.runId}/attempt ${summary.attempt}, not ${want.runId}/${want.attempt}`,
-    );
-  }
-}
-
-/** Every `summary.json` in a downloaded artifact — at its root, or one level down per run dir. */
-function summaryFiles(dir: string): string[] {
-  const found: string[] = [];
-  const visit = (base: string, depth: number): void => {
-    let entries: string[];
-    try {
-      entries = readdirSync(base);
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = join(base, entry);
-      if (entry === SUMMARY_NAME) found.push(full);
-      else if (depth > 0 && safeIsDir(full)) visit(full, depth - 1);
-    }
-  };
-  visit(dir, 1);
-  return found.sort();
-}
-
-function safeIsDir(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-export function downloadSummary({
-  cwd,
-  runId,
-  attempt,
-  artifact,
-}: {
-  cwd: string;
-  runId: number;
-  attempt: number;
-  artifact: string;
-}): TestReportSummary {
-  const dir = mkdtempSync(join(tmpdir(), 'devkit-baseline-'));
-  try {
-    try {
-      gh(['run', 'download', String(runId), '--name', artifact, '--dir', dir], cwd);
-    } catch (e) {
-      // "no artifact" is a claim ABOUT THE RUN and it shrinks the walk-back window, so only gh's own
-      // no-match message may produce it. A transient 5xx or rate limit keeps its generic reason —
-      // relabelling it would assert a fact about CI history from a fact about the network.
-      if (
-        e instanceof GhUnavailable &&
-        e.reason === 'gh-failed' &&
-        /no (valid )?artifacts? /i.test(e.message)
-      ) {
-        throw new GhUnavailable('no-artifact', `run ${runId} has no \`${artifact}\` artifact`);
-      }
-      throw e;
-    }
-    // The producer writes into a per-run directory rather than a shared path, so an artifact holds
-    // one summary per run directory it captured — usually exactly one. Select by the provenance
-    // RECORDED INSIDE each candidate, never by filename or position, which is what makes a leftover
-    // directory from an earlier run harmless rather than a source of stale evidence.
-    const candidates = summaryFiles(dir);
-    if (candidates.length === 0) {
-      throw new GhUnavailable('artifact-unreadable', `run ${runId}'s artifact holds no summary`);
-    }
-    let lastError: GhUnavailable | undefined;
-    for (const file of candidates) {
-      try {
-        const summary = parseSummary(readFileSync(file, 'utf8'), `run ${runId}'s summary`);
-        assertProvenance(summary, { runId, attempt }, `run ${runId}'s artifact`);
-        return summary;
-      } catch (e) {
-        lastError = e instanceof GhUnavailable ? e : undefined;
-      }
-    }
-    throw (
-      lastError ??
-      new GhUnavailable('schema-mismatch', `run ${runId}'s artifact holds no matching summary`)
-    );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
 }
 
 /** One commit's CI verdict on a branch, decided by its newest completed run of one workflow. */

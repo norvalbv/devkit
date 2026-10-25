@@ -1,13 +1,18 @@
 /** `devkit baseline-status` (sc-2245) — see `meta.help` below for the full contract. */
 import {
   type BaselineAnswer,
-  DEFAULT_ARTIFACT,
   DEFAULT_MAX_RUNS,
-  DEFAULT_WORKFLOW,
+  type FileAnswer,
   queryBaseline,
-  workflowSelector,
+  queryRun,
 } from '../../lib/baseline-status/query.mts';
-import { type BaselineSource, configuredSource } from '../../lib/baseline-status/source.mts';
+import {
+  type BaselineSource,
+  DEFAULT_ARTIFACT,
+  DEFAULT_WORKFLOW,
+  configuredSource,
+  workflowSelector,
+} from '../../lib/baseline-status/source.mts';
 import type { TestStatus } from '../../lib/baseline-status/test-verdict.mts';
 
 export const meta = {
@@ -19,6 +24,7 @@ export const meta = {
 Usage:
   devkit baseline-status [--file <path> [--test <name>]] [--json] [--ref <branch>]
                          [--max-runs <n>] [--workflow <file>]
+  devkit baseline-status --run <id> [--file <path> [--test <name>]] [--json]
 
   --file <path>      answer for one test file, plus the last run in which it passed
   --test <name>      with --file: answer for one test, named as the console prints it
@@ -27,6 +33,7 @@ Usage:
   --ref <branch>     branch to read (default: the remote's HEAD, else main)
   --max-runs <n>     how many commits to walk back (default: ${DEFAULT_MAX_RUNS})
   --workflow <file>  the CI workflow to read (default: guard.config.json, else ${DEFAULT_WORKFLOW})
+  --run <id>         answer for one CI run of any event or branch, pull_request included
 
 Reads the per-file summary artifact that \`devkit test-report-run\` uploads from a CI workflow.
 Configure both in guard.config.json — { "baselineStatus": { "workflow": "<file>", "artifact":
@@ -67,6 +74,11 @@ is never a pass.
 \`--file\` history begins at the first run carrying the artifact; before that it reports
 lastPassedReason "no-artifact-history" rather than implying the file never passed, and a gh
 failure partway back reports "lookup-failed".
+
+\`--run <id>\` reads that run's own artifact and names its event, branch and head sha; it cannot be
+combined with --ref, --max-runs or --workflow. A pull_request run tests a merge commit, reported as
+testedSha, so its failing files include any its base already had. \`--file\` does no walk-back
+here: lastPassedReason is "single-run".
 Set DEVKIT_BASELINE_DEBUG=1 to surface gh's stderr.`,
 };
 
@@ -105,9 +117,10 @@ const TEST_LABEL = {
   unknown: 'UNKNOWN',
 } satisfies Record<TestStatus, string>;
 
-function render(answer: BaselineAnswer): void {
+function render(answer: BaselineAnswer, named: boolean): void {
   if (answer.reason) {
-    console.log(`❔ baseline unknown on ${answer.ref} — ${answer.reason}`);
+    const subject = named ? `run ${answer.runId}` : answer.ref;
+    console.log(`❔ baseline unknown on ${subject} — ${answer.reason}`);
     console.log(`   ${answer.detail ?? ''}`);
     for (const skipped of answer.skippedRuns) {
       console.log(`   skipped run ${skipped.runId} (${skipped.conclusion}): ${skipped.why}`);
@@ -116,9 +129,16 @@ function render(answer: BaselineAnswer): void {
     return;
   }
   const icon = answer.runStatus === 'green' ? '✅' : '❌';
-  console.log(
-    `${icon} ${answer.ref} run ${answer.runId} (attempt ${answer.attempt}, ${answer.sha?.slice(0, 8)})`,
-  );
+  const subject = named
+    ? `run ${answer.runId} · ${answer.event} on ${answer.ref}`
+    : `${answer.ref} run ${answer.runId}`;
+  console.log(`${icon} ${subject} (attempt ${answer.attempt}, ${answer.sha?.slice(0, 8)})`);
+  if (answer.testedSha) {
+    const hint = answer.failingFiles.length
+      ? ': failing files include any its base already had'
+      : '';
+    console.log(`   tested merge ${answer.testedSha.slice(0, 8)}${hint}`);
+  }
   if (answer.commitsBehindHead) {
     console.log(
       `   ${answer.commitsBehindHead} commit(s) behind ${answer.ref} head ${answer.head?.slice(0, 8)}`,
@@ -136,8 +156,11 @@ function render(answer: BaselineAnswer): void {
   } else if (answer.testsStatus === 'green') {
     console.log('   no failing test files.');
   }
-  const file = answer.file;
-  if (!file) return;
+  if (answer.file) renderFile(answer.file);
+}
+
+/** The `--file` block: that file's status, its failing tests, `--test`, and where it last passed. */
+function renderFile(file: FileAnswer): void {
   console.log(
     `\n   ${file.path}: ${file.status.toUpperCase()}${file.reason ? ` — ${file.reason}` : ''}`,
   );
@@ -147,21 +170,23 @@ function render(answer: BaselineAnswer): void {
     console.log(
       `   test "${file.test.name}": ${TEST_LABEL[file.test.status]}${file.test.reason ? ` — ${file.test.reason}` : ''}`,
     );
-  if (file.lastPassed) {
-    console.log(
-      `   last passed: ${file.lastPassed.sha.slice(0, 8)} (run ${file.lastPassed.runId})`,
-    );
-  } else {
-    console.log(
-      `   last passed: unknown (${file.lastPassedReason}; searched ${file.searchedRuns} run(s), ` +
-        `${file.runsWithoutArtifact} without an artifact)`,
-    );
-  }
+  console.log(`   last passed: ${lastPassedText(file)}`);
+}
+
+function lastPassedText(file: FileAnswer): string {
+  if (file.lastPassedReason === 'single-run') return 'not searched (--run reads one run)';
+  if (file.lastPassed) return `${file.lastPassed.sha.slice(0, 8)} (run ${file.lastPassed.runId})`;
+  return (
+    `unknown (${file.lastPassedReason}; searched ${file.searchedRuns} run(s), ` +
+    `${file.runsWithoutArtifact} without an artifact)`
+  );
 }
 
 /** Every option this command accepts, and which of them consume the argument after them. */
-const KNOWN_FLAGS = new Set(['--file', '--test', '--json', '--ref', '--max-runs', '--workflow']);
-const VALUED_FLAGS = new Set(['--file', '--test', '--ref', '--max-runs', '--workflow']);
+const VALUED_FLAGS = new Set(['--file', '--test', '--ref', '--max-runs', '--workflow', '--run']);
+const KNOWN_FLAGS = new Set([...VALUED_FLAGS, '--json']);
+/** Options that pick the branch walk, which a named run replaces. */
+const WALK_FLAGS = ['--ref', '--max-runs', '--workflow'];
 
 /** Flag > guard.config.json > default. A corrupt config is a usage error, not a stack trace. */
 function source(args: string[], cwd: string): BaselineSource {
@@ -206,6 +231,19 @@ export default function baselineStatus(args: string[], cwd: string) {
     const file = flag(args, '--file');
     const test = flag(args, '--test');
     if (test && !file) throw new UsageError('--test needs --file <path> (the file the test is in)');
+    const runRaw = flag(args, '--run');
+    if (runRaw !== undefined) {
+      // Digits only, and exact: Number() accepts `0x10` and `1e3`, and rounds a 17-digit id.
+      const runId = Number(runRaw);
+      if (!/^[1-9]\d*$/.test(runRaw) || !Number.isSafeInteger(runId)) {
+        throw new UsageError(`--run needs a run id (got "${runRaw}")`);
+      }
+      const walkFlag = WALK_FLAGS.find((name) => args.includes(name));
+      if (walkFlag) {
+        throw new UsageError(`--run names one run, so it cannot be combined with ${walkFlag}`);
+      }
+      return report(queryRun({ cwd, runId, file, test, ...source(args, cwd) }), args, true);
+    }
     const maxRunsRaw = flag(args, '--max-runs');
     const maxRuns = maxRunsRaw ? Number(maxRunsRaw) : DEFAULT_MAX_RUNS;
     // Integer, not merely finite: `--limit 1.5` fails inside gh, so a bad ARGUMENT would surface as
@@ -226,8 +264,13 @@ export default function baselineStatus(args: string[], cwd: string) {
     console.error(`🚫 ${e.message}.`);
     return 1;
   }
+  return report(answer, args, false);
+}
+
+/** Print the answer and map it to the exit code; see `meta.help` for the three-way contract. */
+function report(answer: BaselineAnswer, args: string[], named: boolean): number {
   if (args.includes('--json')) console.log(JSON.stringify(answer, null, 2));
-  else render(answer);
-  // "No run carries data yet" is a successful query; see `meta.help` for the three-way contract.
+  else render(answer, named);
+  // "No run carries data yet" is a successful query, not an unperformed one.
   return UNPERFORMED.has(answer.reason ?? '') ? 2 : 0;
 }

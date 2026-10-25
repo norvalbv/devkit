@@ -48,9 +48,30 @@ export function gitOnlyPath(dir: string): string {
   return bin;
 }
 
-/** The stub's `gh api …/branches/<ref>` arm: GitHub's head is the stub repo's branch, or `head`. */
+/** `gh api …/actions/runs/<id>`: the raw API object in run-<id>.json, as GitHub would send it. */
+export const API_RUN_BY_ID = `case "$2" in */actions/runs/*)
+    run="$DEVKIT_TEST_FIXTURE/run-\${2##*/}.json"
+    [ -f "$run" ] && exec cat "$run"
+    echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+  esac`;
+
+/** A run as GitHub's REST API sends it: snake_case, and a null conclusion while in flight. */
+export const apiRun = (run: RunRef, path = '.github/workflows/gate.yml') => ({
+  id: run.databaseId,
+  run_attempt: run.attempt,
+  status: run.status,
+  conclusion: run.conclusion || null,
+  head_sha: run.headSha,
+  head_branch: run.headBranch,
+  event: run.event,
+  created_at: run.createdAt,
+  path,
+});
+
+/** The stub's `gh api` arms: a run by id, then a branch head from the repo (or `head`). */
 export const API_BRANCH_HEAD = `if [ "$1" = "api" ]; then
   echo "$*" >> "$DEVKIT_TEST_FIXTURE/api.log"
+  ${API_RUN_BY_ID}
   if [ -f "$DEVKIT_TEST_FIXTURE/head" ]; then cat "$DEVKIT_TEST_FIXTURE/head"; exit 0; fi
   branch=$(printf '%s' "\${2#*/branches/}" | sed 's#%2F#/#g')
   git rev-parse --verify -q "refs/heads/$branch" && exit 0
@@ -102,7 +123,7 @@ export const summaryFor = (
 ) =>
   JSON.stringify({
     schema: 1,
-    sha: 'sha1',
+    sha: null, // a push run's GITHUB_SHA is its head sha; a fake one would read as a tested merge
     runId,
     attempt,
     testsPassed,
