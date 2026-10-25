@@ -7,10 +7,9 @@ import {
   unhandledKey,
 } from '../../../gate-engine/coverage/unhandled-reporter.mts';
 import type { CheckRow } from '../ship/wait-ci/wait.mts';
-import { type FailedStep, GhUnavailable, commitCi, gh, runView } from './gh.mts';
+import { type FailedStep, GhUnavailable, commitCi, gh, runById, runView } from './gh.mts';
 import type { TestReportSummary, UnhandledRecord } from './produce.mts';
-import { loadSummary, workflowSelector } from './query.mts';
-import { configuredSource } from './source.mts';
+import { configuredSource, loadSummary, workflowSelector } from './source.mts';
 
 export type AttributionToken = 'inherited-only' | 'new' | 'unknown';
 
@@ -169,13 +168,8 @@ const runIdOf = (row: CheckRow): number | null => {
 function workflowRun(cwd: string, failures: CheckRow[], workflow: string) {
   for (const id of new Set(failures.map(runIdOf))) {
     if (id === null) continue;
-    const raw = gh(
-      ['api', `repos/{owner}/{repo}/actions/runs/${id}`, '--jq', '[.path, .run_attempt] | @tsv'],
-      cwd,
-    );
-    const [path, attempt] = raw.trim().split('\t');
-    if (workflowSelector(path ?? '') === workflow)
-      return { databaseId: id, attempt: Number(attempt) };
+    const run = runById(cwd, id);
+    if (workflowSelector(run.path) === workflow) return run;
   }
   return null;
 }

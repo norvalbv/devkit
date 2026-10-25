@@ -3,15 +3,14 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import baselineStatus from '../commands/baseline/status.mts';
-import { parseSummary } from '../lib/baseline-status/gh.mts';
+import { parseSummary } from '../lib/baseline-status/source.mts';
 import {
   MAX_NAMES_PER_LIST,
   MAX_NAMES_PER_SUMMARY,
   type TestReportSummary,
   summarise,
 } from '../lib/baseline-status/produce.mts';
-import type { FileStatus } from '../lib/baseline-status/query.mts';
-import { testVerdict } from '../lib/baseline-status/test-verdict.mts';
+import { type FileStatus, testVerdict } from '../lib/baseline-status/test-verdict.mts';
 import { ghHarness, runRef, summaryFor } from './_baseline-fixture.mts';
 
 const FIXTURES = join(import.meta.dirname, 'fixtures');

@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { RUN_LIST_BY_COMMIT } from '../../__tests__/_baseline-fixture.mts';
+import { RUN_LIST_BY_COMMIT, apiRun, runRef } from '../../__tests__/_baseline-fixture.mts';
 import type { CheckRow } from '../ship/wait-ci/wait.mts';
 import {
   attributeFailures,
@@ -23,7 +23,7 @@ const summary = (
   runId = 100,
 ): TestReportSummary => ({
   schema: 1,
-  sha: 'merge-sha',
+  sha: 'e'.repeat(40), // the merge commit; parseSummary drops a sha that is not a commit id
   runId,
   attempt: 1,
   testsPassed: !Object.values(files).includes('failed'),
@@ -255,7 +255,7 @@ const GH_STUB = `#!/bin/sh
 F="$DEVKIT_TEST_FIXTURE"
 if [ "$1" = "api" ]; then
   case "$2" in
-    */actions/runs/*) cat "$F/run-\${2##*/}.tsv" 2>/dev/null && exit 0; echo "HTTP 404" >&2; exit 1 ;;
+    */actions/runs/*) [ -f "$F/run-\${2##*/}.json" ] && exec cat "$F/run-\${2##*/}.json"; echo "HTTP 404" >&2; exit 1 ;;
     */commits/*) echo base-sha; exit 0 ;;
   esac
 fi
@@ -311,6 +311,11 @@ describe('attributeFailures against a stubbed gh', () => {
   let cwd: string;
   let fixture: string;
   const put = (name: string, body: string) => writeFileSync(join(fixture, name), body);
+  const putRun = (id: number, workflow: string) =>
+    put(
+      `run-${id}.json`,
+      JSON.stringify(apiRun(runRef({ databaseId: id }), `.github/workflows/${workflow}`)),
+    );
   const baseRun = (over: Record<string, string> = {}) =>
     put(
       'runs.json',
@@ -346,7 +351,7 @@ describe('attributeFailures against a stubbed gh', () => {
     mkdirSync(join(cwd, 'bin'));
     writeFileSync(join(cwd, 'bin', 'gh'), GH_STUB);
     chmodSync(join(cwd, 'bin', 'gh'), 0o755);
-    put('run-200.tsv', '.github/workflows/gate.yml\t1\n');
+    putRun(200, 'gate.yml');
     put('view-200.json', view('Tests'));
     put('view-100.json', view('Tests'));
     baseRun();
@@ -502,7 +507,7 @@ describe('attributeFailures against a stubbed gh', () => {
     // gate.yml's `required` job fails beside `gate` on every red run; it is the same run, not a stray.
     const a = { 'a.test.mts': names(['x > broke']) };
     put('summary-200.json', JSON.stringify(summary({ 'a.test.mts': 'failed' }, a, 200)));
-    put('run-300.tsv', '.github/workflows/lint.yml\t1\n');
+    putRun(300, 'lint.yml');
     const lint = check('lint', 'https://github.com/o/r/actions/runs/300/job/9');
     const required = check('required', 'https://github.com/o/r/actions/runs/200/job/2');
     const line = attribute([lint, PR_CHECK, required]).line;
@@ -523,11 +528,17 @@ describe('attributeFailures against a stubbed gh', () => {
     expect(attribute().line).toMatch(/^attribution=inherited-only inherited=1 new=0 /);
   });
 
+  it('still attributes a PR run whose head_branch GitHub sends as null', () => {
+    const run = apiRun(runRef({ databaseId: 200 }), '.github/workflows/gate.yml');
+    put('run-200.json', JSON.stringify({ ...run, head_branch: null }));
+    expect(attribute().line).toMatch(/^attribution=new inherited=1 new=1 /);
+  });
+
   it("reads the consumer's configured workflow, not devkit's gate.yml", () => {
     writeFileSync(join(cwd, 'guard.config.json'), '{"baselineStatus":{"workflow":"ci.yml"}}');
     execFileSync('git', ['init', '-q'], { cwd });
     expect(attribute().line).toBe('attribution=unknown reason=no-workflow-run');
-    put('run-200.tsv', '.github/workflows/ci.yml\t1\n');
+    putRun(200, 'ci.yml');
     expect(attribute().line).toMatch(/^attribution=new inherited=1 new=1 /);
   });
 
@@ -539,7 +550,7 @@ describe('attributeFailures against a stubbed gh', () => {
     expect(attribute().line).toBe(
       'attribution=unknown reason=no-artifact base-run=100 base-ci=red',
     );
-    put('run-200.tsv', '.github/workflows/other.yml\t1\n');
+    putRun(200, 'other.yml');
     expect(attribute().line).toBe('attribution=unknown reason=no-workflow-run');
   });
 
