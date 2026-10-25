@@ -5379,6 +5379,14 @@
       "count": 1
     },
     {
+      "fingerprint": "8234ec03a7fc0f49b9fcfd35a7d3290465b7a1feae1c35cac67f83ba966a456b",
+      "ruleId": "anti-slop/no-unsafe-dictionary-type",
+      "file": "gate-engine/judge/process/judge-exec.mts",
+      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
+      "context": "extra?: Record<string, unknown>;",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/eval/adapters.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -6104,14 +6112,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "args[2] as string,",
       "fingerprint": "9071ef8ff3c9c78850847cd7a76cd55009cb1db6f02b99e2c34e613d3c003ce1",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "gate-engine/judge/run-judge.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "extra?: Record<string, unknown>;",
-      "fingerprint": "90791dbbd035e4386c41e0eb27f8d31c16fc6802453bae4d66388cf7b0300fe1",
       "count": 1
     },
     {
@@ -9155,6 +9155,14 @@
       "count": 2
     },
     {
+      "fingerprint": "d0cd0a30acf81531043cc4e506b40c61e7d31031b4026d68ce41739ba3e3a345",
+      "ruleId": "anti-slop/no-conditional-empty-object-spread",
+      "file": "gate-engine/judge/process/judge-exec.mts",
+      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
+      "context": "...(opts.durationMs === undefined ? {} : { duration_ms: opts.durationMs }),",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/commands/doctor.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -9955,14 +9963,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "gate-engine/judge/run-judge.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "...(opts.durationMs === undefined ? {} : { duration_ms: opts.durationMs }),",
-      "fingerprint": "e4d821a982b99b3646ddcdc91ffff819a780d538f67d9467c3b769fe6bb0cb98",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-known-value-widening",
       "file": "cli/__tests__/review-cache-root.test.mts",
       "diagnostic": "The explicit anonymous object type on return value of `initRepository` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
@@ -10320,6 +10320,14 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "(m) => typeof coverage[m] === 'number' && computed[m] < (coverage[m] as number),",
       "fingerprint": "ec7d5e9133394c36fa7c12795791b17664f7d63109a67a2bd3d0a29b0b86c75a",
+      "count": 1
+    },
+    {
+      "fingerprint": "ec9c76271cc66473f3ef25ea1ccf0dc96ac57686079d822c56b0740c2d1c3784",
+      "ruleId": "anti-slop/no-conditional-empty-object-spread",
+      "file": "gate-engine/judge/process/judge-exec.mts",
+      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
+      "context": "...(ref ? { transcript_ref: ref } : {}),",
       "count": 1
     },
     {
@@ -10744,14 +10752,6 @@
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
       "context": "function stringArray(value: unknown, label: string): string[] {",
       "fingerprint": "f38981f0aa32fbc970388b3ece6fe9d08845c1f53736bd85f0b0ff48659bc4bb",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "gate-engine/judge/run-judge.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "...(ref ? { transcript_ref: ref } : {}),",
-      "fingerprint": "f3a5a1565c7115adde7817e8984cc891ece38496b1ef3a409d8bc370ee8b4391",
       "count": 1
     },
     {
