@@ -35,7 +35,7 @@ describe('selectedIds', () => {
     Object.defineProperty(proto, 'antiSlop', { value: true, configurable: true });
     Object.defineProperty(proto, 'guards', { value: ['size'], configurable: true });
     try {
-      expect(selectedIds(repo(null))).toEqual(['size', 'fanout', 'dup', 'clone']);
+      expect(selectedIds(repo(null))).toEqual(['whitespace', 'size', 'fanout', 'dup', 'clone']);
       expect(selectedIds(repo(['clone']))).toEqual(['clone']);
       expect(selectedIds(repo([], false))).toEqual([]);
     } finally {
@@ -55,7 +55,7 @@ describe('selectedIds', () => {
   });
 
   it('EXCLUDES opt-in coverage from the missing-config fallback (unadopted repo never wedged)', () => {
-    expect(selectedIds(repo(null))).toEqual(['size', 'fanout', 'dup', 'clone']);
+    expect(selectedIds(repo(null))).toEqual(['whitespace', 'size', 'fanout', 'dup', 'clone']);
   });
 
   it('selects anti-slop only from its explicit component bit, never components.guards', () => {
@@ -68,7 +68,7 @@ describe('selectedIds', () => {
     expect(selectedIds(repo(null))).not.toContain('anti-slop');
     const d = repo([], true);
     writeFileSync(join(d, '.devkit', 'config.json'), '{ nope');
-    expect(selectedIds(d)).toEqual(['size', 'fanout', 'dup', 'clone']);
+    expect(selectedIds(d)).toEqual(['whitespace', 'size', 'fanout', 'dup', 'clone']);
   });
 
   it('selects comments from components.guards, but keeps it out of both fallbacks (opt-in)', () => {

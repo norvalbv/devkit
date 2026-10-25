@@ -1,0 +1,3 @@
+# The whitespace gate (git diff --check) would flag syntax, not mistakes, in these.
+*.patch -whitespace
+dist/** -whitespace

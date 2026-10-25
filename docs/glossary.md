@@ -25,6 +25,9 @@ The jargon you'll meet in devkit's help, prompts, and gate output — in one pla
 
 - **gate** — a check that runs in the pre-commit hook and can block a commit (e.g. duplication, clone,
   decisions). Each gate reads `guard.config.json`.
+- **whitespace** (`guard-whitespace`) — runs `git diff --cached --check` on the lines a commit adds:
+  trailing whitespace, a new blank line at EOF, leftover conflict markers. Exempt a path in
+  `.gitattributes` (`*.patch -whitespace`).
 - **ratchet** — a gate that only allows a metric to **shrink**, never grow:
   - **fanout** (`guard-fanout`) — caps the number of impl files in one folder (`fanoutCap`). Over the cap →
     split the folder into cohesive kebab-named subfolders.

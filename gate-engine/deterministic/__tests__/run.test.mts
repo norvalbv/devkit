@@ -144,7 +144,7 @@ describe('runDeterministic — aggregation + trichotomy', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const exec = mkExec({});
     expect(runDeterministic(repo(null), { exec })).toBe(0);
-    expect(exec).toHaveBeenCalledTimes(4);
+    expect(exec).toHaveBeenCalledTimes(5);
   });
 
   it('an opted-in anti-slop exit 2 is a HARD failure and prevents a false-green prefix', () => {

@@ -42,6 +42,7 @@ describe('selection helpers', () => {
     });
     expect(s).not.toHaveProperty('biome');
     expect(s.guards).toEqual([
+      'whitespace',
       'size',
       'fanout',
       'dup',
