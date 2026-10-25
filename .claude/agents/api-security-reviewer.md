@@ -89,7 +89,9 @@ theoretical, defense-in-depth, or already covered by a sibling route's auth.
 ## 1. Read skill for detailed rules:
 - `.claude/skills/api-security/SKILL.md`
 
+<!-- interactive-only -->
 SCRIPT=".claude/skills/api-security/scripts/checklist.mjs"
+<!-- /interactive-only -->
 
 ## 2. Generate the checklist
 ```bash

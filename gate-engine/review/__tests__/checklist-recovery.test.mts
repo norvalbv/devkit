@@ -433,7 +433,7 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
     expect(await runReviewGate(repo, { exec })).toBe(2);
     expect(exec.mock.calls.filter(([o]) => o.label === TARGET)).toHaveLength(1);
     expect(reasonOf(repo)).toBe(
-      `checklist artifact missing — ${COUNTED}; run the checklist commands exactly as written`,
+      `checklist artifact missing — ${COUNTED}; run each checklist command as its own plain node call, with no chains, loops or variables`,
     );
     expect(err.mock.calls.flat().join('\n')).toContain(`${COUNTED}: ${DENIED}`);
   });
