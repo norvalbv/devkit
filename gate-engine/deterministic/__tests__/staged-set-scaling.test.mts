@@ -175,16 +175,25 @@ function slopes(change: StagedChange): Record<string, GitWork> {
 
 describe('deterministic gate cost against the staged-set size', () => {
   it('names a reason for every registry gate it does not measure', () => {
-    expect(MEASURED.map((gate) => gate.id)).toEqual(['size', 'fanout', 'clone', 'comments']);
+    expect(MEASURED.map((gate) => gate.id)).toEqual([
+      'whitespace',
+      'size',
+      'fanout',
+      'clone',
+      'comments',
+    ]);
     for (const id of EXCLUDED.keys()) expect(DETERMINISTIC.map((gate) => gate.id)).toContain(id);
   });
 
   it.each(['delete-out-of-scope', 'rename-out-of-scope', 'modify-out-of-scope'] as const)(
     'starts no git process and reads no blob per staged file outside scanRoots (%s)',
     (change) => {
-      expect(slopes(change)).toEqual(
-        Object.fromEntries(MEASURED.map((gate) => [gate.id, { starts: 0, blobs: 0 }])),
+      const expected = Object.fromEntries(
+        MEASURED.map((gate) => [gate.id, { starts: 0, blobs: 0 }]),
       );
+      // whitespace judges every staged path, not scanRoots, so it reads each renamed or edited file.
+      if (change !== 'delete-out-of-scope') expected.whitespace = { starts: 0, blobs: 1 };
+      expect(slopes(change)).toEqual(expected);
     },
   );
 
