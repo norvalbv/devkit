@@ -6,7 +6,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONFIG_FILENAME, resolveGuardConfig } from '../../gate-engine/config.mts';
 import { FALLOW_CACHE, OVERLAY_WRITTEN } from '../../gate-engine/deterministic/gate-inputs.mts';
@@ -24,6 +24,7 @@ import { hooksDir, nativeHooksDir } from './doctor/hooks-path.mts';
 import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mts';
 import { cutStructureBaselines } from './generate/cut-structure-baselines.mts';
 import { isTracked, trackedPathPredicate } from './git-tracked.mts';
+import { hookDrift, readHook, writeHookAtomic } from './husky/overlay/hook-file.mts';
 import { buildOverlayHook } from './husky/husky-block.mts';
 import {
   describeForeignHook,
@@ -164,15 +165,11 @@ function installOverlayHook(
     );
     return;
   }
-  const dir = join(gitRoot, LOCAL_HOOKS);
-  mkdirSync(dir, { recursive: true });
   // pre-commit: devkit gates (+ optional fallow gate) + chain to the repo's pre-commit (if present).
-  const pre = join(dir, 'pre-commit');
-  writeFileSync(
-    pre,
+  writeHookAtomic(
+    join(gitRoot, LOCAL_HOOKS, 'pre-commit'),
     buildOverlayPreCommit(sel, preCommitChain, pkgRel, { root: gitRoot, fallow, stack, gitRuns }),
   );
-  chmodSync(pre, 0o755);
   // every OTHER hook name → pass-through (commit-msg also runs devkit's message judges).
   syncOverlaySiblingHooks(siblings, { dryRun: false });
   if (commitMsgLine) console.log(`  ✓ ${commitMsgLine}`);
@@ -193,8 +190,8 @@ function installOverlayHook(
  * (e.g. one predating a new ship gate) until re-init. This lets `devkit doctor --fix` refresh it
  * without a manual `devkit init --overlay`. Pass-through wrappers are refreshed alongside (idempotent).
  * `core.hooksPath` is left untouched — the `git ci` alias owns it and doctor reports it separately.
- * Returns the pre-commit { missing, drift } (what review reads) plus commitMsg and siblings, observed
- * BEFORE any write.
+ * Returns the pre-commit { missing, drift, contentDrift } (review reads contentDrift) plus
+ * commitMsg and siblings, observed BEFORE any write.
  */
 export function syncOverlayHook(
   gitRoot: string,
@@ -223,15 +220,12 @@ export function syncOverlayHook(
   });
 
   const pre = join(gitRoot, LOCAL_HOOKS, 'pre-commit');
-  const current = existsSync(pre) ? readFileSync(pre, 'utf8') : null;
+  const current = readHook(pre);
   const missing = current === null;
-  const drift = current !== expected; // a missing hook (null) is drift too
-
-  if (!dryRun && drift) {
-    mkdirSync(join(gitRoot, LOCAL_HOOKS), { recursive: true });
-    writeFileSync(pre, expected);
-    chmodSync(pre, 0o755);
-  }
+  // drift (doctor) includes a non-0755 mode; review reads contentDrift and checks the exec bit itself.
+  const drift = hookDrift(current, expected); // a missing hook is drift too
+  const contentDrift = current?.content !== expected;
+  if (!dryRun && drift) writeHookAtomic(pre, expected);
   // Siblings sync on their own: a stale commit-msg must heal even when pre-commit is current.
   const cm = syncOverlaySiblingHooks(
     { gitRoot, scriptDir, scriptsAbs, gitRuns, selection: sel, pkgRel },
@@ -240,6 +234,7 @@ export function syncOverlayHook(
   return {
     missing,
     drift,
+    contentDrift,
     commitMsg: { missing: cm.missing, drift: cm.drift },
     siblings: { scriptDir, ...cm.siblings },
   };
