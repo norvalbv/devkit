@@ -141,6 +141,20 @@ describe('guard-dup-allowlist clone lifecycle', () => {
     expect(file.pairs).toHaveLength(1);
     expect(file.clones).toHaveLength(1);
   });
+
+  it('re-approving a lapsed clone replaces it in place and makes it live for the new decay', () => {
+    const al = freshPath();
+    const lapsed = { fragmentHash: 'lapsed', fileA: 'a.ts', fileB: 'b.ts', date: '2000-01-01' };
+    writeFileSync(al, JSON.stringify({ pairs: [], clones: [lapsed] }));
+    const args = ['add-clone', 'lapsed', 'a.ts', 'b.ts', '--description', 'deliberate copy'];
+    expect(run(al, [...args, '--decay-days', '3650']).status).toBe(0);
+    const { clones } = read(al);
+    expect(clones).toHaveLength(1);
+    expect(clones[0]).toMatchObject({ description: 'deliberate copy', decayDays: 3650 });
+    expect(clones[0].date).not.toBe(lapsed.date);
+    // 3649 or 3650: `date` is a UTC day while decay counts from local midnight.
+    expect(run(al, ['list']).stdout).toMatch(/live 36(49|50)d {2}clone lapsed/);
+  });
 });
 
 describe('guard-dup-allowlist guardrails', () => {
@@ -236,6 +250,26 @@ describe('guard-dup-allowlist prune + baseline guard', () => {
     ).toBe(0);
     // Nothing downgraded, nothing rewritten, no findability metadata dropped.
     expect(read(al).pairs).toEqual([baseline]);
+  });
+
+  it('baseline-clones keeps a reasoned 3650-day clone approval while replacing baseline ones', () => {
+    const al = freshPath();
+    const reasoned = {
+      fragmentHash: 'kept',
+      fileA: 'a.ts',
+      fileB: 'b.ts',
+      description: 'deliberate per-suite copy',
+      date: '2026-10-16',
+      decayDays: 3650,
+    };
+    const oldBaseline = { ...reasoned, fragmentHash: 'old', description: 'baseline 2020-01-01' };
+    writeFileSync(al, JSON.stringify({ pairs: [], clones: [reasoned, oldBaseline] }));
+    const scan = [reasoned, { fragmentHash: 'fresh', fileA: 'c.ts', fileB: 'd.ts' }];
+    expect(run(al, ['baseline-clones'], JSON.stringify(scan)).status).toBe(0);
+    const { clones } = read(al);
+    expect(clones.map((c: { fragmentHash: string }) => c.fragmentHash)).toEqual(['kept', 'fresh']);
+    expect(clones[0]).toEqual(reasoned);
+    expect(clones[1].description).toMatch(/^baseline /);
   });
 
   it('add / add-clone reject a decay < 1 day or not a whole number — exit 1, no write', () => {
