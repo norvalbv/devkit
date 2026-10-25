@@ -121,8 +121,8 @@ function measureBases(
       sha,
       apply ? new Set() : (restoredBy.get(ref) ?? new Set()),
     );
-    if (blockers === null)
-      unverified.push(ref); // a git probe failed — don't know, never an all-clear
+    // null: a git probe failed — don't know, never an all-clear
+    if (blockers === null) unverified.push(ref);
     else verdicts.push({ ref, blockers: blockers.sort() });
   }
   for (const ref of restoredBy.keys()) if (!upstreamOf.has(ref)) unverified.push(ref);

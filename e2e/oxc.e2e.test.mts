@@ -49,7 +49,7 @@ describe('e2e: packed Oxc capability', () => {
     expect(lintVersion.status, out(lintVersion)).toBe(0);
     expect(fmtVersion.status, out(fmtVersion)).toBe(0);
     expect(out(lintVersion)).toContain('1.78.0');
-    expect(out(fmtVersion)).toContain('0.63.0');
+    expect(out(fmtVersion)).toContain('0.74.0');
 
     writeFileSync(join(fx.repoDir, 'rule-target.ts'), 'debugger;\n');
     writeFileSync(
