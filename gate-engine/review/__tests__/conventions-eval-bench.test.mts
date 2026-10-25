@@ -30,6 +30,8 @@ import {
   validateRow,
   variantConsistency,
 } from '../eval/conventions/bench.mts';
+import { parseConventionFindings } from '../evidence/conventions.mts';
+import { blockingAuthorityByGoldSlot } from '../eval/conventions/metrics.mts';
 import {
   CONVENTIONS_GATE_HASH_INPUTS,
   CONVENTIONS_MATCHER_HASH_INPUTS,
@@ -659,11 +661,11 @@ describe('runCase', () => {
     expect(res.blockingAuthority).toEqual({ g1: true });
   });
 
-  it('reports a tolerant gold hit without an OFFENDING line as missing blocking authority', async () => {
+  it('reports a tolerant gold hit without an OFFENDING location as missing blocking authority', async () => {
     const res = await runCase(makeRow(), {
       reviewerExec: async () =>
         'VIOLATION: Never call console.log directly. Use the structured logger. — app/CLAUDE.md:1\n' +
-        "OFFENDING: console.log('leaked'); — app/handler.ts\n" +
+        "OFFENDING: console.log('leaked');\n" +
         'VERDICT: FAIL — direct console.log call\n',
       matcherExec: async () => 'SLOT: F1',
       matchRuns: 1,
@@ -682,11 +684,11 @@ describe('runCase', () => {
     expect(res.score).toBeNull();
   });
 
-  const LINELESS_FAIL =
+  const UNCITED_FAIL =
     'VIOLATION: Never call console.log directly. Use the structured logger. — app/CLAUDE.md:1\n' +
-    "OFFENDING: console.log('leaked'); — app/handler.ts\n" +
+    "OFFENDING: console.log('leaked');\n" +
     'VERDICT: FAIL — direct console.log call\n';
-  const CITED_FAIL = LINELESS_FAIL.replace('app/handler.ts', 'app/handler.ts:1');
+  const CITED_FAIL = UNCITED_FAIL.replace("console.log('leaked');", '$& — app/handler.ts:1');
 
   it('judgeModel reaches the judge argv although the fixture config names no model', async () => {
     const models: string[] = [];
@@ -704,7 +706,7 @@ describe('runCase', () => {
   });
 
   it('strict retries a FAIL without blocking evidence once and scores the retried transcript', async () => {
-    const replies = [LINELESS_FAIL, CITED_FAIL];
+    const replies = [UNCITED_FAIL, CITED_FAIL];
     const opts = {
       matcherExec: async () => 'SLOT: F1',
       matchRuns: 1,
@@ -722,14 +724,14 @@ describe('runCase', () => {
     let lenientCalls = 0;
     const lenient = await runCase(makeRow(), {
       ...opts,
-      reviewerExec: async () => (lenientCalls++, LINELESS_FAIL),
+      reviewerExec: async () => (lenientCalls++, UNCITED_FAIL),
     });
     expect(lenientCalls).toBe(1);
     expect(lenient.blockingAuthority).toEqual({ g1: false });
   });
 
   it('a strict contract retry that goes dark is an outage, never scored from the first transcript', async () => {
-    const replies = [LINELESS_FAIL, null];
+    const replies = [UNCITED_FAIL, null];
     let calls = 0;
     const res = await runCase(makeRow(), {
       strict: true,
@@ -768,4 +770,25 @@ describe('appendLedger', () => {
     expect(readFileSync(path.join(dir, 'runs.log'), 'utf8')).toBe('{"run":1}\n{"run":2}\n');
     expect(() => appendLedger(path.join(dir, 'missing', 'deeper'), { run: 3 })).not.toThrow();
   });
+});
+
+describe('blockingAuthorityByGoldSlot — whole-file citations', () => {
+  // Both sides key the raw location, so a decorated path still meets its own validated key.
+  it.each(['app/components/UserBadge.tsx', '`./app/components/UserBadge.tsx`'])(
+    'credits a gold slot matched to a lineless OFFENDING the parser keeps (%s)',
+    (loc) => {
+      const raw =
+        'VIOLATION: All new files must use kebab-case filenames. — CLAUDE.md:5\n' +
+        `OFFENDING: UserBadge.tsx — ${loc}\n` +
+        'VERDICT: FAIL — not kebab-case';
+      const validated = parseConventionFindings(raw);
+      expect(validated).toEqual([expect.objectContaining({ offendingLine: null })]);
+      const outcomes = [
+        { slotId: 'g1', kind: 'gold' as const, match: 1, stable: true, outage: false },
+      ];
+      expect(blockingAuthorityByGoldSlot(outcomes, parseFindings(raw), validated)).toEqual({
+        g1: true,
+      });
+    },
+  );
 });

@@ -49,7 +49,9 @@ NO_DIFF_SUPPLIED — re-dispatch with the diff pasted inline, or run devkit revi
   "try to" — never justifies a FAIL on its own, even when the diff does the hedged-against thing.
 - A finding needs BOTH of these, or it does not exist:
   1. The exact rule, quoted verbatim, with the CLAUDE.md file and line it came from.
-  2. The exact offending line, quoted verbatim, with its file and line.
+  2. The exact offending line, quoted verbatim, with its file and line. For a rule about a file
+     itself (its name or location), the file's basename with its path and no line, and only for a
+     file this change adds.
   Paraphrasing either — "the diff basically does the thing the rule forbids" — is not a finding.
   If you cannot quote both exactly, stay silent. Silence is the correct, common outcome.
 - No style opinions beyond what the rule LITERALLY says. A rule about logging says nothing about
@@ -80,6 +82,8 @@ For each real violation, emit both lines:
 VIOLATION: <exact quoted rule text> — <CLAUDE.md path>:<line>
 OFFENDING: <exact offending line, verbatim> — <file path>:<line>
 ```
+For a rule about a file itself (its name or location), on a file this change adds, the OFFENDING
+line instead names the file, with nothing after the path: `OFFENDING: <file basename> — <file path>`.
 `<line>` is always a SINGLE line number, never a range — if the rule or the offending change
 spans several lines, cite the line where it starts and quote only that one line. One pair per
 violation. If you find none, say exactly:
