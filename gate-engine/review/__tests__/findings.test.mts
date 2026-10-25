@@ -177,6 +177,58 @@ describe('renderFindingsBlock', () => {
     expect(block).toContain('src/dep.ts · src/dep.ts:4');
   });
 
+  const cappedFile = (count: number): ReviewOutcome => {
+    const res = outcome();
+    res.name = 'commit-guard';
+    const issues = Array.from(
+      { length: count },
+      (_, i) => `h${i} src/dep.ts:${i * 20 + 1} copies x`,
+    );
+    attachItems(res, { files: [{ path: 'src/dep.ts', status: 'fail', issues }] }, new Map());
+    return res;
+  };
+
+  it('says how many issues the per-lens cap dropped from a file, and counts them', () => {
+    const res = cappedFile(4);
+    expect(res.items?.[0].issues).toHaveLength(3);
+    expect(res.items?.[0].issues_omitted).toBe(1);
+    const block = renderFindingsBlock(res);
+    expect(block).toContain('commit-guard: 4 finding(s):');
+    expect(block).toContain(
+      '  • src/dep.ts — +1 more issue(s) past the per-lens cap; raise GUARD_REVIEW_MAX_ISSUES_PER_LENS (max 10) to record them',
+    );
+    expect(block.match(/ {2}• src\/dep\.ts · /g)).toHaveLength(3);
+    expect(block).not.toContain('…and');
+  });
+
+  it('counts several dropped issues once, with no phantom overflow tail', () => {
+    const block = renderFindingsBlock(cappedFile(5));
+    expect(block).toContain('commit-guard: 5 finding(s):');
+    expect(block).toContain('+2 more issue(s) past the per-lens cap');
+    expect(block).not.toContain('…and');
+  });
+
+  it('leaves an item at or under the cap without an omission count', () => {
+    const res = cappedFile(3);
+    expect(res.items?.[0]).not.toHaveProperty('issues_omitted');
+    expect(renderFindingsBlock(res)).not.toContain('past the per-lens cap');
+  });
+
+  it('folds dropped issues into the overflow tail once the line cap is full', () => {
+    const full = Array.from({ length: 12 }, (_, i) => `defect in src/f${i}.ts:${i * 100 + 1}`);
+    const block = renderFindingsBlock(
+      outcome([item('a', full), item('b', ['x src/b.ts:1'], { issues_omitted: 2 })]),
+    );
+    expect(block).toContain('api-security-reviewer: 15 finding(s):');
+    expect(block).not.toContain('past the per-lens cap');
+    expect(block).toContain('…and 3 more not shown');
+  });
+
+  it('ignores the omission count on a lens that no longer blocks', () => {
+    const waived = item('w', ['claim src/w.ts:1'], { disposition: 'waived', issues_omitted: 4 });
+    expect(summarizeFindings([waived, item('b', ['x src/b.ts:1'])]).total).toBe(1);
+  });
+
   it('is empty when the artifact carried no issues', () => {
     expect(renderFindingsBlock(outcome(undefined))).toBe('');
     expect(renderFindingsBlock(outcome([item('a', [], { status: 'pass' })]))).toBe('');
@@ -186,7 +238,7 @@ describe('renderFindingsBlock', () => {
     const issues = Array.from({ length: 14 }, (_, i) => `defect in src/f${i}.ts:${i * 100 + 1}`);
     const block = renderFindingsBlock(outcome([item('lens', [...issues, issues[0]])]));
     expect(block).toContain('api-security-reviewer: 14 finding(s), 1 duplicate(s) folded:');
-    expect(block).toContain('…and 2 more in the transcript');
+    expect(block).toContain('…and 2 more not shown');
   });
 });
 
@@ -232,7 +284,7 @@ describe('class-fix hint', () => {
   it('still hints when the findings run past the 12-line cap', () => {
     const many = Array.from({ length: 14 }, (_, i) => `race in src/f${i}.ts:${i * 100 + 1}`);
     const block = renderFindingsBlock(outcome([item('concurrency-races', many)]));
-    expect(block).toContain('…and 2 more in the transcript');
+    expect(block).toContain('…and 2 more not shown');
     expect(countHint(block)).toBe(1);
   });
 
