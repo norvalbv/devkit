@@ -104,6 +104,8 @@ export const scriptCommand = (script: string): string => `node ${shellWord(scrip
 const INTERACTIVE_ONLY_RE = /<!-- interactive-only -->[\s\S]*?<!-- \/interactive-only -->\n?/g;
 const PROVIDER_SKILL_PREFIXES = ['.agents/skills/', '.claude/skills/', '.cursor/skills/'];
 const SCRIPT_SUFFIX = '/scripts/checklist.mjs';
+// One pass, so a substituted path is never re-scanned for a placeholder it happens to contain.
+const PLACEHOLDER_RE = /node \$SCRIPT|\$SKILL_DIR/g;
 
 /** A brief as a gate judge sees it: interactive setup gone, every path the granted literal. */
 export function gateBrief(brief: string, script: string): string {
@@ -113,9 +115,7 @@ export function gateBrief(brief: string, script: string): string {
   return PROVIDER_SKILL_PREFIXES.reduce(
     (body, prefix) => body.replaceAll(prefix, () => skillPrefix),
     brief.replace(INTERACTIVE_ONLY_RE, ''),
-  )
-    .replaceAll('node $SCRIPT', () => scriptCommand(script))
-    .replaceAll('$SKILL_DIR', () => skillDir);
+  ).replace(PLACEHOLDER_RE, (hit) => (hit === '$SKILL_DIR' ? skillDir : scriptCommand(script)));
 }
 
 /**
