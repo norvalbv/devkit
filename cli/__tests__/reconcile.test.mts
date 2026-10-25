@@ -408,6 +408,19 @@ describe('reconcile — ff-pullability is measured, not claimed', () => {
     expect(ffPullSucceeds(root, g)).toBe(false);
   });
 
+  it('a staged file whose worktree matches the index blocks on the index column alone', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n', 'bar.ts': 'other\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n', 'bar.ts': 'UPSTREAM-BAR\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    writeFileSync(join(root, 'bar.ts'), 'STAGED\n');
+    g('add', '--', 'bar.ts'); // status `M `: the worktree column is clean
+    const entry = entryFor(root, g, base, [{ path: 'foo.ts' }]);
+
+    const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+    expect(blockersAfter(root, res)).toEqual(['bar.ts']);
+    expect(ffPullSucceeds(root, g)).toBe(false);
+  });
+
   it('an untracked file sitting where upstream ADDS one is a blocker', () => {
     const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
     mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n', 'new.ts': 'UPSTREAM-ADD\n' });

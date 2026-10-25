@@ -89,8 +89,8 @@ export function parseArgs(argv: string[]) {
       paths.push(...argv.slice(i + 1).map((p) => posix.normalize(p))); // `./a.ts` records as `a.ts`
       break;
     }
-    if (argv[i] === '--merge' || argv[i] === '--literal-paths')
-      flags[argv[i].slice(2)] = true; // booleans — must NOT consume the next token (e.g. the `--`)
+    // booleans — must NOT consume the next token (e.g. the `--`)
+    if (argv[i] === '--merge' || argv[i] === '--literal-paths') flags[argv[i].slice(2)] = true;
     else if (argv[i].startsWith('--')) flags[argv[i].slice(2)] = argv[++i];
   }
   return { flags, paths };

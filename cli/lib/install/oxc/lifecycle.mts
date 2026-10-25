@@ -402,19 +402,28 @@ export function checkOxcCapability(cwd: string): CheckResult[] {
   }
   const lint = probeOxcRuntime('lint');
   const fmt = probeOxcRuntime('fmt');
-  const runtimeOk =
-    lint.ok &&
-    fmt.ok &&
+  const detail = `${lint.detail}; ${fmt.detail}`;
+  const pinsCurrent =
     lint.runtime?.expectedVersion === manifest.pins.oxlint &&
     fmt.runtime?.expectedVersion === manifest.pins.oxfmt;
-  const runtime = runtimeOk
-    ? check('Oxc runtime', 'OK', `${lint.detail}; ${fmt.detail}`)
-    : check(
-        'Oxc runtime',
-        'DRIFT',
-        `${lint.detail}; ${fmt.detail}`,
-        'reinstall the pinned @norvalbv/devkit package with optional platform dependencies',
-      );
+  // Healthy binaries under stale pins: the installed devkit moved, so a re-sync rewrites the pins.
+  const runtime =
+    lint.ok && fmt.ok
+      ? pinsCurrent
+        ? check('Oxc runtime', 'OK', detail)
+        : check(
+            'Oxc runtime',
+            'DRIFT',
+            `${MANIFEST_REL} pins oxlint@${manifest.pins.oxlint}, oxfmt@${manifest.pins.oxfmt}; installed ${detail}`,
+            'run `devkit doctor --fix`',
+            true,
+          )
+      : check(
+          'Oxc runtime',
+          'DRIFT',
+          detail,
+          'reinstall the pinned @norvalbv/devkit package with optional platform dependencies',
+        );
   const basePath = join(cwd, BASE_REL);
   const baseCurrent = oxcBaseCapabilityIssue(cwd) === null;
   const base = baseCurrent

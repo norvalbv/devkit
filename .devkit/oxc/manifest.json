@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "pins": {
     "oxlint": "1.78.0",
-    "oxfmt": "0.63.0"
+    "oxfmt": "0.74.0"
   },
   "antiSlop": true,
   "baseDigest": "d2ae5f319a9f08ef074f34d58449e0945df304ca0bc1ea4ef27466169241b140",

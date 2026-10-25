@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import childProcess, { type SpawnSyncOptions, spawn } from 'node:child_process';
 import fs, {
   existsSync,
   mkdirSync,
@@ -175,7 +175,7 @@ describe('Oxc capability lifecycle', () => {
     expect(JSON.parse(readFileSync(join(root, '.devkit/oxc/manifest.json'), 'utf8'))).toMatchObject(
       {
         schemaVersion: 1,
-        pins: { oxlint: '1.78.0', oxfmt: '0.63.0' },
+        pins: { oxlint: '1.78.0', oxfmt: '0.74.0' },
         configs: {
           oxlint: { path: '.oxlintrc.json' },
           oxfmt: { path: '.oxfmtrc.json' },
@@ -329,6 +329,53 @@ describe('Oxc capability lifecycle', () => {
     expect(existsSync(join(root, '.oxlintrc.json'))).toBe(true);
     expect(existsSync(join(root, '.oxfmtrc.json'))).toBe(true);
     expect(existsSync(join(root, '.devkit/oxc'))).toBe(false);
+  });
+
+  // The state between installing a devkit with new Oxc pins and re-syncing: nothing to reinstall.
+  it('reports stale manifest pins under a healthy runtime as fixable by doctor --fix', () => {
+    const root = tempRoot();
+    syncOxcCapability(root);
+    const path = join(root, '.devkit/oxc/manifest.json');
+    const manifest = JSON.parse(readFileSync(path, 'utf8'));
+    writeFileSync(
+      path,
+      JSON.stringify({ ...manifest, pins: { ...manifest.pins, oxfmt: '0.0.1' } }),
+    );
+
+    expect(checkOxcCapability(root)[0]).toMatchObject({
+      name: 'Oxc runtime',
+      status: 'DRIFT',
+      detail: expect.stringContaining('oxfmt@0.0.1'),
+      remediation: 'run `devkit doctor --fix`',
+      fixable: true,
+    });
+    syncOxcCapability(root);
+    expect(checkOxcCapability(root).every((result) => result.status === 'OK')).toBe(true);
+  });
+
+  // A re-sync cannot repair a binary that fails to run, so this row must never offer --fix.
+  it('keeps an unusable Oxc binary on the reinstall remedy, not fixable', () => {
+    const root = tempRoot();
+    syncOxcCapability(root);
+    const realSpawnSync = childProcess.spawnSync;
+    // SAFETY: same (command, args, options) signature; only the oxfmt version probe fails.
+    childProcess.spawnSync = ((command: string, args: string[], options: SpawnSyncOptions) =>
+      args[1] === '--version' && /[\\/]node_modules[\\/]oxfmt[\\/]/.test(args[0])
+        ? { pid: 0, output: [], stdout: '', stderr: 'probe failed', status: 1, signal: null }
+        : realSpawnSync(command, args, options)) as typeof childProcess.spawnSync;
+    syncBuiltinESMExports();
+    try {
+      expect(checkOxcCapability(root)[0]).toMatchObject({
+        name: 'Oxc runtime',
+        status: 'DRIFT',
+        detail: expect.stringContaining('probe failed'),
+        remediation: expect.stringContaining('reinstall the pinned'),
+        fixable: false,
+      });
+    } finally {
+      childProcess.spawnSync = realSpawnSync;
+      syncBuiltinESMExports();
+    }
   });
 });
 

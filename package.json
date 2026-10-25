@@ -100,7 +100,7 @@
     "eslint-plugin-project-structure": "^3.14.5",
     "get-port": "7.2.0",
     "mdast-util-from-markdown": "^2.1.0",
-    "oxfmt": "0.63.0",
+    "oxfmt": "0.74.0",
     "oxlint": "1.78.0",
     "playwright-core": "1.63.0",
     "ts-morph": "^28.0.0",

@@ -318,8 +318,8 @@ function callArgsAt(code: string, from: number): number {
       const pair = code.slice(i, i + 2);
       if (pair === '&&' || pair === '||' || pair === '==' || pair === '!=') return -1;
       if (code[i] === '<') depth += 1;
-      else if (code[i] === '=' && code[i + 1] === '>')
-        i += 1; // an arrow, not a closer
+      // an arrow, not a closer
+      else if (code[i] === '=' && code[i + 1] === '>') i += 1;
       else if (code[i] === '>' && (depth -= 1) === 0) {
         i += 1;
         break;
