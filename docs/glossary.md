@@ -43,6 +43,11 @@ The jargon you'll meet in devkit's help, prompts, and gate output — in one pla
   rejects only a real opt-out; an `--extra` command's fatal exit 2 was never one and stays
   `(unexpected:2)`. Nothing exports it by default, and it salts the **deterministic-prefix cache** so a
   non-strict all-green key can't authorise a later strict run.
+- **killed / spawn-failed** — a deterministic gate whose own process ended by a signal (an OOM kill,
+  an operator `kill`) is reported as `<label>(killed:SIGTERM)`; one whose command could not start (a
+  binary missing from PATH) as `<label>(spawn-failed:ENOENT)`. Both **block** and are recorded as
+  `could_not_run`, never as a finding. A ship-supervisor reap or Ctrl-C signals the whole process
+  group, so guard-deterministic stops with the gate and reports neither.
 - **fail-closed** — the ship-only inverse of **fail-open**: when a strict AI gate can't reach a verdict
   (a `claude` outage, inconclusive after its one retry, or the gate itself could not run — e.g. a git
   read failed) it **blocks** the ship instead of skipping.
