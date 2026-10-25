@@ -452,8 +452,13 @@ function seedResultsCache(
   const cacheDir = join(root, dir, 'vitest/fixture');
   mkdirSync(cacheDir, { recursive: true });
   const path = join(cacheDir, 'results.json');
-  const results = entries.map(([key, failed]) => [key, { duration: 1, failed }]);
-  writeFileSync(path, JSON.stringify({ version: 'fixture', results }));
+  type FileResult = { duration: number; failed: boolean };
+  const projects: Record<string, { files: Record<string, FileResult> }> = {};
+  for (const [key, failed] of entries) {
+    const [project = '', file = ''] = key.split(':');
+    (projects[project] ??= { files: {} }).files[file] = { duration: 1, failed };
+  }
+  writeFileSync(path, JSON.stringify({ version: 1, projects }));
   const stamp = Date.now() / 1000 - ageSeconds;
   utimesSync(path, stamp, stamp);
   return path;
