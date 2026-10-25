@@ -25,7 +25,7 @@
       "kind": "agent",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": ["commit-guard-retrieval"],
+      "suiteIds": ["reviewer-commit-guard", "commit-guard-retrieval"],
       "canonical": "agents/commit-guard.md"
     },
     {
@@ -285,7 +285,7 @@
       "kind": "reviewer",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": ["commit-guard-retrieval"],
+      "suiteIds": ["reviewer-commit-guard", "commit-guard-retrieval"],
       "canonical": "REVIEWERS:commit-guard"
     },
     {
@@ -879,6 +879,40 @@
         "corpus": ["gate-engine/co-occurrence/labels.json"],
         "scorer": ["gate-engine/co-occurrence/matcher.mts"],
         "runner": ["gate-engine/co-occurrence/matcher.mts"]
+      }
+    },
+    {
+      "id": "reviewer-commit-guard",
+      "label": "Commit-guard reviewer (localized fixture)",
+      "adapter": "reviewer",
+      "subjectIds": ["reviewer-commit-guard", "agent-commit-guard"],
+      "runner": "gate-engine/review/eval/reviewers/bench.mts",
+      "sections": ["commit-guard"],
+      "lifecycle": "shipped",
+      "acceptance": "Complete model/cascade cohort with zero outages. Fixtures carry no semantic index, so retrieval is unavailable and only duplicates that keep their original's name are in reach; this is not production retrieval recall",
+      "hashes": {
+        "implementation": [
+          "gate-engine/review/run-review.mts",
+          "gate-engine/review/reviewers.mts",
+          "agents/commit-guard.md",
+          "skills/commit-guard/**"
+        ],
+        "corpus": ["gate-engine/review/eval/reviewers/cases-commit-guard.jsonl"],
+        "scorer": [
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "gate-engine/review/eval/reviewers/stats.mts",
+          "gate-engine/eval/adapters.mts",
+          "gate-engine/eval/metric-ratio.mts"
+        ],
+        "runner": [
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "gate-engine/review/eval/reviewers/corpus.mts",
+          "gate-engine/review/eval/reviewers/progress.mts",
+          "gate-engine/review/eval/reviewers/corpus/row.mts",
+          "gate-engine/review/eval/reviewers/corpus/chunk-guard.mts",
+          "gate-engine/review/lens/*.mts",
+          "gate-engine/review/cascade/reviewer.mts"
+        ]
       }
     },
     {

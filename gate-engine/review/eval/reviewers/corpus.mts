@@ -10,13 +10,13 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { z } from 'zod';
 import { BenchAbort, parseCasesText } from '../../../decisions/eval/bench.mts';
 import { checklistScript, REVIEWERS } from '../../reviewers.mts';
 import { groupByPair } from './corpus/twins.mts';
 
-export const BENCH_REVIEWERS = REVIEWERS.filter(
-  (r) => r.domain === 'backend' || r.domain === 'frontend' || r.domain === 'all',
-);
+// conventions-reviewer has its own bench (eval/conventions); every other reviewer is benched here.
+export const BENCH_REVIEWERS = REVIEWERS.filter((r) => r.domain !== 'conventions');
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // gate-engine/review/eval/reviewers → repo root is four levels up.
@@ -34,11 +34,15 @@ const sha12 = (text) => createHash('sha256').update(text).digest('hex').slice(0,
 // Fixture layout every row lands in: backend rows stage under api/, frontend rows under web/, and
 // correctness (domain 'all') rows may live under any of api/, web/, or src/ (its roots = the
 // union). selectReviewers then fires exactly the row's target reviewer.
+//
+// commit-guard rows keep their source diff's cli/ and gate-engine/ .mts paths so imports resolve.
 export const FIXTURE_CONFIG = {
-  scanRoots: ['api', 'web', 'src'],
-  sourceExtensions: ['ts', 'tsx', 'js', 'mjs'],
+  scanRoots: ['api', 'web', 'src', 'cli', 'gate-engine'],
+  sourceExtensions: ['ts', 'tsx', 'js', 'mjs', 'mts'],
   review: { backendRoots: ['api'], frontendRoots: ['web'] },
 };
+
+const SYMBOLS = z.array(z.string().regex(/^[A-Za-z_$][\w$]*$/)).min(1);
 
 export const casesFile = (reviewer) => path.join(here, `cases-${reviewer.skill}.jsonl`);
 
@@ -83,6 +87,8 @@ export function lintRows(rows, reviewerName) {
     if (row.sourcePr !== undefined && typeof row.sourcePr !== 'number')
       throw new BenchAbort(2, `${where}: sourcePr must be a number`);
     if (!row.expected) throw new BenchAbort(2, `${where}: missing expected`);
+    if (row.expectSymbols !== undefined && !SYMBOLS.safeParse(row.expectSymbols).success)
+      throw new BenchAbort(2, `${where}: expectSymbols must be a non-empty array of identifiers`);
     if (row.expected === 'FAIL' && !(Array.isArray(row.expectItems) && row.expectItems.length > 0))
       throw new BenchAbort(2, `${where}: expected FAIL needs expectItems`);
     if (!row.repo?.base || !row.repo?.staged)
@@ -245,7 +251,14 @@ export const rowHash = (row) => sha12(canonicalJSON(row));
  * (sc-1416) must not invalidate row pairing or stale a fresh checkpoint. Comparisons prefer
  * behaviorHash when BOTH sides carry it and fall back to strict rowHash for old baselines, so
  * this is additive: no comparability epoch break. */
-const BEHAVIOR_FIELDS = ['reviewer', 'expected', 'expectItems', 'reasonPattern', 'repo'];
+const BEHAVIOR_FIELDS = [
+  'reviewer',
+  'expected',
+  'expectItems',
+  'expectSymbols',
+  'reasonPattern',
+  'repo',
+];
 export const behaviorRowHash = (row) =>
   sha12(
     canonicalJSON(

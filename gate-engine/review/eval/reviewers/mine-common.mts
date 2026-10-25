@@ -56,8 +56,12 @@ refusing to dedup against an unknown corpus`);
         throw new Error(`mine-common: malformed JSON in promoted corpus ${name} line ${i + 1} — \
 refusing to dedup against an unknown corpus`);
       }
-      const u = row?.source?.url;
-      if (u) urls.add(u);
+      // `also`: further gate events one row anchors (a FAIL named across two revisions).
+      const also = row?.source?.also ?? [];
+      if (!Array.isArray(also))
+        throw new Error(`mine-common: source.also must be an array in ${name} line ${i + 1} — \
+refusing to dedup against an unknown corpus`);
+      for (const u of [row?.source?.url, ...also]) if (u) urls.add(u);
     }
   }
   return urls;

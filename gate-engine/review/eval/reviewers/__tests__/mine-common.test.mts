@@ -46,6 +46,20 @@ const canDenyReads = () => {
 };
 
 describe('collectCorpusUrls', () => {
+  it('collects every source.also url, so a row anchored on two gate events dedups both', () => {
+    const dir = mkTmp();
+    const twoEvents = { id: 'g', source: { url: 'telemetry://a', also: ['telemetry://b'] } };
+    writeFileSync(join(dir, 'cases-commit-guard.jsonl'), `${JSON.stringify(twoEvents)}\n`);
+    expect([...collectCorpusUrls(dir)].sort()).toEqual(['telemetry://a', 'telemetry://b']);
+  });
+
+  it('throws on a source.also that is not an array rather than deduping its characters', () => {
+    const dir = mkTmp();
+    const bad = { id: 'g', source: { url: 'telemetry://a', also: 'telemetry://b' } };
+    writeFileSync(join(dir, 'cases-commit-guard.jsonl'), `${JSON.stringify(bad)}\n`);
+    expect(() => collectCorpusUrls(dir)).toThrow(/source\.also/);
+  });
+
   it('collects source.url from every cases-*.jsonl and ignores other files', () => {
     const dir = mkTmp();
     writeFileSync(join(dir, 'cases-api-security.jsonl'), row('https://a/1') + row('https://a/2'));

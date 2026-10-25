@@ -279,7 +279,7 @@ export function validateRow(row) {
       });
       try {
         const state = JSON.parse(readFileSync(path.join(fx.repo, r.stateFile), 'utf8'));
-        names.push(...(state.items ?? []).map((i) => i.name));
+        names.push(...(state.items ?? state.files ?? []).map((i) => i.name ?? i.path));
       } catch {
         problems.push(`checklist generate left no readable artifact: ${r.stateFile}`);
       }
