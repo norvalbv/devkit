@@ -102,18 +102,21 @@ function checklistWorkflow(reviewer: ChecklistReviewer, script: string, assetRoo
 export const scriptCommand = (script: string): string => `node ${shellWord(script)}`;
 
 const INTERACTIVE_ONLY_RE = /<!-- interactive-only -->[\s\S]*?<!-- \/interactive-only -->\n?/g;
-const SCRIPT_SUFFIX = '/scripts/checklist.mjs';
-// Provider skill prefixes and placeholders in ONE pass, so no substituted path is ever re-scanned.
+// One pass through a function replacer: no path is re-scanned or read as a replacement pattern.
 const PLACEHOLDER_RE = /node \$SCRIPT|\$SKILL_DIR|\.(?:agents|claude|cursor)\/skills\//g;
+
+/** What one gate-brief match stands for: the skill dir, the granted command, or the skill prefix. */
+function placeholderValue(hit: string, script: string): string {
+  const skillDir = script.slice(0, -'/scripts/checklist.mjs'.length);
+  if (hit === '$SKILL_DIR') return skillDir;
+  if (hit === 'node $SCRIPT') return scriptCommand(script);
+  return skillDir.slice(0, skillDir.lastIndexOf('/') + 1);
+}
 
 /** A brief as a gate judge sees it: interactive setup gone, every path the granted literal. */
 export function gateBrief(brief: string, script: string): string {
-  const skillDir = script.slice(0, -SCRIPT_SUFFIX.length);
-  const skillPrefix = skillDir.slice(0, skillDir.lastIndexOf('/') + 1);
-  // A function replacer: a `$` in a consumer's path must not read as a replacement pattern.
-  const fill = (hit: string) =>
-    hit === '$SKILL_DIR' ? skillDir : hit === 'node $SCRIPT' ? scriptCommand(script) : skillPrefix;
-  return brief.replace(INTERACTIVE_ONLY_RE, '').replace(PLACEHOLDER_RE, fill);
+  const body = brief.replace(INTERACTIVE_ONLY_RE, '');
+  return body.replace(PLACEHOLDER_RE, (hit) => placeholderValue(hit, script));
 }
 
 /**
