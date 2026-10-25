@@ -55,7 +55,7 @@ const ALL_FLAGS = [
 ].flatMap((name) => [`GUARD_${name}`, `FRINK_${name}`]);
 
 beforeEach(() => {
-  for (const name of [...ALL_FLAGS, 'HUSKY']) vi.stubEnv(name, undefined);
+  for (const name of ALL_FLAGS) vi.stubEnv(name, undefined);
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -87,14 +87,12 @@ describe('attemptBypasses', () => {
     vi.stubEnv('GUARD_NO_COVERAGE', '0');
     vi.stubEnv('FRINK_NO_COVERAGE', '1');
     vi.stubEnv('GUARD_DECISIONS_DIR', 'records');
-    vi.stubEnv('HUSKY', '0');
     expect(read([ATTEMPT, PASSED])).toEqual([
       'GUARD_NO_REVIEW',
       'GUARD_COVERAGE_OK',
       'GUARD_REVIEW_SKIP',
       'GUARD_DECISIONS_DIR',
       'GUARD_COMPLETENESS_HARD=0',
-      'HUSKY=0',
     ]);
   });
 
