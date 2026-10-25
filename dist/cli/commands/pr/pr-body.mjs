@@ -45,8 +45,12 @@ function publish(cwd, repo, pr, caller) {
         }
         result = errorMessage(error);
     }
-    if (result === 'written' || result === 'unchanged') {
-        console.log(`PR #${pr} description ${result}; any devkit evidence block was kept`);
+    if (result === 'unchanged') {
+        console.log(`PR #${pr} description already matched; nothing was written`);
+        return 0;
+    }
+    if (result === 'written') {
+        console.log(`PR #${pr} description written, carrying the evidence block as it was read`);
         return 0;
     }
     const why = result === 'contended' ? 'another writer kept changing the description' : result;
