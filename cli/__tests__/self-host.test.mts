@@ -25,7 +25,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { projectionDrift } from '../lib/install/agent-assets/projection-parity.mts';
-import { FORMAT_TOOL_SETUP } from '../lib/husky/format-fragment.mts';
+import { FORMAT_EXTENSION_FILTER, FORMAT_TOOL_SETUP } from '../lib/husky/format-fragment.mts';
 import { BIN_DIRS } from '../lib/husky/gate-policy/block-helpers.mts';
 import {
   buildFullHook,
@@ -258,7 +258,7 @@ describe('buildSelfHostHook', () => {
     expect(hook).toContain('blocking: devkit formats its own staged set hard');
     // The consumer's best-effort report must not survive into the hard self-host hook.
     expect(hook).not.toContain('this commit continues');
-    expect(hook).not.toContain("grep -E '\\.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$'");
+    expect(hook).not.toContain(FORMAT_EXTENSION_FILTER);
     expect(hook).not.toContain('$__dk_package_bin_dir/oxfmt');
     expect(hook).not.toContain('$__dk_package_bin_dir/guard-');
     expect(hook).not.toContain('@norvalbv/devkit');

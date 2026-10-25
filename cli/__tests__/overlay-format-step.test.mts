@@ -140,6 +140,13 @@ describe('overlay format step — real git and the real oxfmt binary', () => {
     expect(r0.git('show', ':moved.ts')).toBe(UNFORMATTED);
   });
 
+  it('formats a staged .cjs file, which the repo format check covers', () => {
+    const { repo, git } = repoWith({ '.oxfmtrc.json': '{}\n', 'a.cjs': UNFORMATTED });
+    const r = runStep(repo);
+    expect(r.status, r.stdout).toBe(0);
+    expect(git('show', ':a.cjs')).toBe('const a = { b: 1 };\n');
+  });
+
   // Linux CI runs hooks under dash; an if/elif chain that defines a function per arm must parse there.
   it.skipIf(!hasDash)('formats under dash, the POSIX sh Linux hooks run with', () => {
     const { repo, git } = repoWith({ '.oxfmtrc.json': '{}\n', 'a.ts': UNFORMATTED });
