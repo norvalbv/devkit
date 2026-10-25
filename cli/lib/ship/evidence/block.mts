@@ -210,7 +210,7 @@ export function carryEvidenceBlock(callerBody: string, currentBody: string): str
 export function readEvidenceBlock(
   body: string,
   currentHead: string,
-): (EvidenceOutcome & { stale: boolean }) | null {
+): (z.infer<typeof outcomeSchema> & { stale: boolean }) | null {
   const line = BLOCK.exec(body)?.[0]
     .split('\n')
     .map((text) => text.trimEnd())

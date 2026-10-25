@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { EVIDENCE_BEGIN, readEvidenceBlock, VERDICT_SLOT } from '../lib/ship/evidence/block.mts';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import {
@@ -89,15 +90,29 @@ function ghEnv(extra: Record<string, string>) {
   return {
     log: join(bin, 'gh.log'),
     state: join(bin, 'gh.body'),
+    sink: join(bin, 'gate-events.jsonl'),
     env: {
       ...inherited,
       ...GIT_ENV,
       PATH: `${bin}:${process.env.PATH}`,
       GH_LOG: join(bin, 'gh.log'),
       GH_STATE: join(bin, 'gh.body'),
+      DEVKIT_GATE_EVENTS: join(bin, 'gate-events.jsonl'),
       ...extra,
     },
   };
+}
+
+const sinkRow = z.looseObject({ type: z.string() });
+
+/** The sink's rows of one type, in write order. */
+function rowsOf(sink: string, type: string) {
+  if (!existsSync(sink)) return [];
+  return readFileSync(sink, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => sinkRow.parse(JSON.parse(line)))
+    .filter((row) => row.type === type);
 }
 
 function write(root: string, files: Record<string, string>) {
@@ -169,6 +184,24 @@ describe('devkit ship evidence block', () => {
       verdict: 'auto-merge-eligible',
       reasons: [{ code: 'captured-proof' }],
     });
+    // The capture scrubs the ship env from its tests; the row still names this ship and repo.
+    const [attempt] = rowsOf(repo.sink, 'ship_attempt');
+    const [row, ...extra] = rowsOf(repo.sink, 'ship_evidence');
+    expect(extra).toEqual([]);
+    expect(row).toMatchObject({
+      ship_id: attempt?.ship_id,
+      repo: attempt?.repo,
+      branch: 'feat/fix',
+      pr_number: 42,
+      head,
+      status: 'captured',
+      reason: null,
+      test_files: 1,
+      publish: 'written',
+      verdict: 'auto-merge-eligible',
+      failed: false,
+    });
+    expect(row?.duration_s).toEqual(expect.any(Number));
 
     // An explicit body with no new commit swaps the caller text and carries the block unchanged.
     const reworded = bash(repo.dir, repo.env, [
@@ -184,6 +217,8 @@ describe('devkit ship evidence block', () => {
     expect(reworded.status, reworded.stderr).toBe(0);
     expect(reworded.stderr).not.toContain('evidence: running');
     expect(readFileSync(repo.state, 'utf8')).toBe(`reworded\n\n${block}\n`);
+    // No new commit, so no evidence step and no second row.
+    expect(rowsOf(repo.sink, 'ship_evidence')).toHaveLength(1);
 
     // A new commit re-runs the evidence and replaces the block in place; other text stays.
     writeFileSync(repo.state, `reworded\n\n${block}\n\n${QAVIS}\n`);
@@ -211,6 +246,9 @@ describe('devkit ship evidence block', () => {
       verdict: 'auto-merge-eligible',
       reasons: [{ code: 'captured-proof' }],
     });
+    const rows = rowsOf(repo.sink, 'ship_evidence');
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({ head: next, status: 'captured', publish: 'written' });
   }, 600_000);
 
   it('makes no PR-body call at all when the repository has not configured evidence', () => {
@@ -228,6 +266,8 @@ describe('devkit ship evidence block', () => {
     expect(shipped.status, shipped.stderr).toBe(0);
     expect(readFileSync(repo.log, 'utf8')).not.toMatch(/--json body|pr edit/);
     expect(readFileSync(repo.state, 'utf8')).not.toContain(EVIDENCE_BEGIN);
+    expect(rowsOf(repo.sink, 'ship_attempt')).not.toEqual([]);
+    expect(rowsOf(repo.sink, 'ship_evidence')).toEqual([]);
   }, 240_000);
 
   it('drops a block pasted into the caller body before the PR is created', () => {
@@ -409,6 +449,11 @@ describe('devkit ship evidence block', () => {
     expect(readEvidenceBlock(body, tipOf(repo.bare, 'feat/slow'))?.status).toBe('inconclusive');
     expect(body).toMatch(/did not finish within 10s \(setup \d+s[^)]* unfinished\)/);
     expect(body).toContain('**Merge verdict:** human-review (no-captured-proof: inconclusive)');
+    const [row, ...extra] = rowsOf(repo.sink, 'ship_evidence');
+    expect(extra).toEqual([]);
+    expect(row).toMatchObject({ status: 'inconclusive', test_files: 1, failed: false });
+    expect(row?.detail).toMatch(/did not finish within 10s/);
+    expect(row?.duration_s).toBeGreaterThanOrEqual(10);
     const pid = Number(readFileSync(pidFile, 'utf8'));
     expect(() => process.kill(pid, 0)).toThrow();
   }, 240_000);
@@ -450,7 +495,7 @@ function publishRun(
         timeout: 200_000,
       },
     );
-  return { head, gh, publish };
+  return { root, head, gh, publish };
 }
 
 describe('evidence outcomes', () => {
@@ -479,6 +524,75 @@ describe('evidence outcomes', () => {
     expect(readEvidenceBlock(readFileSync(run.gh.state, 'utf8'), run.head)).toMatchObject({
       status: 'not-run',
       reason: 'platform-skipped',
+    });
+  });
+
+  it('records an abstention under a ship id, and nothing for a run outside a ship', () => {
+    const run = publishRun({}, { 'src/value.mjs': FIXED });
+    expect(run.publish().status).toBe(0);
+    expect(rowsOf(run.gh.sink, 'ship_evidence')).toEqual([]);
+
+    writeFileSync(run.gh.state, '');
+    const started = String(Math.floor(Date.now() / 1000) - 30);
+    const r = spawnSync(
+      process.execPath,
+      [
+        RUN,
+        'publish',
+        '--cwd',
+        run.root,
+        '--repo',
+        'acme/app',
+        '--pr',
+        '42',
+        '--head',
+        run.head,
+      ].concat(['--started', started]),
+      { env: { ...run.gh.env, DEVKIT_SHIP_ID: 'ship-1' }, encoding: 'utf8', timeout: 200_000 },
+    );
+    expect(r.status, r.stderr).toBe(0);
+    // A run that finds this head's block current (a --failed fallback after a lost read-back, or a
+    // retry) reports the recorded outcome, so the captured rate counts what the PR body holds.
+    expect(run.publish(run.head, { DEVKIT_SHIP_ID: 'ship-1' }).status).toBe(0);
+    const rows = rowsOf(run.gh.sink, 'ship_evidence');
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({
+      status: 'not-run',
+      reason: 'no-test-change',
+      verdict: rows[0]?.verdict,
+      test_files: null,
+      publish: 'unchanged',
+    });
+    expect(rows[0]).toMatchObject({
+      ship_id: 'ship-1',
+      status: 'not-run',
+      reason: 'no-test-change',
+      test_files: 0,
+      publish: 'written',
+    });
+    expect(rows[0]?.duration_s).toBeGreaterThanOrEqual(30);
+  });
+
+  it('writes one row across a publish run that fails and its --failed fallback', () => {
+    const run = publishRun({}, { 'src/value.mjs': FIXED });
+    const once = { GH_VIEW_FAIL: join(run.root, '.git', 'view-failed'), GH_VIEW_FAIL_ONCE: '1' };
+    const script = `SCRIPT_DIR=${JSON.stringify(SHIP_DIR)}; . "$SCRIPT_DIR/publish-evidence.sh"; publish_evidence_block "$@"`;
+    const r = spawnSync('/bin/bash', ['-c', script, 'x', run.root, '42', 'acme/app', run.head], {
+      env: { ...run.gh.env, ...once, DEVKIT_SHIP_ID: 'ship-2' },
+      encoding: 'utf8',
+      timeout: 200_000,
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('evidence step stopped with exit 1');
+    const rows = rowsOf(run.gh.sink, 'ship_evidence');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      ship_id: 'ship-2',
+      status: 'inconclusive',
+      detail: 'the evidence step stopped with exit 1',
+      test_files: null,
+      publish: 'written',
+      failed: true,
     });
   });
 
