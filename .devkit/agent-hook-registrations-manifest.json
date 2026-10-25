@@ -63,6 +63,18 @@
       }
     },
     {
+      "registrationId": "comments:preflight",
+      "ownerId": "comments",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "PostToolUse",
+        "matcher": "Edit|Write|MultiEdit",
+        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/comment-budget-preflight.mjs\""
+      }
+    },
+    {
       "registrationId": "decisions:pre-edit",
       "ownerId": "decisions",
       "provider": "claude",
@@ -96,6 +108,30 @@
         "event": "PostToolUse",
         "matcher": "Task|Agent",
         "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs\""
+      }
+    },
+    {
+      "registrationId": "prior-art-gate:pre-bash",
+      "ownerId": "priorArtGate",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "PreToolUse",
+        "matcher": "Bash",
+        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs\" bash"
+      }
+    },
+    {
+      "registrationId": "prior-art-gate:pre-edit",
+      "ownerId": "priorArtGate",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "PreToolUse",
+        "matcher": "Edit|Write|MultiEdit",
+        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs\" edit"
       }
     },
     {
@@ -171,6 +207,18 @@
       }
     },
     {
+      "registrationId": "comments:preflight",
+      "ownerId": "comments",
+      "provider": "codex",
+      "installScope": "shared",
+      "destinationRel": ".codex/hooks.json",
+      "native": {
+        "event": "PostToolUse",
+        "matcher": "Edit|Write|MultiEdit",
+        "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/comment-budget-preflight.mjs\""
+      }
+    },
+    {
       "registrationId": "decisions:pre-edit",
       "ownerId": "decisions",
       "provider": "codex",
@@ -207,6 +255,18 @@
       }
     },
     {
+      "registrationId": "prior-art-gate:pre-edit",
+      "ownerId": "priorArtGate",
+      "provider": "codex",
+      "installScope": "shared",
+      "destinationRel": ".codex/hooks.json",
+      "native": {
+        "event": "PreToolUse",
+        "matcher": "Edit|Write|MultiEdit",
+        "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/prior-art-gate.mjs\" edit"
+      }
+    },
+    {
       "registrationId": "prior-art-gate:pre-plan",
       "ownerId": "priorArtGate",
       "provider": "codex",
@@ -240,6 +300,18 @@
         "event": "preToolUse",
         "matcher": "Write",
         "command": ".cursor/hooks/base-drift-brief.mjs"
+      }
+    },
+    {
+      "registrationId": "comments:preflight",
+      "ownerId": "comments",
+      "provider": "cursor",
+      "installScope": "shared",
+      "destinationRel": ".cursor/hooks.json",
+      "native": {
+        "event": "afterFileEdit",
+        "matcher": null,
+        "command": ".cursor/hooks/comment-budget-preflight.mjs"
       }
     },
     {
