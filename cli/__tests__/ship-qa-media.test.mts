@@ -155,7 +155,7 @@ describe('ship attaches the QA capture to the PR', () => {
     const { body, attachCalls } = read();
     expect(attachCalls).toBe(1);
     expect(body.startsWith('caller text')).toBe(true);
-    expect(body).toContain('#### QA capture (devkit machine)');
+    expect(body).toContain('<b>QA capture</b>');
     expect(body).toMatch(/^https:\/\/github\.com\/user-attachments\/assets\/\w+webm$/m);
     expect(body).toMatch(
       /!\[click screenshot\]\(https:\/\/github\.com\/user-attachments\/assets\/\w+png\)/,
@@ -284,7 +284,7 @@ describe('devkit machine attach puts a capture recorded after the ship into its 
       code: 0,
       said: expect.stringContaining('attached to #7'),
     });
-    expect(read().body).toContain('#### QA capture (devkit machine)');
+    expect(read().body).toContain('<b>QA capture</b>');
     expect(attached(root, 'https://github.com/o/r/pull/7/files')).toMatchObject({
       code: 0,
       said: expect.stringContaining('already in #7: click.webm, click.final.png'),

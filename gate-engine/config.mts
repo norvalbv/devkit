@@ -54,6 +54,7 @@ export interface ReviewConfig {
   frontendRoots: string[];
   trustBoundaries: string;
   shortcutTracking: boolean;
+  prNotes: boolean; // false: devkit ship leaves PASS advisories out of the PR body
   accessibility: { skipTouchTargets: boolean };
   agentsDir: string;
   // sc-2107 judge knobs: env (GUARD_* — see resolvers) > guard.config.json > defaults; 0 = off.
@@ -218,6 +219,7 @@ export const DEFAULTS = Object.freeze({
     frontendRoots: [],
     trustBoundaries: '',
     shortcutTracking: false,
+    prNotes: true,
     accessibility: Object.freeze({ skipTouchTargets: false }),
     // Where the synced reviewer agent .md briefs live — guard-review wraps these for its
     // headless judges (the SAME files the root agent dispatches interactively).

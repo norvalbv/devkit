@@ -255,10 +255,15 @@ export function mergeVerdict(change: ShipChange, configText: string | null): Mer
   return decide(reasons);
 }
 
-/** The block's verdict text: the verdict and every reason that yields it, the deciding one first. */
-export function verdictLine({ verdict, reasons }: MergeVerdict): string {
-  const why = reasons
+/** GitHub strips colour from a PR body, so the block marks each verdict with an emoji. */
+export const VERDICT_MARK: Record<Verdict, string> = {
+  'auto-merge-eligible': '🟢',
+  'human-review': '🟡',
+  policy: '🟠',
+};
+
+/** Every reason that yields the verdict, the deciding one first, as one markdown line each. */
+export const verdictReasons = ({ verdict, reasons }: MergeVerdict): string[] =>
+  reasons
     .filter(({ code }) => VERDICT_REASONS[code] === verdict)
-    .map(({ code, detail }) => (detail ? `${code}: ${detail}` : code));
-  return `${verdict} (${why.join('; ')})`;
-}
+    .map(({ code, detail }) => (detail ? `**${code}:** ${detail}` : `**${code}**`));

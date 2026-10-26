@@ -10,6 +10,7 @@ import {
   sectionEnd,
 } from './block.mts';
 import { withQaSection } from './media.mts';
+import { FINDING_SEPARATOR } from '../../../../gate-engine/judge/advisory/emit.mts';
 import { noteLines, upsertNotes } from './reviewer-notes.mts';
 
 const SHA_A = 'a'.repeat(40);
@@ -34,11 +35,13 @@ describe('noteLines', () => {
     ]);
   });
 
-  it('keeps a joined or union-typed detail as one bullet, verbatim', () => {
-    const detail = 'a.ts:1 — `x: string | null` is never narrowed | b.ts:2 — dead branch';
+  it('gives each finding of a row its own bullet and keeps a union type whole', () => {
+    const findings = ['a.ts:1 — `x: string | null` is never narrowed', 'b.ts:2 — dead branch'];
+    const detail = findings.join(FINDING_SEPARATOR);
     const lines = noteLines([attempt, advisory('review:commit-guard', detail)], SHA_A);
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain(detail);
+    expect(lines).toEqual(
+      findings.map((text) => `- **commit-guard** at \`${SHA_A.slice(0, 12)}\`: ${text}`),
+    );
   });
 
   it('reads only the newest attempt and ignores advisories that are not a reviewer', () => {
@@ -99,9 +102,12 @@ describe('upsertNotes', () => {
         '',
         EVIDENCE_BEGIN,
         sectionBegin('notes'),
-        '#### Reviewer notes (devkit ship)',
-        'Non-blocking advisories from the devkit ship reviewers.',
+        '<details><summary>💬 <b>Reviewer notes</b> · 1 non-blocking advisory</summary>',
+        '',
         ...first,
+        '',
+        '</details>',
+        '',
         sectionEnd('notes'),
         EVIDENCE_END,
         '',
@@ -122,6 +128,9 @@ describe('upsertNotes', () => {
     expect(twice).toContain(second[0]);
     expect(upsertNotes(twice, second, false)).toBe(twice);
     expect(twice.match(NOTES)).toHaveLength(1);
+    expect(twice).toContain(
+      '<summary>💬 <b>Reviewer notes</b> · 2 non-blocking advisories</summary>',
+    );
   });
 
   it('keeps one note when a cached PASS replays the same advisory under a later commit', () => {

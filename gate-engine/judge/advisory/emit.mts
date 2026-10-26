@@ -16,6 +16,9 @@ export type AdvisoryToken = 'clean' | 'findings' | 'unreadable';
  */
 const DETAIL_CAP = 500;
 
+/** Joins a reviewer's findings in one row; findings are one line each, so a reader can split them. */
+export const FINDING_SEPARATOR = '\n';
+
 /**
  * Carries NO `family`: the digest's isBlocking() matches on that field, and a stage holding no exit
  * must never be renderable as the gate that stopped the run.

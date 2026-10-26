@@ -19,6 +19,8 @@ export interface RegressionTestCounts {
 export interface RegressionFailureSummary {
   fullName: string;
   message: string;
+  /** A failed test's describe titles then its own title, when the report gave them. */
+  path?: string[];
 }
 
 /** One test's outcome keyed by checkout-relative file and full name; skips and todos read skipped. */
@@ -84,6 +86,7 @@ interface ParsedVitestAssertion {
   status: NonFailureVitestStatus | 'failed';
   fullName: string;
   failureMessages: string[];
+  path?: string[];
 }
 
 interface ParsedVitestFile {
@@ -103,6 +106,12 @@ interface ParsedVitestReport {
 export const MAX_FAILURES = 10;
 const MAX_FAILURE_CHARS = 600;
 const MAX_FAILURE_NAME_CHARS = 240;
+/** A V8 stack frame: a line opening `at` that ends in its `:line:column` location. */
+const STACK_FRAME = /^\s*at .*:\d+:\d+\)?$/m;
+
+/** The error text before its stack trace, so the frames never spend the message's length budget. */
+const withoutStack = (text: string): string =>
+  text.slice(0, STACK_FRAME.exec(text)?.index).trim() || text;
 
 function parseJson(raw: string): JsonValue {
   return JSON.parse(raw);
@@ -149,7 +158,10 @@ function parseVitestAssertion(value: JsonValue): ParsedVitestAssertion {
   ) {
     throw new Error('Vitest report contains a malformed assertion');
   }
-  return { status, fullName: value.fullName, failureMessages: value.failureMessages };
+  const { ancestorTitles, title } = value;
+  const titled = Array.isArray(ancestorTitles) && ancestorTitles.every(isJsonString);
+  const path = titled && isJsonString(title) ? [...ancestorTitles, title] : undefined;
+  return { status, fullName: value.fullName, failureMessages: value.failureMessages, path };
 }
 
 function parseVitestFile(value: JsonValue): ParsedVitestFile {
@@ -221,7 +233,12 @@ function fileError(file: ParsedVitestFile, root: string, dependencySource: strin
   }
   return {
     fullName: boundedText(file.name, MAX_FAILURE_NAME_CHARS, root, dependencySource),
-    message: boundedText(file.message || '(no message)', MAX_FAILURE_CHARS, root, dependencySource),
+    message: boundedText(
+      withoutStack(file.message) || '(no message)',
+      MAX_FAILURE_CHARS,
+      root,
+      dependencySource,
+    ),
   };
 }
 
@@ -269,10 +286,13 @@ export function parseVitestRegressionReport(
           boundedText(assertion.fullName, MAX_FAILURE_NAME_CHARS, checkoutRoot, dependencySource) ||
           '(unnamed test)',
         message: boundedText(
-          raw ?? '(no failure message)',
+          raw === undefined ? '(no failure message)' : withoutStack(raw),
           MAX_FAILURE_CHARS,
           checkoutRoot,
           dependencySource,
+        ),
+        path: assertion.path?.map((title) =>
+          boundedText(title, MAX_FAILURE_NAME_CHARS, checkoutRoot, dependencySource),
         ),
       });
     }

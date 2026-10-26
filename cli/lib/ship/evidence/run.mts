@@ -5,6 +5,7 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { resolveGuardConfig } from '../../../../gate-engine/config.mts';
 import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mts';
 import { clip } from '../../../../gate-engine/judge/odb-probe.mts';
 import type { RegressionEvidence } from '../../baseline-status/regression-evidence.mts';
@@ -287,7 +288,8 @@ async function main(argv: string[]): Promise<void> {
   }
   if (command === 'notes') {
     const [repo, pr, head] = ['repo', 'pr', 'head'].map((name) => required(values, name));
-    publishNotes(repo, pr, head, values.mode === 'replace');
+    if (resolveGuardConfig(values.cwd ?? process.cwd()).review.prNotes !== false)
+      publishNotes(repo, pr, head, values.mode === 'replace');
     return;
   }
   if (command !== 'publish')

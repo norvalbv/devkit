@@ -5,7 +5,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
-import { emitAdvisoryResult } from '../../judge/advisory/emit.mts';
+import { emitAdvisoryResult, FINDING_SEPARATOR } from '../../judge/advisory/emit.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import type { VerdictMeta } from '../../judge/verdict-store.mts';
 import { ADVISORY_CAP } from '../contracts/response.mts';
@@ -299,7 +299,7 @@ export function reportAdvisories(
 ): void {
   if (!advisories?.length) return;
   printAdvisories(name, advisories, ref);
-  emitAdvisoryResult(`review:${name}`, 'finding', advisories.join(' | '));
+  emitAdvisoryResult(`review:${name}`, 'finding', advisories.join(FINDING_SEPARATOR));
 }
 
 /** The screen half of reportAdvisories, for a caller that emits one row across several labels. */

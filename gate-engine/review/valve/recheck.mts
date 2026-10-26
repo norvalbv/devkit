@@ -4,7 +4,7 @@
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mts';
 import { type LensPart, type ReviewTask, taskLabel } from '../lens/split.mts';
 import { isShipLane } from '../cascade/consumer-assets.mts';
-import { emitAdvisoryResult } from '../../judge/advisory/emit.mts';
+import { emitAdvisoryResult, FINDING_SEPARATOR } from '../../judge/advisory/emit.mts';
 import { ADVISORY_CAP, parseAdvisories } from '../contracts/response.mts';
 import { printAdvisories } from '../evidence/base-context.mts';
 import { emitReviewSkipped } from '../evidence/scope.mts';
@@ -119,6 +119,7 @@ export function reportLensPartAdvisories(splitParts: Map<string, LensPart[]>): v
       all.push(...advisories);
     }
     const unique = [...new Set(all)].slice(0, ADVISORY_CAP);
-    if (unique.length) emitAdvisoryResult(`review:${name}`, 'finding', unique.join(' | '));
+    if (unique.length)
+      emitAdvisoryResult(`review:${name}`, 'finding', unique.join(FINDING_SEPARATOR));
   }
 }

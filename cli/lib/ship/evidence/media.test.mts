@@ -129,7 +129,9 @@ describe('the QA section in the PR body', () => {
     const body = `caller text\n\n${EVIDENCE_BEGIN}\n#### Regression evidence\n<!-- devkit:evidence:data {} -->\n${EVIDENCE_END}\n`;
     const next = withQaSection(body, renderQaSection(plan, refs));
     expect(next.startsWith('caller text\n\n')).toBe(true);
-    expect(next.indexOf('#### QA capture')).toBeLessThan(next.indexOf('<!-- devkit:evidence:data'));
+    const qa = next.indexOf('<b>QA capture</b>');
+    expect(qa).toBeGreaterThan(-1);
+    expect(qa).toBeLessThan(next.indexOf('<!-- devkit:evidence:data'));
     expect(withQaSection(next, renderQaSection({ picks: [], notes: [] }, refs))).not.toContain(
       URL_A,
     );
