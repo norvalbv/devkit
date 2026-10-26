@@ -10,6 +10,7 @@
 import { FRESH_DEFAULT_AGENT_PROVIDERS, normalizeAgentProviders, } from './install/agent-assets/agent-providers.mjs';
 /** The recommended-on gate-engine sub-gates (the --yes / non-TTY default guard set). */
 export const RECOMMENDED_GUARD_IDS = [
+    'whitespace',
     'size',
     'fanout',
     'dup',
@@ -93,7 +94,7 @@ export const COMPONENTS = [
     {
         id: 'guards',
         label: 'Gate-engine guards',
-        hint: 'size · fanout · dup · clone · decisions',
+        hint: 'whitespace · size · fanout · dup · clone · decisions',
         recommended: true,
     },
     {
@@ -106,6 +107,11 @@ export const COMPONENTS = [
 ];
 /** Per-guard copy for the wizard multiselect. */
 export const GUARD_OPTIONS = [
+    {
+        id: 'whitespace',
+        label: 'whitespace',
+        hint: 'git diff --check on staged lines: trailing whitespace, blank line at EOF, conflict markers',
+    },
     { id: 'size', label: 'size', hint: 'eslint-disable max-lines ratchet' },
     { id: 'fanout', label: 'fanout', hint: 'folder fan-out ratchet' },
     { id: 'dup', label: 'dup', hint: 'semantic duplication (search-code)' },

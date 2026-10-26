@@ -46,9 +46,9 @@ export function reportFailures(fails, failed, rechecks) {
     console.error('   On commit or ship, decision and reviewer gates run only after these pass.');
     printRecheckFooter(rechecks);
     if (fails.some((f) => f.label.startsWith('structure-lint'))) {
-        console.error('   Base branch structure debt that your diff did not cause? Re-run with the explicit');
-        console.error('   one-run assertion:  export GUARD_STRUCTURE_OK=1');
-        console.error('   A structure violation introduced by your own change must be fixed instead.');
+        console.error('   guard-structure blocks only violations your change adds, or all when');
+        console.error('   it edits structure policy or deletes/renames. Fix those.');
+        console.error('   GUARD_STRUCTURE_OK=1 is for base debt or a custom structure command.');
     }
     if (fails.some((f) => NOT_FOUND_RE.test(f.label))) {
         console.error('   exit 127 = command not found: the gate ran, but its BINARY did not resolve — a');

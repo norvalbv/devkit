@@ -16,9 +16,10 @@ evidence_caller_body() {
 }
 
 # This ship's reviewer advisories into the PR body; `replace` only for a history rewrite. Fail-open.
-# usage: publish_reviewer_notes <pr-number> <repo> <head-sha> [replace]
+# usage: publish_reviewer_notes <pr-number> <repo> <head-sha> <checkout-root> [replace]
 publish_reviewer_notes() {
-  node "$(evidence_run_script)" notes --repo "$2" --pr "$1" --head "$3" ${4:+--mode "$4"} </dev/null || true
+  node "$(evidence_run_script)" notes --repo "$2" --pr "$1" --head "$3" --cwd "$4" \
+    ${5:+--mode "$5"} </dev/null || true
 }
 
 # usage: publish_evidence_block <worktree> <pr-number> <repo> <head-sha> [<source-checkout>]
@@ -38,16 +39,19 @@ publish_evidence_block() {
 MEDIA_BUDGET_SECONDS=600
 
 publish_regression_evidence() {
-  local wt=$1 pr=$2 repo=$3 head=$4 run=$5 supervisor=$6 budget tmp status=0
+  local wt=$1 pr=$2 repo=$3 head=$4 run=$5 supervisor=$6 budget tmp status=0 started
+  started=$(date +%s)
   budget=$(node "$run" budget "$wt" </dev/null) || budget=0
   case "$budget" in '' | *[!0-9]* | 0) return 0 ;; esac
   # Owned here so a capture killed at the outer bound cannot leak its clones.
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/devkit-evidence.XXXXXX") || return 0
   TMPDIR=$tmp node "$supervisor" "$((budget + 60))" -- \
-    node "$run" publish --cwd "$wt" --repo "$repo" --pr "$pr" --head "$head" </dev/null || status=$?
+    node "$run" publish --cwd "$wt" --repo "$repo" --pr "$pr" --head "$head" \
+    --started "$started" </dev/null || status=$?
   if [ "$status" -ne 0 ]; then
     TMPDIR=$tmp node "$supervisor" 60 -- node "$run" publish --cwd "$wt" --repo "$repo" --pr "$pr" \
-      --head "$head" --failed "the evidence step stopped with exit $status" </dev/null || true
+      --head "$head" --started "$started" --failed "the evidence step stopped with exit $status" \
+      </dev/null || true
   fi
   rm -rf "$tmp"
   return 0

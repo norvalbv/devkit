@@ -9,7 +9,7 @@ import { VERDICT_LABEL, verdictUnavailable } from '../evidence/block.mjs';
 import { prBase } from '../evidence/red-ref.mjs';
 import { errorMessage, gitEnvironment } from '../review/shared/common.mjs';
 import { shipBypasses } from './bypasses.mjs';
-import { mergeVerdict, verdictLine } from './verdict.mjs';
+import { mergeVerdict, VERDICT_MARK, verdictReasons } from './verdict.mjs';
 const git = (cwd, args) => execFileSync('git', ['-C', cwd, ...args], {
     encoding: 'utf8',
     env: gitEnvironment(),
@@ -67,8 +67,9 @@ export function printVerdict(input) {
             evidence: outcome,
         };
         const verdict = mergeVerdict(change, policyText(cwd, base));
-        const line = `${VERDICT_LABEL} ${verdictLine(verdict)} · advisory, at \`${head.slice(0, 12)}\``;
-        return { line, verdict };
+        const mark = `${VERDICT_MARK[verdict.verdict]} ${verdict.verdict}`;
+        const line = `${VERDICT_LABEL} ${mark} · advisory, at \`${head.slice(0, 12)}\``;
+        return { line, reasons: verdictReasons(verdict), verdict };
     }
     catch (error) {
         return verdictUnavailable(errorMessage(error));

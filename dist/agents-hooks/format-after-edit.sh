@@ -55,7 +55,7 @@ fi
 # Oxfmt on the edited file (silent, best-effort), rendered from cli/lib/husky/format-fragment.mts.
 # Gated on an Oxfmt CONFIG, not merely the binary: configless Oxfmt formats to its own defaults,
 # which in a repo formatting with something else turns one small edit into a whole-file diff.
-if [[ "$file_path" =~ \.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$ ]] && { [ -f ".oxfmtrc.json" ] || [ -f ".oxfmtrc.jsonc" ] || [ -f "oxfmt.config.ts" ] || [ -f "oxfmt.config.mts" ]; } && [ -x "./node_modules/.bin/oxfmt" ]; then
+if [[ "$file_path" =~ \.(tsx?|jsx?|mts|cts|mjs|cjs|css|jsonc?)$ ]] && { [ -f ".oxfmtrc.json" ] || [ -f ".oxfmtrc.jsonc" ] || [ -f "oxfmt.config.ts" ] || [ -f "oxfmt.config.mts" ]; } && [ -x "./node_modules/.bin/oxfmt" ]; then
   "./node_modules/.bin/oxfmt" --no-error-on-unmatched-pattern --write "$file_path" >/dev/null 2>&1 || true
 fi
 

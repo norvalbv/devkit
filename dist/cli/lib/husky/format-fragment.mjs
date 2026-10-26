@@ -70,7 +70,7 @@ export function renderAgentHookLines(f = OXFMT_STEP) {
  * Extension-only: devkit cannot know a consumer's authored-file boundary, and NOT derived from
  * `sourceExtensions`, whose edits would then each be a hook-drift event. self-host swaps in a scope.
  */
-export const FORMAT_EXTENSIONS = '\\.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$';
+export const FORMAT_EXTENSIONS = '\\.(tsx?|jsx?|mts|cts|mjs|cjs|css|jsonc?)$';
 export const FORMAT_EXTENSION_FILTER = `grep -E '${FORMAT_EXTENSIONS}'`;
 /**
  * Consumer policy: REPORT, never block — the bin dir belongs to the consumer, so a hoisting quirk
@@ -110,7 +110,9 @@ export const formatFragment = (binDir, chain) => `# devkit:format
 # body — self-host replaces the setup outright, and an unreachable arm must not survive into it.
 __dk_format_staged() {
 ${renderToolChain(chain, binDir)}
-STAGED_FMT=$(git diff --cached --name-only -z --diff-filter=ACM | tr '\\0' '\\n' | ${FORMAT_EXTENSION_FILTER} || true)
+# -M100%: an edited rename lists as A under its new path; an exact move stays R, skipped so its
+# bytes, and the rename the later gates key on, are left untouched.
+STAGED_FMT=$(git diff --cached --name-only -z -M100% --diff-filter=ACM | tr '\\0' '\\n' | ${FORMAT_EXTENSION_FILTER} || true)
 if [ -z "$STAGED_FMT" ]; then
     echo "🎨 $FMT_TOOL: no staged formattable path — nothing to format."
 else
