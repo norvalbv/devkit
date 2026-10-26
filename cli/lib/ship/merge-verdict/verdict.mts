@@ -160,13 +160,22 @@ const printable = (text: string): string => text.replace(UNPRINTABLE, '_');
 const anyDepth = (glob: string): RegExp => compileRepoGlob(`**/${glob}`);
 const counted = (n: number | null): boolean => n !== null && Number.isSafeInteger(n) && n >= 0;
 
+/** guard.config.json text (null when absent) to its `mergeVerdict` block; malformed input throws. */
+function readPolicy(configText: string | null) {
+  const raw = configText === null ? {} : parseJsonObject<object>(configText, CONFIG_FILENAME);
+  const parsed = policySchema.safeParse(raw);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw new Error(`${CONFIG_FILENAME} ${issue.path.join('.')}: ${issue.message}`);
+  }
+  return parsed.data.mergeVerdict;
+}
+
 /** False only for an explicit `mergeVerdict.enabled: false`; a config that cannot be read keeps the
  * verdict, so it still prints config-invalid. */
 export function verdictEnabled(configText: string | null): boolean {
   try {
-    const raw = configText === null ? {} : parseJsonObject<object>(configText, CONFIG_FILENAME);
-    const parsed = policySchema.safeParse(raw);
-    return !parsed.success || parsed.data.mergeVerdict.enabled;
+    return readPolicy(configText).enabled;
   } catch {
     return true;
   }
@@ -174,13 +183,7 @@ export function verdictEnabled(configText: string | null): boolean {
 
 /** guard.config.json text (null when absent) to a policy; malformed input throws. */
 function parsePolicy(configText: string | null): Policy {
-  const raw = configText === null ? {} : parseJsonObject<object>(configText, CONFIG_FILENAME);
-  const parsed = policySchema.safeParse(raw);
-  if (!parsed.success) {
-    const issue = parsed.error.issues[0];
-    throw new Error(`${CONFIG_FILENAME} ${issue.path.join('.')}: ${issue.message}`);
-  }
-  const { consumerSurface, limits } = parsed.data.mergeVerdict;
+  const { consumerSurface, limits } = readPolicy(configText);
   const { decisionsDir, allowlistPath } = resolveGuardConfigJson(configText);
   return {
     governance: [...GOVERNANCE_GLOBS, allowlistPath.replace(LEADING_DOT_SLASH, '')].map(anyDepth),
