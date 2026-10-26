@@ -1,15 +1,19 @@
 import { AGENT_TARGETS } from '../../components.mts';
 import { isSafeAgentAssetPath } from '../agent-asset-manifest/lifecycle.mts';
-import { requireAgentProviders } from '../agent-assets/agent-providers.mts';
-import { type HookInstallScope, hookRegistrationDestination } from './codec.mts';
+import { type AgentProvider, requireAgentProviders } from '../agent-assets/agent-providers.mts';
+import {
+  type HookInstallScope,
+  type HookRegistrationOwnershipV1,
+  hookRegistrationDestination,
+} from './codec.mts';
 import {
   adoptExactLegacy,
   type HookRegistrationOptions,
   handlerLocation,
   ledgerOf,
-  otherClaudeSettings,
+  otherScopeFile,
+  otherScopePass,
   providerDocument,
-  retiredElsewhere,
   stripReclaimedCommands,
   unrecognisedFallowGates,
 } from './install-support.mts';
@@ -20,6 +24,29 @@ import {
   readHookRegistrationLedger,
 } from './lifecycle.mts';
 import { dataRecord } from './plain-data.mts';
+
+/** Doctor rows: `missing` is what `devkit init` repairs, `advisories` what only the user can. */
+interface Findings {
+  missing: string[];
+  advisories: string[];
+}
+
+/** devkit's leftovers in the file the other scope writes, sorted by who can remove them. */
+function otherScopeFindings(
+  root: string,
+  provider: AgentProvider,
+  scope: HookInstallScope,
+  entries: HookRegistrationOwnershipV1[],
+): Findings {
+  const found: Findings = { missing: [], advisories: [] };
+  const elsewhere = otherScopePass(root, provider, scope, entries);
+  if (!elsewhere) return found;
+  const into = elsewhere.repairable ? found.missing : found.advisories;
+  if (elsewhere.retiredFound) into.push(`${provider}:retired-registration:${elsewhere.rel}`);
+  if (elsewhere.switched) into.push(`${provider}:scope-switch:${elsewhere.rel}`);
+  else if (elsewhere.stranded) found.advisories.push(`${provider}:scope-switch:${elsewhere.rel}`);
+  return found;
+}
 
 /** Doctor's read-only view of hook registrations. `advisories` are findings devkit must not repair,
  * so they never make `ok` false: an unrecognised fallow-gate.sh spelling is reported, never deleted. */
@@ -48,13 +75,10 @@ export function checkHookRegistrations(
     const legacy = reconcileLegacyHookCommands(ledger?.entries ?? [], provider, rel);
     if (stripReclaimedCommands(document, provider).changed)
       missing.push(`${provider}:retired-registration`);
-    const other = otherClaudeSettings(root, provider, scope);
-    const elsewhere = retiredElsewhere(root, provider, scope, other);
-    if (elsewhere)
-      (elsewhere.repairable ? missing : advisories).push(
-        `${provider}:retired-registration:${elsewhere.rel}`,
-      );
-    for (const file of [{ rel, document }, other]) {
+    const elsewhere = otherScopeFindings(root, provider, scope, ledger?.entries ?? []);
+    missing.push(...elsewhere.missing);
+    advisories.push(...elsewhere.advisories);
+    for (const file of [{ rel, document }, otherScopeFile(root, provider, scope)]) {
       if (!file) continue;
       for (const handler of unrecognisedFallowGates(dataRecord(file.document), provider))
         advisories.push(

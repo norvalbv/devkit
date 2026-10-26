@@ -44,27 +44,21 @@ import {
 } from './hook-registration-ledger/codec.mts';
 import {
   adopt,
-  adoptExactLegacy,
   asDropped,
   type HookRegistrationOptions,
   ledgerOf,
+  otherScopePass,
   ownedKey,
   type ProviderPlan,
-  providerDocument,
   publishPlan,
-  reclaimRetiredElsewhere,
-  release,
+  reclaimPass,
   reportDropped,
   skipProvider,
-  stripReclaimedCommands,
 } from './hook-registration-ledger/install-support.mts';
-import { reconcileLegacyHookCommands } from './hook-registration-ledger/legacy-commands.mts';
 import {
   installProjectedHookRegistrations,
   projectHookRegistrations,
   readHookRegistrationLedger,
-  removeLedgerAuthorizedHookRegistrations,
-  transferHookRegistrationScope,
   withAgentAssetLifecycleLock,
 } from './hook-registration-ledger/lifecycle.mts';
 import { HOOK_REGISTRATIONS } from './hook-registration-ledger/registrations.mts';
@@ -313,26 +307,17 @@ export function installHookRegistrations(
     for (const provider of requireAgentProviders(targets)) {
       const rel = hookRegistrationDestination(provider, scope);
       if (skipProvider(root, provider, rel, overlay)) continue;
-      // Not added to `wrote`: overlay git-excludes those paths, and this file is the user's.
-      reclaimRetiredElsewhere(root, provider, scope, dryRun);
-      let document = providerDocument(root, provider, rel);
-      const legacy = reconcileLegacyHookCommands(entries, provider, rel);
-      const retired = stripReclaimedCommands(document, provider, legacy.stripped);
-      document = retired.document;
-      entries = legacy.entries;
-      entries = adoptExactLegacy(entries, document, legacyOwnedComponentIds, provider, scope);
-      entries = transferHookRegistrationScope(entries, provider, scope);
-      const removed = removeLedgerAuthorizedHookRegistrations(
-        document,
-        projectHookRegistrations(obsoleteIds, [provider], scope),
-        ledgerOf(entries),
+      const { legacy, retired, removed, ...pass } = reclaimPass(
+        root,
         provider,
         scope,
+        obsoleteIds,
+        entries,
+        legacyOwnedComponentIds,
       );
-      entries = release(entries, [...removed.removed, ...removed.alreadyAbsent]);
-      document = removed.document;
+      entries = pass.entries;
       const installed = installProjectedHookRegistrations(
-        document,
+        removed.document,
         projectHookRegistrations(componentIds, [provider], scope),
         ledgerOf(entries),
         provider,
@@ -360,6 +345,24 @@ export function installHookRegistrations(
       const deselected = asDropped(removed.removed, 'deselected');
       reportDropped(rel, [...retired.dropped, ...deselected], dryRun);
       if (plan.report) wrote.push(plan.rel);
+      // After the publish above, so a throw on this scope leaves the old file's hooks in place.
+      const other = otherScopePass(root, provider, scope, entries);
+      if (!other) continue;
+      if (!other.repairable) {
+        console.log(`  ! ${other.rel} is git-tracked — devkit's hooks there are yours to remove`);
+        continue;
+      }
+      entries = other.entries;
+      const otherPlan = {
+        provider,
+        rel: other.rel,
+        document: other.removed.document,
+        changed: other.changed,
+      };
+      published = publishPlan(root, otherPlan, entries, published, dryRun);
+      // Not added to `wrote`: overlay git-excludes those paths, and this file is the user's.
+      const switched = asDropped(other.removed.removed, 'scope-switch');
+      reportDropped(other.rel, [...other.retired.dropped, ...switched], dryRun);
     }
     if (wrote.length && published.entries.length) wrote.push(HOOK_REGISTRATION_LEDGER_REL);
     console.log(`  ${dryRun ? '[dry-run] merge' : '✓ registered'} hook registrations`);
@@ -407,22 +410,15 @@ export function removeHookRegistrations(
     for (const provider of requireAgentProviders(targets)) {
       const rel = hookRegistrationDestination(provider, scope);
       if (skipProvider(root, provider, rel, overlay)) continue;
-      let document = providerDocument(root, provider, rel);
-      const legacy = reconcileLegacyHookCommands(entries, provider, rel);
-      const retired = stripReclaimedCommands(document, provider, legacy.stripped);
-      document = retired.document;
-      entries = legacy.entries;
-      entries = adoptExactLegacy(entries, document, legacyOwnedComponentIds, provider, scope);
-      entries = transferHookRegistrationScope(entries, provider, scope);
-      const removed = removeLedgerAuthorizedHookRegistrations(
-        document,
-        projectHookRegistrations(Object.keys(HOOK_REGISTRATIONS), [provider], scope),
-        ledgerOf(entries),
+      const { retired, removed, ...pass } = reclaimPass(
+        root,
         provider,
         scope,
+        Object.keys(HOOK_REGISTRATIONS),
+        entries,
+        legacyOwnedComponentIds,
       );
-      entries = release(entries, [...removed.removed, ...removed.alreadyAbsent]);
-      entries = entries.filter((entry) => storedKeys.has(ownedKey(entry)));
+      entries = pass.entries.filter((entry) => storedKeys.has(ownedKey(entry)));
       const plan = {
         provider,
         rel,
