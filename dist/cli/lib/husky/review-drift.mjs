@@ -15,7 +15,7 @@ export function reviewHookDrift(cwd) {
     if (cfg.overlay) {
         // Pre-commit drift only: review never runs commit-msg (completeness is a commit gate, sc-2361).
         const sync = syncOverlayHook(gitRoot, cwd, cfg, { dryRun: true });
-        return sync.drift ? 'overlay pre-commit differs from the current generator' : null;
+        return sync.contentDrift ? 'overlay pre-commit differs from the current generator' : null;
     }
     if (cfg.selfHost)
         return selfHostHookParity(cwd, { components: cfg.components }).reason;

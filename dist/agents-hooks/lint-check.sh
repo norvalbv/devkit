@@ -44,7 +44,7 @@ truncate() { if [ ${#1} -gt 1500 ]; then echo "${1:0:1500}... (truncated)"; else
 if { [ -f ".oxfmtrc.json" ] || [ -f ".oxfmtrc.jsonc" ] || [ -f "oxfmt.config.ts" ] || [ -f "oxfmt.config.mts" ]; } && [ -x "./node_modules/.bin/oxfmt" ]; then
   oxfmt_files=()
   while IFS= read -r f; do
-    [[ "$f" =~ \.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$ ]] && oxfmt_files+=("$f")
+    [[ "$f" =~ \.(tsx?|jsx?|mts|cts|mjs|cjs|css|jsonc?)$ ]] && oxfmt_files+=("$f")
   done < "$LEDGER"
   if [ ${#oxfmt_files[@]} -gt 0 ]; then
     lint_output=$("./node_modules/.bin/oxfmt" --no-error-on-unmatched-pattern --check "${oxfmt_files[@]}" 2>&1)

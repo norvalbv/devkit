@@ -61,7 +61,7 @@ export async function runOverlayDoctor(cwd, cfg, fix) {
     else if (fix && (sync.missing || sync.drift))
         console.log('  ✓ .devkit/hooks/pre-commit regenerated (was stale/missing — refreshed to the current devkit)');
     else if (sync.drift)
-        console.log('  ⚠ .devkit/hooks/pre-commit is STALE (predates the current devkit) — run `devkit doctor --fix` to refresh');
+        console.log('  ⚠ .devkit/hooks/pre-commit is STALE or its mode is not 0755 — run `devkit doctor --fix` to refresh');
     else
         console.log('  ✓ .devkit/hooks/pre-commit present');
     for (const hook of ['pre-commit', 'commit-msg'])

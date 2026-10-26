@@ -66,6 +66,18 @@ export const HOOK_REGISTRATIONS = {
             cursorMatcher: 'Write',
         },
     ],
+    // Write-time advisory that a NEW file would fail guard-structure or guard-fanout at commit. Owned
+    // by either folder gate (selection.mts placementSelected); additionalContext only, never a denial.
+    placement: [
+        {
+            registrationId: 'placement:brief',
+            event: 'PreToolUse',
+            matcher: 'Write',
+            command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/placement-brief.mjs"',
+            cursorEvent: 'preToolUse',
+            cursorMatcher: 'Write',
+        },
+    ],
     // story 15 — search-code steering: PreToolUse guard + PostToolUse counter (engine bins).
     searchSteering: [
         {
@@ -229,6 +241,16 @@ export const HOOK_REGISTRATIONS = {
             event: 'PreToolUse',
             matcher: 'Bash',
             command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-staged-gate.sh"',
+        },
+    ],
+    // The fanout guard's authoring-time advisory: only Write creates a file. No Cursor mirror, since
+    // Cursor's preToolUse output cannot carry context to the agent.
+    fanout: [
+        {
+            registrationId: 'fanout:new-file-brief',
+            event: 'PreToolUse',
+            matcher: 'Write',
+            command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/fanout-brief.mjs"',
         },
     ],
 };

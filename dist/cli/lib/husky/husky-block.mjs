@@ -19,6 +19,7 @@ import { DK_COMMIT_INDEX_CAPTURE, selectedFragment } from './review-fragments.mj
 import { sentryShipPrewarmFragment } from './sentry-fragments.mjs';
 import { ESLINT_OVERLAY_FILE, LEGACY_ESLINT_OVERLAY_MARKER, } from './overlay/eslint-overlay-marker.mjs';
 import { shQuote } from '../ship/redact-secrets.mjs';
+import { DETERMINISTIC } from '../../../gate-engine/deterministic/registry.mjs';
 // The ONE deterministic line: `guard-deterministic` (gate-engine/deterministic/run.mjs) owns the
 // prefix-cache check/record, runs the selected guards (.devkit/config.json components.guards),
 // applies the rc trichotomy per gate, and aggregates every failure into one report + one exit
@@ -30,8 +31,8 @@ echo "🚧 Deterministic gates (aggregated)..."
 __dk_gate_deterministic "$__dk_package_bin_dir/guard-deterministic" --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''}${extras.map((e) => ` --extra "${e.label}=${e.cmd}"`).join('')}
 # /devkit:deterministic`;
 // Guard run order: the deterministic orchestrator first (one aggregated report), AI gates last so
-// a doomed commit never pays for a judge. Explicit lists — never rely on object-key order.
-const DETERMINISTIC_GUARD_IDS = ['size', 'fanout', 'dup', 'clone', 'coverage', 'comments'];
+// a doomed commit never pays for a judge. The orchestrator owns its own order (the registry).
+const DETERMINISTIC_GUARD_IDS = DETERMINISTIC.map((gate) => gate.id);
 const AI_GUARD_IDS = ['decisions', 'review'];
 // ui-evidence runs last: a reminder about the final staged set, which never blocks. It speaks on a
 // plain commit and a ship alike, and `|| true` keeps a missing bin fail-open.
@@ -75,11 +76,17 @@ export function wantsDeterministic(selection) {
     // decisions arms the orchestrator's decision-checks gate, which runs Checks linked to Targets.
     return [...DETERMINISTIC_GUARD_IDS, 'decisions'].some((id) => selection.guards?.includes(id));
 }
+// Ship-only proof that this block started: husky's runner exits 0 under HUSKY=0 without running it.
+const SHIP_CHAIN_SENTINEL = `[ -n "\${DEVKIT_SHIP:-}" ] && echo 'devkit-gates: chain start' >&2`;
 /** The ONE gate body for every install mode: format (the prefix-cache key hashes the post-format
  *  index) → deterministic → preAi → AI guards → postGuards. */
 export function buildGuardBlock(selection, pkgRel = '', { binDir = 'package', preAi, postGuards, formatChain = [CONSUMER_FORMATTER] } = {}) {
     const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
-    const pieces = [buildPreCommitExit(handoff), ...gateBlockPrelude(BIN_DIRS[binDir].open)];
+    const pieces = [
+        SHIP_CHAIN_SENTINEL,
+        buildPreCommitExit(handoff),
+        ...gateBlockPrelude(BIN_DIRS[binDir].open),
+    ];
     // First so a first-gate block still records the run's terminal (the trap covers every exit path).
     if (!pkgRel)
         pieces.push(formatFragment(BIN_DIRS[binDir].formatter, formatChain));
@@ -187,10 +194,6 @@ export function buildOverlayHook(selection, chainTarget = '.husky/pre-commit', p
     return `${HOOK_PREAMBLE}
 # devkit OVERLAY (LOCAL, git-ignored). Runs devkit's gates + lint overlay on this commit, then
 # the repo's OWN committed hook UNCHANGED. Invisible to the team — nothing here is committed.
-# Sentinel: proves the chain actually started, so \`devkit ship\` can tell a real run from a silent
-# no-op and never report "gates ran" when they didn't. Only during ship (DEVKIT_SHIP=1) — a normal
-# \`git ci\` stays quiet. Emitted before the gates so even a first-gate block still records it.
-[ -n "\${DEVKIT_SHIP:-}" ] && echo 'devkit-gates: chain start' >&2
 ${prelude ? `${prelude}\n` : ''}${block}
 
 # Invoked by the global init.sh shim (husky reclaimed core.hooksPath on a plain \`git commit\`):

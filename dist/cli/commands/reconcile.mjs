@@ -97,8 +97,9 @@ function measureBases(mainRepo, results, apply) {
         // Under --apply the restores are already staged (index==upstream exempts them anyway); under a
         // dry run nothing is staged, so the would-restore paths must be subtracted explicitly.
         const blockers = ffBlockers(mainRepo, sha, apply ? new Set() : (restoredBy.get(ref) ?? new Set()));
+        // null: a git probe failed — don't know, never an all-clear
         if (blockers === null)
-            unverified.push(ref); // a git probe failed — don't know, never an all-clear
+            unverified.push(ref);
         else
             verdicts.push({ ref, blockers: blockers.sort() });
     }

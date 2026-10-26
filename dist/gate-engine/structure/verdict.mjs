@@ -25,13 +25,22 @@ export function combineStructureResults(results) {
         .join('\n');
     const blocked = results.filter((result) => result.code === 1);
     const skipped = results.filter((result) => result.code === 2);
+    const advisories = results.filter((result) => result.code === 0);
     if (blocked.length) {
         const errorCount = blocked.reduce((n, result) => n + result.errorCount, 0);
-        return violations(errorCount, texts([...blocked, ...skipped]));
+        return violations(errorCount, texts([...blocked, ...skipped, ...advisories]));
     }
     if (skipped.length)
-        return { code: 2, errorCount: 0, text: texts(skipped) };
-    return clean();
+        return { code: 2, errorCount: 0, text: texts([...skipped, ...advisories]) };
+    const text = texts(advisories);
+    return text ? { code: 0, errorCount: 0, text } : clean();
+}
+/** Violations already present at HEAD in files the change only edits: reported, never blocking. */
+export function preExisting(result, sha) {
+    if (result.code !== 1)
+        return result;
+    const head = `⚠ ${result.errorCount} pre-existing structure violation(s) at ${sha}, not caused by this change (advisory; CI lints the whole tree):`;
+    return { code: 0, errorCount: 0, text: [head, result.text].filter(Boolean).join('\n') };
 }
 // A present-but-malformed block resolves to empty lists; name it, never read it as "none declared".
 // A top-level null stays absent, as the resolver treats it; a non-object tree entry has no root.

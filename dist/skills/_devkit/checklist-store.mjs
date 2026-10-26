@@ -54,7 +54,9 @@ export function createChecklistStore({
 
   const load = () => {
     const p = filePath();
-    return existsSync(p) ? JSON.parse(readFileSync(p, 'utf-8')) : null;
+    // Empty means absent: the gate pre-creates the file a confined codex judge may write.
+    const text = existsSync(p) ? readFileSync(p, 'utf-8') : '';
+    return text ? JSON.parse(text) : null;
   };
 
   const save = (data) => {

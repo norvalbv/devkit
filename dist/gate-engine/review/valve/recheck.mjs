@@ -3,7 +3,7 @@
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mjs';
 import { taskLabel } from '../lens/split.mjs';
 import { isShipLane } from '../cascade/consumer-assets.mjs';
-import { emitAdvisoryResult } from '../../judge/advisory/emit.mjs';
+import { emitAdvisoryResult, FINDING_SEPARATOR } from '../../judge/advisory/emit.mjs';
 import { ADVISORY_CAP, parseAdvisories } from '../contracts/response.mjs';
 import { printAdvisories } from '../evidence/base-context.mjs';
 import { emitReviewSkipped } from '../evidence/scope.mjs';
@@ -90,6 +90,6 @@ export function reportLensPartAdvisories(splitParts) {
         }
         const unique = [...new Set(all)].slice(0, ADVISORY_CAP);
         if (unique.length)
-            emitAdvisoryResult(`review:${name}`, 'finding', unique.join(' | '));
+            emitAdvisoryResult(`review:${name}`, 'finding', unique.join(FINDING_SEPARATOR));
     }
 }

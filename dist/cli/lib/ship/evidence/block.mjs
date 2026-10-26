@@ -3,7 +3,7 @@
 import { stripVTControlCharacters } from 'node:util';
 import { z } from 'zod';
 import { codeSpan, fencedJson, MAX_FAILURES, } from '../../baseline-status/regression-evidence.mjs';
-import { EVIDENCE_ABSTENTIONS, EVIDENCE_STATUSES } from './outcome.mjs';
+import { EVIDENCE_ABSTENTIONS, EVIDENCE_STATUSES, } from './outcome.mjs';
 export const EVIDENCE_BEGIN = '<!-- devkit:evidence:begin -->';
 export const EVIDENCE_END = '<!-- devkit:evidence:end -->';
 /** The merge verdict's line; the data line carries its full reason list for later re-scoring. */
@@ -20,8 +20,14 @@ const BLOCK = /^<!-- devkit:evidence:begin -->\r?\n[\s\S]*?\n<!-- devkit:evidenc
 const BLOCKS = new RegExp(BLOCK.source, 'gm');
 const MARKER = /<!-- devkit:evidence:/g;
 const SHOWN_ARGS = 40;
+const STATUS_MARK = {
+    captured: '✅',
+    inconclusive: '⚠️',
+    'not-run': '⏭️',
+};
 const MAX_DETAIL_CHARS = 500;
 const MAX_FAILURE_CHARS = 240;
+const TITLE_JOIN = ' › ';
 const outcomeSchema = z.strictObject({
     status: z.enum(EVIDENCE_STATUSES),
     reason: z.enum(EVIDENCE_ABSTENTIONS).nullable(),
@@ -42,11 +48,24 @@ export const callerText = (body) => defuse(body.replace(BLOCKS, ''));
 const clip = (text, limit) => text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 const flat = (text) => stripVTControlCharacters(text).replace(/\s+/g, ' ').trim();
 export const plain = (text) => clip(flat(text).replaceAll('<', '&lt;'), MAX_DETAIL_CHARS);
-const failureLine = (item) => `- ${codeSpan(flat(item.fullName))}: ${codeSpan(flat(clip(item.message, MAX_FAILURE_CHARS)))}`;
+/** A failure's name, less the `depth` describe titles the list already printed above it. */
+function failureLine(item, depth) {
+    const name = item.path && depth ? item.path.slice(depth).join(TITLE_JOIN) : item.fullName;
+    return `- ${codeSpan(flat(name))}: ${codeSpan(flat(clip(item.message, MAX_FAILURE_CHARS)))}`;
+}
+/** The describe titles every listed failure shares; a test's own title is never one of them. */
+function sharedDescribe(items) {
+    const paths = items.flatMap((item) => (item.path ? [item.path] : []));
+    if (paths.length < 2 || paths.length < items.length)
+        return [];
+    const [first] = paths;
+    const depth = first.findIndex((title, n) => paths.some((path) => n >= path.length - 1 || path[n] !== title));
+    return first.slice(0, depth);
+}
 /** `n` and its noun; `plus` marks a floor, from a list the report summary cut at its cap. */
 const counted = (n, noun, plus = '') => `${n}${plus} ${noun}${n === 1 && !plus ? '' : 's'}`;
 /** A collapsed section; `summary` is raw HTML, so it carries no markdown. */
-const details = (summary, body) => [
+export const details = (summary, body) => [
     `<details><summary>${summary}</summary>`,
     '',
     ...body,
@@ -58,7 +77,12 @@ const details = (summary, body) => [
 function failureList(title, items, total) {
     const rest = total - items.length;
     const more = rest > 0 ? [`- … and ${rest} more`] : [];
-    return items.length ? details(title, [...items.map(failureLine), ...more]) : [];
+    const shared = sharedDescribe(items);
+    const under = shared.length
+        ? [`Each test listed is under ${codeSpan(flat(shared.join(TITLE_JOIN)))}`, '']
+        : [];
+    const lines = items.map((item) => failureLine(item, shared.length));
+    return items.length ? details(title, [...under, ...lines, ...more]) : [];
 }
 const short = (sha) => (sha ? `\`${sha.slice(0, 12)}\`` : 'unknown');
 function operandRow(name, tree, operand) {
@@ -91,19 +115,23 @@ function runLines(evidence) {
 }
 export function renderEvidenceBlock(outcome, evidence, verdict) {
     const label = outcome.reason ? `${outcome.status} (${outcome.reason})` : outcome.status;
+    const summary = `${STATUS_MARK[outcome.status]} <b>Regression evidence</b> · ${label}`;
     const content = [
-        `**Evidence:** ${label} — ${plain(outcome.detail)}`,
-        `Head ${short(outcome.headSha)} · base ${short(outcome.baseSha)}`,
+        ...(verdict?.reasons ?? []).map((reason) => `- ${plain(reason)}`),
         '',
-        ...(evidence ? runLines(evidence) : []),
-        "<sub>Captured runs, not proof of causality. Dependencies are the shipping checkout's " +
-            `installed packages. Stale unless the PR head is \`${outcome.headSha}\`.</sub>`,
+        ...details(`${summary}: ${plain(outcome.detail)}`, [
+            `Head ${short(outcome.headSha)} · base ${short(outcome.baseSha)}`,
+            '',
+            ...(evidence ? runLines(evidence) : []),
+            "<sub>Captured runs, not proof of causality. Dependencies are the shipping checkout's " +
+                `installed packages. Stale unless the PR head is \`${outcome.headSha}\`.</sub>`,
+        ]),
     ].join('\n');
     const record = verdict?.verdict ? { ...outcome, mergeVerdict: verdict.verdict } : outcome;
     const data = JSON.stringify(record).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e');
     return [
         EVIDENCE_BEGIN,
-        '#### Regression evidence (devkit ship)',
+        '## Automated evidence',
         // A line opening with a comment is a raw HTML block, so the slot trails the verdict's markdown.
         `${verdict ? `${plain(verdict.line)} ` : ''}${VERDICT_SLOT}`,
         defuse(content),

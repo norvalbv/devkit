@@ -12,8 +12,8 @@
  * the final message and token usage — so the seam is argv translation + envelope parsing, not a
  * second judge pipeline.
  */
-import { join } from 'node:path';
 import { withResultArgs } from '../claude-result.mjs';
+import { codexPermissionArgs } from './permissions.mjs';
 /** Parse the JSONL stream ONCE at the I/O boundary; the verdict/usage/failure readers below all
  * branch on these domain events rather than re-scanning raw lines. */
 export function codexEventsOf(raw) {
@@ -136,8 +136,8 @@ export function parseModelSpec(spec) {
 const confinedWorkspace = (parts, workspace) => parts.readOnly ? null : (workspace ?? null);
 // Claude judges cannot run tests (JUDGE_READ_TOOLS); codex judges have a shell and are told instead.
 export const NO_TEST_RUNS = 'Do not run tests, test runners or package-manager scripts (bun run, npm run); review by reading. Test execution belongs to the pre-push suite.';
-function repoRootNotice(repoRoot) {
-    return `The repository under review is ${repoRoot}. Run every command from there (cd into it first); paths in this task are relative to it. Its working tree is read-only to you except .claude/. ${NO_TEST_RUNS}\n\n`;
+function repoRootNotice({ repoRoot, stateFile }) {
+    return `The repository under review is ${repoRoot}. Run every command from there (cd into it first); paths in this task are relative to it. Its working tree is read-only to you${stateFile ? ` except ${stateFile}` : ''}. ${NO_TEST_RUNS}\n\n`;
 }
 export function codexExecArgs(parts, mcpArgv = [], workspace) {
     if (!parts.model || !parts.prompt)
@@ -147,7 +147,7 @@ export function codexExecArgs(parts, mcpArgv = [], workspace) {
     // Codex exec has no system-prompt flag: an agent brief (`--append-system-prompt`) is prepended
     // to the prompt instead. A labeled block, so the model sees the brief/task boundary the two
     // claude message slots used to provide.
-    const prompt = (confined ? repoRootNotice(confined.repoRoot) : '') +
+    const prompt = (confined ? repoRootNotice(confined) : '') +
         (parts.systemPrompt
             ? `<agent-brief>\n${parts.systemPrompt}\n</agent-brief>\n\n${parts.prompt}`
             : parts.prompt);
@@ -161,7 +161,9 @@ export function codexExecArgs(parts, mcpArgv = [], workspace) {
     if (spec.effort !== null)
         argv.push('-c', `model_reasoning_effort=${JSON.stringify(spec.effort)}`);
     // skills/commit-gates/SKILL.md replays this sandbox via `codex sandbox`; keep it in step.
-    argv.push('--sandbox', parts.readOnly ? 'read-only' : 'workspace-write', ...(confined ? ['-C', confined.scratch, '--add-dir', join(confined.repoRoot, '.claude')] : []), '-c', 'web_search="disabled"', ...mcpArgv, '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check', '--ephemeral', '--color', 'never', '--json', prompt);
+    argv.push(...(confined
+        ? ['-C', confined.scratch, ...codexPermissionArgs(confined)]
+        : ['--sandbox', parts.readOnly ? 'read-only' : 'workspace-write']), '-c', 'web_search="disabled"', ...mcpArgv, '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check', '--ephemeral', '--color', 'never', '--json', prompt);
     return argv;
 }
 /** True when the runtime representation is a real string (a JSON number/object is not its own

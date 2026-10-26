@@ -291,8 +291,9 @@ function callArgsAt(code, from) {
                 return -1;
             if (code[i] === '<')
                 depth += 1;
+            // an arrow, not a closer
             else if (code[i] === '=' && code[i + 1] === '>')
-                i += 1; // an arrow, not a closer
+                i += 1;
             else if (code[i] === '>' && (depth -= 1) === 0) {
                 i += 1;
                 break;

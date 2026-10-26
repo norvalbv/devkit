@@ -14,6 +14,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { parseJsonObject } from '../../gate-engine/config-json.mjs';
 import { packageDir, readJson } from '../lib/fs-helpers.mjs';
 // The current eslint.config source for a stack (mirrors init's STRUCTURE_TEMPLATE_FILES): every
 // structure stack EXCEPT electron uses the shared universal shim; electron keeps its preset.
@@ -50,7 +51,7 @@ function guardConfigChange(cwd, stack) {
     if (!existsSync(dest) || !tpl)
         return null;
     // guard.config.json is external data: a JSON object of arbitrary top-level keys.
-    const have = JSON.parse(readFileSync(dest, 'utf8'));
+    const have = parseJsonObject(readFileSync(dest, 'utf8'), 'guard.config.json');
     const missing = Object.keys(tpl).filter((k) => !k.startsWith('//') && !(k in have));
     if (!missing.length)
         return null;

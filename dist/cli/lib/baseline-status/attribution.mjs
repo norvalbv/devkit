@@ -3,9 +3,8 @@
  * on its merge commit's first parent. Never guesses; an unreadable input is a named reason.
  */
 import { unhandledKey, } from '../../../gate-engine/coverage/unhandled-reporter.mjs';
-import { GhUnavailable, commitCi, gh, runView } from './gh.mjs';
-import { loadSummary, workflowSelector } from './query.mjs';
-import { configuredSource } from './source.mjs';
+import { GhUnavailable, commitCi, gh, runById, runView } from './gh.mjs';
+import { configuredSource, loadSummary, workflowSelector } from './source.mjs';
 /** Listed values per field; past this the line says `+N` rather than growing without bound. */
 const LIST_CAP = 5;
 const own = (map, key) => map && Object.hasOwn(map, key) ? map[key] : undefined;
@@ -119,10 +118,9 @@ function workflowRun(cwd, failures, workflow) {
     for (const id of new Set(failures.map(runIdOf))) {
         if (id === null)
             continue;
-        const raw = gh(['api', `repos/{owner}/{repo}/actions/runs/${id}`, '--jq', '[.path, .run_attempt] | @tsv'], cwd);
-        const [path, attempt] = raw.trim().split('\t');
-        if (workflowSelector(path ?? '') === workflow)
-            return { databaseId: id, attempt: Number(attempt) };
+        const run = runById(cwd, id);
+        if (workflowSelector(run.path) === workflow)
+            return run;
     }
     return null;
 }

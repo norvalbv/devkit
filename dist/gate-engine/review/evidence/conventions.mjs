@@ -19,6 +19,12 @@ export function splitConventionCitation(block) {
 function citationLocation(block) {
     return splitConventionCitation(block)?.location ?? null;
 }
+// A whole-file OFFENDING ends at a bare path: one token, no `:line`, so a prose line never joins it.
+// Two linear tests, not one regex: nested unbounded classes backtrack quadratically on a long token.
+function isBarePath(location) {
+    const core = location.replace(/^`|`$/g, '');
+    return !/[\s`]/.test(core) && /[./]/.test(core);
+}
 function hasConventionCitationTrailer(block) {
     const location = citationLocation(block);
     return Boolean(location &&
@@ -34,7 +40,12 @@ export function parseConventionEvidencePairs(raw) {
     let mode = 'idle';
     let buffer = [];
     let pendingViolation = null;
-    const blockHasTrailer = () => hasConventionCitationTrailer(buffer.join(' '));
+    const blockHasTrailer = () => {
+        const block = buffer.join(' ');
+        if (hasConventionCitationTrailer(block))
+            return true;
+        return mode === 'offending' && isBarePath(citationLocation(block) ?? '');
+    };
     const finalize = () => {
         if (mode === 'violation' && buffer.length)
             pendingViolation = buffer.join(' ');
@@ -125,15 +136,15 @@ export function parseConventionLocation(location) {
     const path = location.slice(0, line.index).trim();
     return path ? { path, line: Number(line[1]) } : null;
 }
-/** Parse the last spaced dash trailer; only OFFENDING citations require a numeric line. */
-function parseConventionCitation(block, requireLine) {
+/** Parse the last spaced dash trailer; a lineless OFFENDING is a whole-file citation. */
+function parseConventionCitation(block, offending) {
     const location = citationLocation(block);
     if (!location)
         return null;
     const normalized = parseConventionLocation(location);
     if (normalized)
         return normalized;
-    return !requireLine && LINELESS_RULE_LOCATION_RE.test(location)
+    return offending || LINELESS_RULE_LOCATION_RE.test(location)
         ? { path: location, line: null }
         : null;
 }
@@ -150,7 +161,7 @@ export function parseConventionFindingCandidates(raw) {
     for (const pair of parseConventionEvidencePairs(evidence)) {
         const violation = parseConventionCitation(pair.violation, false);
         const offending = parseConventionCitation(pair.offending, true);
-        if (!violation || !offending || offending.line === null)
+        if (!violation || !offending)
             continue;
         findings.push({
             rulePath: violation.path,

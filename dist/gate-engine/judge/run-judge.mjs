@@ -16,37 +16,16 @@
 // diverges: a warn-by-default gate fails open (commit proceeds) while a deterministic-floor gate's
 // regex floor still blocks. Each caller describes its own consequence where it differs.
 import { execFile, execFileSync } from 'node:child_process';
-import { parsePriorArtResponse } from '../prior-art/response-contract.mjs';
-import { parseJudgeUsage, recordPermissionDenials, unwrapClaudeResult, withResultArgs, } from './claude-result.mjs';
-import { codexFailure, judgeBinFor, judgeCliFor, parseClaudeArgv, parseCodexUsage, unwrapCodexResult, } from './codex/result.mjs';
-import { emitGateEvent } from './gate-events.mjs';
 import { trackJudge } from './process/heartbeat.mjs';
-import { prepareCodexSandbox } from './codex/workspace.mjs';
-import { withoutGitEnv } from './judge-isolation.mjs';
-import { prepareJudgeMcpProfile, spawnDegradedCause, } from './mcp/profile.mjs';
-import { classifyJudgeOutage, } from './outage/classify.mjs';
-import { unavailableMessage, warnNoOutput } from './outage/wording.mjs';
-import { saveCodexCommands } from './codex/commands.mjs';
-import { composeTranscript, saveTranscriptUnique } from './transcript-store.mjs';
+import { cleanupJudgeRun, prepareJudgeRun, routeJudge, settleJudgeError, settleJudgeOutput, } from './process/judge-exec.mjs';
 // Re-exported so the gates that already import their remedy wording from here keep ONE import path,
 // while the wording itself lives beside the classifier that decides it.
 export { remedyCause, strictRemedy, unavailableMessage, } from './outage/wording.mjs';
+export { recordAgentRun, } from './process/judge-exec.mjs';
 // Narrow an unknown thrown value to the JudgeError shape; a non-object (or null) reads as {} so every
 // field access is undefined — matching the original `e?.field` optional-chaining behaviour exactly.
 function judgeErr(e) {
     return e && typeof e === 'object' ? e : {};
-}
-/** ONE classification per failed spawn, so the sync and async paths cannot disagree. The double
- *  classify keeps the wording a pure function of the error, hence unit-testable. */
-function reportOutage(opts, e, bin, startedAt, usage) {
-    const outage = classifyJudgeOutage(e);
-    const model = modelFromArgs(opts.args);
-    if (outage.kind === 'model-unavailable' && model !== null)
-        outage.model = model;
-    console.error(unavailableMessage(opts.label, e, opts.timeout, bin));
-    emitJudgeExec(opts, outage.kind, startedAt, undefined, usage, outage.detail, e.stdout);
-    opts.onOutage?.(outage);
-    return outage;
 }
 /**
  * THE cap for a deep, tool-using judge that investigates a whole staged diff — the review-gate
@@ -70,189 +49,25 @@ function reportOutage(opts, e, bin, startedAt, usage) {
  * reads one target's staged hunks and keeps its own much tighter caps.
  */
 export const DEEP_JUDGE_TIMEOUT_MS = 1800000;
-/** The `--model <m>` value from a judge argv, for the telemetry event; null when absent. */
-function modelFromArgs(args) {
-    const i = args.indexOf('--model');
-    return i !== -1 && i + 1 < args.length ? args[i + 1] : null;
-}
-function allowedToolsFromArgs(args) {
-    return parseClaudeArgv(args).allowedTools?.join(',') ?? '';
-}
-/** Keep the validated outcome queryable after its transcript expires, without copying prose. */
-function priorArtTelemetry(output) {
-    const parsed = parsePriorArtResponse(output);
-    if (!parsed.ok)
-        return { prior_art_status: 'invalid', prior_art_error: parsed.error.code };
-    const result = parsed.value;
-    if (result.status !== 'reviewed')
-        return { prior_art_status: result.status };
-    return {
-        prior_art_status: result.status,
-        prior_art_verdict: result.verdict,
-        prior_art_framing: result.frameChallenge?.framing,
-        prior_art_boundary: result.frameChallenge?.boundaryMustExist,
-        prior_art_next_step: result.suggestedNextStep?.kind,
-        prior_art_confidence: result.confidence,
-    };
-}
-export function recordAgentRun(opts) {
-    // Same predicate execJudge applies to a judge's stdout, so both entry points name a no-output run
-    // identically rather than one of them calling it a success.
-    const outcome = opts.outcome ?? (opts.output?.trim() ? 'ok' : 'empty');
-    // Exclusive-create store: the durable event line's transcript_ref must keep resolving to THIS
-    // invocation's output — never silently rewritten by a later sample OR a later process (a
-    // retried/amended commit shares the same run id). Uniqueness is the filesystem's, not ours.
-    const ref = outcome === 'ok' && opts.transcript !== false && opts.output
-        ? saveTranscriptUnique(opts.label, composeTranscript(opts.input ?? '', opts.output))
-        : null;
-    const extra = Object.fromEntries(Object.entries(opts.extra ?? {}).filter(([key]) => !key.startsWith('prior_art_')));
-    if (opts.label === 'prior-art' && outcome === 'ok')
-        Object.assign(extra, priorArtTelemetry(opts.output ?? ''));
-    const telemetry = emitGateEvent({
-        ...extra,
-        type: 'judge_exec',
-        judge: opts.label,
-        model: opts.model ?? null,
-        outcome,
-        ...(opts.durationMs === undefined ? {} : { duration_ms: opts.durationMs }),
-        input_chars: opts.input?.length ?? 0,
-        output_chars: opts.output?.length ?? 0,
-        ...(ref ? { transcript_ref: ref } : {}),
-    });
-    return { ref, telemetry };
-}
-/**
- * One `judge_exec` telemetry line per `claude -p` invocation — the SPEND/OUTAGE ledger every judge
- * shares, complementing (never replacing) the richer gate-level verdict events the review/decisions
- * gates emit themselves. This is what makes every judge visible to the usage tracker: the gate-level
- * emitters only cover the gates that thought to call them (the factory/sentry judges recorded
- * nothing at all before this).
- */
-function emitJudgeExec(opts, outcome, startedAt, output, usage, 
-/** The provider's own failure sentence, so the ledger records WHY, not just that it failed. */
-outageDetail, stdout) {
-    // Omitted entirely when unreadable — see parseJudgeUsage on why a zero-filled row is worse
-    // than an absent one.
-    const extra = usage ? { ...usage } : {};
-    if (opts.lens !== undefined)
-        extra.lens = opts.lens;
-    // The sc-2538 evidence sat in a stderr line nobody kept. On the ledger it is queryable: the
-    // dashboard can answer "which outage, and until when" without re-running the ship.
-    if (outageDetail !== undefined)
-        extra.outage_detail = outageDetail;
-    const commandsRef = saveCodexCommands(opts.label, stdout, opts.lens);
-    if (commandsRef)
-        extra.commands_ref = commandsRef;
-    Object.assign(extra, recordPermissionDenials(opts, stdout));
-    recordAgentRun({
-        label: opts.label,
-        output,
-        input: opts.input,
-        model: modelFromArgs(opts.args),
-        outcome,
-        durationMs: Date.now() - startedAt,
-        transcript: opts.transcript,
-        extra: Object.keys(extra).length > 0 ? extra : undefined,
-    });
-}
-/**
- * Unwrap one judge's stdout into the verdict text its caller expects, plus the spend to bill it.
- * Both come from the SAME parse of the same bytes, so a run can never be recorded with a cost that
- * belongs to different output. The parser follows the binary that produced the bytes — a codex
- * JSONL stream fed to the claude unwrapper would hand the verdict parser raw event noise. A codex
- * stream carrying a terminal failure event (`turn.failed` / `error`) reads as a FAILURE, never as
- * verdict text: falling through would record outcome 'ok' with raw JSONL as the transcript.
- */
-function readJudgeOutput(stdout, cli) {
-    if (cli.codex) {
-        const failure = codexFailure(stdout);
-        // A failed turn's stream can still carry its usage event — those tokens were burned whether or
-        // not a verdict arrived, and dropping them under-counts exactly the most expensive failures.
-        if (failure !== null)
-            return { failure: { providerFailure: failure, stdout }, usage: parseCodexUsage(stdout) };
-        return { text: unwrapCodexResult(stdout) ?? stdout, usage: parseCodexUsage(stdout) };
-    }
-    return { text: unwrapClaudeResult(stdout) ?? stdout, usage: parseJudgeUsage(stdout) };
-}
-/**
- * Salvage the spend from a FAILED spawn's partial stdout: the SIGKILL at the cap and a non-zero
- * exit both leave whatever the judge streamed first, and a parseable usage record there prices
- * tokens that were burned regardless of the missing verdict. Unparseable/absent → null, never a
- * zero row (see parseJudgeUsage: a zero-filled row reads downstream as a free judge).
- */
-function salvageUsage(text, args) {
-    if (!text || !text.trim())
-        return null;
-    return judgeBinFor(args) === 'claude' ? parseJudgeUsage(text) : parseCodexUsage(text);
-}
-/**
- * Compose the spawn for the routed binary. The claude path prepends the profile's --mcp-config
- * flags; the codex path translates the SAME selected servers into codex-native `-c mcp_servers.*`
- * config with secrets forwarded through the spawn env by NAME (sc-2054 — see codexMcpArgs). Both
- * runtimes now honor the judge-mcp-profiles Target.
- */
-function spawnFor(args, mcp, ws) {
-    const cli = judgeCliFor(args, mcp.servers, ws.codexReadOnly, ws.workspace);
-    return cli.codex ? cli : { ...cli, argv: withResultArgs([...mcp.args, ...args]) };
-}
+/** Run one judge invocation: raw stdout, or null after ONE stderr warning when it could not run.
+ *  `onOutage` fires with the classified outage, whose `permanent` flag is the retry predicate. */
 export function execJudge(opts) {
-    const { label, args, input, timeout, cwd, env, onOutage } = opts;
-    const startedAt = Date.now();
-    const mcp = prepareJudgeMcpProfile(opts.mcpProfile ?? { kind: 'none' }, {
-        cwd: cwd ?? process.cwd(),
-        env,
-        allowedTools: allowedToolsFromArgs(args),
-        projectRoots: opts.mcpProjectRoots,
-    });
-    let ws;
+    const run = prepareJudgeRun(opts);
     try {
-        // Inside the try on purpose: an argv a codex model cannot express (no prompt) surfaces as ONE
-        // outage warning carrying the translation error, keeping this function's never-throws contract.
-        ws = prepareCodexSandbox(args, opts.codexReadOnly === true, cwd ?? process.cwd());
-        const cli = spawnFor(args, mcp, ws);
-        opts.onMcpPrepared?.(mcp.capabilityFingerprint, spawnDegradedCause(mcp, cli.mcpInjected));
+        const { cli, spawnOptions } = routeJudge(opts, run);
+        // stderr is piped, not discarded: it is the channel a claude quota message arrives on.
         const out = execFileSync(cli.bin, cli.argv, {
-            cwd,
-            // Never the caller's env verbatim: git leaks an ABSOLUTE GIT_INDEX_FILE/GIT_DIR into every
-            // hook run in a linked worktree (how ship commits), and a tool-using judge that touches
-            // another repo would write ITS index over the ship's staged diff. See withoutGitEnv.
-            env: { ...withoutGitEnv(env), ...cli.extraEnv },
-            input,
-            encoding: 'utf8',
-            timeout,
-            // SIGTERM alone can be trapped/ignored by the child, leaving the cap best-effort instead of a
-            // guarantee (sc-1317) — SIGKILL cannot be caught, so the timeout always actually terminates.
-            killSignal: 'SIGKILL',
-            // stderr was DISCARDED, throwing away the one channel a claude quota message arrives on.
-            // Nothing was ever displayed from it, so piping it changes no output.
+            ...spawnOptions,
+            input: opts.input,
             stdio: ['pipe', 'pipe', 'pipe'],
-            // REQUIRED by the line above: stderr now counts against maxBuffer, so the 1 MB default would
-            // turn a chatty-but-healthy judge into an ENOBUFS failure. 10 MB matches the async twin.
-            maxBuffer: 10 * 1024 * 1024,
         });
-        if (!out || !String(out).trim()) {
-            warnNoOutput(label, judgeBinFor(args));
-            emitJudgeExec(opts, 'empty', startedAt);
-            onOutage?.({ kind: 'empty', permanent: false });
-            return null;
-        }
-        const parsed = readJudgeOutput(String(out), cli);
-        if ('failure' in parsed) {
-            // The stream reported the turn failed (exit 0 notwithstanding). This was hardcoded
-            // `transient` while HOLDING the message that proves a usage lock is not transient.
-            reportOutage(opts, parsed.failure, cli.bin, startedAt, parsed.usage);
-            return null;
-        }
-        emitJudgeExec(opts, 'ok', startedAt, parsed.text, parsed.usage, undefined, String(out));
-        return parsed.text;
+        return settleJudgeOutput(opts, run, cli, out);
     }
     catch (e) {
-        reportOutage(opts, judgeErr(e), judgeBinFor(args), startedAt, salvageUsage(judgeErr(e).stdout, args));
-        return null;
+        return settleJudgeError(opts, run, judgeErr(e));
     }
     finally {
-        mcp.cleanup();
-        ws?.cleanup();
+        cleanupJudgeRun(run);
     }
 }
 /**
@@ -264,82 +79,33 @@ export function execJudge(opts) {
  * judge's transcript (tool output included) can exceed the 1 MB default.
  */
 export function execJudgeAsync(opts) {
-    const { label, args, input, timeout, cwd, env, onOutage } = opts;
-    const startedAt = Date.now();
-    const mcp = prepareJudgeMcpProfile(opts.mcpProfile ?? { kind: 'none' }, {
-        cwd: cwd ?? process.cwd(),
-        env,
-        allowedTools: allowedToolsFromArgs(args),
-        projectRoots: opts.mcpProjectRoots,
-    });
-    let ws;
+    const run = prepareJudgeRun(opts);
     return new Promise((resolve) => {
-        // sc-2422 liveness narration; stopped first on every settle path so no line follows the verdict.
-        const stopHeartbeat = trackJudge({ label, timeoutMs: timeout });
-        // Shared outage path — a callback error AND a synchronous throw from execFile() itself (e.g. an
-        // out-of-range `timeout` validates and throws before spawn even starts, sc-1317) both resolve
-        // null the same way. Without the try/catch below, that synchronous throw escaped as a REJECTED
-        // promise, breaking this function's own documented contract (never throws/rejects, always
-        // resolves) for any caller awaiting it outside its own try/catch — the sync execJudge twin
-        // already had this same guard via its enclosing try/catch.
+        // Liveness narration; stopped first on every settle path so no line follows the verdict.
+        const stopHeartbeat = trackJudge({ label: opts.label, timeoutMs: opts.timeout });
+        // Shared outage path: a callback error AND a synchronous throw from execFile() itself both
+        // resolve null, so this function never rejects.
         const fail = (err, stdout) => {
             stopHeartbeat();
-            mcp.cleanup();
-            ws?.cleanup();
-            // The callback's own stdout wins (execFile hands it beside the error); the throw-attached
-            // copy covers the synchronous-throw path.
-            const streams = stdout ?? err.stdout;
-            reportOutage(opts, { ...err, stdout: streams }, judgeBinFor(args), startedAt, salvageUsage(streams, args));
-            resolve(null);
+            cleanupJudgeRun(run);
+            // The callback's own stdout wins; the throw-attached copy covers the synchronous-throw path.
+            resolve(settleJudgeError(opts, run, { ...err, stdout: stdout ?? err.stdout }));
         };
         try {
-            // See the sync twin: routing inside the try keeps the never-rejects contract when argv
-            // translation itself throws.
-            ws = prepareCodexSandbox(args, opts.codexReadOnly === true, cwd ?? process.cwd());
-            const cli = spawnFor(args, mcp, ws);
-            opts.onMcpPrepared?.(mcp.capabilityFingerprint, spawnDegradedCause(mcp, cli.mcpInjected));
-            const child = execFile(cli.bin, cli.argv, {
-                cwd,
-                // env: see the execJudge twin — the git-env scrub applies to every judge spawn.
-                env: { ...withoutGitEnv(env), ...cli.extraEnv },
-                encoding: 'utf8',
-                timeout,
-                // See the execJudge twin: SIGKILL so the cap is a guaranteed kill, not a trappable request.
-                killSignal: 'SIGKILL',
-                maxBuffer: 10 * 1024 * 1024,
-            }, 
-            // The third parameter was omitted, silently dropping stderr — the channel a claude-family
-            // quota message arrives on (sc-2538). The sync twin's `stdio` change is this one's mirror.
-            (err, stdout, stderr) => {
+            const { cli, spawnOptions } = routeJudge(opts, run);
+            const child = execFile(cli.bin, cli.argv, spawnOptions, (err, stdout, stderr) => {
                 stopHeartbeat();
                 if (err) {
                     fail({ ...judgeErr(err), stderr: stderr ? String(stderr) : undefined }, stdout ? String(stdout) : undefined);
                     return;
                 }
-                mcp.cleanup();
-                ws?.cleanup();
-                if (!stdout || !String(stdout).trim()) {
-                    warnNoOutput(label, judgeBinFor(args));
-                    emitJudgeExec(opts, 'empty', startedAt);
-                    onOutage?.({ kind: 'empty', permanent: false });
-                    resolve(null);
-                    return;
-                }
-                const raw = String(stdout);
-                const parsed = readJudgeOutput(raw, cli);
-                if ('failure' in parsed) {
-                    // See the sync twin: a stream-reported failed turn is classified, not assumed.
-                    reportOutage(opts, parsed.failure, cli.bin, startedAt, parsed.usage);
-                    resolve(null);
-                    return;
-                }
-                emitJudgeExec(opts, 'ok', startedAt, parsed.text, parsed.usage, undefined, raw);
-                resolve(parsed.text);
+                cleanupJudgeRun(run);
+                resolve(settleJudgeOutput(opts, run, cli, stdout));
             });
             // EPIPE guard: claude may exit (ENOENT wrapper, early crash) before stdin is consumed.
             child.stdin?.on('error', () => { });
-            if (input !== undefined)
-                child.stdin?.write(input);
+            if (opts.input !== undefined)
+                child.stdin?.write(opts.input);
             child.stdin?.end();
         }
         catch (e) {

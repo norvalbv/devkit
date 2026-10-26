@@ -5,6 +5,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync, } f
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mjs';
+import { parseJsonObject } from '../config-json.mjs';
 import { exitGate } from '../deterministic/reason.mjs';
 import { overlayInstall } from '../overlay-mode.mjs';
 import { readRatchetBaseline, refuseFreezeThroughLink, removeRatchetBaseline, SIZE_BASELINE, writeRatchetBaseline, } from './baseline-paths.mjs';
@@ -129,10 +130,10 @@ export function setMaxLines(cwd, cap = LINE_CAP, testCap = TEST_LINE_CAP) {
         return false;
     let cfg;
     try {
-        cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+        cfg = parseJsonObject(readFileSync(cfgPath, 'utf8'), CONFIG_FILENAME);
     }
     catch {
-        // Unparseable guard.config.json → skip (mirror hasLineCap). A corrupt user-edited file must not
+        // Unparseable or duplicate-key guard.config.json → skip (mirror hasLineCap). A corrupt file must not
         // crash init/upgrade; the gates surface the JSON error separately when they run.
         return false;
     }

@@ -19,6 +19,7 @@
 import { accessSync, closeSync, constants, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync, } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { z } from 'zod';
+import { parseJsonObject } from '../../../../gate-engine/config-json.mjs';
 import { isCodexModel } from '../../../../gate-engine/judge/codex/result.mjs';
 import { CLAUDE_FAMILY_SET, FAMILY_ENV_KEYS, } from '../../../../gate-engine/judge/outage/family-override.mjs';
 import { correctnessModel, resolveEscalationModel, resolveReviewModel, resolveSentryModel, sentryModelOverride, } from '../../../../gate-engine/review/reviewers.mjs';
@@ -251,15 +252,15 @@ export function bindClaudeFamily(cwd) {
         const snapshot = readFileSync(path, 'utf8');
         let raw;
         try {
-            // SAFETY: the parsed shape is range-checked below — a null document, missing review
-            // object, or claimed keys that are not a stale devkit write abort the bind without writing.
-            raw = JSON.parse(snapshot);
+            // A non-object or duplicate-key document throws; a missing review object or claimed keys
+            // that are not a stale devkit write abort the bind below, so neither path writes.
+            raw = parseJsonObject(snapshot, 'guard.config.json');
         }
         catch {
             return false;
         }
-        const review = raw?.review;
-        if (!raw || !review)
+        const review = raw.review;
+        if (!review)
             return false;
         const fresh = familyKeysAbsent(review);
         const stale = staleFamilyKeys(review);
