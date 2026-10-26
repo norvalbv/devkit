@@ -741,7 +741,7 @@ describe('devkit prove-regression', () => {
             status: 'failed',
             assertionResults: [
               failed('x codex', `AssertionError: expected 3 to be +0${stack}`),
-              failed('x acp', 'expected 1\n  at the door, with no location'),
+              failed('x acp', 'expected 1\n  at config.json:12 must be unique'),
             ],
           },
         ],
@@ -757,7 +757,7 @@ describe('devkit prove-regression', () => {
       },
       {
         fullName: 'grid stop x acp',
-        message: 'expected 1 at the door, with no location',
+        message: 'expected 1 at config.json:12 must be unique',
         path: ['grid', 'stop', 'x acp'],
       },
     ]);

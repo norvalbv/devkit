@@ -106,8 +106,8 @@ interface ParsedVitestReport {
 export const MAX_FAILURES = 10;
 const MAX_FAILURE_CHARS = 600;
 const MAX_FAILURE_NAME_CHARS = 240;
-/** Vitest's own V8 frame test: a line opening `at` that names a location. */
-const STACK_FRAME = /^\s*at .*(?:\S:\d+|\(native\))/m;
+/** A V8 stack frame: a line opening `at` that ends in its `:line:column` location. */
+const STACK_FRAME = /^\s*at .*:\d+:\d+\)?$/m;
 
 /** The error text before its stack trace, so the frames never spend the message's length budget. */
 const withoutStack = (text: string): string =>
