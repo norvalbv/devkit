@@ -14,7 +14,7 @@ import {
   type ShipChange,
   VERDICT_REASONS,
   type VerdictReason,
-  verdictLine,
+  verdictReasons,
 } from './verdict.mts';
 
 const HEAD = 'a'.repeat(40);
@@ -395,9 +395,7 @@ describe('mergeVerdict', () => {
   it.each(ROWS)('$name', (row) => {
     const result = mergeVerdict(row.change, row.config ?? null);
     expect(result).toEqual({ verdict: row.verdict, reasons: row.reasons });
-    expect(verdictLine(result)).toMatch(
-      new RegExp(`^${row.verdict} \\(${result.reasons[0].code}[:;)]`),
-    );
+    expect(verdictReasons(result)[0]).toMatch(new RegExp(`^\\*\\*${result.reasons[0].code}[:*]`));
   });
 
   it('treats only a capture at this head as proof, for every evidence status', () => {
@@ -455,24 +453,25 @@ describe('mergeVerdict', () => {
   });
 });
 
-describe('verdictLine', () => {
-  it('prints every reason that yields the verdict, deciding one first, with its detail', () => {
-    expect(verdictLine(mergeVerdict(change([p('a.mts', 51)]), null))).toBe(
-      'human-review (over-size: 51/50 lines, 1/4 files, default limit)',
-    );
-    expect(verdictLine(mergeVerdict(change([p('a.test.mts')]), null))).toBe(
-      'auto-merge-eligible (test-only)',
-    );
+describe('verdictReasons', () => {
+  it('lists every reason that yields the verdict, deciding one first, with its detail', () => {
+    expect(verdictReasons(mergeVerdict(change([p('a.mts', 51)]), null))).toEqual([
+      '**over-size:** 51/50 lines, 1/4 files, default limit',
+    ]);
+    expect(verdictReasons(mergeVerdict(change([p('a.test.mts')]), null))).toEqual([
+      '**test-only**',
+    ]);
     const both = mergeVerdict(change([p('docs/decisions/x.md'), p('a.mts', 51)]), null);
     expect(both.reasons.at(-1)?.code).toBe('captured-proof');
-    expect(verdictLine(both)).toBe(
-      'human-review (decision-record; over-size: 51/50 lines, 1/4 files, default limit)',
-    );
+    expect(verdictReasons(both)).toEqual([
+      '**decision-record**',
+      '**over-size:** 51/50 lines, 1/4 files, default limit',
+    ]);
   });
 
   it('cannot close the evidence markers or break the line', () => {
     const hostile = 'x --> <!-- y\n`z`‮';
-    const line = verdictLine(mergeVerdict(change([fix], { bypasses: [hostile] }), null));
-    expect(line).toBe('human-review (gate-bypassed: x --_ _!-- y__z__)');
+    const reasons = verdictReasons(mergeVerdict(change([fix], { bypasses: [hostile] }), null));
+    expect(reasons).toEqual(['**gate-bypassed:** x --_ _!-- y__z__']);
   });
 });

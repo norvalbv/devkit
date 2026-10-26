@@ -718,6 +718,51 @@ describe('devkit prove-regression', () => {
     expect([...report.tests]).toEqual([[`<checkout>/a.test.mts\0fails at ${checkout}`, 'failed']]);
   });
 
+  it("keeps a failure's describe titles and cuts its message where the stack trace starts", () => {
+    const failed = (title: string, message: string) => ({
+      ancestorTitles: ['grid', 'stop'],
+      title,
+      fullName: `grid stop ${title}`,
+      status: 'failed',
+      failureMessages: [message],
+    });
+    const stack = '\n    at /tmp/c/a.test.mts:655:32\n    at process (node:internal/x:105:5)';
+    const report = parseVitestRegressionReport(
+      JSON.stringify({
+        success: false,
+        numTotalTests: 2,
+        numPassedTests: 0,
+        numFailedTests: 2,
+        numPendingTests: 0,
+        numTodoTests: 0,
+        testResults: [
+          {
+            name: '/tmp/c/a.test.mts',
+            status: 'failed',
+            assertionResults: [
+              failed('x codex', `AssertionError: expected 3 to be +0${stack}`),
+              failed('x acp', 'expected 1\n  at the door, with no location'),
+            ],
+          },
+        ],
+      }),
+      '/tmp/c',
+    );
+
+    expect(report.failures).toEqual([
+      {
+        fullName: 'grid stop x codex',
+        message: 'AssertionError: expected 3 to be +0',
+        path: ['grid', 'stop', 'x codex'],
+      },
+      {
+        fullName: 'grid stop x acp',
+        message: 'expected 1 at the door, with no location',
+        path: ['grid', 'stop', 'x acp'],
+      },
+    ]);
+  });
+
   it.each([
     ['one of two red failures passes', ['failed', 'failed'], ['passed', 'failed'], 'captured'],
     ['the red failure is renamed on green', ['failed'], [], 'inconclusive'],

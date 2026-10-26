@@ -16,9 +16,10 @@ evidence_caller_body() {
 }
 
 # This ship's reviewer advisories into the PR body; `replace` only for a history rewrite. Fail-open.
-# usage: publish_reviewer_notes <pr-number> <repo> <head-sha> [replace]
+# usage: publish_reviewer_notes <pr-number> <repo> <head-sha> <checkout-root> [replace]
 publish_reviewer_notes() {
-  node "$(evidence_run_script)" notes --repo "$2" --pr "$1" --head "$3" ${4:+--mode "$4"} </dev/null || true
+  node "$(evidence_run_script)" notes --repo "$2" --pr "$1" --head "$3" --cwd "$4" \
+    ${5:+--mode "$5"} </dev/null || true
 }
 
 # usage: publish_evidence_block <worktree> <pr-number> <repo> <head-sha> [<source-checkout>]

@@ -10,7 +10,7 @@ import type { EvidenceOutcome } from '../evidence/outcome.mts';
 import { prBase } from '../evidence/red-ref.mts';
 import { errorMessage, gitEnvironment } from '../review/shared/common.mts';
 import { type PrCommit, shipBypasses } from './bypasses.mts';
-import { type ChangedPath, mergeVerdict, verdictLine } from './verdict.mts';
+import { type ChangedPath, mergeVerdict, VERDICT_MARK, verdictReasons } from './verdict.mts';
 
 const git = (cwd: string, args: string[]): string =>
   execFileSync('git', ['-C', cwd, ...args], {
@@ -83,8 +83,9 @@ export function printVerdict(input: VerdictInput): PrintedVerdict {
       evidence: outcome,
     };
     const verdict = mergeVerdict(change, policyText(cwd, base));
-    const line = `${VERDICT_LABEL} ${verdictLine(verdict)} · advisory, at \`${head.slice(0, 12)}\``;
-    return { line, verdict };
+    const mark = `${VERDICT_MARK[verdict.verdict]} ${verdict.verdict}`;
+    const line = `${VERDICT_LABEL} ${mark} · advisory, at \`${head.slice(0, 12)}\``;
+    return { line, reasons: verdictReasons(verdict), verdict };
   } catch (error) {
     return verdictUnavailable(errorMessage(error));
   }

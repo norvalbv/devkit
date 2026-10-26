@@ -93,7 +93,9 @@ describe('evidence block', () => {
 
   it('names the abstention reason and renders no runs when nothing was captured', () => {
     const block = renderEvidenceBlock(notRun('docs-only', 'only Markdown', HEAD, BASE), null);
-    expect(block).toContain('**Evidence:** not-run (docs-only) — only Markdown');
+    expect(block).toContain(
+      '<details><summary>⏭️ <b>Regression evidence</b> · not-run (docs-only): only Markdown</summary>',
+    );
     expect(block).not.toContain('| red |');
     expect(readEvidenceBlock(block, HEAD)?.reason).toBe('docs-only');
   });
@@ -106,11 +108,31 @@ describe('evidence block', () => {
         { code: 'captured-proof' as const },
       ],
     };
-    const line = '**Merge verdict:** human-review (over-size: 60/50 lines) · advisory';
-    const block = renderEvidenceBlock(captured, evidence, { line, verdict: mergeVerdict });
+    const line = '**Merge verdict:** 🟡 human-review · advisory';
+    const reasons = ['**over-size:** 60/50 lines'];
+    const block = renderEvidenceBlock(captured, evidence, { line, reasons, verdict: mergeVerdict });
 
-    expect(block).toContain(`\n${line} ${VERDICT_SLOT}\n`);
+    expect(block).toContain(`\n${line} ${VERDICT_SLOT}\n- **over-size:** 60/50 lines\n\n`);
     expect(readEvidenceBlock(block, HEAD)).toEqual({ ...captured, mergeVerdict, stale: false });
+  });
+
+  it('shows the verdict and its reasons, and collapses the runs under a one-line status', () => {
+    const line = '**Merge verdict:** 🟡 human-review · advisory';
+    const reasons = ['**over-size:** 60/50 lines', '**decision-record**'];
+    const block = renderEvidenceBlock(captured, evidence, { line, reasons });
+    const nodes = fromMarkdown(block).children;
+    const html = nodes.flatMap((node) => (node.type === 'html' ? [node.value] : []));
+
+    expect(nodes.find((node) => node.type === 'heading')).toMatchObject({ depth: 2 });
+    expect(nodes.find((node) => node.type === 'list')).toMatchObject({
+      children: [{ type: 'listItem' }, { type: 'listItem' }],
+    });
+    expect(html).toContain(
+      `<details><summary>✅ <b>Regression evidence</b> · captured: ${evidence.reason}</summary>`,
+    );
+    expect(block).toMatch(
+      /Regression evidence.*<\/summary>\n\nHead [^]*\| red \|[^]*causality[^]*<\/details>/,
+    );
   });
 
   it('keeps an unavailable verdict on one line, with no data, and never ends the block', () => {
@@ -162,6 +184,30 @@ describe('evidence block', () => {
     const capped = render(Array<RegressionFailureSummary>(MAX_FAILURES).fill(gone));
     expect(capped).toContain(`<summary>Did not load on red (${MAX_FAILURES}+ files):`);
     expect(capped.split('- `gone.test.mjs`')).toHaveLength(MAX_FAILURES + 1);
+  });
+
+  it('prints the describe titles every red failure shares once, above the list', () => {
+    const failed = (title: string) => ({
+      fullName: `grid stop ${title}`,
+      message: 'boom',
+      path: ['grid', 'stop', title],
+    });
+    const render = (failures: RegressionFailureSummary[]) =>
+      renderEvidenceBlock(captured, { ...evidence, red: { ...evidence.red, failures } });
+
+    expect(render([failed('x codex'), failed('x acp')])).toContain(
+      '<details><summary>Failed on red (1 test)</summary>\n\n' +
+        'Each test listed is under `grid › stop`\n\n- `x codex`: `boom`\n- `x acp`: `boom`\n',
+    );
+    const other = { fullName: 'grid start y', message: 'boom', path: ['grid', 'start', 'y'] };
+    expect(render([failed('x codex'), other])).toContain(
+      'Each test listed is under `grid`\n\n- `stop › x codex`: `boom`\n- `start › y`: `boom`\n',
+    );
+    const unnamed = { fullName: 'loose', message: 'boom' };
+    expect(render([failed('x codex'), unnamed])).toContain(
+      '(1 test)</summary>\n\n- `grid stop x codex`',
+    );
+    expect(render([failed('x codex')])).toContain('(1 test)</summary>\n\n- `grid stop x codex`');
   });
 
   it('keeps marker text and comment closers in content from ending the block or its data', () => {

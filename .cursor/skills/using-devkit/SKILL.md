@@ -121,9 +121,10 @@ devkit command.
   An explicit `--body` keeps the current block, a block pasted into a body is dropped, and a
   re-ship that pushes rewrites only the block. It can never fail the ship.
 - **The block also carries a "Reviewer notes" section** (`devkit:evidence:notes`): every PASS
-  reviewer advisory, with the commit it was raised at, even when no `evidence` entry is configured.
-  A `--pr` re-ship adds its own and keeps the earlier ones; a `--base` rewrite replaces them. Don't
-  re-list advisories in your own text — write only what you did about each one.
+  reviewer advisory, one bullet per finding with the commit it was raised at, even when no
+  `evidence` entry is configured. A `--pr` re-ship adds its own and keeps the earlier ones; a
+  `--base` rewrite replaces them. `"review": { "prNotes": false }` in `guard.config.json` turns the
+  section off. Don't re-list advisories in your own text — write only what you did about each one.
 - **`another ship for <branch> is still running` → wait or stop that run; never force-remove it.**
   Ship reclaims the worktree and branch a KILLED ship left behind automatically, so a refusal means
   it proved the owner is alive. When the message says the shell is gone but the gate tree survives,
