@@ -76,8 +76,12 @@ describe('printVerdict', () => {
     const head = commit({ 'src/fix.mts': lines(12) });
     const printed = verdictFor(root, base, head, shipEnv(head));
     expect(printed.line).toBe(
-      `**Merge verdict:** human-review (over-size: 12/10 lines, 1/4 files, default limit; no-captured-proof: not-run: no-test-change) · advisory, at \`${head.slice(0, 12)}\``,
+      `**Merge verdict:** 🟡 human-review · advisory, at \`${head.slice(0, 12)}\``,
     );
+    expect(printed.reasons).toEqual([
+      '**over-size:** 12/10 lines, 1/4 files, default limit',
+      '**no-captured-proof:** not-run: no-test-change',
+    ]);
     expect(printed.verdict?.reasons.map((r) => r.code)).toEqual(['over-size', 'no-captured-proof']);
   });
 
@@ -103,9 +107,10 @@ describe('printVerdict', () => {
     const { root, commit } = repo();
     const base = commit({ 'README.md': 'x\n' });
     const head = commit({ 'src/fix.mts': lines(1) });
-    expect(verdictFor(root, base, head, { DEVKIT_NO_TELEMETRY: '1' }).line).toContain(
-      'human-review (bypass-unknown: no devkit ship gate run; no-captured-proof: not-run: no-test-change)',
-    );
+    expect(verdictFor(root, base, head, { DEVKIT_NO_TELEMETRY: '1' }).reasons).toEqual([
+      '**bypass-unknown:** no devkit ship gate run',
+      '**no-captured-proof:** not-run: no-test-change',
+    ]);
   });
 
   it('reads the default sink when the ship env names none, as a gate-less resume does', () => {
@@ -118,7 +123,7 @@ describe('printVerdict', () => {
     mkdirSync(dirname(sink), { recursive: true });
     writeFileSync(sink, `${gatedRows([head])}\n`);
     try {
-      expect(verdictFor(root, base, head).line).toContain('auto-merge-eligible (test-only)');
+      expect(verdictFor(root, base, head).line).toContain('🟢 auto-merge-eligible');
     } finally {
       rmSync(sink, { force: true });
     }

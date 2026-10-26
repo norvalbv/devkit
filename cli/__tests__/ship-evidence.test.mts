@@ -178,7 +178,7 @@ describe('devkit ship evidence block', () => {
     expect(block).toContain('| red | PR test files on the PR base | 1 | 0 | 1 | 0 |');
     // One small source file with proof captured at this head, gated by this ship with no bypass.
     expect(block).toContain(
-      `**Merge verdict:** auto-merge-eligible (captured-proof) · advisory, at \`${head.slice(0, 12)}\` ${VERDICT_SLOT}\n`,
+      `**Merge verdict:** 🟢 auto-merge-eligible · advisory, at \`${head.slice(0, 12)}\` ${VERDICT_SLOT}\n- **captured-proof**\n`,
     );
     expect(readEvidenceBlock(block, head)?.mergeVerdict).toEqual({
       verdict: 'auto-merge-eligible',
@@ -304,7 +304,7 @@ describe('devkit ship evidence block', () => {
     expect(readFileSync(repo.state, 'utf8')).toMatch(
       /^mine\n\n<!-- devkit:evidence:begin -->\n<!-- devkit:evidence:notes:begin -->/,
     );
-    expect(readFileSync(repo.state, 'utf8')).toContain(`#### Reviewer notes (devkit ship)\n`);
+    expect(readFileSync(repo.state, 'utf8')).toContain('<summary>💬 <b>Reviewer notes</b>');
     expect(readFileSync(repo.state, 'utf8')).toContain(`${first}\n`);
 
     // An append re-ship judged only its delta: its note joins the first, which stays.
@@ -357,7 +357,7 @@ describe('devkit ship evidence block', () => {
       gh.state,
       `prose\n\n${notesBlock(`- **r** at \`${'a'.repeat(12)}\`: old.ts:1 — stale`)}\n`,
     );
-    const call = `. "$SCRIPT_DIR/publish-evidence.sh"; publish_reviewer_notes 42 acme/app ${head} replace`;
+    const call = `. "$SCRIPT_DIR/publish-evidence.sh"; publish_reviewer_notes 42 acme/app ${head} "$PWD" replace`;
     const r = spawnSync('/bin/bash', ['-c', call], {
       env: { ...gh.env, SCRIPT_DIR: SHIP_DIR, DEVKIT_GATE_EVENTS: sink, DEVKIT_SHIP_ID: 'rewrite' },
       encoding: 'utf8',
@@ -367,6 +367,27 @@ describe('devkit ship evidence block', () => {
     expect(body).toContain(`- **r** at \`${head.slice(0, 12)}\`: new.ts:1 — kept`);
     expect(body).not.toContain('stale');
     expect(body.startsWith('prose\n\n')).toBe(true);
+  }, 60_000);
+
+  it('writes no notes when the checkout sets review.prNotes to false', () => {
+    const root = mkdtempSync(join(tmpdir(), 'notes-off-'));
+    dirs.push(root);
+    writeFileSync(join(root, 'guard.config.json'), '{ "review": { "prNotes": false } }\n');
+    const sink = join(root, 'gate-events.jsonl');
+    const rows = [
+      { type: 'ship_attempt', ship_id: 'off' },
+      { type: 'advisory_result', ship_id: 'off', gate: 'review:r', detail: 'a.ts:1 — noted' },
+    ];
+    writeFileSync(sink, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
+    const gh = ghEnv({ GH_HEAD_OID: 'c'.repeat(40), GH_BASE_OID: 'd'.repeat(40) });
+    writeFileSync(gh.state, 'prose\n');
+    const call = `. "$SCRIPT_DIR/publish-evidence.sh"; publish_reviewer_notes 42 acme/app ${'c'.repeat(40)} "${root}"`;
+    const r = spawnSync('/bin/bash', ['-c', call], {
+      env: { ...gh.env, SCRIPT_DIR: SHIP_DIR, DEVKIT_GATE_EVENTS: sink, DEVKIT_SHIP_ID: 'off' },
+      encoding: 'utf8',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(gh.state, 'utf8')).toBe('prose\n');
   }, 60_000);
 
   it('leaves the PR body alone when it cannot be read, and the same command re-run then writes it', () => {
@@ -448,7 +469,8 @@ describe('devkit ship evidence block', () => {
     const body = readFileSync(repo.state, 'utf8');
     expect(readEvidenceBlock(body, tipOf(repo.bare, 'feat/slow'))?.status).toBe('inconclusive');
     expect(body).toMatch(/did not finish within 10s \(setup \d+s[^)]* unfinished\)/);
-    expect(body).toContain('**Merge verdict:** human-review (no-captured-proof: inconclusive)');
+    expect(body).toContain('**Merge verdict:** 🟡 human-review · advisory');
+    expect(body).toContain('\n- **no-captured-proof:** inconclusive\n');
     const [row, ...extra] = rowsOf(repo.sink, 'ship_evidence');
     expect(extra).toEqual([]);
     expect(row).toMatchObject({ status: 'inconclusive', test_files: 1, failed: false });
@@ -633,7 +655,7 @@ describe('evidence outcomes', () => {
 
     expect(run.publish(run.head, { ...shipped, GUARD_COVERAGE_OK: '1' }).status).toBe(0);
     expect(readFileSync(run.gh.state, 'utf8')).toContain(
-      '**Merge verdict:** human-review (gate-bypassed: GUARD_COVERAGE_OK; no-captured-proof: not-run: no-test-change) · advisory',
+      '\n- **gate-bypassed:** GUARD_COVERAGE_OK\n- **no-captured-proof:** not-run: no-test-change\n',
     );
 
     writeFileSync(run.gh.state, '');
