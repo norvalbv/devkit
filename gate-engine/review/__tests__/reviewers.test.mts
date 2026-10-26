@@ -739,13 +739,59 @@ describe('wrapConventionsPrompt / parseConventionFindings', () => {
     const transcript = `VIOLATION: Never use raw SQL. — CLAUDE.md:3\n${boundary}OFFENDING: const x = 1 — src/unrelated.ts:80`;
     expect(parseConventionEvidencePairs(transcript)).toEqual([]);
   });
-  it('treats a verdict closer before a delayed citation as a hard evidence boundary', () => {
+  it.each([
+    'VERDICT: FAIL — abandoned point',
+    '✅ VERDICT: PASS',
+    '⚠️ **VERDICT**: FAIL',
+    '✅ NO_VIOLATIONS',
+  ])('treats %s before a delayed citation as a hard evidence boundary', (verdict) => {
     const transcript =
       'VIOLATION: Never use raw SQL.\n' +
-      'VERDICT: FAIL — abandoned point\n' +
+      `${verdict}\n` +
       '— CLAUDE.md:3\n' +
       'OFFENDING: const x = 1 — src/unrelated.ts:80';
     expect(parseConventionEvidencePairs(transcript)).toEqual([]);
+  });
+  it('never merges an emoji-dressed verdict line into an untrailered OFFENDING block', () => {
+    const transcript =
+      'VIOLATION: Never use raw SQL. — CLAUDE.md:3\n' +
+      'OFFENDING: db.raw(query)\n' +
+      '⚠️ **VERDICT**: FAIL\n' +
+      'more — src/db.ts:80';
+    expect(parseConventionEvidencePairs(transcript)).toEqual([
+      { violation: 'Never use raw SQL. — CLAUDE.md:3', offending: 'db.raw(query)' },
+    ]);
+  });
+  it('stops the citation lookahead for a protocol-like OFFENDING line at an emoji verdict', () => {
+    const transcript =
+      'VIOLATION: Never use raw SQL. — CLAUDE.md:3\n' +
+      'OFFENDING: db.raw(query)\n' +
+      'OFFENDING: second\n' +
+      '✅ VERDICT: FAIL\n' +
+      '— src/db.ts:80';
+    for (const pair of parseConventionEvidencePairs(transcript))
+      expect(pair.offending).not.toContain('VERDICT');
+  });
+  it('keeps a complete pair blocking when an emoji verdict line closes the transcript', () => {
+    const transcript =
+      'VIOLATION: Never use raw SQL. — CLAUDE.md:3\n' +
+      'OFFENDING: db.raw(query) — src/db.ts:80\n' +
+      '❌ **VERDICT: FAIL** — raw SQL';
+    expect(lensesOf(transcript)).toEqual([
+      { rulePath: 'CLAUDE.md', ruleLine: 3, offendingPath: 'src/db.ts', offendingLine: 80 },
+    ]);
+  });
+  it('does not close on a backtick-quoted verdict mention', () => {
+    const transcript =
+      'VIOLATION: Never use raw SQL. — CLAUDE.md:3\n' +
+      'OFFENDING: db.raw(query)\n' +
+      '`VERDICT: FAIL` — src/db.ts:80';
+    expect(parseConventionEvidencePairs(transcript)).toEqual([
+      {
+        violation: 'Never use raw SQL. — CLAUDE.md:3',
+        offending: 'db.raw(query) `VERDICT: FAIL` — src/db.ts:80',
+      },
+    ]);
   });
   it('preserves quoted verdict text without treating it as a protocol closer', () => {
     const transcript =
