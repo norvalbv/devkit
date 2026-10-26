@@ -26,6 +26,10 @@ export const JUDGE_READ_ONLY = ['--disallowedTools', '*'];
 // An explicit Bash(git diff:*) allow overrides Claude Code's read-only validator and approves
 // `git diff --output=<file>` writes; read-only git forms run with no rule, Read covers the rest.
 export const JUDGE_READ_TOOLS = 'Read,Grep,Glob';
+// Claude Code otherwise loads ~/.claude/CLAUDE.md, the repo's CLAUDE.md (+ @imports), auto-memory
+// and the user's skill list; a judge sees only what the gate renders into its prompt.
+export const CLAUDE_JUDGE_ARGS = ['--disable-slash-commands'];
+export const CLAUDE_JUDGE_ENV = { CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1' };
 
 // Git's per-repository environment. Git EXPORTS these into a hook's environment, and for a hook run
 // in a LINKED WORKTREE (which is exactly how `devkit ship` commits) the values are ABSOLUTE:

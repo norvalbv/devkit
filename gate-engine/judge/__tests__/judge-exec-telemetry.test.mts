@@ -80,6 +80,20 @@ describe('judge_exec telemetry', () => {
     expect(out).toContain('--mcp-config {"mcpServers":{}} --strict-mcp-config');
   });
 
+  it('spawns every claude judge with CLAUDE.md memory and skills off, whatever the caller env says', async () => {
+    fakeClaude('echo "mds=$CLAUDE_CODE_DISABLE_CLAUDE_MDS $*"');
+    const opts = {
+      label: 'review:conventions-reviewer',
+      args: ['-p', '--model', 'haiku', 'judge this'],
+      timeout: 30000,
+      env: { ...process.env, CLAUDE_CODE_DISABLE_CLAUDE_MDS: '0' },
+    };
+    for (const out of [execJudge(opts), await execJudgeAsync(opts)]) {
+      expect(out).toMatch(/^mds=1 /);
+      expect(out).toContain('--disable-slash-commands');
+    }
+  });
+
   it('success emits one ok event with model/duration/sizes AND a transcript by default', () => {
     fakeClaude('echo FIT');
     const out = execJudge({
