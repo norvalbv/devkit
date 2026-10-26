@@ -49,10 +49,18 @@ function shipEnv(...heads: string[]) {
   return { DEVKIT_GATE_EVENTS: sink };
 }
 
-function verdictFor(root: string, base: string, head: string, env: NodeJS.ProcessEnv = {}) {
+function maybeVerdictFor(root: string, base: string, head: string, env: NodeJS.ProcessEnv = {}) {
   const outcome = notRun('no-test-change', 'x', head, base);
   return printVerdict({ cwd: root, head, baseRefOid: base, title: 'fix: x', outcome, env });
 }
+
+function verdictFor(root: string, base: string, head: string, env: NodeJS.ProcessEnv = {}) {
+  const printed = maybeVerdictFor(root, base, head, env);
+  if (!printed) throw new Error('expected a printed verdict');
+  return printed;
+}
+
+const disabled = JSON.stringify({ mergeVerdict: { enabled: false } });
 
 describe('numstat', () => {
   it('counts text lines, reads a binary file as null and keeps a path with spaces whole', () => {
@@ -101,6 +109,28 @@ describe('printVerdict', () => {
     const head = commit({ 'src/fix.mts': lines(12) });
     writeFileSync(join(root, 'guard.config.json'), policy(10));
     expect(verdictFor(root, base, head, shipEnv(head)).verdict?.reasons[0].code).toBe('over-size');
+  });
+
+  it("prints no verdict when the checkout's untracked policy sets enabled to false", () => {
+    const { root, commit } = repo();
+    const base = commit({ 'README.md': 'x\n' });
+    const head = commit({ 'src/fix.mts': lines(12) });
+    writeFileSync(join(root, 'guard.config.json'), disabled);
+    expect(maybeVerdictFor(root, base, head, shipEnv(head))).toBeUndefined();
+  });
+
+  it("prints no verdict when the base tree's policy sets enabled to false", () => {
+    const { root, commit } = repo();
+    const base = commit({ 'guard.config.json': disabled });
+    const head = commit({ 'src/fix.mts': lines(12) });
+    expect(maybeVerdictFor(root, base, head, shipEnv(head))).toBeUndefined();
+  });
+
+  it("keeps the verdict when only the PR turns it off, since the base tree's policy decides", () => {
+    const { root, commit } = repo();
+    const base = commit({ 'guard.config.json': policy(10) });
+    const head = commit({ 'guard.config.json': disabled, 'src/fix.mts': lines(12) });
+    expect(verdictFor(root, base, head, shipEnv(head)).verdict?.verdict).toBe('policy');
   });
 
   it('reads the bypass record as unknown with no telemetry sink', () => {

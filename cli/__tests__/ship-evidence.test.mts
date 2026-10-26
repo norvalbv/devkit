@@ -680,6 +680,25 @@ describe('evidence outcomes', () => {
     expect(readEvidenceBlock(body, run.head)?.mergeVerdict).toBeUndefined();
   });
 
+  it('writes the evidence with no verdict line when the policy sets mergeVerdict.enabled to false', () => {
+    const config = JSON.stringify({
+      sourceExtensions: ['mjs'],
+      evidence: { command: COMMAND },
+      mergeVerdict: { enabled: false },
+    });
+    const run = publishRun(
+      { 'guard.config.json': config },
+      { 'src/value.mjs': FIXED, 'src/value.test.mjs': VALUE_TEST },
+    );
+    const r = run.publish();
+    expect(r.status, r.stderr).toBe(0);
+    const body = readFileSync(run.gh.state, 'utf8');
+    expect(body).not.toContain('Merge verdict');
+    expect(body).toContain(`## Automated evidence\n${VERDICT_SLOT}\n`);
+    expect(readEvidenceBlock(body, run.head)).toMatchObject({ status: 'captured' });
+    expect(readEvidenceBlock(body, run.head)?.mergeVerdict).toBeUndefined();
+  });
+
   it('writes nothing once the PR head has moved past the evidence head', () => {
     const run = publishRun({}, { 'src/value.mjs': FIXED, 'src/value.test.mjs': VALUE_TEST });
     const r = run.publish('f'.repeat(40));
