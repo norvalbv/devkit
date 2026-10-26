@@ -16,13 +16,17 @@ import {
   histogramKey,
   indexWaiverLine,
   INLINE_DIFF_CAP_BYTES,
+  isDecoyWaiver,
   isRealDefectWaiver,
   isSameDiff,
+  LENS_WAIVER_COLUMNS_SQL,
+  lensRowsSql,
   lookupWaiver,
   mergeCandidates,
   newWaiverIndex,
   pickFailReason,
   resolveDiffPayload,
+  resolveWaiverFacts,
   selectFailLensRows,
   sortByTsStart,
   telemetryUrl,
@@ -620,9 +624,44 @@ describe('mine-telemetry-lib: waiver kind from the gate-events sink', () => {
     expect(isRealDefectWaiver(lookupWaiver(indexOf(fresh(kind)), 's1', R, 'races'))).toBe(real);
   });
 
-  it('mints an unclassified or unmatched waiver as before', () => {
-    expect(isRealDefectWaiver({ kind: null, rationale: 'old reason' })).toBe(false);
-    expect(isRealDefectWaiver(null)).toBe(false);
+  it('drops an unclassified or unmatched waiver as unknown, not as a real defect', () => {
+    for (const waiver of [{ kind: null, rationale: 'old reason' }, null]) {
+      expect(isRealDefectWaiver(waiver)).toBe(false);
+      expect(isDecoyWaiver(waiver)).toBe(false);
+    }
+  });
+});
+
+describe('mine-telemetry-lib: resolveWaiverFacts', () => {
+  const sinkFp = { kind: 'false-positive', rationale: 'sink says wrong' };
+
+  it('takes a ship from another machine at its usage.db kind, with no sink line', () => {
+    const facts = resolveWaiverFacts({ waiver_kind: 'deferred', waiver_rationale: 'later' }, null);
+    expect(facts).toEqual({ kind: 'deferred', rationale: 'later' });
+    expect(isRealDefectWaiver(facts)).toBe(true);
+    expect(isDecoyWaiver(facts)).toBe(false);
+  });
+
+  it("keeps the row's own unclassified facts over the sink's", () => {
+    const facts = resolveWaiverFacts({ waiver_kind: null, waiver_rationale: 'old reason' }, sinkFp);
+    expect(facts).toEqual({ kind: null, rationale: 'old reason' });
+    expect(isDecoyWaiver(facts)).toBe(false);
+  });
+
+  it('falls back to the sink when usage.db has no waiver columns or left both blank', () => {
+    expect(resolveWaiverFacts({ ship_id: 's1' }, sinkFp)).toBe(sinkFp);
+    expect(
+      isDecoyWaiver(resolveWaiverFacts({ waiver_kind: null, waiver_rationale: null }, sinkFp)),
+    ).toBe(true);
+    expect(resolveWaiverFacts({ waiver_kind: null, waiver_rationale: null }, null)).toBeNull();
+  });
+
+  it('mints only an explicit false-positive', () => {
+    const row = { waiver_kind: 'false-positive', waiver_rationale: 'reviewer misread' };
+    expect(isDecoyWaiver(resolveWaiverFacts(row, null))).toBe(true);
+    expect(
+      isDecoyWaiver(resolveWaiverFacts({ waiver_kind: 'bogus', waiver_rationale: 'x' }, null)),
+    ).toBe(false);
   });
 });
 
@@ -744,6 +783,43 @@ describe('mine-common: collectRepoArgs', () => {
 
   it('rejects a trailing --repo with no value', () => {
     expect(() => collectRepoArgs(['--dev', '--repo'])).toThrow(/--repo needs a repository name/);
+  });
+});
+
+// The miner exits 0 on any query error, so a broken lens query would mine nothing silently.
+describe('mine-telemetry-lib: lens query against a real usage.db', () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), 'mine-telemetry-lens-'));
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+  const maybe = sqlite3Available() ? it : it.skip;
+  const LENS_COLS = 'ship_id, reviewer, lens, status, disposition, issues_json';
+  const readLenses = (name: string, extraCols: string, extraVals: string) => {
+    const db = path.join(tmp, `${name}.db`);
+    execFileSync('sqlite3', [
+      db,
+      `CREATE TABLE commit_review_lenses(${LENS_COLS}, ts${extraCols});
+       INSERT INTO commit_review_lenses VALUES('s1','r','races','fail','waived',NULL,'t'${extraVals});`,
+    ]);
+    return sqliteJson(db, lensRowsSql(sqliteJson(db, LENS_WAIVER_COLUMNS_SQL)));
+  };
+
+  maybe('reads the waiver columns a current usage.db carries into the resolver', () => {
+    const [row] = readLenses('current', ', waiver_kind, waiver_rationale', ",'deferred','later'");
+    expect(resolveWaiverFacts(row, null)).toEqual({ kind: 'deferred', rationale: 'later' });
+  });
+
+  maybe('reads an older usage.db without them, leaving the row to the sink', () => {
+    const [row] = readLenses('older', '', '');
+    expect(row).toEqual({
+      ship_id: 's1',
+      reviewer: 'r',
+      lens: 'races',
+      status: 'fail',
+      disposition: 'waived',
+      issues_json: null,
+    });
+    expect(resolveWaiverFacts(row, { kind: 'false-positive', rationale: 'x' })?.kind).toBe(
+      'false-positive',
+    );
   });
 });
 
