@@ -14,6 +14,7 @@ import {
   type ShipChange,
   VERDICT_REASONS,
   type VerdictReason,
+  verdictEnabled,
   verdictReasons,
 } from './verdict.mts';
 
@@ -41,6 +42,7 @@ interface LimitFixture {
 }
 /** A `mergeVerdict` value as written in guard.config.json; `maxSourceLine` is a deliberate typo. */
 interface PolicyFixture {
+  enabled?: boolean | string;
   consumerSurface?: string[];
   limits?: Record<string, LimitFixture>;
   maxSourceLines?: number;
@@ -357,6 +359,7 @@ const ROWS: Row[] = [
       'mergeVerdict.limits.default.maxSourceLines',
     ],
     ['an uppercase type', config({ limits: { Fix: {} } }), 'mergeVerdict.limits.Fix'],
+    ['a non-boolean enabled', config({ enabled: 'no' }), 'mergeVerdict.enabled'],
     ['an escaping glob', config({ consumerSurface: ['../x'] }), 'mergeVerdict.consumerSurface.0'],
     [
       'a character class',
@@ -450,6 +453,24 @@ describe('mergeVerdict', () => {
     expect(mergeVerdict(change([p('records/x.md')]), null).reasons).toEqual([
       { code: 'decision-record' },
     ]);
+  });
+});
+
+describe('verdictEnabled', () => {
+  it.each([
+    ['no config', null, true],
+    ['a config without the key', '{"scanRoots":["src"]}', true],
+    ['enabled true', config({ enabled: true }), true],
+    ['enabled false', config({ enabled: false, consumerSurface: ['templates/**'] }), false],
+    ['a non-boolean enabled, which still prints config-invalid', config({ enabled: 'no' }), true],
+    ['malformed JSON, which still prints config-invalid', '{', true],
+  ])('%s', (_name, text, expected) => {
+    expect(verdictEnabled(text)).toBe(expected);
+  });
+
+  it('accepts enabled alongside the other keys without reading as config-invalid', () => {
+    const text = config({ enabled: false, limits: { fix: { maxSourceLines: 10 } } });
+    expect(mergeVerdict(change([p('a.test.mts')]), text).verdict).toBe('auto-merge-eligible');
   });
 });
 

@@ -141,6 +141,7 @@ const GOVERNANCE_GLOBS = [
 const policySchema = z.looseObject({
   mergeVerdict: z
     .strictObject({
+      enabled: z.boolean().default(true),
       consumerSurface: z.array(repoGlobSchema).default([]),
       limits: z
         .record(
@@ -158,6 +159,18 @@ const policySchema = z.looseObject({
 const printable = (text: string): string => text.replace(UNPRINTABLE, '_');
 const anyDepth = (glob: string): RegExp => compileRepoGlob(`**/${glob}`);
 const counted = (n: number | null): boolean => n !== null && Number.isSafeInteger(n) && n >= 0;
+
+/** False only for an explicit `mergeVerdict.enabled: false`; a config that cannot be read keeps the
+ * verdict, so it still prints config-invalid. */
+export function verdictEnabled(configText: string | null): boolean {
+  try {
+    const raw = configText === null ? {} : parseJsonObject<object>(configText, CONFIG_FILENAME);
+    const parsed = policySchema.safeParse(raw);
+    return !parsed.success || parsed.data.mergeVerdict.enabled;
+  } catch {
+    return true;
+  }
+}
 
 /** guard.config.json text (null when absent) to a policy; malformed input throws. */
 function parsePolicy(configText: string | null): Policy {
