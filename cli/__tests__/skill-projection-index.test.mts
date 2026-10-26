@@ -1,6 +1,6 @@
 // sc-2759: the self-host skill-projection advisory judges the pending commit's index, not the
 // working tree a ship refreshes from the running package.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,8 +9,10 @@ import { resetCommitIndexCache } from '../../gate-engine/ratchets/commit-index.m
 import { indexTreeRef } from '../../gate-engine/ratchets/git-index.mts';
 import { treeBlobsAtRef } from '../../gate-engine/ratchets/tree-blobs.mts';
 import {
+  blamedFindings,
   inspectSkillProjectionIntegrity,
   printSkillProjectionWarning,
+  runSkillProjectionGate,
 } from '../lib/husky/skill-projection-integrity.mts';
 import { agentAssetDir } from '../lib/install/agent-assets/agent-assets.mts';
 import { rootRegistry } from './_helpers.mts';
@@ -368,6 +370,198 @@ describe('skill projection advisory reads the commit index (sc-2759)', () => {
     expect(() => git(root, ['merge', '-q', 'side'])).toThrow();
 
     expect(inspectSkillProjectionIntegrity(root).active).toBe(false);
+  });
+});
+
+/** Run the gate with console captured; returns its exit code and everything it printed. */
+function gate(root: string) {
+  const lines: string[] = [];
+  const capture = (line: string) => lines.push(line);
+  const { log, error } = console;
+  console.log = capture;
+  console.error = capture;
+  try {
+    return { code: runSkillProjectionGate(root), output: lines.join('\n') };
+  } finally {
+    console.log = log;
+    console.error = error;
+  }
+}
+
+describe('skill projection gate blames only the drift this commit caused (sc-3950)', () => {
+  const twoSkills = { 'review/SKILL.md': '# Review\n', 'other/SKILL.md': '# Other\n' };
+
+  it('blocks a staged skill edit whose provider copies were not synced, naming only that skill', () => {
+    const root = devkitGitRepo(twoSkills);
+    write(root, '.claude/skills/other/SKILL.md', '# Other, already stale\n');
+    git(root, ['commit', '-q', '-am', 'pre-existing drift']);
+    write(root, 'skills/review/SKILL.md', '# Review v2\n');
+    git(root, ['add', 'skills']);
+
+    const { code, output } = gate(root);
+    expect(code).toBe(1);
+    expect(output).toContain('stale .claude/skills/review/SKILL.md');
+    expect(output).toContain('stale .cursor/skills/review/SKILL.md');
+    expect(output).toContain('sync-skills');
+    expect(output).not.toContain('other');
+    // dist lags until the next release by design: it is reported by the advisory, never blamed.
+    expect(output).not.toContain('dist/skills');
+  });
+
+  it('passes a synced skill edit despite pre-existing drift elsewhere and a missing dist copy', () => {
+    const root = devkitGitRepo(twoSkills);
+    write(root, '.claude/skills/other/SKILL.md', '# Other, already stale\n');
+    git(root, ['commit', '-q', '-am', 'pre-existing drift']);
+    // A new skill file synced to every provider but not to the release-only dist/.
+    for (const dir of ['skills', '.claude/skills', '.cursor/skills'])
+      write(root, `${dir}/review/ref.md`, 'ref\n');
+    git(root, ['add', '-A']);
+
+    expect(inspectSkillProjectionIntegrity(root).findings.sort()).toEqual([
+      'missing dist/skills/review/ref.md',
+      'stale .claude/skills/other/SKILL.md',
+    ]);
+    expect(gate(root)).toEqual({ code: 0, output: '' });
+  });
+
+  it('blocks a deleted skill file whose tracked provider copy is left behind', () => {
+    const root = devkitGitRepo({ 'review/SKILL.md': '# Review\n', 'review/ref.md': 'ref\n' });
+    git(root, ['rm', '-q', 'skills/review/ref.md', 'dist/skills/review/ref.md']);
+
+    const { code, output } = gate(root);
+    expect(code).toBe(1);
+    expect(output).toContain('orphan .claude/skills/review/ref.md');
+    expect(output).toContain('remove orphan files explicitly');
+  });
+
+  it('passes a staged symlink source whose provider copies match, since sync cannot repair it', () => {
+    const root = devkitGitRepo();
+    write(root, 'elsewhere.md', '# Review\n');
+    rmSync(join(root, 'skills/review/SKILL.md'));
+    symlinkSync('../../elsewhere.md', join(root, 'skills/review/SKILL.md'));
+    git(root, ['add', '-A']);
+
+    // The advisory still reports it; blocking would name a sync-skills remedy that changes nothing.
+    expect(inspectSkillProjectionIntegrity(root).findings).toEqual([
+      'unreadable skills/review/SKILL.md',
+    ]);
+    expect(gate(root).code).toBe(0);
+  });
+
+  it('blames a renamed skill for both its left-behind and its missing copies', () => {
+    const root = devkitGitRepo();
+    git(root, ['mv', 'skills/review', 'skills/reviewer']);
+
+    const { code, output } = gate(root);
+    expect(code).toBe(1);
+    expect(output).toContain('orphan .claude/skills/review/SKILL.md');
+    expect(output).toContain('missing .claude/skills/reviewer/SKILL.md');
+  });
+
+  it('blames from the carrier index of a partial commit, not the default index', () => {
+    const root = devkitGitRepo();
+    const gitDir = join(root, '.git');
+    const partial = join(gitDir, 'next-index-4242.lock');
+    copyFileSync(join(gitDir, 'index'), partial);
+    write(root, 'skills/review/SKILL.md', '# Review v2\n');
+    // Only the partial commit's index carries the unsynced edit; the default index matches HEAD.
+    git(root, ['add', 'skills'], { ...process.env, GIT_INDEX_FILE: partial });
+    expect(gate(root).code).toBe(0);
+
+    Object.assign(process.env, {
+      DEVKIT_COMMIT_INDEX_FILE: partial,
+      DEVKIT_COMMIT_GIT_DIR: gitDir,
+    });
+    resetCommitIndexCache();
+    expect(gate(root).code).toBe(1);
+  });
+
+  it('blocks a hand edit staged only in a provider copy', () => {
+    const root = devkitGitRepo();
+    write(root, '.cursor/skills/review/SKILL.md', '# edited in place\n');
+    git(root, ['add', '.cursor']);
+
+    expect(gate(root).code).toBe(1);
+  });
+
+  it('blames every provider finding when the staged manifest adds a provider', () => {
+    const root = devkitGitRepo();
+    write(root, '.devkit/skills-manifest.json', manifest(['claude', 'cursor', 'codex']));
+    git(root, ['add', '.devkit']);
+
+    const { code, output } = gate(root);
+    expect(code).toBe(1);
+    expect(output).toContain('missing .agents/skills/review/SKILL.md');
+  });
+
+  it('stands down on an unmerged index rather than blaming the tree', () => {
+    const root = devkitGitRepo();
+    git(root, ['checkout', '-q', '-b', 'side']);
+    write(root, 'skills/review/SKILL.md', '# side\n');
+    git(root, ['commit', '-q', '-am', 'side']);
+    git(root, ['checkout', '-q', '-']);
+    write(root, 'skills/review/SKILL.md', '# main\n');
+    git(root, ['commit', '-q', '-am', 'main']);
+    expect(() => git(root, ['merge', '-q', 'side'])).toThrow();
+
+    const { code, output } = gate(root);
+    expect(code).toBe(0);
+    expect(output).toContain('nothing was judged');
+  });
+
+  it('is silent outside devkit', () => {
+    const root = devkitGitRepo();
+    write(root, 'package.json', `${JSON.stringify({ name: 'consumer' })}\n`);
+    write(root, 'skills/review/SKILL.md', '# Review v2\n');
+    git(root, ['add', '-A']);
+
+    expect(gate(root)).toEqual({ code: 0, output: '' });
+  });
+
+  it('maps shared and vendored skill directories by their first path segment', () => {
+    const staged = new Set(['skills/_devkit/review-roots.mjs']);
+    expect(
+      blamedFindings(
+        [
+          'stale .claude/skills/_devkit/review-roots.mjs',
+          'orphan .claude/skills/i-have-adhd/SKILL.md',
+          'stale dist/skills/_devkit/review-roots.mjs',
+        ],
+        staged,
+      ),
+    ).toEqual(['stale .claude/skills/_devkit/review-roots.mjs']);
+    // A finding's path starts after the FIRST space only, so a spaced skill name still matches.
+    expect(
+      blamedFindings(
+        ['stale .cursor/skills/my skill/SKILL.md'],
+        new Set(['skills/my skill/SKILL.md']),
+      ),
+    ).toEqual(['stale .cursor/skills/my skill/SKILL.md']);
+  });
+
+  it('exits through the --gate entrypoint with the gate verdict', () => {
+    const root = devkitGitRepo();
+    const run = () =>
+      spawnSync('node', [script, '--root', root, '--gate'], {
+        encoding: 'utf8',
+        timeout: SPAWN_TIMEOUT_MS,
+      });
+    expect(run().status).toBe(0);
+
+    write(root, 'skills/review/SKILL.md', '# Review v2\n');
+    git(root, ['add', 'skills']);
+    const blocked = run();
+    expect(blocked.status).toBe(1);
+    expect(blocked.stderr).toContain('caused by this commit');
+  });
+
+  it('passes rather than blocks when the gate itself cannot start', () => {
+    const run = spawnSync('node', [script, '--gate'], {
+      encoding: 'utf8',
+      timeout: SPAWN_TIMEOUT_MS,
+    });
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain('did not run');
   });
 });
 

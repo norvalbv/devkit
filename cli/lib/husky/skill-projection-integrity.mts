@@ -5,6 +5,7 @@ import { emitAdvisoryResult } from '../../../gate-engine/judge/advisory/emit.mts
 import {
   indexTreeRef,
   isGitWorktree,
+  stagedTouchedSet,
   treeTextAtRef,
 } from '../../../gate-engine/ratchets/git-index.mts';
 import { treeBlobsAtRef } from '../../../gate-engine/ratchets/tree-blobs.mts';
@@ -37,13 +38,18 @@ export interface SkillProjectionIntegrityReport {
 const MANIFEST = '.devkit/skills-manifest.json';
 // A finding is `<kind> <path>`; anchor on the path so a provider file named `x dist/skills/y` is not dist.
 const DIST_FINDING_RE = /^\S+ dist\/skills\//;
+// The classes sync-skills or a delete repairs; `unchecked`/`unreadable` judged nothing, so never block.
+const REPAIRABLE_FINDING_RE = /^(?:missing|stale|orphan) /;
 const CONFIG = '.devkit/config.json';
+const PROVIDER_SKILL_DIRS = SUPPORTED_AGENT_PROVIDERS.map((provider) =>
+  agentAssetDir(provider, 'skills'),
+);
 // Every path the advisory reads. Provider dirs come from the one registry the writers use.
 const SNAPSHOT_PATHS = [
   'package.json',
   'skills',
   'dist/skills',
-  ...SUPPORTED_AGENT_PROVIDERS.map((provider) => agentAssetDir(provider, 'skills')),
+  ...PROVIDER_SKILL_DIRS,
   MANIFEST,
   CONFIG,
 ];
@@ -169,12 +175,18 @@ export function printSkillProjectionWarning(report: SkillProjectionIntegrityRepo
         ? '  Judged: the staged commit index (unstaged working-tree edits are not counted).'
         : '  Judged: the working tree (no git repository).',
     );
-  const orphans = report.findings.filter((finding) => finding.startsWith('orphan '));
-  const repairs = report.findings.filter((finding) => !finding.startsWith('orphan '));
+  printRepairs(report.findings, report.source);
+  return 0;
+}
+
+/** Each finding, then the repair its class needs: re-sync for missing/stale, deletion for orphans. */
+function printRepairs(findings: string[], source?: ProjectionSource): void {
+  const orphans = findings.filter((finding) => finding.startsWith('orphan '));
+  const repairs = findings.filter((finding) => !finding.startsWith('orphan '));
   for (const finding of repairs) console.error(`  ${finding}`);
   const isDist = (finding: string) => DIST_FINDING_RE.test(finding);
   if (repairs.some((finding) => !isDist(finding))) {
-    const stage = report.source === 'index' ? ', then `git add` the result' : '';
+    const stage = source === 'index' ? `, then \`git add\` the result and ${MANIFEST}` : '';
     console.error(
       `  Repair missing/stale provider files with \`${selfHostCommand(SYNC_SKILLS)}\`${stage}.`,
     );
@@ -188,7 +200,42 @@ export function printSkillProjectionWarning(report: SkillProjectionIntegrityRepo
     console.error('  Orphans (sync never removes these; remove orphan files explicitly):');
     for (const finding of orphans) console.error(`    ${finding}`);
   }
-  return 0;
+}
+
+/** The skill a repo path belongs to: `skills/<name>/…` or `<provider skills dir>/<name>/…`. */
+function skillNameOf(path: string): string | null {
+  const dir = ['skills', ...PROVIDER_SKILL_DIRS].find((prefix) => path.startsWith(`${prefix}/`));
+  return dir ? path.slice(dir.length + 1).split('/')[0] : null;
+}
+
+/** Provider drift this commit caused: under a skill it touched, or all of it when it staged config. */
+export function blamedFindings(findings: string[], staged: Set<string>): string[] {
+  const blameAll = staged.has(CONFIG) || staged.has(MANIFEST);
+  const touched = new Set([...staged].map(skillNameOf));
+  return findings.filter(
+    (finding) =>
+      !DIST_FINDING_RE.test(finding) &&
+      REPAIRABLE_FINDING_RE.test(finding) &&
+      (blameAll || touched.has(skillNameOf(finding.slice(finding.indexOf(' ') + 1)))),
+  );
+}
+
+/** Block only on provider drift the staged change caused; dist and pre-existing drift stay advisory. */
+export function runSkillProjectionGate(root: string): number {
+  const report = inspectSkillProjectionIntegrity(root);
+  if (!report.active) return 0;
+  const staged = stagedTouchedSet(root);
+  if (!staged || report.findings.some((finding) => finding.startsWith('unchecked '))) {
+    console.log('⚠ Skill projection gate could not read the staged change — nothing was judged.');
+    return 0;
+  }
+  const blamed = blamedFindings(report.findings, staged);
+  if (!blamed.length) return 0;
+  console.error(
+    `🚫 Skill projection drift caused by this commit — ${blamed.length} provider file(s) do not match skills/:`,
+  );
+  printRepairs(blamed, report.source);
+  return 1;
 }
 
 function parseRoot(args: string[]): string {
@@ -211,7 +258,20 @@ function emitProjectionAdvisory(report: SkillProjectionIntegrityReport): void {
   );
 }
 
+// `--extra` blocks on any non-zero exit, so a crash in the gate must pass rather than block.
+function gateMain(args: string[]): void {
+  try {
+    process.exitCode = runSkillProjectionGate(parseRoot(args));
+  } catch (error) {
+    console.log(
+      `⚠ Skill projection gate did not run (${error instanceof Error ? error.message : String(error)}) — nothing was judged.`,
+    );
+    process.exitCode = 0;
+  }
+}
+
 function main(): void {
+  if (process.argv.includes('--gate')) return gateMain(process.argv.slice(2));
   try {
     const report = inspectSkillProjectionIntegrity(parseRoot(process.argv.slice(2)));
     process.exitCode = printSkillProjectionWarning(report);
