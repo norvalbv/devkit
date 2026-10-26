@@ -101,7 +101,7 @@ export const deniedCalls = (denied: string[]): string =>
 /** Why a PASS left no artifact, from the spawn's measured denials; unmeasured keeps the bare text. */
 function missingArtifactCause(denied?: string[] | null): string {
   if (denied?.length)
-    return `${deniedCalls(denied)}; run the checklist commands exactly as written`;
+    return `${deniedCalls(denied)} (the allowlist runs Bash only for the checklist commands, spelled as given)`;
   return `the judge skipped the checklist workflow${denied ? ' (no tool call was denied)' : ''}`;
 }
 
@@ -196,6 +196,9 @@ export interface ReviewOutcome {
   /** Epoch ms the provider said its limit clears, when it named one — so the fail-closed remedy can
    * say how long the wait is instead of telling the operator to re-run into the same wall. */
   outageResetsAt?: number;
+  /** Refused tool calls of the spawn behind a checklist contract miss; unset when unmeasured or
+   * the artifact holds a FAILED item, which is a candidate violation rather than a judge-side miss. */
+  refusedCalls?: number;
   transcript?: string;
   /** Contract-validated waiver lenses of a FAIL — the only findings the override valve may
    * block or waive (a fabricated pair beside a grounded one must not demand its own waiver). */
