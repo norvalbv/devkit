@@ -4,7 +4,7 @@ import { parsePriorArtResponse } from '../../prior-art/response-contract.mjs';
 import { parseJudgeUsage, recordPermissionDenials, unwrapClaudeResult, withResultArgs, } from '../claude-result.mjs';
 import { saveCodexCommands } from '../codex/commands.mjs';
 import { codexFailure, judgeBinFor, judgeCliFor, parseClaudeArgv, parseCodexUsage, unwrapCodexResult, } from '../codex/result.mjs';
-import { prepareCodexSandbox } from '../codex/workspace.mjs';
+import { prepareCodexSandbox, } from '../codex/workspace.mjs';
 import { emitGateEvent } from '../gate-events.mjs';
 import { withoutGitEnv } from '../judge-isolation.mjs';
 import { prepareJudgeMcpProfile, spawnDegradedCause, } from '../mcp/profile.mjs';
@@ -146,7 +146,7 @@ export function cleanupJudgeRun(run) {
 /** Route the argv to its binary and build the spawn options. Callers run it inside their try, so
  *  an argv a codex model cannot express settles as ONE outage instead of throwing. */
 export function routeJudge(opts, run) {
-    run.ws = prepareCodexSandbox(opts.args, opts.codexReadOnly === true, opts.cwd ?? process.cwd());
+    run.ws = prepareCodexSandbox(opts.args, opts, opts.cwd ?? process.cwd());
     const cli = spawnFor(opts.args, run.mcp, run.ws);
     opts.onMcpPrepared?.(run.mcp.capabilityFingerprint, spawnDegradedCause(run.mcp, cli.mcpInjected));
     const spawnOptions = {

@@ -294,10 +294,9 @@ export function ffBlockers(root, upstream, exempt) {
             if (upstreamAdds.has(p))
                 maybeUntracked.push(p);
         }
-        else if (st[0] !== ' ')
-            blocked.push(p); // index differs from HEAD → reject_merge
-        else if (WT_BLOCKING.has(st[1]))
-            blocked.push(p); // worktree differs from index → verify_uptodate
+        // index differs from HEAD → reject_merge; worktree differs from index → verify_uptodate
+        else if (st[0] !== ' ' || WT_BLOCKING.has(st[1]))
+            blocked.push(p);
     }
     if (maybeUntracked.length > 0) {
         const collisions = untrackedAt(root, maybeUntracked);

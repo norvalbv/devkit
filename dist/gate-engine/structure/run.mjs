@@ -7,6 +7,7 @@
 //
 //   guard-structure gate     # lint all declared structure roots (CI/manual)
 //   guard-structure staged   # lint only staged structure input (generated pre-commit hook)
+//   guard-structure preflight -- <path...>   # would these (possibly new) paths be rejected?
 //
 // PARAMETERIZED (W-3): the trees / roots / grammar / baselines all come from resolveGuardConfig(cwd)
 // — the consumer's guard.config.json under the consumer cwd, never the package dir. Grandfathering is
@@ -17,22 +18,22 @@
 // 2 fail-open (could-not-run).
 import { execFileSync } from 'node:child_process';
 import { commitIndexEnv } from '../ratchets/commit-index.mjs';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ESLint } from 'eslint'; // devkit's OWN eslint (now a dependency), never the consumer's
 import { z } from 'zod';
 import { resolveGuardConfig } from '../config.mjs';
 import { gitPrefix, nameStatusRecords, splitNul } from '../ratchets/git-index.mjs';
-import { buildStructureConfigs } from './eslint-config.mjs';
-import { eslintNodeFlags, LINKED_ISOLATED_STORE, linkedIsolatedStore, } from './eslint-node-flags.mjs';
+import { lintAttributed } from './attribution.mjs';
+import { noGrammarResult, preflightStructure, withStructureLinter } from './preflight.mjs';
+import { runPresetAttributed, runPresetLint } from './preset-lint.mjs';
 import { clean, combineStructureResults, couldNotRun, violations, withStructureConfigGaps, } from './verdict.mjs';
 export { combineStructureResults };
 // ESLint throws "No files matching the pattern" for an absent tree and "…are ignored" when every file
 // in a present tree is ignored — both mean "nothing to lint" (clean), not a failure. Hoisted (perf).
 const NOTHING_TO_LINT_RE = /No files matching|are ignored/i;
 const ELECTRON_SOURCE_EXTENSIONS = ['ts', 'tsx', 'css'];
+const STAGED_NAMES = ['diff', '--cached', '--name-only', '-z'];
 const POLICY_PATH_RE = /^(?:(?:eslint\.config\.mjs|guard\.config\.json|eslint\/domains\.mjs|\.devkit\/(?:config\.json|structure\/exempt\.mjs|baselines\/imports\.mjs))$|eslint\/baselines\/|\.devkit\/baselines\/structure\/)/;
 function pathInRoot(file, root) {
     const cleanRoot = root.replace(/\/+$/, '');
@@ -176,28 +177,6 @@ function stagedScopes(cwd, electron) {
     const configScopes = rootedTrees.map((tree) => treeScope(tree, 'grammar'));
     return configScopes.length ? configScopes : scanRootScopes('grammar');
 }
-// The electron preset leg: the consumer's locally pinned eslint + its own eslint.config.mjs.
-function runPresetLint(cwd, targets) {
-    const eslintBin = join(cwd, 'node_modules', 'eslint', 'bin', 'eslint.js');
-    if (!existsSync(eslintBin)) {
-        return couldNotRun('electron structure lint needs the locally pinned eslint binary');
-    }
-    if (linkedIsolatedStore(cwd))
-        return couldNotRun(LINKED_ISOLATED_STORE);
-    // An empty root is clean, not ESLint's exit-2 "no files matching".
-    const args = [...eslintNodeFlags(cwd), eslintBin, '--no-error-on-unmatched-pattern', '--'];
-    try {
-        execFileSync(process.execPath, [...args, ...targets], { cwd, stdio: 'inherit' });
-        return clean();
-    }
-    catch (e) {
-        // ESLint exits 1 for lint errors only; a crash, a broken config or a failed spawn did not lint.
-        const status = e instanceof Error && 'status' in e ? e.status : undefined;
-        if (status === 1)
-            return violations(0, 'guard-structure: local eslint failed');
-        return couldNotRun(`local eslint exited abnormally (status ${String(status ?? 'unknown')})`);
-    }
-}
 function firstProbeFile(cwd, scope, excluded) {
     const pending = [scope.root];
     while (pending.length) {
@@ -226,7 +205,7 @@ export async function runStagedStructureGate(cwd = process.cwd()) {
         // `unstaged` below and defers as policy, instead of silently routing on bytes nobody staged.
         const stack = electronPreset(cwd);
         const prefix = gitPrefix(cwd);
-        const changed = toCwdPaths(gitPaths(cwd, ['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR']), prefix);
+        const changed = toCwdPaths(gitPaths(cwd, [...STAGED_NAMES, '--diff-filter=ACMR']), prefix);
         // Name-status preserves both sides of a rename, unlike name-only. Either side can remove a
         // required sibling, so either must probe its containing structure root.
         const destructive = toCwdPaths(destructivePaths(cwd), prefix);
@@ -263,10 +242,11 @@ export async function runStagedStructureGate(cwd = process.cwd()) {
         const legFiles = (leg) => unique([...plan.targets, ...probeTargets]).filter((file) => scopes.some((scope) => scope.leg === leg && pathInScope(file, scope)));
         const presetFiles = legFiles('preset');
         const grammarFiles = legFiles('grammar');
-        if (presetFiles.length)
-            results.push(runPresetLint(cwd, presetFiles));
-        if (grammarFiles.length)
-            results.push(await runGrammarLint(cwd, grammarFiles));
+        const added = new Set(toCwdPaths(gitPaths(cwd, [...STAGED_NAMES, '--diff-filter=AC']), prefix));
+        // A staged policy edit, deletion or rename can change an edited file's verdict too.
+        const stable = !destructive.length && !changed.some((f) => isPolicyPath(f) || routingInputs.includes(f));
+        results.push(...(await runPresetAttributed(cwd, presetFiles, added, stable)));
+        results.push(...(await lintAttributed(cwd, grammarFiles, added, stable, runGrammarLint)));
         return withStructureConfigGaps(cwd, combineStructureResults(results));
     }
     catch (error) {
@@ -294,7 +274,7 @@ async function structureLegs(cwd, targets) {
     const presetRoots = cfg.scanRoots.filter((root) => existsSync(join(cwd, root)));
     const results = [];
     if (presetRoots.length)
-        results.push(runPresetLint(cwd, presetRoots));
+        results.push(await runPresetLint(cwd, presetRoots));
     if (trees.some((tree) => tree.grammar))
         results.push(await runGrammarLint(cwd));
     if (!results.length)
@@ -305,28 +285,15 @@ async function structureLegs(cwd, targets) {
 async function runGrammarLint(cwd, targets) {
     try {
         const cfg = resolveGuardConfig(cwd);
-        const baseConfig = await buildStructureConfigs(cwd);
-        if (!baseConfig.length)
-            return couldNotRun('no structure.trees[].grammar declared (preset-only consumer); the electron preset leg runs only for an electron stack (recorded, else detected)');
         // Only GRAMMAR roots, and only those on disk: a preset root enclosing a grammar root would lint
         // that grammar root a second time.
         const trees = cfg.structure?.trees ?? [];
         const grammarRoots = trees.flatMap((tree) => (tree.grammar && tree.root ? [tree.root] : []));
         const roots = (targets ?? grammarRoots).filter((target) => existsSync(join(cwd, target)));
-        if (!roots.length)
-            return couldNotRun('no structure root is both declared in guard.config.json and present on disk');
-        // The plugin's error cache drops a message already cached for another filename; persisted in the
-        // repo root it silences the next run (sc-2309), so it lives for this run only.
-        const cacheDir = mkdtempSync(join(tmpdir(), 'devkit-structure-cache-'));
-        try {
-            return await lintStructureRoots(cwd, roots, [
-                ...baseConfig,
-                { settings: { 'project-structure/cache-location': cacheDir } },
-            ]);
-        }
-        finally {
-            rmSync(cacheDir, { recursive: true, force: true });
-        }
+        const result = await withStructureLinter(cwd, (eslint) => roots.length
+            ? lintStructureRoots(eslint, roots)
+            : Promise.resolve(couldNotRun('no structure root is both declared in guard.config.json and present on disk')));
+        return result ?? noGrammarResult();
     }
     catch (e) {
         // Fail OPEN (exit 2), like the ratchet gates when their baseline is missing — a structure gate
@@ -335,8 +302,7 @@ async function runGrammarLint(cwd, targets) {
         return couldNotRun(message);
     }
 }
-async function lintStructureRoots(cwd, roots, baseConfig) {
-    const eslint = new ESLint({ cwd, overrideConfigFile: true, baseConfig });
+async function lintStructureRoots(eslint, roots) {
     // Lint each root INDEPENDENTLY: a batched lintFiles fail-fasts on the first empty/all-ignored root
     // and would mask a sibling's violation; per-root, that root is its own "clean".
     const allResults = [];
@@ -359,8 +325,12 @@ async function lintStructureRoots(cwd, roots, baseConfig) {
     return violations(errorCount, text);
 }
 export async function runCli(cmd = 'gate') {
+    const paths = process.argv.slice(4);
+    if (cmd === 'preflight' && process.argv[3] === '--' && paths.length > 0) {
+        process.exit(await preflightStructure(process.cwd(), paths));
+    }
     if (cmd !== 'gate' && cmd !== 'staged') {
-        console.error('usage: guard-structure <gate|staged>');
+        console.error('usage: guard-structure <gate|staged|preflight -- path...>');
         process.exit(2);
     }
     const { code, text } = cmd === 'staged'
@@ -371,8 +341,8 @@ export async function runCli(cmd = 'gate') {
             console.error(text);
         console.error('🚫 Structure violations (folder-structure). Rename/relocate the file(s) to match the declared grammar, or (if intentional) re-grandfather via `devkit init`.');
     }
-    else if (code === 2 && text) {
-        console.error(text); // fail-open notice on stderr; still exits 2 (pass)
+    else if (text) {
+        console.error(text); // fail-open notice or pre-existing advisory; both pass
     }
     process.exit(code);
 }

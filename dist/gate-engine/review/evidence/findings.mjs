@@ -35,28 +35,41 @@ export function isBlockingItem(item) {
 /** Every blocking issue a reviewer's lenses reported, one line each, deduplicated and bounded. */
 export function summarizeFindings(items) {
     const seen = new Set();
-    const lines = [];
-    let total = 0;
-    let deduped = 0;
+    const summary = { lines: [], total: 0, deduped: 0, unlisted: 0 };
     for (const item of items ?? []) {
         if (!isBlockingItem(item))
             continue;
         for (const issue of item.issues ?? []) {
             const key = fingerprint(item.lens, issue);
             if (seen.has(key)) {
-                deduped += 1;
+                summary.deduped += 1;
                 continue;
             }
             seen.add(key);
-            total += 1;
-            if (lines.length < FINDINGS_CAP) {
-                const loc = issue.match(LOCATION_RE);
-                const text = issue.replace(/\s+/g, ' ').trim().slice(0, ISSUE_LINE_CHARS);
-                lines.push(`  • ${item.lens}${loc ? ` · ${loc[1]}:${loc[2]}` : ''} — ${text}`);
-            }
+            listOrCount(summary, 1, () => issueLine(item.lens, issue));
         }
+        const omitted = item.issues_omitted ?? 0;
+        if (omitted > 0)
+            listOrCount(summary, omitted, () => omittedLine(item.lens, omitted));
     }
-    return { lines, total, deduped };
+    return summary;
+}
+/** Counts `count` findings and lists them on one line while FINDINGS_CAP has room. */
+function listOrCount(summary, count, line) {
+    summary.total += count;
+    if (summary.lines.length < FINDINGS_CAP)
+        summary.lines.push(line());
+    else
+        summary.unlisted += count;
+}
+function issueLine(lens, issue) {
+    const loc = issue.match(LOCATION_RE);
+    const text = issue.replace(/\s+/g, ' ').trim().slice(0, ISSUE_LINE_CHARS);
+    return `  • ${lens}${loc ? ` · ${loc[1]}:${loc[2]}` : ''} — ${text}`;
+}
+/** The per-lens cap dropped these before the gate saw their text, so the remedy is the knob. */
+function omittedLine(lens, omitted) {
+    return `  • ${lens} — +${omitted} more issue(s) past the per-lens cap; raise GUARD_REVIEW_MAX_ISSUES_PER_LENS (max 10) to record them`;
 }
 /** `items` spills to an `itemsRef` sidecar past the event byte budget (items.mts) — the block must
  * not vanish on exactly the multi-finding failures it exists for, so read the spill back. */
@@ -78,11 +91,11 @@ function resolveItems(res, readRef) {
  * split reviewer's failing lens parts so multi-lens failures never fragment or double-count. */
 export function renderFindingsBlockForParts(name, parts, readRef = readTranscript, withHint = true, driftDeps = {}) {
     const items = parts.flatMap((part) => resolveItems(part, readRef) ?? []);
-    const { lines, total, deduped } = summarizeFindings(items);
+    const { lines, total, deduped, unlisted } = summarizeFindings(items);
     if (lines.length === 0)
         return '';
     const folded = deduped > 0 ? `, ${deduped} duplicate(s) folded` : '';
-    const more = total > lines.length ? `\n  …and ${total - lines.length} more in the transcript` : '';
+    const more = unlisted > 0 ? `\n  …and ${unlisted} more not shown` : '';
     const hint = withHint ? `\n${CLASS_FIX_HINT}` : '';
     const drift = scopeDriftHint(name, items, driftDeps);
     return `${name}: ${total} finding(s)${folded}:\n${lines.join('\n')}${more}${hint}${drift ? `\n${drift}` : ''}`;

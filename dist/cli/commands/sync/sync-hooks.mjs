@@ -16,7 +16,7 @@ import { AGENT_TARGETS } from '../../lib/components.mjs';
 import { detectGitRoot } from '../../lib/detect-git-root.mjs';
 import { readJson } from '../../lib/fs-helpers.mjs';
 import { isAgentProvider, resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from '../../lib/install/agent-assets/agent-providers.mjs';
-import { hookScriptsFor } from '../../lib/install/hook-registration-ledger/selection.mjs';
+import { hookScriptsFor, placementSelected, } from '../../lib/install/hook-registration-ledger/selection.mjs';
 import { syncHookScripts } from '../../lib/install/install-hooks.mjs';
 // `--flag a,b` → ['a','b']; undefined when the flag is absent (so a caller-default can apply).
 function listFlag(args, name) {
@@ -70,6 +70,9 @@ export default function run(args, cwd) {
     const baseDrift = cfg?.components?.baseDrift ?? false;
     // And for the anti-slop preflight hook, owned by the antiSlop component.
     const antiSlop = cfg?.components?.antiSlop ?? false;
+    const fanout = cfg?.components?.guards?.includes('fanout') ?? false;
+    // And for the placement brief, owned by the fanout guard or the structure component.
+    const placement = placementSelected(cfg?.components ?? {});
     const explicitTargets = listFlag(args, '--targets');
     const targets = explicitTargets ??
         (cfg
@@ -89,6 +92,8 @@ export default function run(args, cwd) {
         priorArtGate,
         baseDrift,
         antiSlop,
+        fanout,
+        placement,
     });
     syncHookScripts(gitRoot, {
         dryRun: args.includes('--dry-run'),

@@ -194,12 +194,14 @@ export function attachItems(res, state, disposition, opts = {}) {
     const capped = ordered.slice(0, ITEM_CAP).map((it) => {
         const lens = String(it.name ?? it.path ?? '(finding)').slice(0, LENS_CHARS);
         // checkItem clears issues on a pass, so this only ever carries text for a non-pass.
-        const issues = (Array.isArray(it.issues) ? it.issues : [])
+        const recorded = Array.isArray(it.issues) ? it.issues : [];
+        const issues = recorded
             .slice(0, issuesPerLensCap())
             .map((issue) => String(issue).slice(0, ISSUE_CHARS));
+        const omitted = recorded.length - issues.length;
         const lensDisposition = disposition.get(lens);
         const waiver = waiverByLens.get(lens);
-        return {
+        const item = {
             lens,
             status: String(it.status),
             ...(lensDisposition ? { disposition: lensDisposition } : {}),
@@ -211,6 +213,9 @@ export function attachItems(res, state, disposition, opts = {}) {
                 }
                 : {}),
         };
+        if (omitted > 0)
+            item.issues_omitted = omitted;
+        return item;
     });
     // The tally is always inline: it is the cheap answer to "did these lenses fire", and it must
     // survive a spill.

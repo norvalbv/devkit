@@ -109,6 +109,7 @@ export const DEFAULTS = Object.freeze({
         frontendRoots: [],
         trustBoundaries: '',
         shortcutTracking: false,
+        prNotes: true,
         accessibility: Object.freeze({ skipTouchTargets: false }),
         // Where the synced reviewer agent .md briefs live — guard-review wraps these for its
         // headless judges (the SAME files the root agent dispatches interactively).

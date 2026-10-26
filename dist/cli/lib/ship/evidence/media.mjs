@@ -1,7 +1,7 @@
 /** The QA-capture section of the evidence block: what `devkit machine run` recorded, the apt part of
  * it uploaded to GitHub through `gh --attach`, and why anything else was left out. */
 import { shotFile } from '../../machine/manifest.mjs';
-import { sectionBegin, sectionEnd, sectionOf, withSection } from './block.mjs';
+import { details, sectionBegin, sectionEnd, sectionOf, withSection } from './block.mjs';
 export const QA_BEGIN = sectionBegin('qa');
 export const QA_END = sectionEnd('qa');
 const ATTACHMENT = /https:\/\/github\.com\/user-attachments\/assets\/[A-Za-z0-9-]+/;
@@ -73,14 +73,22 @@ export function renderQaSection(plan, refs) {
     ]);
     return [
         QA_BEGIN,
-        '#### QA capture (devkit machine)',
-        '',
-        ...media,
-        ...plan.notes.map((note) => `- ${note}`),
-        ...(plan.notes.length ? [''] : []),
-        "<sub>Recorded by `devkit machine run` on the agent's own machine: a captured run, not proof of causality.</sub>",
+        ...details(qaSummary(shown), [
+            ...media,
+            ...plan.notes.map((note) => `- ${note}`),
+            ...(plan.notes.length ? [''] : []),
+            "<sub>Recorded by `devkit machine run` on the agent's own machine: a captured run, not proof of causality.</sub>",
+        ]),
         QA_END,
     ].join('\n');
+}
+/** The section's collapsed line: what it attached, or that it attached nothing (its notes say why). */
+function qaSummary(shown) {
+    if (!shown.length)
+        return '⚠️ <b>QA capture</b> · nothing attached';
+    const flows = new Set(shown.map((entry) => entry.flow)).size;
+    const kinds = [...new Set(shown.map((entry) => entry.kind))].join(' + ');
+    return `🎬 <b>QA capture</b> · ${flows} flow${flows === 1 ? '' : 's'} passed · ${kinds}`;
 }
 export const qaSectionOf = (body) => sectionOf('qa', body);
 /** Every uploaded capture in `body`, by short sha: the line after a sha cell is its media line. */

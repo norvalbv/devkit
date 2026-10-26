@@ -84,6 +84,7 @@ function fileChange(source, file) {
         removedRuns,
         // A new file is wholly this change's; otherwise only growth makes existing lines this change's.
         grew: staged !== null && (head === null || countLines(staged) > countLines(head)),
+        isNew: staged !== null && head === null,
     };
 }
 /** Whether `quote` lies in the SMALLEST run of 1..MAX_SPAN joined lines starting at `start` (0-based),
@@ -123,8 +124,14 @@ function inStagedWindow(cited, quote, change) {
             return true;
     return false;
 }
-function isGrounded(finding, forms, change) {
-    const staged = (quote) => quote !== null && inStagedWindow(finding.offendingLine, quote, change);
+function isGrounded(finding, forms, change, path) {
+    const line = finding.offendingLine;
+    // A whole-file citation quotes the file's own name, and only a file this change adds can break it.
+    if (line === null) {
+        const quote = normalizeCitedPath(forms.plain);
+        return change.isNew && (quote === path || quote === path.split('/').at(-1));
+    }
+    const staged = (quote) => quote !== null && inStagedWindow(line, quote, change);
     const removed = (quote) => quote !== null && inRemoved(quote, change);
     return (staged(forms.plain) ||
         (forms.marker === '+' && staged(forms.body)) ||
@@ -181,7 +188,7 @@ export function groundConventionFindings(findings, source) {
             changes.set(path, change);
         }
         // Canonical path out, so every spelling of one citation shares one lens (and one waiver).
-        if (isGrounded(finding, forms, change))
+        if (isGrounded(finding, forms, change, path))
             grounded.push({ ...finding, offendingPath: path });
     }
     return grounded;

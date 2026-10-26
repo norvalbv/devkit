@@ -1198,7 +1198,7 @@ if [ "$UPDATE_PR_BODY" -eq 1 ]; then
     # Released first, as on the success path: a long capture must not block a same-branch --pr.
     rewrite_publish_lock_release
     if [[ "${PR_URL##*/}" =~ ^[0-9]+$ ]]; then
-      publish_reviewer_notes "${PR_URL##*/}" "$REPO" "$SHIP_COMMIT" "$NOTES_MODE"
+      publish_reviewer_notes "${PR_URL##*/}" "$REPO" "$SHIP_COMMIT" "$ROOT" "$NOTES_MODE"
       publish_evidence_block "$WT" "${PR_URL##*/}" "$REPO" "$SHIP_COMMIT" "$ROOT"
     fi
     [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "${PR_NUM:-}" pr-body-publication-failed
@@ -1215,7 +1215,7 @@ if [ -n "$PR_URL" ]; then
   reship_mark_ready "${PR_NUM:-}" || READY_STATUS=1
   echo "$PR_URL"
   if [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then
-    publish_reviewer_notes "$PR_NUM" "$REPO" "$SHIP_COMMIT" "$NOTES_MODE"
+    publish_reviewer_notes "$PR_NUM" "$REPO" "$SHIP_COMMIT" "$ROOT" "$NOTES_MODE"
     publish_evidence_block "$WT" "$PR_NUM" "$REPO" "$SHIP_COMMIT" "$ROOT"
   fi
   # The wait comes after the ready flip so it observes the check set that flip triggers — but a

@@ -12,6 +12,10 @@ const OUTCOME_RANK = { passed: 0, skipped: 1, failed: 2 };
 export const MAX_FAILURES = 10;
 const MAX_FAILURE_CHARS = 600;
 const MAX_FAILURE_NAME_CHARS = 240;
+/** A V8 stack frame: a line opening `at` that ends in its `:line:column` location. */
+const STACK_FRAME = /^\s*at .*:\d+:\d+\)?$/m;
+/** The error text before its stack trace, so the frames never spend the message's length budget. */
+const withoutStack = (text) => text.slice(0, STACK_FRAME.exec(text)?.index).trim() || text;
 function parseJson(raw) {
     return JSON.parse(raw);
 }
@@ -48,7 +52,10 @@ function parseVitestAssertion(value) {
         !value.failureMessages.every(isJsonString)) {
         throw new Error('Vitest report contains a malformed assertion');
     }
-    return { status, fullName: value.fullName, failureMessages: value.failureMessages };
+    const { ancestorTitles, title } = value;
+    const titled = Array.isArray(ancestorTitles) && ancestorTitles.every(isJsonString);
+    const path = titled && isJsonString(title) ? [...ancestorTitles, title] : undefined;
+    return { status, fullName: value.fullName, failureMessages: value.failureMessages, path };
 }
 function parseVitestFile(value) {
     if (!isJsonRecord(value) || !Array.isArray(value.assertionResults)) {
@@ -109,7 +116,7 @@ function fileError(file, root, dependencySource) {
     }
     return {
         fullName: boundedText(file.name, MAX_FAILURE_NAME_CHARS, root, dependencySource),
-        message: boundedText(file.message || '(no message)', MAX_FAILURE_CHARS, root, dependencySource),
+        message: boundedText(withoutStack(file.message) || '(no message)', MAX_FAILURE_CHARS, root, dependencySource),
     };
 }
 /** Parse Vitest's built-in JSON reporter, used only as an optional reviewer-facing adapter. */
@@ -156,7 +163,8 @@ export function parseVitestRegressionReport(json, checkoutRoot, dependencySource
             failures.push({
                 fullName: boundedText(assertion.fullName, MAX_FAILURE_NAME_CHARS, checkoutRoot, dependencySource) ||
                     '(unnamed test)',
-                message: boundedText(raw ?? '(no failure message)', MAX_FAILURE_CHARS, checkoutRoot, dependencySource),
+                message: boundedText(raw === undefined ? '(no failure message)' : withoutStack(raw), MAX_FAILURE_CHARS, checkoutRoot, dependencySource),
+                path: assertion.path?.map((title) => boundedText(title, MAX_FAILURE_NAME_CHARS, checkoutRoot, dependencySource)),
             });
         }
     }

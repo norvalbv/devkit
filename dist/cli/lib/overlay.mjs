@@ -5,7 +5,7 @@
  * `git ci`, re-running overlay init, or the optional global commit gate restores it.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONFIG_FILENAME, resolveGuardConfig } from '../../gate-engine/config.mjs';
 import { FALLOW_CACHE, OVERLAY_WRITTEN } from '../../gate-engine/deterministic/gate-inputs.mjs';
@@ -17,6 +17,7 @@ import { hooksDir, nativeHooksDir } from './doctor/hooks-path.mjs';
 import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mjs';
 import { cutStructureBaselines } from './generate/cut-structure-baselines.mjs';
 import { isTracked, trackedPathPredicate } from './git-tracked.mjs';
+import { hookDrift, readHook, writeHookAtomic } from './husky/overlay/hook-file.mjs';
 import { buildOverlayHook } from './husky/husky-block.mjs';
 import { describeForeignHook, describeOverlayCommitMsg, describeUnreadableHook, syncOverlaySiblingHooks, } from './husky/overlay/commit-msg.mjs';
 import { installHealAlias } from './husky/overlay/heal-alias.mjs';
@@ -119,12 +120,8 @@ function installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun, { fallo
         console.log(`  [dry-run] git config core.hooksPath ${hooksPath}; pre-commit (gates → ${preCommitChain}${fallow ? ' + fallow' : ''}); ${passthrough}${commitMsgLine ? `; ${commitMsgLine}` : ''}`);
         return;
     }
-    const dir = join(gitRoot, LOCAL_HOOKS);
-    mkdirSync(dir, { recursive: true });
     // pre-commit: devkit gates (+ optional fallow gate) + chain to the repo's pre-commit (if present).
-    const pre = join(dir, 'pre-commit');
-    writeFileSync(pre, buildOverlayPreCommit(sel, preCommitChain, pkgRel, { root: gitRoot, fallow, stack, gitRuns }));
-    chmodSync(pre, 0o755);
+    writeHookAtomic(join(gitRoot, LOCAL_HOOKS, 'pre-commit'), buildOverlayPreCommit(sel, preCommitChain, pkgRel, { root: gitRoot, fallow, stack, gitRuns }));
     // every OTHER hook name → pass-through (commit-msg also runs devkit's message judges).
     syncOverlaySiblingHooks(siblings, { dryRun: false });
     if (commitMsgLine)
@@ -144,8 +141,8 @@ function installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun, { fallo
  * (e.g. one predating a new ship gate) until re-init. This lets `devkit doctor --fix` refresh it
  * without a manual `devkit init --overlay`. Pass-through wrappers are refreshed alongside (idempotent).
  * `core.hooksPath` is left untouched — the `git ci` alias owns it and doctor reports it separately.
- * Returns the pre-commit { missing, drift } (what review reads) plus commitMsg and siblings, observed
- * BEFORE any write.
+ * Returns the pre-commit { missing, drift, contentDrift } (review reads contentDrift) plus
+ * commitMsg and siblings, observed BEFORE any write.
  */
 export function syncOverlayHook(gitRoot, cwd, cfg, { dryRun }) {
     // Raw `structure`: normalizeSelection defaults it on, which would gate an overlay never baselined.
@@ -163,19 +160,19 @@ export function syncOverlayHook(gitRoot, cwd, cfg, { dryRun }) {
         gitRuns,
     });
     const pre = join(gitRoot, LOCAL_HOOKS, 'pre-commit');
-    const current = existsSync(pre) ? readFileSync(pre, 'utf8') : null;
+    const current = readHook(pre);
     const missing = current === null;
-    const drift = current !== expected; // a missing hook (null) is drift too
-    if (!dryRun && drift) {
-        mkdirSync(join(gitRoot, LOCAL_HOOKS), { recursive: true });
-        writeFileSync(pre, expected);
-        chmodSync(pre, 0o755);
-    }
+    // drift (doctor) includes a non-0755 mode; review reads contentDrift and checks the exec bit itself.
+    const drift = hookDrift(current, expected); // a missing hook is drift too
+    const contentDrift = current?.content !== expected;
+    if (!dryRun && drift)
+        writeHookAtomic(pre, expected);
     // Siblings sync on their own: a stale commit-msg must heal even when pre-commit is current.
     const cm = syncOverlaySiblingHooks({ gitRoot, scriptDir, scriptsAbs, gitRuns, selection: sel, pkgRel }, { dryRun });
     return {
         missing,
         drift,
+        contentDrift,
         commitMsg: { missing: cm.missing, drift: cm.drift },
         siblings: { scriptDir, ...cm.siblings },
     };
