@@ -48,6 +48,9 @@
   "//maxTestLines": "Looser raw line cap for test files. Existing oversized tests are grandfathered shrink-only into the same size-lines.json baseline. 0 = off.",
   "maxTestLines": 2000,
 
+  "//maxLinesExtensions": "Extra extensions the raw-line caps also govern, beyond sourceExtensions (e.g. ['sh'] for shell scripts under scanRoots). No other gate reads them. After adding one, run guard-size freeze so files already over the cap are grandfathered. Default: [].",
+  "maxLinesExtensions": [],
+
   "//decisionsDir": "Append-only decision-log dir (guard-decisions CLI + smell gate target). Default: 'docs/decisions'.",
   "decisionsDir": "docs/decisions",
 
