@@ -54,7 +54,8 @@ describe('judgeSentryWithCache', () => {
     expect(judgeSentryWithCache(cwd, 'INPUT', IDENTITY, first)).toEqual({ verdict, evidence });
     expect(first).toHaveBeenCalledTimes(1);
     const second = vi.fn(() => ({ verdict: 'SKIP', evidence: 'should not run' }));
-    expect(judgeSentryWithCache(cwd, 'INPUT', IDENTITY, second)).toEqual({ verdict, evidence });
+    const hit = { verdict, evidence, cached: true };
+    expect(judgeSentryWithCache(cwd, 'INPUT', IDENTITY, second)).toEqual(hit);
     expect(second).not.toHaveBeenCalled();
   });
 
@@ -78,11 +79,15 @@ describe('judgeSentryWithCache', () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
-  it('a cache hit names itself on stderr (the gate output stays explainable)', () => {
+  it('a cache hit is flagged for the gate verdict line and prints nothing itself', () => {
     const errs = vi.spyOn(console, 'error').mockImplementation(() => {});
     const cwd = tempCwd();
-    judgeSentryWithCache(cwd, 'INPUT', IDENTITY, () => ({ verdict: 'MONITOR', evidence: 'e' }));
-    judgeSentryWithCache(cwd, 'INPUT', IDENTITY, () => null);
-    expect(errs.mock.calls.flat().join('\n')).toContain('cached MONITOR');
+    const miss = judgeSentryWithCache(cwd, 'INPUT', IDENTITY, () => ({
+      verdict: 'MONITOR',
+      evidence: 'e',
+    }));
+    expect(miss?.cached).toBeUndefined();
+    expect(judgeSentryWithCache(cwd, 'INPUT', IDENTITY, () => null)?.cached).toBe(true);
+    expect(errs).not.toHaveBeenCalled();
   });
 });
