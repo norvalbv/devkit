@@ -76,6 +76,7 @@ interface Limit {
 }
 
 interface Policy {
+  enabled: boolean;
   governance: RegExp[];
   decisionRecord: RegExp;
   consumerSurface: RegExp[];
@@ -141,6 +142,7 @@ const GOVERNANCE_GLOBS = [
 const policySchema = z.looseObject({
   mergeVerdict: z
     .strictObject({
+      enabled: z.boolean().default(true),
       consumerSurface: z.array(repoGlobSchema).default([]),
       limits: z
         .record(
@@ -167,14 +169,25 @@ function parsePolicy(configText: string | null): Policy {
     const issue = parsed.error.issues[0];
     throw new Error(`${CONFIG_FILENAME} ${issue.path.join('.')}: ${issue.message}`);
   }
-  const { consumerSurface, limits } = parsed.data.mergeVerdict;
+  const { enabled, consumerSurface, limits } = parsed.data.mergeVerdict;
   const { decisionsDir, allowlistPath } = resolveGuardConfigJson(configText);
   return {
+    enabled,
     governance: [...GOVERNANCE_GLOBS, allowlistPath.replace(LEADING_DOT_SLASH, '')].map(anyDepth),
     decisionRecord: decisionFileRe(decisionsDir),
     consumerSurface: consumerSurface.map((glob) => compileRepoGlob(glob)),
     limits,
   };
+}
+
+/** False only for an explicit `mergeVerdict.enabled: false` in a policy that parses whole; any config
+ * that `mergeVerdict` would read as config-invalid keeps the verdict, so that reason still prints. */
+export function verdictEnabled(configText: string | null): boolean {
+  try {
+    return parsePolicy(configText).enabled;
+  } catch {
+    return true;
+  }
 }
 
 /** The size limit for `subject`'s commit type: its entry, then `default`, then the built-in limit. */
