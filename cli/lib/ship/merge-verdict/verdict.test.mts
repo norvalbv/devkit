@@ -468,6 +468,12 @@ describe('verdictEnabled', () => {
     expect(verdictEnabled(text)).toBe(expected);
   });
 
+  it('keeps the verdict when the opt-out sits in a config the rest of the policy rejects', () => {
+    const text = JSON.stringify({ decisionsDir: 123, mergeVerdict: { enabled: false } });
+    expect(mergeVerdict(change([fix]), text).reasons[0].code).toBe('config-invalid');
+    expect(verdictEnabled(text)).toBe(true);
+  });
+
   it('accepts enabled alongside the other keys without reading as config-invalid', () => {
     const text = config({ enabled: false, limits: { fix: { maxSourceLines: 10 } } });
     expect(mergeVerdict(change([p('a.test.mts')]), text).verdict).toBe('auto-merge-eligible');
