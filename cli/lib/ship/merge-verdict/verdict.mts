@@ -76,6 +76,7 @@ interface Limit {
 }
 
 interface Policy {
+  enabled: boolean;
   governance: RegExp[];
   decisionRecord: RegExp;
   consumerSurface: RegExp[];
@@ -160,37 +161,33 @@ const printable = (text: string): string => text.replace(UNPRINTABLE, '_');
 const anyDepth = (glob: string): RegExp => compileRepoGlob(`**/${glob}`);
 const counted = (n: number | null): boolean => n !== null && Number.isSafeInteger(n) && n >= 0;
 
-/** guard.config.json text (null when absent) to its `mergeVerdict` block; malformed input throws. */
-function readPolicy(configText: string | null) {
+/** guard.config.json text (null when absent) to a policy; malformed input throws. */
+function parsePolicy(configText: string | null): Policy {
   const raw = configText === null ? {} : parseJsonObject<object>(configText, CONFIG_FILENAME);
   const parsed = policySchema.safeParse(raw);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     throw new Error(`${CONFIG_FILENAME} ${issue.path.join('.')}: ${issue.message}`);
   }
-  return parsed.data.mergeVerdict;
-}
-
-/** False only for an explicit `mergeVerdict.enabled: false`; a config that cannot be read keeps the
- * verdict, so it still prints config-invalid. */
-export function verdictEnabled(configText: string | null): boolean {
-  try {
-    return readPolicy(configText).enabled;
-  } catch {
-    return true;
-  }
-}
-
-/** guard.config.json text (null when absent) to a policy; malformed input throws. */
-function parsePolicy(configText: string | null): Policy {
-  const { consumerSurface, limits } = readPolicy(configText);
+  const { enabled, consumerSurface, limits } = parsed.data.mergeVerdict;
   const { decisionsDir, allowlistPath } = resolveGuardConfigJson(configText);
   return {
+    enabled,
     governance: [...GOVERNANCE_GLOBS, allowlistPath.replace(LEADING_DOT_SLASH, '')].map(anyDepth),
     decisionRecord: decisionFileRe(decisionsDir),
     consumerSurface: consumerSurface.map((glob) => compileRepoGlob(glob)),
     limits,
   };
+}
+
+/** False only for an explicit `mergeVerdict.enabled: false` in a policy that parses whole; any config
+ * that `mergeVerdict` would read as config-invalid keeps the verdict, so that reason still prints. */
+export function verdictEnabled(configText: string | null): boolean {
+  try {
+    return parsePolicy(configText).enabled;
+  } catch {
+    return true;
+  }
 }
 
 /** The size limit for `subject`'s commit type: its entry, then `default`, then the built-in limit. */
