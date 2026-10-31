@@ -85,8 +85,45 @@ function emitDecisionRead(cmd: string | undefined, rest: string[], read?: QueryR
   emitGateEvent(sized());
 }
 
+/** One usage line per command, led by its name, so `<cmd> --help` answers before the command runs. */
+const USAGE = [
+  'add <slug> --target --context … --ruling … | --note "…"   record a Target / append a note',
+  'amend <slug> --target … | --note "…" | --note-replace OLD NEW   correct an entry not in HEAD',
+  'rescope <slug> --scope "<globs>" --reason "<why>"   append-only Scope correction',
+  'query "<text>" [--top K] [--json | --full]   rank axes for a topic',
+  'show <slug>   print one axis file',
+  'check <slug>   exit 0 if axis <slug> has a file, else 1 (prints nothing, validates nothing)',
+  'list   print the current-Target spine',
+  'reindex   rebuild the derived embedding cache',
+  'drift   report scoped rulings whose Scope no longer matches code',
+  'detect --gate | scan [--working]   architectural-smell gate',
+  'check-alignment --gate | scan   scope-matched alignment gate',
+  'scoped-targets --files <a,b> [--query "<text>" --top K]   governing Targets as JSON',
+  'categories   per-category view',
+  'enforce [link <slug> --check "<cmd>|none" --reason "<why>"]   Checks linked to Targets',
+  'integrity [--staged]   structural-integrity scan',
+];
+
+const HELP_FLAGS = ['--help', '-h'];
+
+/** Usage for one command, or for all of them; `--help` counts only right after the command. */
+function usage(cmd: string | undefined): string {
+  const line = USAGE.find((entry) => entry.startsWith(`${cmd} `));
+  const lines = line ? [line] : USAGE;
+  return `Usage:\n${lines.map((entry) => `  guard-decisions ${entry}`).join('\n')}\n`;
+}
+
 async function run(argv: string[]) {
   const [cmd, ...rest] = argv;
+  if (cmd === undefined) {
+    process.stderr.write(usage(cmd));
+    process.exitCode = 1;
+    return;
+  }
+  if (HELP_FLAGS.includes(cmd) || HELP_FLAGS.includes(rest[0] ?? '')) {
+    process.stdout.write(usage(cmd));
+    return;
+  }
   if (AGENT_READS.has(cmd)) process.env.DEVKIT_AGENT_RUN_ID ||= `decisions-${randomUUID()}`;
   if (cmd === 'categories') {
     // recall/category-report.mts's import closure never reaches markdown.mts, so this command works

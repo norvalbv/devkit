@@ -33,7 +33,7 @@ export function candidates(cwd: string, names: string[]): string[] {
   return names.filter((name) => existsSync(join(cwd, name)));
 }
 
-/** A root config the refresh rewrote: its path, prior bytes, and the starter written over them. */
+/** A root config the refresh rewrote (or a dry run would): path, prior bytes, and the new starter. */
 export type RefreshedConfig = [path: string, before: string, written: string];
 
 /** A config devkit created and nobody edited takes the current starter; any edit keeps it as is. */
@@ -47,10 +47,8 @@ function refreshedStarter(
   const created = previous.createdDigest;
   const path = join(cwd, previous.path);
   if (created === digest(starter) || created !== fileDigest(path)) return previous;
-  if (!dryRun) {
-    rewrites.push([previous.path, readFileSync(path, 'utf8'), starter]);
-    writeFileAtomic(path, starter);
-  }
+  rewrites.push([previous.path, readFileSync(path, 'utf8'), starter]);
+  if (!dryRun) writeFileAtomic(path, starter);
   return { path: previous.path, createdDigest: digest(starter) };
 }
 
