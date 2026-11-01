@@ -1,6 +1,7 @@
 import { AGENT_TARGETS } from '../../components.mts';
+import { isTracked } from '../../git-tracked.mts';
 import { isSafeAgentAssetPath } from '../agent-asset-manifest/lifecycle.mts';
-import { requireAgentProviders } from '../agent-assets/agent-providers.mts';
+import { type AgentProvider, requireAgentProviders } from '../agent-assets/agent-providers.mts';
 import { type HookInstallScope, hookRegistrationDestination } from './codec.mts';
 import {
   adoptExactLegacy,
@@ -21,6 +22,26 @@ import {
 } from './lifecycle.mts';
 import { dataRecord } from './plain-data.mts';
 
+type HookFile = ReturnType<typeof otherClaudeSettings>;
+
+function unrecognisedAdvisories(provider: AgentProvider, file: HookFile): string[] {
+  if (!file) return [];
+  return unrecognisedFallowGates(dataRecord(file.document), provider).map(
+    (handler) =>
+      `${provider}:unrecognised-fallow-gate ${handlerLocation(file.rel, handler)}: ${handler.command}`,
+  );
+}
+
+/** Install never writes a tracked overlay destination, so everything found in it is report-only. */
+function trackedAdvisories(root: string, provider: AgentProvider, rel: string): string[] {
+  const found = [`${provider}:tracked:${rel}`];
+  if (!isSafeAgentAssetPath(root, rel, true)) return found;
+  const document = providerDocument(root, provider, rel);
+  if (stripReclaimedCommands(document, provider).changed)
+    found.push(`${provider}:retired-registration:${rel}`);
+  return [...found, ...unrecognisedAdvisories(provider, { rel, document })];
+}
+
 /** Doctor's read-only view of hook registrations. `advisories` are findings devkit must not repair,
  * so they never make `ok` false: an unrecognised fallow-gate.sh spelling is reported, never deleted. */
 export function checkHookRegistrations(
@@ -38,6 +59,19 @@ export function checkHookRegistrations(
   const advisories: string[] = [];
   for (const provider of requireAgentProviders(targets)) {
     const rel = hookRegistrationDestination(provider, scope);
+    // Install reclaims the other settings file before it skips a destination, so judge it first.
+    const other = otherClaudeSettings(root, provider, scope);
+    const elsewhere = retiredElsewhere(root, provider, scope, other);
+    if (elsewhere)
+      (elsewhere.repairable ? missing : advisories).push(
+        `${provider}:retired-registration:${elsewhere.rel}`,
+      );
+    advisories.push(...unrecognisedAdvisories(provider, other));
+    // Mirrors skipProvider: install never registers into a tracked overlay file, so this can't be fixed.
+    if (overlay && isTracked(root, rel)) {
+      advisories.push(...trackedAdvisories(root, provider, rel));
+      continue;
+    }
     if (!isSafeAgentAssetPath(root, rel, true)) {
       missing.push(`${provider}:unsafe-config`);
       continue;
@@ -48,19 +82,7 @@ export function checkHookRegistrations(
     const legacy = reconcileLegacyHookCommands(ledger?.entries ?? [], provider, rel);
     if (stripReclaimedCommands(document, provider).changed)
       missing.push(`${provider}:retired-registration`);
-    const other = otherClaudeSettings(root, provider, scope);
-    const elsewhere = retiredElsewhere(root, provider, scope, other);
-    if (elsewhere)
-      (elsewhere.repairable ? missing : advisories).push(
-        `${provider}:retired-registration:${elsewhere.rel}`,
-      );
-    for (const file of [{ rel, document }, other]) {
-      if (!file) continue;
-      for (const handler of unrecognisedFallowGates(dataRecord(file.document), provider))
-        advisories.push(
-          `${provider}:unrecognised-fallow-gate ${handlerLocation(file.rel, handler)}: ${handler.command}`,
-        );
-    }
+    advisories.push(...unrecognisedAdvisories(provider, { rel, document }));
     if (legacy.ledgerChanged) missing.push(`${provider}:superseded-registration`);
     const effectiveLedger = legacyOwnedComponentIds?.length
       ? ledgerOf(

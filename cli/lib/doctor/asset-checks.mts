@@ -338,14 +338,28 @@ export function checkRegistrations(
     );
   }
   const { ok, missing, advisories } = result;
+  const tracked = advisories.filter((advisory) => advisory.split(':')[1] === 'tracked');
+  const fallow = advisories.filter((advisory) => !tracked.includes(advisory));
   // `; ` because an advisory carries a raw hook command, which can contain commas.
-  const advice = advisories.join('; ');
+  const fallowAdvice = fallow.join('; ');
+  const trackedAdvice = tracked.length
+    ? `committed, so overlay never edits it or manages devkit's hooks in it: ${tracked.join('; ')}; ` +
+      'to let devkit register them, untrack it (`git rm --cached <file>`) and run `devkit doctor --fix`'
+    : '';
+  const advice = [trackedAdvice, fallowAdvice].filter(Boolean).join('; ');
   if (ok && advisories.length)
     return check(
       'hook registrations',
       'DRIFT',
-      `fallow-gate.sh hooks devkit will not remove: ${advice}`,
-      'delete them from the named files by hand: devkit never edits a committed file or removes an unrecognised spelling',
+      [
+        trackedAdvice,
+        fallow.length ? `fallow-gate.sh hooks devkit will not remove: ${fallowAdvice}` : '',
+      ]
+        .filter(Boolean)
+        .join('; '),
+      fallow.length
+        ? 'delete them from the named files by hand: devkit never edits a committed file or removes an unrecognised spelling'
+        : '',
       false,
       true,
     );
