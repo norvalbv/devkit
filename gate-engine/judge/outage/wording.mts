@@ -79,6 +79,22 @@ export function remedyCause(outage?: JudgeOutage): RemedyCause {
     : 'outage';
 }
 
+/** Reason + machine cause for an inconclusive outcome, both naming what the PROVIDER said: a usage
+ *  lock collapsed into "judge outage" sends the reader to the one remedy that cannot work. */
+export function outageReason(
+  outage: JudgeOutage | undefined,
+  pass: 'judge' | 'escalation' = 'judge',
+): string {
+  const subject = pass === 'escalation' ? 'escalation' : 'judge';
+  if (outage?.kind === 'timeout') return `${subject} timed out`;
+  if (outage?.kind === 'rate-limited') return `${subject} hit the provider usage limit`;
+  if (outage?.kind === 'unauthenticated') return `${subject} CLI is not authenticated`;
+  if (outage?.kind === 'absent') return `${subject} CLI is not installed`;
+  if (outage?.kind === 'model-unavailable')
+    return `${subject} model \`${outage.model ?? 'unknown'}\` is not available on this account`;
+  return `${subject} outage`;
+}
+
 /** The remedy a fail-closed gate prints when a judge produced no verdict — ONE wording seam for
  *  every gate (sc-1227). The CAUSE picks the remedy, and the wrong one costs real operator time. */
 export function strictRemedy(cause: RemedyCause, bin = 'claude', resetsAt?: number): string {

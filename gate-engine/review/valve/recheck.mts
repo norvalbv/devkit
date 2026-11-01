@@ -10,8 +10,7 @@ import { printAdvisories } from '../evidence/base-context.mts';
 import { emitReviewSkipped } from '../evidence/scope.mts';
 import { lensGroupId, resolveLensGroups } from '../lens/groups.mts';
 import { REVIEWERS, type ReviewerSelection } from '../reviewers.mts';
-import { reviewerSkipRemedy } from '../overrides.mts';
-import { skippedReviewers } from '../runtime.mts';
+import { reviewerSkipRemedy, skippedReviewers } from '../overrides.mts';
 
 /** The only reviewer the gate fans out into lens groups (lens/split.mts planReviewWork). */
 const SPLIT_REVIEWER = 'correctness-reviewer';

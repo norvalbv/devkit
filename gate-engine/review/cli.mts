@@ -41,7 +41,8 @@ import { planReviewWork, resolveChunkCap, resolveLensGroups } from './lens/split
 import { cacheKey, resolveEscalationModel, resolveReviewModel } from './reviewers.mts';
 import { selectRepositoryReviewers } from './scope/repository.mts';
 import { runReviewGate } from './run-review.mts';
-import { resolveReviewerIdentities, skippedReviewers } from './runtime.mts';
+import { resolveReviewerIdentities } from './runtime.mts';
+import { skippedReviewers } from './overrides.mts';
 import { parseRecheckTarget, type RecheckTarget } from './valve/recheck.mts';
 import { runWaive } from './valve/waive.mts';
 

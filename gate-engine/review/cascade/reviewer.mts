@@ -4,6 +4,7 @@ import { JUDGE_ISOLATION } from '../../judge/judge-isolation.mts';
 import { mcpSpawnTracker, namedAgentMcpProfile } from '../../judge/mcp/profile.mts';
 import type { JudgeOutage } from '../../judge/outage/classify.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, remedyCause } from '../../judge/run-judge.mts';
+import { outageReason } from '../../judge/outage/wording.mts';
 import { renderGoverningClaudeMd } from '../claude-md.mts';
 import { renderStagedLineCounts } from '../evidence/line-counts.mts';
 import { parseReviewVerdict } from '../contracts/response.mts';
@@ -62,22 +63,6 @@ export function renderAlsoStaged(files: string[], stagedFiles: string[]): string
     'They ARE staged (any edit or deletion is in this commit): never call them unstaged. They are ' +
     'not yours to judge; inspect one only if an in-scope change depends on it.'
   );
-}
-
-/** Reason + machine cause for an inconclusive outcome, both naming what the PROVIDER said: a usage
- *  lock collapsed into "judge outage" sends the reader to the one remedy that cannot work. */
-function outageReason(
-  outage: JudgeOutage | undefined,
-  pass: 'judge' | 'escalation' = 'judge',
-): string {
-  const subject = pass === 'escalation' ? 'escalation' : 'judge';
-  if (outage?.kind === 'timeout') return `${subject} timed out`;
-  if (outage?.kind === 'rate-limited') return `${subject} hit the provider usage limit`;
-  if (outage?.kind === 'unauthenticated') return `${subject} CLI is not authenticated`;
-  if (outage?.kind === 'absent') return `${subject} CLI is not installed`;
-  if (outage?.kind === 'model-unavailable')
-    return `${subject} model \`${outage.model ?? 'unknown'}\` is not available on this account`;
-  return `${subject} outage`;
 }
 
 /** Orchestration inputs threaded through one reviewer's cascade. */
@@ -429,6 +414,7 @@ async function cascadeVerdict(
       status: 'inconclusive',
       reason: 'escalation skipped — the first pass spent the whole budget',
       inconclusiveCause: 'timeout',
+      firstPassReason: firstVerdict.reason,
       escalated: false,
       model: passModel,
       transcript: first,
@@ -449,6 +435,7 @@ async function cascadeVerdict(
       status: 'inconclusive',
       reason: outageReason(secondOutage, 'escalation'),
       inconclusiveCause: remedyCause(secondOutage),
+      firstPassReason: firstVerdict.reason,
       outageBin: judgeBinForModel(escalationModel),
       escalated: true,
       model: passModel,

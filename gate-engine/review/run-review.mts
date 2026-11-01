@@ -95,8 +95,8 @@ import {
   passAssetVerifier,
   preflightReviewAssets,
   resolveReviewerIdentities,
-  skippedReviewers,
 } from './runtime.mts';
+import { skippedReviewers } from './overrides.mts';
 import { ReviewGateTiming, reviewConcurrency } from './telemetry/timing.mts';
 
 export { runCascade };

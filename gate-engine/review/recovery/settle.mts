@@ -52,6 +52,14 @@ export interface RecoverableOutcome extends ReviewOutcome {
 export const retryableReason = (res: ReviewOutcome): string | undefined =>
   (res as RecoverableOutcome).retryable;
 
+/** A first-pass finding its escalation never answered, as an unconfirmed (non-blocking) advisory. */
+const firstPassAdvisory = (res: ReviewOutcome): string[] =>
+  res.firstPassReason === undefined
+    ? []
+    : [
+        `first pass (unconfirmed — its escalation never answered): ${res.firstPassReason || '(no reason given)'}`,
+      ];
+
 /** Everything the settle path touches, captured once per gate run. */
 export interface SettleCtx {
   cwd: string;
@@ -87,7 +95,8 @@ export function settleReviewOutcome(
   // Only a PASS can be degraded: asset re-verification may have voided the verdict since.
   const degraded = res.status === 'pass' ? res.degraded : undefined;
   const mcpDegraded = res.status === 'pass' ? res.mcpDegraded : undefined;
-  const advisories = res.status === 'pass' ? parseAdvisories(res.transcript ?? '') : [];
+  const advisories =
+    res.status === 'pass' ? parseAdvisories(res.transcript ?? '') : firstPassAdvisory(res);
   // A retrieval-DEGRADED PASS describes the environment, not the diff: never cached, so a retry
   // re-attempts retrieval instead of replaying the outage.
   if (res.status === 'pass' && !degraded)

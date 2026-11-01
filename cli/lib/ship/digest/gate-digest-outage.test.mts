@@ -114,6 +114,24 @@ describe('a judge outage in the ship digest', () => {
     expect(rows[0].detail).toBe('response_contract');
   });
 
+  it("keeps a fail-closed reviewer's unconfirmed first pass beside its BLOCKED row, once per replay", () => {
+    const firstPass = ev({
+      type: 'advisory_result',
+      gate: 'review:commit-guard',
+      status: 'finding',
+      detail: 'first pass (unconfirmed — its escalation never answered): duplicates fooHelper',
+    });
+    const text = digest([
+      ev({ type: 'ship_attempt' }),
+      ...[1, 2].flatMap(() => [inconclusive('commit-guard', 'rate-limited'), firstPass]),
+      shipResult('review'),
+    ]);
+    expect(text).toContain('✗ review:commit-guard — BLOCKED this run');
+    expect(text.split('\n').filter((l) => l.includes('advisory, did NOT block'))).toEqual([
+      '   ⚠ review:commit-guard — advisory, did NOT block this run: first pass (unconfirmed — its escalation never answered): duplicates fooHelper',
+    ]);
+  });
+
   it('collapses a hook replay of one inconclusive reviewer to one row', () => {
     const rows = summarise([inconclusive('x'), inconclusive('x'), shipResult('review')], SHIP);
     expect(rows).toHaveLength(1);

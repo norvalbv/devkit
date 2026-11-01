@@ -190,6 +190,8 @@ export interface ReviewOutcome {
   /** Machine-owned category set where the inconclusive outcome originates. Consumers must never
    * reverse-engineer this from the human-readable reason. */
   inconclusiveCause?: ReviewInconclusiveCause;
+  /** A non-PASS first pass's reason when its escalation never answered: unconfirmed, never blocks. */
+  firstPassReason?: string;
   /** Binary of the SPAWN that went dark; an engine-error rejection, where the failing pass is
    * unknowable, carries the backtick-joined candidate set exactly as the remedy renders it. */
   outageBin?: string;
@@ -417,17 +419,6 @@ export function gateJudgeEnv(reviewMode: boolean, cfg: GuardConfig): NodeJS.Proc
 
 // The staged-list channel lives in its own module (sc-3400); re-exported so callers keep one seam.
 export { withStagedFiles } from './evidence/staged-files-env.mts';
-
-/** GUARD_REVIEW_SKIP / FRINK_REVIEW_SKIP: comma-list of reviewer names to drop from a run — the
- * per-reviewer rollback lever (GUARD_NO_REVIEW kills the whole gate; this surgically disables one). */
-export function skippedReviewers(): Set<string> {
-  return new Set(
-    (process.env.GUARD_REVIEW_SKIP ?? process.env.FRINK_REVIEW_SKIP ?? '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
-  );
-}
 
 /** Parsed checklist state-file artifact for a reviewer, or null (missing/corrupt/no checklist at
  * all — a skill-less reviewer has no stateFile to read → unverifiable). */
