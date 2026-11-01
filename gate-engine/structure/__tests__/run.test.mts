@@ -367,6 +367,16 @@ describe('guard-structure staged plan', () => {
     ).toEqual({ targets: [], probeScopes: [], deferred: ['src/Feature/index.ts'] });
   });
 
+  it('defers a root that a staged policy edit governs when it holds an unrelated working-tree source', () => {
+    expect(
+      planStagedStructureLint(scopes, ['guard.config.json'], [], ['src/Feature/Wip.ts']),
+    ).toEqual({
+      targets: [],
+      probeScopes: scopes.slice(1),
+      deferred: ['src'],
+    });
+  });
+
   it('defers every staged file in a topology root with an unrelated working-tree source', () => {
     expect(
       planStagedStructureLint(scopes, ['src/Feature/index.ts'], [], ['src/Feature/Uncommitted.ts']),
@@ -569,6 +579,69 @@ describe('guard-structure staged execution', () => {
       stage(root);
       git(root, 'add', '--', 'guard.config.json', 'src/bad-name.ts');
       expect((await runStagedStructureGate(root)).code).toBe(1);
+    });
+
+    // A staged policy edit re-lints every INDEXED source under each root, as CI does, never one probe.
+    function policyEdit(root: string) {
+      write(root, 'guard.config.json', `${JSON.stringify(config)}\n`);
+      git(root, 'add', '--', 'guard.config.json');
+    }
+
+    it('a staged policy edit reaches debt in a file it never edited, not just one probe file', async () => {
+      const root = debtRepo(['src/A.ts', 'src/B.ts', 'src/C.ts', 'src/D.ts', 'src/now-invalid.ts']);
+      policyEdit(root);
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(1);
+      expect(result.text).toContain('now-invalid');
+    });
+
+    it('a staged policy edit never judges a gitignored source that a clean checkout lacks', async () => {
+      const root = debtRepo(['src/Ok.ts']);
+      write(root, '.gitignore', 'src/generated/\n');
+      git(root, 'add', '--', '.gitignore');
+      git(root, 'commit', '-qm', 'ignore');
+      write(root, 'src/generated/schema-types.ts'); // codegen output: violates {pascal}
+      policyEdit(root);
+      await expect(runStagedStructureGate(root)).resolves.toMatchObject({ code: 0 });
+    });
+
+    it('a staged policy edit over a root whose only sources are gitignored is could-not-run', async () => {
+      const root = debtRepo(['README.md']);
+      write(root, '.gitignore', 'src/generated/\n');
+      git(root, 'add', '--', '.gitignore');
+      git(root, 'commit', '-qm', 'ignore');
+      write(root, 'src/generated/Types.ts'); // valid name, but nothing under src/ is indexed
+      policyEdit(root);
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(2);
+      expect(result.text).toContain('src');
+    });
+
+    it('a staged policy edit that leaves a root without sources is could-not-run, not clean', async () => {
+      const root = debtRepo(['src/Ok.ts', 'src/README.md']); // README keeps src/ on disk
+      git(root, 'rm', '-q', '--', 'src/Ok.ts');
+      policyEdit(root);
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(2);
+      expect(result.text).toContain('src');
+    });
+
+    it('a staged policy edit from a package subdirectory re-lints that package, not siblings', async () => {
+      const root = repo();
+      const pkg = join(root, 'packages', 'lib');
+      write(pkg, 'guard.config.json', JSON.stringify(config));
+      write(pkg, 'src/Ok.ts');
+      write(pkg, 'src/committed-debt.ts');
+      write(root, 'packages/other/src/sibling-debt.ts');
+      initializeGit(root);
+      git(root, 'add', '-A');
+      git(root, 'commit', '-qm', 'base');
+      write(pkg, 'guard.config.json', `${JSON.stringify(config)}\n`);
+      git(root, 'add', '--', 'packages/lib/guard.config.json');
+      const result = await runStagedStructureGate(pkg);
+      expect(result.code).toBe(1);
+      expect(result.text).toContain('committed-debt');
+      expect(result.text).not.toContain('sibling-debt');
     });
   });
 
@@ -1008,8 +1081,8 @@ process.exit(results.some((r) => r.errorCount) ? 1 : 0);
     commitAll(root);
     execFileSync('git', ['rm', '-q', '--', '.devkit/config.json'], { cwd: root });
     const result = await runStagedStructureGate(root);
-    expect(result.code).toBe(1); // detected electron still owns src/, and the probe reached it
-    expect(presetCalls(root)).toEqual([['src/Bad.ts']]);
+    expect(result.code).toBe(1); // detected electron still owns src/, and the policy lint reached it
+    expect(presetCalls(root)).toEqual([['src']]);
   });
 
   it('never routes a non-electron repo without grammar to a local eslint (stack decides the leg)', async () => {

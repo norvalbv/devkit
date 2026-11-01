@@ -24,8 +24,8 @@
  * aggregated report:
  *   --structure "<cmd>"   run <cmd> as the `structure-lint` gate. A `guard-structure …` command
  *                         runs as the sibling module with the full trichotomy (2 = fail-open);
- *                         any other command (electron's `bunx eslint src`, devkit's own
- *                         `bun run lint:structure`) spawns via PATH and BLOCKS on every non-zero
+ *                         any other command (electron's `bunx eslint src`, a repo's own
+ *                         lint script) spawns via PATH and BLOCKS on every non-zero
  *                         code (eslint's exit 2 is a fatal config error, not an opt-out).
  *   --extra "<label>=<cmd>"  (repeatable) an arbitrary deterministic gate; non-zero blocks. A
  *                         repo declares more the same way in guard.config.json `extraGates`.
