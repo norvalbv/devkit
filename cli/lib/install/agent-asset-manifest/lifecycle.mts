@@ -345,6 +345,8 @@ export function syncProviderNativeAssets(
       for (const output of plan.stale) removeOutput(options.root, options.kind, output);
       writeFileAtomic(path, plan.encoded);
     }
+    for (const output of plan.stale)
+      console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${output.rootRel}`);
     return { manifest: plan.manifest, outputPaths: plan.outputPaths, skips: plan.skips };
   });
 }

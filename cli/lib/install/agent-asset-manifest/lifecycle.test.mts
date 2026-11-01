@@ -210,6 +210,32 @@ describe('provider-native asset sync', () => {
     expect(existsSync(join(root, '.cursor/agents/reviewer.md'))).toBe(false);
   });
 
+  it('names every output a retired agent loses, on a dry run as on the real one', () => {
+    const root = tempRoot();
+    const content = Buffer.from(AGENT.toString().replace('name: reviewer', 'name: retired'));
+    const retired = { logicalRel: 'retired.md', content };
+    syncProviderNativeAssets({
+      ...agentOptions(root),
+      sources: [...agentOptions(root).sources, retired],
+    });
+    const paths = [
+      '.claude/agents/retired.md',
+      '.codex/agents/retired.toml',
+      '.cursor/agents/retired.md',
+    ];
+    const logged = () => vi.mocked(console.log).mock.calls.map((args) => args.join(' '));
+    vi.mocked(console.log).mockClear();
+
+    syncProviderNativeAssets({ ...agentOptions(root), dryRun: true });
+    expect(logged()).toEqual(paths.map((path) => `  [dry-run] remove ${path}`));
+    for (const path of paths) expect(existsSync(join(root, path))).toBe(true);
+
+    vi.mocked(console.log).mockClear();
+    syncProviderNativeAssets(agentOptions(root));
+    expect(logged()).toEqual(paths.map((path) => `  ✓ removed ${path}`));
+    for (const path of paths) expect(existsSync(join(root, path))).toBe(false);
+  });
+
   it('validates every projection before publishing any output or manifest', () => {
     const root = tempRoot();
     expect(() =>

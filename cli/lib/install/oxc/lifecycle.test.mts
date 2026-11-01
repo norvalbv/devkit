@@ -281,6 +281,33 @@ describe('Oxc capability lifecycle', () => {
     expect(readFileSync(join(root, '.oxfmtrc.json'), 'utf8')).not.toBe('{}\n');
   });
 
+  it('names on a dry run each root config the real run would write, and writes none', () => {
+    const logged = () => vi.mocked(console.log).mock.calls.map((args) => args.join(' '));
+    const fresh = tempRoot();
+    syncOxcCapability(fresh, { refreshStarters: true, dryRun: true });
+    expect(logged().join('\n')).toContain(
+      'write the devkit starter to .oxlintrc.json + .oxfmtrc.json',
+    );
+    expect(existsSync(join(fresh, '.oxlintrc.json'))).toBe(false);
+
+    const root = tempRoot();
+    syncOxcCapability(root);
+    const manifestPath = join(root, '.devkit/oxc/manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    writeFileSync(join(root, '.oxfmtrc.json'), '{}\n');
+    manifest.configs.oxfmt.createdDigest = digest('{}\n');
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    vi.mocked(console.log).mockClear();
+    syncOxcCapability(root, { refreshStarters: true, dryRun: true });
+    expect(logged().join('\n')).toContain('write the devkit starter to .oxfmtrc.json');
+    expect(readFileSync(join(root, '.oxfmtrc.json'), 'utf8')).toBe('{}\n');
+
+    syncOxcCapability(root, { refreshStarters: true });
+    vi.mocked(console.log).mockClear();
+    syncOxcCapability(root, { refreshStarters: true, dryRun: true });
+    expect(logged().join('\n')).toContain('preserve existing root configs');
+  });
+
   it('fails safely when more than one config for a tool exists', () => {
     const root = tempRoot();
     writeFileSync(join(root, '.oxlintrc.json'), '{}\n');

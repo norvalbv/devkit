@@ -200,6 +200,46 @@ describe('guard-decisions categories (via cli.mts, the real bin)', () => {
   });
 });
 
+describe('guard-decisions <command> --help (via cli.mts, the real bin)', () => {
+  it('prints reindex usage instead of reindexing', () => {
+    expectExit(run(['add', 'my-axis', '--target', '--new', ...reqFlags('my-axis')]), 0);
+    const r = run(['reindex', '--help']);
+    expectExit(r, 0);
+    expect(r.stdout).toBe(
+      'Usage:\n  guard-decisions reindex   rebuild the derived embedding cache\n',
+    );
+  });
+
+  it('prints show usage instead of looking up an axis named --help', () => {
+    const r = run(['show', '--help']);
+    expectExit(r, 0);
+    expect(r.stdout).toContain('guard-decisions show <slug>');
+    expect(r.stderr).not.toContain('No decision axis');
+  });
+
+  it('says check takes a slug and only tests that its file exists', () => {
+    const r = run(['check', '-h']);
+    expectExit(r, 0);
+    expect(r.stdout).toContain('guard-decisions check <slug>   exit 0 if axis <slug> has a file');
+  });
+
+  it('lists every command for a bare --help, and still refuses a missing command', () => {
+    const r = run(['--help']);
+    expectExit(r, 0);
+    for (const cmd of ['add', 'query', 'reindex', 'show', 'check', 'detect', 'integrity'])
+      expect(r.stdout).toContain(`guard-decisions ${cmd} `);
+    const bare = run([]);
+    expectRefusal(bare);
+    expect(bare.stderr).toContain('guard-decisions check <slug>');
+  });
+
+  it('treats a --help after the slug as an argument, not a help request', () => {
+    const r = run(['show', 'no-such-axis', '--help']);
+    expectRefusal(r);
+    expect(r.stderr).toContain('No decision axis "no-such-axis"');
+  });
+});
+
 // The bin must CALL each sub-engine, never rely on its run-as-main guard: a module some import
 // chain already loaded skips the guard, and the gate exits 0 having judged nothing.
 describe('guard-decisions sub-engine dispatch (via cli.mts, the real bin)', () => {
