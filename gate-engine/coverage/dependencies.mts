@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, matchesGlob, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse } from 'yaml';
 import { z } from 'zod';
 import { shellWord } from '../review/valve/shell-word.mts';
 
@@ -18,11 +19,13 @@ export interface CollectionError {
   message: string;
 }
 
+const PNPM_INSTALL = 'pnpm install --frozen-lockfile';
+
 /** Lockfiles in precedence order, each with its frozen install. agents-hooks' resolve_pm mirrors it. */
 const LOCKFILE_LADDER: [lockfile: string, install: string][] = [
   ['bun.lock', 'bun install --frozen-lockfile'],
   ['bun.lockb', 'bun install --frozen-lockfile'],
-  ['pnpm-lock.yaml', 'pnpm install --frozen-lockfile'],
+  ['pnpm-lock.yaml', PNPM_INSTALL],
   ['yarn.lock', 'yarn install --immutable'],
   ['package-lock.json', 'npm ci'],
   ['npm-shrinkwrap.json', 'npm ci'],
@@ -134,11 +137,28 @@ function declaresPackage(manifest: Declarations, name: string): boolean {
   );
 }
 
-/** Whether `manifest`'s `workspaces` globs list the package at `member` (relative, posix). */
-function listsWorkspace(manifest: Declarations, member: string): boolean {
-  const { workspaces = [] } = manifest;
-  const patterns = (Array.isArray(workspaces) ? workspaces : (workspaces.packages ?? [])).map(
-    (pattern) => pattern.replace(/\/+$/, ''),
+const pnpmWorkspaceSchema = z.object({ packages: globs.optional() });
+
+/** The member globs of the install at `dir`. pnpm reads only pnpm-workspace.yaml; every other
+ * manager reads only package.json `workspaces`. */
+function workspacePatterns(dir: string, manifest: Declarations | null): string[] {
+  if (dependencyInstallRemedy(dir) !== PNPM_INSTALL) {
+    const { workspaces = [] } = manifest ?? {};
+    return Array.isArray(workspaces) ? workspaces : (workspaces.packages ?? []);
+  }
+  try {
+    const text = readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8');
+    const parsed = pnpmWorkspaceSchema.safeParse(parse(text, { logLevel: 'error' }));
+    return parsed.data?.packages ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Whether the install at `dir` lists the package at `member` (relative, posix) as a workspace. */
+function listsWorkspace(dir: string, manifest: Declarations | null, member: string): boolean {
+  const patterns = workspacePatterns(dir, manifest).map((pattern) =>
+    pattern.replace(/^(!?)\.\//, '$1').replace(/\/+$/, ''),
   );
   const matches = (pattern: string): boolean => matchesGlob(member, pattern);
   return (
@@ -155,6 +175,10 @@ export const canonicalPath = (p: string): string => {
     return resolve(p);
   }
 };
+
+/** Whether `dir` lies in a node_modules inside `top`: where the checkout itself sits does not count. */
+const underNodeModules = (top: string, dir: string): boolean =>
+  relative(top, dir).split(/[\\/]/).includes('node_modules');
 
 /** Whether node would resolve package `name` from `dir`: some node_modules at or above it holds it. */
 function resolvesFrom(dir: string, name: string): boolean {
@@ -174,14 +198,15 @@ export function installDirFor(missing: MissingModule, root: string): string | nu
   // Already installed: the error is a missing subpath or export, which no install fixes.
   if (resolvesFrom(dir, name)) return null;
   // An installed package's own imports are its install's business, whoever declares them.
-  const installed = dir.split(/[\\/]/).includes('node_modules');
+  const installed = underNodeModules(top, dir);
   let declarer: string | null = null;
   while (!relative(top, dir).startsWith('..')) {
-    const manifest = dir.split(/[\\/]/).includes('node_modules') ? null : readDeclarations(dir);
-    if (manifest) {
-      const declares = installed || declaresPackage(manifest, name);
+    // A pnpm workspace root needs no package.json: pnpm-workspace.yaml alone lists its members.
+    if (!underNodeModules(top, dir)) {
+      const manifest = readDeclarations(dir);
+      const declares = manifest !== null && (installed || declaresPackage(manifest, name));
       const member = declarer && relative(dir, declarer).replaceAll('\\', '/');
-      const provides = declares || (member !== null && listsWorkspace(manifest, member));
+      const provides = declares || (member !== null && listsWorkspace(dir, manifest, member));
       if (provides && LOCKFILES.some((lock) => hasLockfile(dir, lock))) return dir;
       if (declares) declarer ??= dir;
     }
@@ -199,6 +224,20 @@ export function collectionRemedy(message: string, cwd: string): string | null {
   const rel = relative(canonicalPath(cwd), dir);
   const install = dependencyInstallRemedy(dir);
   return rel ? `(cd ${shellWord(rel)} && ${install})` : install;
+}
+
+/** Each distinct install command the collection errors call for, mapped to the first file that needs it. */
+export function collectionRemedies(errors: CollectionError[], cwd: string): Map<string, string> {
+  const remedies = new Map<string, string>();
+  // One broken shared import fails every file with the same message: walk the tree once for it.
+  const walked = new Set<string>();
+  for (const { file, message } of errors) {
+    if (walked.has(message)) continue;
+    walked.add(message);
+    const remedy = collectionRemedy(message, cwd);
+    if (remedy && !remedies.has(remedy)) remedies.set(remedy, file);
+  }
+  return remedies;
 }
 
 /** Said before the suite: a declared dependency resolves from no node_modules at or above `cwd`.
