@@ -32,7 +32,8 @@ Only Problem Statement is required.
 [What has been observed. Prior fixes/patches on this axis — count them.]
 
 ## Dependency & Context
-[The SDK/library/platform involved. Version, consumption mode, constraints.]
+[The SDK/library/platform involved. Version, consumption mode, constraints. The hand-built
+ layer this work extends, if any.]
 
 ## What's Been Tried
 [Approaches already attempted or considered, and how they failed.]
@@ -119,6 +120,10 @@ ruling: benchmark rows are admitted only after independent review.
    - `GENUINE_NEW_WORK` → proceed; carry the absence evidence into the plan's context.
    - `INSUFFICIENT_EVIDENCE`, `aborted`, or invalid JSON → say "prior art unverified" and continue.
      Never treat it as clearance or as a blocker.
+   - A `Layer:` sentence in `summary` → relay it to the user in one line, whatever the verdict.
+     Adopting or declining that standard is a road-not-taken decision: record it through the
+     brainstorming skill's Capture A when the decisions guard is selected, so later runs receive
+     it as Settled Axes.
 3. The eventual plan records one line: `Prior-art: <verdict> — <how the plan responds>`.
    (A skipped run records `Prior-art: skipped — <reason>` instead; keep the two distinguishable.)
 4. At plan-exit, pass `feature-critique` a **bounded 3-line summary only** (verdict,
