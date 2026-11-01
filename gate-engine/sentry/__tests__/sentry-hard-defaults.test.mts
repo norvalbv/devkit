@@ -7,6 +7,7 @@
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -82,6 +83,7 @@ describe('gate mode is hard by default (spawned; stubbed claude, message tier, t
   it('confident MONITOR blocks (exit 1) with NO SENTRY_HARD set — hard is the default', () => {
     const r = gate({ PATH: stubPath('echo MONITOR\n') }, 'fix(x): silent swallow');
     expect(r.status).toBe(1);
+    expect(r.stderr.match(/sentry-advisory: MONITOR/g)).toHaveLength(1);
   });
 
   it('GUARD_SENTRY_HARD=0 softens the same verdict back to warn (exit 0)', () => {
@@ -90,10 +92,26 @@ describe('gate mode is hard by default (spawned; stubbed claude, message tier, t
       'fix(x): silent swallow',
     );
     expect(r.status).toBe(0);
+    expect(r.stderr.match(/sentry-advisory: MONITOR/g)).toHaveLength(1);
   });
 
   it('a SKIP verdict passes (exit 0) under the hard default', () => {
     expect(gate({ PATH: stubPath('echo SKIP\n') }, 'fix(x): y').status).toBe(0);
+  });
+
+  // The verdict line now prints on every outcome; the watchlist must still follow only soft MONITOR.
+  it.each([
+    ['MONITOR', '0', 1],
+    ['MONITOR', '1', 0],
+    ['SKIP', '0', 0],
+  ])('%s with SENTRY_HARD=%s appends %i watchlist entr(ies)', (verdict, hard, entries) => {
+    const dir = mkdtempSync(join(tmpdir(), 'sentry-hard-wl-'));
+    stubs.push(dir);
+    const wl = join(dir, 'wl.md');
+    const env = { PATH: stubPath(`echo ${verdict}\n`), GUARD_SENTRY_HARD: hard };
+    gate({ ...env, GUARD_SENTRY_WATCHLIST: wl }, 'fix(x): silent swallow');
+    const text = existsSync(wl) ? readFileSync(wl, 'utf8') : '';
+    expect(text.match(/^- \[ \] fix\(x\): silent swallow/gm) ?? []).toHaveLength(entries);
   });
 });
 
@@ -214,7 +232,7 @@ describe('diff tier, spawned against a REAL staged diff (sc-1984: authority foll
       'fix(ui): badge spacing',
     );
     expect(r.status).toBe(0);
-    expect(r.stderr).toContain('advisory only');
+    expect(r.stderr).toContain('sentry-judge: DEGRADED — advisory only');
     expect(r.stderr).toContain('no error-handling hunk');
   });
 
@@ -289,7 +307,10 @@ describe('diff tier, spawned against a REAL staged diff (sc-1984: authority foll
 
     const commitMsg = run(gitMsg);
     expect(commitMsg.status).toBe(1); // the same block, not a fresh vote that could flip after QA
-    expect(commitMsg.stderr).toContain('sentry-judge: cached MONITOR');
+    expect(commitMsg.stderr.match(/sentry-advisory: MONITOR/g)).toEqual([
+      'sentry-advisory: MONITOR',
+    ]);
+    expect(commitMsg.stderr).toContain('sentry-advisory: MONITOR (cached)');
     expect(judged()).toBe(sampled);
   });
 });

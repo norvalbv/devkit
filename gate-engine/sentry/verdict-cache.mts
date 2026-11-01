@@ -25,15 +25,10 @@ import { createHash } from 'node:crypto';
 import { verdictKey } from '../decisions/verdict-cache.mts';
 import { emitCacheHit, emitGateEvent } from '../judge/gate-events.mts';
 import { devkitDataFile, loadEntries, saveEntries } from '../judge/verdict-store.mts';
+import type { SentryVerdictLike } from './verdict-line.mts';
 
 const STORE_FILE = 'sentry-verdict-cache.json';
 const CACHEABLE = new Set(['MONITOR', 'SKIP']);
-
-/** The judge result shape shared with check-sentry (kept structural to avoid a cyclic import). */
-export interface CachedSentryVerdict {
-  verdict: string | null;
-  evidence: string;
-}
 
 /** Identity inputs the key must cover beyond the stdin payload itself. */
 export interface SentryJudgeIdentity {
@@ -61,15 +56,14 @@ export function judgeSentryWithCache(
   cwd: string,
   input: string,
   identity: SentryJudgeIdentity,
-  judgeFn: () => CachedSentryVerdict | null,
-): CachedSentryVerdict | null {
+  judgeFn: () => SentryVerdictLike | null,
+): SentryVerdictLike | null {
   const file = devkitDataFile(cwd, STORE_FILE);
   const key = sentryVerdictKey(input, identity);
   const hit = loadEntries(file)[key];
   if (hit && typeof hit.verdict === 'string' && CACHEABLE.has(hit.verdict)) {
-    console.error(`sentry-judge: cached ${hit.verdict} (identical message + error-hunk evidence)`);
     emitCacheHit('sentry-advisory', hit.model, hit.duration_ms);
-    return { verdict: hit.verdict, evidence: String(hit.evidence ?? '') };
+    return { verdict: hit.verdict, evidence: String(hit.evidence ?? ''), cached: true };
   }
   const started = Date.now();
   const result = judgeFn();

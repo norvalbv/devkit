@@ -13,6 +13,7 @@ const ENV_KEYS = [
   'DEVKIT_SHIP_ID',
   'GUARD_NO_COMPLETENESS',
   'GUARD_NO_SENTRY_JUDGE',
+  'GUARD_SENTRY_NO_LLM',
 ];
 const saved: Record<string, string | undefined> = {};
 let dir: string;
@@ -70,10 +71,15 @@ describe('gate bypass telemetry', () => {
     expect(bypass).toMatchObject({ gate: 'completeness', status: 'could_not_run' });
   });
 
-  it('sentry records GUARD_NO_SENTRY_JUDGE at its skip', () => {
-    process.env.GUARD_NO_SENTRY_JUDGE = '1';
-    expect(skipReason('feat: adds a network call')).toContain('GUARD_NO_SENTRY_JUDGE');
-    const bypass = events().find((e) => e.bypass === 'GUARD_NO_SENTRY_JUDGE');
-    expect(bypass).toMatchObject({ gate: 'sentry', status: 'could_not_run' });
-  });
+  it.each(['GUARD_NO_SENTRY_JUDGE', 'GUARD_SENTRY_NO_LLM'])(
+    'sentry records %s at its skip',
+    (flag) => {
+      process.env[flag] = '1';
+      expect(skipReason('feat: adds a network call')).toContain(
+        `BYPASSED for this run (${flag}=1)`,
+      );
+      const bypass = events().find((e) => e.bypass === flag);
+      expect(bypass).toMatchObject({ gate: 'sentry', status: 'could_not_run' });
+    },
+  );
 });
