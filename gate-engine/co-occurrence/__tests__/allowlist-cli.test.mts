@@ -155,6 +155,28 @@ describe('guard-dup-allowlist clone lifecycle', () => {
     // 3649 or 3650: `date` is a UTC day while decay counts from local midnight.
     expect(run(al, ['list']).stdout).toMatch(/live 36(49|50)d {2}clone lapsed/);
   });
+
+  // The fragment hash pins a clone approval to its code, so the gate's printed command (which
+  // carries no --decay-days) must not write an entry that lapses a week later on unchanged code.
+  it('add-clone is durable by default; --decay-days N opts into a temporary waiver', () => {
+    const al = freshPath();
+    run(al, ['add-clone', 'durable', 'a.ts', 'b.ts', '--description', 'by design']);
+    run(al, ['add-clone', 'waiver', 'a.ts', 'b.ts', '--description', 'x', '--decay-days', '30']);
+    expect(read(al).clones.map((c: { decayDays: number }) => c.decayDays)).toEqual([3650, 30]);
+  });
+
+  it('add-clone over a baseline-frozen clone keeps its 3650-day freeze', () => {
+    const al = freshPath();
+    const baseline = {
+      fragmentHash: 'frozen',
+      description: 'baseline 2020-01-01 — pre-existing clone, frozen by guard-clone',
+      date: '2020-01-01',
+      decayDays: 3650,
+    };
+    writeFileSync(al, JSON.stringify({ pairs: [], clones: [baseline] }));
+    run(al, ['add-clone', 'frozen', 'a.ts', 'b.ts', '--description', 'looks intentional']);
+    expect(read(al).clones[0].decayDays).toBe(3650);
+  });
 });
 
 describe('guard-dup-allowlist guardrails', () => {
