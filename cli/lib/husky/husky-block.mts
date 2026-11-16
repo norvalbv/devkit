@@ -14,6 +14,7 @@ import { GUARD_FRAGMENTS } from './ai-guard-fragments.mts';
 import {
   BIN_DIRS,
   type BinDir,
+  CHEAP_GATE_FLUSH,
   DK_DETERMINISTIC_GATE_HELPER,
   gateBlockPrelude,
   REVIEW_FAILURE_FINALIZER,
@@ -153,6 +154,7 @@ export function buildGuardBlock(
     );
   if (selection.fallow) pieces.push(FALLOW_STAGED_BLOCK);
   if (preAi) pieces.push(preAi);
+  pieces.push(CHEAP_GATE_FLUSH);
   for (const id of AI_GUARD_IDS) {
     if (selection.guards?.includes(id)) pieces.push(selectedFragment(id, GUARD_FRAGMENTS[id]));
   }
@@ -374,6 +376,7 @@ export function removeFragment(
 const INFRA_SENTINELS = new Set([
   'commit-index',
   'commit-terminal',
+  'cheap-gate-flush',
   'gate-log',
   'review-failure-finalizer',
 ]);

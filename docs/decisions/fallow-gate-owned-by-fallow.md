@@ -80,3 +80,4 @@ created: 2026-07-25
 **Scope:** cli/lib/install/install-fallow.mts,cli/commands/init.mts,cli/lib/husky/husky-block.mts,cli/lib/husky/gate-policy/fallow-staged.mts,cli/lib/husky/self-host.mts,agents-hooks/**
 **Source:** collab · sc-4717
 **Evidence-change:** Measured that the agent wrapper, the surface the 2026-10-05 Target relied on to block introduced duplication, never fires on devkit ship or an env-prefixed git commit, so the commit hook decides for agents too; and prior-art confirmed upstream keeps duplication warn-only through fallow 3.34.1 with no gating severity, so the gap will not close from fallow's side.
+- 2026-10-15 — sc-4550 — On commit and ship the staged fallow audit now runs even after guard-deterministic fails; its exit-1 block is recorded and the cheap-gate flush stops the commit before the AI guards, so a fallow finding reports in the same attempt as a coverage or anti-slop failure. Blocking stays exit-1-only; self-host stays advisory.

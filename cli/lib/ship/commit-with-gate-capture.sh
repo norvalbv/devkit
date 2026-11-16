@@ -328,9 +328,8 @@ SHIP_HOOK_WRAPPER
   fi
 
   # Ship result telemetry — the outcome + a coarse blocked_gate tag derived from the captured log
-  # (the per-gate/per-reviewer events carry the precise cause). Chain order is deterministic →
-  # decisions → review, and each hook step is `|| exit`, so exactly one gate blocks; grep in that
-  # order attributes it.
+  # (the per-gate/per-reviewer events carry the precise cause). Chain order is cheap gates (one
+  # flush line) → decisions → review, and each AI step is `|| exit`; grep in that order attributes it.
   local blocked_json timed_out shell_gate reaped_json=false
   [ "${RUN_GATES_REAPED:-0}" != 1 ] || reaped_json=true
   if [ -n "$blocked_override" ]; then blocked_json=$blocked_override; timed_out=false
@@ -349,12 +348,14 @@ SHIP_HOOK_WRAPPER
   # is the one that dies, so a grep would blame it for a failure it did not cause.
   elif [ "$staged_missing" -eq 1 ]; then blocked_json='"staged_objects_missing"'; timed_out=false
   # sc-2753: guard-comments aggregates in the deterministic stage; alone, it keeps its own name.
-  elif grep -qE '✗ deterministic gates failed: guard-comments(\([^)]*\))?$' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
+  elif grep -qE '✗ deterministic gates failed: guard-comments(\([^)]*\))?$' "$log" 2>/dev/null &&
+    ! grep -qE '✗ commit blocked before the AI gates:.* (fallow|[a-z]+-overlay)( |$)' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
   elif grep -q '✗ deterministic gates failed' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
   # A hook-shell gate (fallow, the eslint overlay) keeps its own token, as comments does.
   # Whole lines only (a finding may quote one); LC_ALL=C because BSD sed aborts on invalid UTF-8.
   elif shell_gate=$(LC_ALL=C sed -n 's/^✗ staged gate blocked: \([a-z-]*\) (its report is above)$/\1/p' "$log" 2>/dev/null | tail -n 1) &&
     [ -n "$shell_gate" ]; then blocked_json="\"$shell_gate\""; timed_out=false
+  elif grep -q '✗ commit blocked before the AI gates' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
   elif grep -qE 'decision smells:|^ *guard-decisions: (judge unavailable|unexpected exit)' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
   elif grep -q 'guard-comments: .* need a decision' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
   # Completeness and the fail-closed judge lines block the review family too (its gate_result family).
