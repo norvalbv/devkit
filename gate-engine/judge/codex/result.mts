@@ -232,6 +232,8 @@ export function codexExecArgs(
     // No AGENTS.md project docs, matching the claude judge's disabled CLAUDE.md memory.
     '-c',
     'project_doc_max_bytes=0',
+    '-c',
+    'skills.include_instructions=false',
     ...mcpArgv,
     '--ignore-user-config',
     '--ignore-rules',
