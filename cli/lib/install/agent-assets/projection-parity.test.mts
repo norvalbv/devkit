@@ -98,8 +98,7 @@ describe('projectionDrift', () => {
     ]);
   });
 
-  // codex relocates skills to `.agents/skills` and renames agents to `.toml`. devkit gitignores its
-  // own codex projections, so without this the routing is untested.
+  // codex relocates skills to `.agents/skills` and renames agents to `.toml`.
   it('routes a codex target to .agents/skills rather than .codex/skills', () => {
     const root = tempRoot();
     seedSkills(root);
@@ -121,27 +120,15 @@ describe('projectionDrift', () => {
 });
 
 describe('projectionDrift in a git repository', () => {
-  const gitRoot = (ignore: string): string => {
+  // Skipping an ignored target once hid a months-stale codex projection; a re-ignore must fail loudly.
+  it('still checks a target whose projection git ignores', () => {
     const root = tempRoot();
     spawnSync('git', ['init', '-q', root]);
-    write(root, '.gitignore', ignore);
+    write(root, '.gitignore', '.agents/\n');
     seedSkills(root);
-    return root;
-  };
-
-  it('skips a target whose projection git ignores, and still checks the rest', () => {
-    const root = gitRoot('.agents/\n');
-    expect(projectionDrift(skillsInput(root, ['claude', 'codex']))).toEqual([]);
-    write(root, '.claude/skills/alpha/SKILL.md', '# edited\n');
-    expect(projectionDrift(skillsInput(root, ['claude', 'codex']))).toEqual([
-      'stale .claude/skills/alpha/SKILL.md',
-    ]);
-  });
-
-  it('reports unchecked, never a clean pass, when every target is ignored', () => {
-    const root = gitRoot('.agents/\n.claude/\n');
-    expect(projectionDrift(skillsInput(root, ['claude', 'codex']))).toEqual([
-      'unchecked skills/ — every agentTarget projection is gitignored',
+    expect(projectionDrift(skillsInput(root, ['claude', 'codex'])).sort()).toEqual([
+      'missing .agents/skills/alpha/SKILL.md',
+      'missing .agents/skills/alpha/references/notes.md',
     ]);
   });
 });
