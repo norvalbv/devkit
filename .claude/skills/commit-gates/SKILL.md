@@ -40,6 +40,12 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
    further. If a finding names a file absent from the brief, brief it on the retry
    (`--resume <branch> -- <path>`) instead of chasing the finding. Each briefed path is one literal file
    from the repo root; a glob is not expanded, so brief every file by name.
+   For a failed `guard.config.json` `extraGates` command, ship re-runs that command at the commit the
+   gate worktree was cut from. A line `ship: <label> also exits 1 at <sha> … Base run output: <path>`
+   means the same command fails there too: read that file, and get the findings it lists fixed on
+   the base (or rebase onto a base that has them fixed) before chasing them in your change. No line
+   is not evidence either way: the base run passed, ended some other way, ran out of its 120-second
+   budget, or the gate is not a root-config `extraGates` entry. Start from your own change.
 4. Treat a bypass as an explicit operator decision. Never use `--no-verify`, silently disable a
    selected guard, freeze a baseline to absorb new debt, or invent an environment variable. A
    `guard-review waive` backed by a reproduction (see the reviewer gates below) is a dispute, not a bypass.
