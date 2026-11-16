@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ESLint } from 'eslint';
+import { defineConfig } from 'eslint/config';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ESLINT_OVERLAY_FILE,
@@ -24,6 +25,7 @@ afterEach(() => {
 });
 
 const ESLINT_BIN = join(process.cwd(), 'node_modules', '.bin', 'eslint');
+const DEFINE_CONFIG = JSON.stringify(join(process.cwd(), 'node_modules/eslint/lib/config-api.js'));
 
 // A consumer repo: its own flat config (source text), plus files, plus the overlay config.
 function fixture(repoConfig: string, files: Record<string, string>, repo = 'eslint.config.mjs') {
@@ -150,6 +152,29 @@ describe('overlay eslint config — never weakens a repo rule', () => {
     const errs = errorsFor(await lint(root, ['src/a.js']));
     expect(errs.map((m) => m.ruleId)).toEqual(['max-lines-per-function']);
   });
+
+  it('ESLint 10 defineConfig exports extends flattened: the extended rule is a top-level rule', () => {
+    const out = defineConfig([
+      { files: ['src/**/*.js'], extends: [{ rules: { 'max-lines-per-function': 'error' } }] },
+    ]);
+    expect(out.some((c) => 'extends' in c)).toBe(false);
+    expect(out.some((c) => c.rules?.['max-lines-per-function'] === 'error')).toBe(true);
+  });
+
+  // Severity-only so a missed rule shows: devkit's cap would lend it max 300, eslint's default is 50.
+  it.each([
+    ['an extends object', "extends: [{ rules: { 'max-lines-per-function': 'error' } }]"],
+    [
+      'a plugin config string',
+      "plugins: { p: { configs: { strict: [{ rules: { 'max-lines-per-function': 'error' } }] } } }, extends: ['p/strict']",
+    ],
+  ])('a rule set via defineConfig %s suppresses the cap', async (_form, entry) => {
+    const root = fixture(
+      `import { defineConfig } from ${DEFINE_CONFIG};\nexport default defineConfig([{ files: ['src/**/*.js'], ${entry} }]);\n`,
+      { 'src/a.js': fn(61) },
+    );
+    expect(errorsFor(await lint(root, ['src/a.js']), 'max-lines-per-function')).toHaveLength(1);
+  });
 });
 
 describe("overlay eslint config — devkit's caps where the repo sets none", () => {
@@ -258,6 +283,23 @@ describe('overlay eslint config — real consumer config shapes', () => {
     writeFileSync(join(root, 'package.json'), '{"type":"commonjs"}\n');
     expect(errorsFor(await lint(root, ['src/a.js'])).map((m) => m.ruleId)).toEqual([
       'max-lines-per-function',
+    ]);
+  });
+
+  // globalIgnores() adds a `name` key, and an extended entry's own files flatten to nested globs.
+  it('keeps the caps scoped under defineConfig with globalIgnores and an extends array', async () => {
+    const root = fixture(
+      `import { defineConfig, globalIgnores } from ${DEFINE_CONFIG};\nexport default defineConfig([globalIgnores(['dist/**']), { files: ['src/**/*.js'], extends: [[{ rules: { 'max-lines-per-function': 'error' } }, { files: ['**/*.js'], rules: {} }]] }]);\n`,
+      {
+        'src/a.js': fn(61),
+        'src/long.js': 'void 0;\n'.repeat(501),
+        'scripts/long.js': 'void 0;\n'.repeat(501),
+      },
+    );
+    const errs = errorsFor(await lint(root, ['src/a.js', 'src/long.js', 'scripts/long.js']));
+    expect(errs.map((m) => [m.file.split(/[\\/]/).slice(-2).join('/'), m.ruleId])).toEqual([
+      ['src/a.js', 'max-lines-per-function'],
+      ['src/long.js', 'max-lines'],
     ]);
   });
 });
