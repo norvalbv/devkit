@@ -126,6 +126,9 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
 - **A `↻ … not converging` line** under a blocked ship's digest means the same reviewer has blocked
   three or more rounds on this branch with no pass between, and its latest blocking-finding count is
   no better than its best earlier round. It says the count is not falling, not which findings recur.
+  A `↻ review: <file> …` line is the cross-reviewer form: no single reviewer has that streak, but
+  every round since the last pass, whichever reviewer blocked it, cited that one file, and the summed
+  count is not falling. Treat the file as one class.
   Stop re-shipping blind: fix the remaining findings as a class, waive the rest with the
   `guard-review waive` line, the `--kind` that fits and a rationale, or ask the user for the reviewer
   skip the block note names. `--no-verify` is never the landing path.

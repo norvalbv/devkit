@@ -1,6 +1,7 @@
-/** sc-2165: names a reviewer whose blocks on this branch are not converging. Narration only — no exit,
+/** Names a reviewer or file whose blocks on this branch are not converging. Narration only — no exit,
  * never fed to a reviewer; why it exists: decision ship-gates-converge-not-restart. */
 import { z } from 'zod';
+import { issueLocations } from '../../../../gate-engine/review/contracts/response.mts';
 import { scanBackward } from './tail.mts';
 
 /** Below this many consecutive blocks a re-ship is ordinary iteration, not a loop. */
@@ -29,13 +30,18 @@ const trendRowSchema = z.object({
   branch: text,
   exit_code: z.number().optional().catch(undefined),
   items: z.array(z.unknown()).optional().catch(undefined),
+  // 'files' = each item's lens is a repo path (commit-guard); 'items' = a lens is a bug class.
+  item_artifact: text,
 });
 export type TrendRow = z.infer<typeof trendRowSchema>;
 
-/** One reviewer's streak on this branch, oldest first. `null` = the count was not recorded. */
+/** One reviewer's streak on this branch, oldest first. `null` = the count was not recorded. A
+ * cross-reviewer streak also names the file every round blocked on and the reviewers involved. */
 export interface TrendLine {
   reviewer: string;
   counts: (number | null)[];
+  file?: string;
+  reviewers?: string[];
 }
 
 /** Which ship's history to read. repo + branch come from the ship's own exported envelope. */
@@ -169,6 +175,78 @@ function stalled(counts: (number | null)[]): boolean {
   return latest !== null && earlier.length > 0 && latest >= Math.min(...earlier);
 }
 
+const LEADING_DOT_SLASH_RE = /^\.\//;
+
+/** Files a verdict row's blocking findings cite; null when its vector is absent, spilled or
+ * unparseable. A 'files' lens is the path itself; otherwise each issue's first `file:line`. */
+function filesOf(row: TrendRow): string[] | null {
+  if (!row.items) return null;
+  const files: string[] = [];
+  for (const raw of row.items) {
+    const item = lensSchema.safeParse(raw);
+    if (!item.success) return null;
+    if (!isBlocking(item.data)) continue;
+    const cited =
+      row.item_artifact === 'files'
+        ? [item.data.lens]
+        : (item.data.issues ?? []).map((issue) => issueLocations(issue)[0]?.file);
+    for (const file of cited) if (file) files.push(file.replace(LEADING_DOT_SLASH_RE, ''));
+  }
+  return files;
+}
+
+/** Every reviewer's fail verdict on the attempt, and whether any reviewer reached a verdict at all. */
+function verdictsOf(a: Attempt) {
+  const names = new Set(a.rows.filter((r) => r.type === 'review_result').map((r) => r.reviewer));
+  const fails = [...names].flatMap((name) => {
+    const verdict = name ? verdictOf(a, name) : undefined;
+    return verdict !== 'cached' && verdict?.status === 'fail' ? [verdict] : [];
+  });
+  const reviewed = a.rows.some(
+    (r) =>
+      (r.type === 'cache_hit' && r.judge?.startsWith('review:')) ||
+      (r.type === 'review_result' && r.status === 'pass'),
+  );
+  return { fails, reviewed };
+}
+
+/** The trailing run of review-blocked rounds, any reviewer, that all block on one file. Same stops
+ * as streakOf; a round whose files are unknown ends the run rather than bridging it. */
+function handoffOf(mine: Attempt[]): TrendLine | undefined {
+  const rounds: TrendRow[][] = [];
+  let shared: string[] | undefined;
+  for (let i = mine.length - 1; i >= 0 && rounds.length < HISTORY_CAP; i--) {
+    if (mine[i].result?.exit_code === 0) break;
+    const { fails, reviewed } = verdictsOf(mine[i]);
+    if (!fails.length) {
+      if (reviewed) break;
+      continue;
+    }
+    const files = fails.map(filesOf);
+    if (files.includes(null)) break;
+    const cited = files.flatMap((f) => f ?? []);
+    // Exact repo paths only: a bare `index.ts` cannot say which directory's file recurred.
+    const next = (shared ?? cited).filter((f) => cited.includes(f));
+    if (!next.length) break;
+    shared = next;
+    rounds.unshift(fails);
+  }
+  const counts = rounds.map((fails) =>
+    fails.reduce<number | null>((sum, row) => {
+      const n = countOf(row);
+      return sum === null || n === null ? null : sum + n;
+    }, 0),
+  );
+  if (!shared || rounds.length < MIN_STREAK || !stalled(counts)) return undefined;
+  const reviewers = [...new Set(rounds.flat().map((r) => r.reviewer ?? ''))];
+  return {
+    reviewer: 'review',
+    counts,
+    file: shared.reduce((a, b) => (b.length > a.length ? b : a)),
+    reviewers,
+  };
+}
+
 /** Pure: sink rows → the streaks worth naming for the reviewers that blocked THIS ship. */
 export function summariseTrend(rows: TrendRow[], key: ShipKey): TrendLine[] {
   const keyed = branchAttempts(rows, key);
@@ -179,13 +257,17 @@ export function summariseTrend(rows: TrendRow[], key: ShipKey): TrendLine[] {
       .map((r) => r.reviewer ?? ''),
   );
   const lines: TrendLine[] = [];
+  let ownStreak = false;
   for (const reviewer of blocking) {
     const streak = streakOf(keyed.mine, reviewer);
     if (streak.length < MIN_STREAK) continue;
+    ownStreak = true;
     const counts = streak.map(countOf);
     if (stalled(counts)) lines.push({ reviewer, counts });
   }
-  return lines;
+  // A reviewer with its own streak already judged convergence; the cross-reviewer line never overrides it.
+  const handoff = blocking.size && !ownStreak ? handoffOf(keyed.mine) : undefined;
+  return handoff ? [...lines, handoff] : lines;
 }
 
 /** The newest HISTORY_CAP attempts of this ship's branch, read backward. Never throws. */
@@ -198,16 +280,19 @@ export function readBranchHistory(sink: string, key: ShipKey): TrendRow[] {
   );
 }
 
+const REMEDY =
+  '     The blocking-finding count is not falling: fix and test the whole class, or use the waive / skip remedies printed above.';
+
 /** Pure: streaks → at most two lines per reviewer, or '' for silence. */
 export function renderTrend(lines: TrendLine[]): string {
   return lines
-    .map(({ reviewer, counts }) => {
+    .map(({ reviewer, counts, file, reviewers }) => {
       const shown = counts.slice(-SHOWN).map((n) => (n === null ? '?' : `${n}`));
       const series = `${counts.length > SHOWN ? '… → ' : ''}${shown.join(' → ')}`;
-      return [
-        `   ↻ ${reviewer}: ${counts.length} blocking rounds on this branch with no pass between — ${series} findings, not converging`,
-        '     The blocking-finding count is not falling: fix and test the whole class, or use the waive / skip remedies printed above.',
-      ].join('\n');
+      const headline = file
+        ? `   ↻ ${reviewer}: ${file} drew blocking findings in ${counts.length} rounds running across reviewers (${reviewers?.join(', ')}) — ${series} blocking findings per round, not converging`
+        : `   ↻ ${reviewer}: ${counts.length} blocking rounds on this branch with no pass between — ${series} findings, not converging`;
+      return [headline, REMEDY].join('\n');
     })
     .join('\n');
 }
