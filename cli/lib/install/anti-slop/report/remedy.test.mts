@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   GATE_REASON_ENV,
   readGateReason,
+  reasonReport,
 } from '../../../../../gate-engine/deterministic/reason.mts';
 import antiSlop from '../../../../commands/oxc/anti-slop.mts';
 import {
@@ -228,7 +229,7 @@ describe('anti-slop check FAIL output (wiring)', () => {
   const git = (cwd: string, args: string[]) =>
     execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 30_000 }).trim();
 
-  function repository(overlay: boolean): string {
+  function repository(overlay: boolean, baseline = true): string {
     const root = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-remedy-'));
     roots.push(root);
     git(root, ['init', '-q']);
@@ -243,7 +244,7 @@ describe('anti-slop check FAIL output (wiring)', () => {
     }
     syncAntiSlopCapability(root);
     syncOxcCapability(root, overlay ? { antiSlop: true, overlay: true } : { antiSlop: true });
-    writeFileSync(join(root, ANTI_SLOP_BASELINE_REL), EMPTY_BASELINE);
+    if (baseline) writeFileSync(join(root, ANTI_SLOP_BASELINE_REL), EMPTY_BASELINE);
     writeFileSync(join(root, 'src', 'a.test.ts'), MOCKING_SOURCE);
     git(root, ['add', '-A']);
     return root;
@@ -259,10 +260,15 @@ describe('anti-slop check FAIL output (wiring)', () => {
     expect(stderr).toContain(ACCEPT_VIA_OVERRIDE);
   });
 
+  function reasonFile(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-reason-'));
+    roots.push(dir);
+    return join(dir, 'reason.txt');
+  }
+
   it('records the FAIL line, then the rule and location, for the aggregated verdict', () => {
     const cwd = repository(false);
-    const reason = join(mkdtempSync(join(tmpdir(), 'devkit-anti-slop-reason-')), 'reason.txt');
-    roots.push(join(reason, '..'));
+    const reason = reasonFile();
     vi.stubEnv(GATE_REASON_ENV, reason);
     expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
     const [summary, ...locations] = readGateReason(reason);
@@ -271,6 +277,36 @@ describe('anti-slop check FAIL output (wiring)', () => {
       expect.stringMatching(/^ERROR \S+ src\/a\.test\.ts:3:\d+ \(1 new\)$/u),
     ]);
     expect(locations[0]).toContain(MOCKING);
+  });
+
+  it.each([false, true])(
+    'records the missing-baseline exit 2 so the tail block names the remedy, stderr unchanged (overlay %s)',
+    (overlay) => {
+      const cwd = repository(overlay, false);
+      const reason = reasonFile();
+      vi.stubEnv(GATE_REASON_ENV, reason);
+      const missing = `anti-slop: ${ANTI_SLOP_BASELINE_REL} is missing; run \`devkit anti-slop create\` explicitly`;
+      expect(antiSlop(['check', '--staged'], cwd)).toBe(2);
+      expect(err).toEqual([missing]);
+      expect(readGateReason(reason)).toEqual([missing]);
+      const block = reasonReport([
+        { id: 'anti-slop', label: 'guard-anti-slop(unexpected:2)', reason: readGateReason(reason) },
+      ]).join('\n');
+      expect(block).toContain(`── guard-anti-slop(unexpected:2) ──\n     ${missing}`);
+      expect(block).not.toContain('(no reason summary');
+    },
+  );
+
+  it('records the not-installed refusal of a capability-gated command', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-remedy-'));
+    roots.push(cwd);
+    git(cwd, ['init', '-q']);
+    const reason = reasonFile();
+    vi.stubEnv(GATE_REASON_ENV, reason);
+    expect(antiSlop(['create'], cwd)).toBe(2);
+    expect(readGateReason(reason)).toEqual([
+      'anti-slop: not installed — run `devkit init --anti-slop`',
+    ]);
   });
 
   it('prints the named-type hint when the real rule blocks a conditional empty spread', () => {
