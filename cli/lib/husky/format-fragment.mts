@@ -73,21 +73,27 @@ export interface AgentHookLines {
   'agents-hooks/lint-check.sh': string[];
 }
 
+/** Trails every rendered line, so whoever edits one in a hook sees the lock on the line itself. */
+export const AGENT_HOOK_MARKER =
+  '# devkit: must equal renderAgentHookLines (cli/lib/husky/format-fragment.mts)';
+
+const marked = (lines: string[]): string[] => lines.map((l) => `${l} ${AGENT_HOOK_MARKER}`);
+
 /** The agent hooks run the repo's own Oxfmt bin: devkit's hoisted pin in package mode, the repo's
  *  own in overlay. Standalone has none there, so the hooks skip and the commit step formats. */
 export function renderAgentHookLines(f: StepFormatter = OXFMT_STEP): AgentHookLines {
   const bin = `./node_modules/.bin/${f.bin}`;
   const gate = `{ ${f.configProbes.map((p) => `[ -f "${p}" ]`).join(' || ')}; } && [ -x "${bin}" ]`;
   return {
-    'agents-hooks/format-after-edit.sh': [
+    'agents-hooks/format-after-edit.sh': marked([
       `if [[ "$file_path" =~ ${FORMAT_EXTENSIONS} ]] && ${gate}; then`,
       `  "${bin}" ${OXFMT_WRITE_ARGS} "$file_path" >/dev/null 2>&1 || true`,
-    ],
-    'agents-hooks/lint-check.sh': [
+    ]),
+    'agents-hooks/lint-check.sh': marked([
       `if ${gate}; then`,
       `    lint_output=$("${bin}" ${OXFMT_CHECK_ARGS} "\${oxfmt_files[@]}" 2>&1)`,
       `      echo "Run '${bin} --write <file>' to auto-fix." >&2`,
-    ],
+    ]),
   };
 }
 

@@ -55,8 +55,8 @@ fi
 # Oxfmt on the edited file (silent, best-effort), rendered from cli/lib/husky/format-fragment.mts.
 # Gated on an Oxfmt CONFIG, not merely the binary: configless Oxfmt formats to its own defaults,
 # which in a repo formatting with something else turns one small edit into a whole-file diff.
-if [[ "$file_path" =~ \.(tsx?|jsx?|mts|cts|mjs|cjs|css|jsonc?)$ ]] && { [ -f ".oxfmtrc.json" ] || [ -f ".oxfmtrc.jsonc" ] || [ -f "oxfmt.config.ts" ] || [ -f "oxfmt.config.mts" ]; } && [ -x "./node_modules/.bin/oxfmt" ]; then
-  "./node_modules/.bin/oxfmt" --no-error-on-unmatched-pattern --write "$file_path" >/dev/null 2>&1 || true
+if [[ "$file_path" =~ \.(tsx?|jsx?|mts|cts|mjs|cjs|css|jsonc?)$ ]] && { [ -f ".oxfmtrc.json" ] || [ -f ".oxfmtrc.jsonc" ] || [ -f "oxfmt.config.ts" ] || [ -f "oxfmt.config.mts" ]; } && [ -x "./node_modules/.bin/oxfmt" ]; then # devkit: must equal renderAgentHookLines (cli/lib/husky/format-fragment.mts)
+  "./node_modules/.bin/oxfmt" --no-error-on-unmatched-pattern --write "$file_path" >/dev/null 2>&1 || true # devkit: must equal renderAgentHookLines (cli/lib/husky/format-fragment.mts)
 fi
 
 # ESLint structure/size check — scoped to the consumer's configured scanRoots. Resolve them by
