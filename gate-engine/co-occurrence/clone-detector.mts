@@ -48,7 +48,10 @@ import { exitGate, failLine } from '../deterministic/reason.mts';
 import { ALLOWLIST_CLI, type CloneAllowlistEntry, loadAllowlist, saveAllowlist } from './allowlist-io.mts';
 import { flagReader } from './argv.mts';
 import { loadChangedSet } from './changed-files.mts';
-import { DEFAULT_DECAY_DAYS, isExpired } from './decay.mts';
+import { isExpired } from './decay.mts';
+import { cloneRow, lapsedNote, loc } from './clones/clone-format.mts';
+import type { Clone, JscpdReport } from './clones/clone-types.mts';
+import { IMPORT_IGNORE_PATTERNS } from './clones/import-ignore-patterns.mts';
 import { JSCPD_OWN_ROOT, jscpdVersionMismatch, resolveJscpdBin } from './jscpd-bin.mts';
 
 // Resolve config against the consumer cwd (W-3). Scan roots, allowlist, jscpd cwd all key off it.
@@ -89,48 +92,6 @@ const JSCPD_BIN = resolveJscpdBin({
   ownRoot: JSCPD_OWN_ROOT,
   repoRoot,
 });
-
-/** A line locator in a jscpd clone: either a bare line number or a `{ line }` object. */
-type CloneLineLoc = number | { line: number };
-
-/** A normalised clone pair (cross-file by default; same-file when requested). */
-export interface Clone {
-  fragmentHash: string;
-  /** jscpd's kind: `exact` token clone, or `similar` (same-structure functions, `similarity` score). */
-  kind: string;
-  similarity?: number;
-  lines: number;
-  tokens: number;
-  fileA: string;
-  startA: CloneLineLoc;
-  endA: CloneLineLoc;
-  fileB: string;
-  startB: CloneLineLoc;
-  endB: CloneLineLoc;
-  fragment: string;
-}
-
-// The pieces of jscpd's JSON report we read (external-data shape).
-interface JscpdFileEntry {
-  name: string;
-  start: number;
-  end: number;
-  startLoc?: { line: number };
-  endLoc?: { line: number };
-}
-interface JscpdDuplicate {
-  fragment?: string;
-  kind: string;
-  similarity?: number;
-  isNew?: boolean;
-  lines: number;
-  tokens: number;
-  firstFile: JscpdFileEntry;
-  secondFile: JscpdFileEntry;
-}
-interface JscpdReport {
-  duplicates?: JscpdDuplicate[];
-}
 
 interface DetectClonesOptions {
   minTokens?: number;
@@ -255,35 +216,6 @@ export function relPath(f: string): string {
   return path;
 }
 
-/**
- * Import/re-export declarations are excluded from clone detection AT THE TOKENIZER, via jscpd's
- * `--ignore-pattern` (each entry becomes an ignore token rule in the format grammar; matched
- * text never enters any fragment). Two modules using the same shared libs are FORCED into
- * identical, linter-sorted import preambles — the module system working, not copy-paste debt —
- * and a big enough preamble clears the min-tokens floor on its own, false-blocking sibling
- * files. Removing imports up front gives the clean semantic "clones are measured over
- * non-import code": nothing can ride a preamble over the token floor, and nothing real can hide
- * behind one. (A post-hoc fragment classifier was tried first; six reviewer-verified holes —
- * ratio leaks, dynamic import(...), quote-terminated statements, import attributes — showed
- * that design to be unfixable. See the gate-contract tests.)
- *
- * Each pattern is bounded so it can never span arbitrary code: single-line forms forbid `\n`,
- * the multi-line named form crosses lines only inside `{...}` and requires the `} from '...'`
- * closer. Dynamic `import(...)` is runtime code and deliberately matches none of them. jscpd's
- * CLI comma-splits this option, so patterns must stay comma-free. Unmatched exotic shapes
- * (import attributes, default+named multi-line) fall through to normal tokenization — the safe
- * direction: worst case a clone REPORTS and the allowlist is the remedy, never the reverse.
- */
-export const IMPORT_IGNORE_PATTERNS = [
-  // Named / namespace-in-braces, incl. multi-line specifier lists: import [type] { ... } from 'x';
-  String.raw`import\s*(type\s+)?\{[^}]*\}\s*from\s*['"][^'"]+['"];?`,
-  // Default / namespace, single-line only: import foo from 'x'; import * as ns from 'x';
-  String.raw`import\s+(type\s+)?[\w$*][^\n]*?from\s*['"][^'"]+['"];?`,
-  // Side-effect: import 'x';
-  String.raw`import\s*['"][^'"]+['"];?`,
-  // Re-export barrels: export { a } from 'x'; / export * from 'x';
-  String.raw`export\s*(\{[^}]*\}|\*)\s*from\s*['"][^'"]+['"];?`,
-];
 
 /** Stable key: hash the fragment with whitespace collapsed so reformatting
  * doesn't change the key, but real code changes do. */
@@ -371,29 +303,6 @@ function findIgnoreMarkers(paths: string[], changed: Set<string> | null): Ignore
         .split('\n')
         .flatMap((text, i) => (text.includes(IGNORE_MARKER) ? [{ file, line: i + 1 }] : [])),
     );
-}
-
-type CloneLocSide = 'startA' | 'endA' | 'startB' | 'endB';
-const loc = (c: Clone, side: CloneLocSide): number => {
-  const v = c[side];
-  return typeof v === 'number' ? v : v.line;
-};
-
-const cloneRow = (c: Clone): string =>
-  `  ${String(c.lines).padStart(3)}L  ${c.fragmentHash}  ${c.fileA}:${loc(c, 'startA')} <> ${c.fileB}:${loc(c, 'startB')}${c.kind === 'similar' ? `  (similar ${c.similarity})` : ''}`;
-
-const filePairKey = (a: string, b: string): string => [a, b].sort().join('\0');
-
-/** Provenance of a lapsed approval, so a re-approval re-judges the original reason. */
-function lapsedNote(c: Clone, e: CloneAllowlistEntry): string {
-  const lifetime =
-    e.decayDays === undefined
-      ? `no lifetime recorded (${DEFAULT_DECAY_DAYS}-day default)`
-      : `${e.decayDays}-day lifetime`;
-  const moved =
-    e.fileA && e.fileB && filePairKey(e.fileA, e.fileB) !== filePairKey(c.fileA, c.fileB);
-  const where = moved ? ` — approved for ${e.fileA} <> ${e.fileB}` : '';
-  return `approved ${e.date}, ${lifetime}${where}: "${e.description || 'no reason recorded'}"`;
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────
