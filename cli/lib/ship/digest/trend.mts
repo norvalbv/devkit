@@ -7,7 +7,7 @@ import { scanBackward } from './tail.mts';
 /** Below this many consecutive blocks a re-ship is ordinary iteration, not a loop. */
 const MIN_STREAK = 3;
 /** How far back one branch is walked; also bounds the backward read. */
-const HISTORY_CAP = 20;
+export const HISTORY_CAP = 20;
 /** Counts shown before the series is elided at its old end. */
 const SHOWN = 8;
 
@@ -28,6 +28,10 @@ const trendRowSchema = z.object({
   judge: text,
   repo: text,
   branch: text,
+  gate: text,
+  detail: text,
+  transcript_ref: text,
+  ts: text,
   exit_code: z.number().optional().catch(undefined),
   items: z.array(z.unknown()).optional().catch(undefined),
 });
@@ -46,7 +50,7 @@ export interface ShipKey {
   branch: string;
 }
 
-interface Attempt {
+export interface Attempt {
   shipId: string;
   rows: TrendRow[];
   result?: TrendRow;
@@ -101,7 +105,11 @@ const isReviewFail = (row: TrendRow) =>
 
 /** This branch's rows → its attempts in order, or null when two overlap (completion order is then not
  * round order). Markers open attempts: an inherited DEVKIT_SHIP_ID can span several. */
-function attemptsOf(rows: TrendRow[], key: ShipKey, why?: Why): Attempt[] | null {
+export function attemptsOf(
+  rows: TrendRow[],
+  key: Omit<ShipKey, 'shipId'>,
+  why?: Why,
+): Attempt[] | null {
   const done: Attempt[] = [];
   let current: Attempt | undefined;
   const displaced = new Set<string>();
@@ -182,7 +190,7 @@ function asOfResult(rows: TrendRow[], key: ShipKey): TrendRow[] | null {
 }
 
 /** This branch's finished attempts up to the current one, or null when the ship cannot be keyed. */
-function branchAttempts(rows: TrendRow[], key: ShipKey) {
+export function branchAttempts(rows: TrendRow[], key: ShipKey) {
   const window = asOfResult(rows, key);
   const all = window && attemptsOf(window, key);
   if (!all) return null;

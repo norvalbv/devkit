@@ -14,6 +14,7 @@ import {
 } from '../../gate-engine/judge/outage/family-override.mts';
 import { findsFlag } from '../lib/help/wants-help.mts';
 import { enterShipQueue, prequeueEnv, queueAhead } from '../lib/ship/queue/enter.mts';
+import { listBranchAdvisories } from '../lib/ship/digest/advisories.mts';
 import { formatShipQueue, readShipQueue } from '../lib/ship/queue/status.mts';
 import { reportShipRuntimeProvenance } from '../lib/ship/runtime-provenance.mts';
 import {
@@ -31,6 +32,7 @@ export interface ShipDependencies {
   queueAhead: () => string[] | undefined;
   runPrequeue: typeof runPackagedScriptQuiet;
   showQueue: () => string;
+  listAdvisories: (cwd: string, branch: string) => { text: string; code: number };
 }
 
 const DEFAULT_DEPENDENCIES: ShipDependencies = {
@@ -40,6 +42,7 @@ const DEFAULT_DEPENDENCIES: ShipDependencies = {
   queueAhead: () => queueAhead(),
   runPrequeue: runPackagedScriptQuiet,
   showQueue: () => formatShipQueue(readShipQueue()),
+  listAdvisories: listBranchAdvisories,
 };
 
 /** Value flags the bash parsers refuse under --resume (it replays WHAT ships). */
@@ -72,7 +75,7 @@ export const meta = {
   valueFlags: ['--base', '--body', '--body-file', '--link', '--wait-ci-timeout'],
   // An argv the dispatcher rejects never reaches a parser, so none of its tokens is consumed.
   valueFlagsFor(args: readonly string[]): readonly string[] {
-    if (args[0] === '--queue') return [];
+    if (args[0] === '--queue' || args[0] === '--advisories') return [];
     const flags = parserValueFlags(args);
     return dispatchRejection(args, routeFlagsOf(args, flags)) ? [] : flags;
   },
@@ -84,6 +87,7 @@ Usage:
   devkit ship --pr <branch> "<title>" [--ready] [--body "<text>"] [--body-file <f>] [--link <d>]... [--] <path...>
   devkit ship --resume <branch> [--body-file <f>] [--] <extra-path...>
   devkit ship --queue
+  devkit ship --advisories <branch>
                           bare positional paths (no --) are accepted.
 
   <branch> and "<title>" are POSITIONAL and must come FIRST, before any flag. The bracketed flags
@@ -215,6 +219,9 @@ Usage:
                       SHIP_DRY_RUN=1 run first.
   --queue             Print the machine-wide ship queue — the running ship (branch, repo, elapsed,
                       last gate line) and the waiters, next up first — then exit. Takes no slot.
+  --advisories <branch>  Print every distinct reviewer ADVISORY the ship attempts on <branch> raised,
+                      once each, with the attempts that raised it — a single PASS shows only a
+                      sample. <branch> is the ship branch, not the worktree's. Takes no slot.
   --link <d>          Extra gitignored gate-dep dir to symlink into the worktree (repeatable;
                       the base .husky/_ + node_modules are always linked).
   --pr                Re-push: add changes to the EXISTING PR on <branch> as a new commit
@@ -319,6 +326,22 @@ export default function ship(
     } catch (cause) {
       console.error(
         `ship: could not read the queue: ${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+      return 1;
+    }
+  }
+  if (args[0] === '--advisories') {
+    if (args.length !== 2) {
+      console.error('Usage: devkit ship --advisories <branch>');
+      return 1;
+    }
+    try {
+      const { text, code } = dependencies.listAdvisories(cwd, args[1]);
+      console.log(text);
+      return code;
+    } catch (cause) {
+      console.error(
+        `ship: could not read the advisories: ${cause instanceof Error ? cause.message : String(cause)}`,
       );
       return 1;
     }
