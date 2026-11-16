@@ -3,22 +3,23 @@
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { diffClassifier } from '../../../gate-engine/coverage/diff-gate.mts';
+import { addedProductionLines, diffClassifier } from '../../../gate-engine/coverage/diff-gate.mts';
 import { detectFallow } from '../../lib/install/install-fallow.mts';
 import { gitRunner, line, ok } from '../../lib/ship/base-drift/git-run.mts';
 import { mergeBaseOf, nulList } from '../coverage/diff.mts';
-import { type KillMatrixReport, killMatrixReport, redundancy } from './report.mts';
+import { changedLines, type KillMatrixReport, killMatrixReport, redundancy } from './report.mts';
 
 /** The first fallow release with `mutation --kill-matrix-for`. */
 const FALLOW_FLOOR = [3, 40, 0];
 const DEFAULT_BUDGET = '4m';
+const MAX_UNCAUGHT = 10;
 
 export const meta = {
   name: 'test-redundancy',
   agentFacing: true,
-  summary: 'Tests in your changed test files that catch nothing another test misses.',
-  help: `devkit test-redundancy — which tests in the changed test files catch no failure that another
-test does not already catch.
+  summary: 'Changed lines no test catches, and changed tests that catch nothing new.',
+  help: `devkit test-redundancy — which lines you changed no test catches, and which tests in the
+changed test files catch no failure that another test does not already catch.
 
 Usage:
   devkit test-redundancy [--base <ref>] [--time-budget <duration>] [-- <source path>...]
@@ -34,9 +35,15 @@ It runs \`fallow mutation --kill-matrix-for\` (fallow 3.40.0 or later): fallow p
 the source, runs the whole test suite against each, and records which tests catch which bug. Run it
 before you ship, after your last test edit.
 
+  not caught     A planted bug on a line you changed that no test failed on, or a changed line no
+                 test runs. This is where a test is missing or weak, and the best-evidenced of the
+                 signals here. Add or strengthen a test, or note why the change cannot matter: some
+                 planted bugs do not alter behaviour. The first ${MAX_UNCAUGHT} are listed, then a count.
+  changed lines  How many planted bugs landed on lines you changed and how many ran. A run cut
+                 short by the time budget says so; an empty list is then not a pass.
   redundant      Other tests already catch every bug this test catches. Review each one on its
                  own: two tests with equal evidence are both listed, so deleting both removes the
-                 protection.
+                 protection. This prompts a review; it never tells you to delete a test.
   kills nothing  The test ran the code and caught no planted bug. It may guard data or a removal
                  that no planted bug expresses; keep it only with that reason stated.
   not judged     fallow's evidence was incomplete, with its reason. This is never a pass.
@@ -118,6 +125,8 @@ interface Change {
   testFiles: number;
   targets: string[];
   sources: string[];
+  /** Whether the change added or modified this line of a production file fallow names. */
+  isChanged: (file: string, line: number) => boolean;
 }
 
 /** The change's test files and the source to mutate, or the one line that says why not. */
@@ -149,7 +158,19 @@ function findChange(cwd: string, opts: Options): Change | Stop {
       'the change touches no production source. Name the source these tests cover: devkit test-redundancy -- <source path>...',
     );
   }
-  return { testFiles: tests.length, targets: tests.map(fromHere), sources };
+  const isProduction = (p: string) => classify(p, false) === 'production';
+  let added = new Map<string, Set<number>>();
+  try {
+    added = addedProductionLines(top, isProduction, [mb.sha]);
+  } catch {
+    // Without the diff no line counts as changed; the redundancy verdicts do not depend on it.
+  }
+  const newFiles = new Set(untracked.filter(isProduction));
+  const isChanged = (file: string, lineNo: number): boolean => {
+    const path = relative(top, join(here, file));
+    return newFiles.has(path) || (added.get(path)?.has(lineNo) ?? false);
+  };
+  return { testFiles: tests.length, targets: tests.map(fromHere), sources, isChanged };
 }
 
 interface Answer {
@@ -205,6 +226,21 @@ function printReport({ version, report }: Answer, change: Change): void {
   console.log(
     `fallow ${version}: ${done} of ${mutants} planted bugs ran in ${seconds}s, ${judged} tests judged in ${change.testFiles} changed test file(s).`,
   );
+  const { uncaught, planned, ran } = changedLines(report, change.isChanged);
+  for (const u of uncaught.slice(0, MAX_UNCAUGHT)) {
+    console.log(`  not caught     ${u.file}:${u.line}  ${u.what}`);
+  }
+  if (uncaught.length > MAX_UNCAUGHT) {
+    console.log(`  not caught     ... and ${uncaught.length - MAX_UNCAUGHT} more on changed lines`);
+  }
+  console.log(
+    `  changed lines  ${uncaught.length} not caught of ${ran} planted bugs that ran (${planned} planned)`,
+  );
+  if (ran < planned) {
+    console.log(
+      `                 ${planned - ran} did not run before the time budget, so those lines may be untested.`,
+    );
+  }
   for (const t of flagged) {
     console.log(`  ${t.verdict.padEnd(13)}  ${t.testId}`);
   }
@@ -212,7 +248,9 @@ function printReport({ version, report }: Answer, change: Change): void {
   for (const u of unjudged) {
     console.log(`  not judged     ${u.target} (${u.tests} tests): ${u.reasons.join(', ')}`);
   }
-  if (flagged.length) console.log('What each word means: devkit help test-redundancy');
+  if (flagged.length || uncaught.length) {
+    console.log('What each word means: devkit help test-redundancy');
+  }
 }
 
 export default function testRedundancy(

@@ -55,9 +55,9 @@ function run(cwd: string, deps: Deps, ...args: string[]) {
 }
 
 /** repo() whose base holds the test "adds", with an origin/main ref and a feature branch cut from it. */
-function featureRepo() {
-  const r = repo();
-  write(r.root, 'src/a.test.mts', 'test("adds", () => {});\n');
+function featureRepo(pkg = '') {
+  const r = repo(pkg);
+  write(r.cwd, 'src/a.test.mts', 'test("adds", () => {});\n');
   git(r.root, 'commit', '-q', '-am', 'base test');
   git(r.root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
   git(r.root, 'switch', '-q', '-c', 'feature');
@@ -158,5 +158,39 @@ describe('devkit test-redundancy', () => {
     expect(noBase.code).toBe(0);
     expect(noBase.out).toContain('Not judged: cannot resolve --base no-such-ref to a commit.');
     expect(runFallow).not.toHaveBeenCalled();
+  });
+
+  it('lists uncaught planted bugs on changed lines even when no test could be judged', () => {
+    const { root, cwd } = featureRepo('pkg');
+    write(cwd, 'src/a.mts', 'export const a = 2;\n');
+    addTest(cwd);
+    const cutShort: KillMatrixReport = {
+      summary: { counts: { total: 3, pending: 1 } },
+      mutants: [
+        {
+          file: 'src/a.mts',
+          line: 1,
+          status: 'survived',
+          operator: 'x',
+          change: { from: '2', to: '0' },
+        },
+        { file: 'src/a.mts', line: 1, status: 'pending' },
+        { file: 'src/a.mts', line: 7, status: 'survived' },
+      ],
+      kill_matrix: {
+        targets: [
+          { target: 'src/a.test.mts', status: 'incomplete', reasons: ['partial-mutation-run'] },
+        ],
+      },
+    };
+
+    const { out } = run(cwd, fallow('3.41.0', JSON.stringify(cutShort)).deps);
+
+    expect(root).not.toBe(cwd);
+    expect(out).toContain('not caught     src/a.mts:1  x: 2 → 0');
+    expect(out).not.toContain('src/a.mts:7');
+    expect(out).toContain('changed lines  1 not caught of 1 planted bugs that ran (2 planned)');
+    expect(out).toContain('1 did not run before the time budget');
+    expect(out).toContain('not judged     src/a.test.mts (0 tests): partial-mutation-run');
   });
 });
