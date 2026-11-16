@@ -8,6 +8,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { runVitestDetailed, type VitestRun } from '../../../../gate-engine/coverage/vitest-cli.mts';
 import {
   displayPath,
   readDiagnosis,
@@ -124,10 +125,11 @@ interface SpawnResult {
 }
 
 type Exec = (
-  cmd: string,
+  bin: string,
   args: string[],
-  opts: { cwd: string; stdio: 'inherit'; env: NodeJS.ProcessEnv },
-) => SpawnResult;
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+) => Promise<VitestRun>;
 
 interface RunOpts {
   staged: Iterable<string>;
@@ -204,27 +206,31 @@ function narrate(result: SpawnResult, report: string, root: string): void {
   }
 }
 
-/** Exit code of the related-tests run: 0 when nothing is selected, vitest's status otherwise. */
-export async function runRelatedTests(root: string, opts: RunOpts): Promise<number> {
+// Grouped, so a signal to this gate also ends vitest's fork workers rather than orphaning them.
+const runGrouped: Exec = (bin, args, cwd, env) =>
+  runVitestDetailed(bin, args, cwd, env, { group: true });
+
+/** The related-tests run: code 0 when nothing is selected, vitest's outcome otherwise. */
+export async function runRelatedTests(root: string, opts: RunOpts): Promise<VitestRun> {
   const staged = [...opts.staged];
   const paths = relatedPaths(staged);
   // From the raw set: relatedPaths drops vitest.setup.mjs, which the env-scrub test binds.
   const forced = forcedTests(staged);
   if (!paths.length && !forced.length) {
     console.log('related-tests: none selected');
-    return 0;
+    return { code: 0, interrupted: false };
   }
   let files: string[] = [];
   try {
     if (paths.length) files = await (opts.list ?? listRelated)(root, paths);
   } catch (err) {
     console.error(`✗ related-tests could not list related tests: ${errorMessage(err)}`);
-    return 1;
+    return { code: 1, interrupted: false };
   }
   // The reach test only answers for source modules, so a config-only commit skips the queue.
   if (!files.length && !forced.length && !paths.some((p) => SOURCE_RE.test(p))) {
     console.log(`related-tests: no test relates to the ${paths.length} staged path(s)`);
-    return 0;
+    return { code: 0, interrupted: false };
   }
   // listRelated returns absolute paths, so absolutise the rest for the set to dedupe.
   const tests = [...new Set([...files, ...[...forced, REACH_TEST].map((t) => join(root, t))])];
@@ -242,13 +248,12 @@ export async function runRelatedTests(root: string, opts: RunOpts): Promise<numb
   const env = { ...process.env };
   delete env[GATE_REASON_ENV];
   try {
-    const result = (opts.exec ?? spawnSync)(vitest, args, { cwd: root, stdio: 'inherit', env });
-    if (result.error)
-      console.error(`✗ related-tests could not run vitest: ${result.error.message}`);
-    // A null status is a signal kill or a failed spawn: nothing passed, so block.
-    const status = result.status ?? 1;
-    if (status !== 0) narrate(result, report, root);
-    return status;
+    const run = await (opts.exec ?? runGrouped)(vitest, args, root, env);
+    // A signalled gate blocks, even when vitest still exits 0 after the forwarded signal.
+    const code = run.interrupted && run.code === 0 ? 1 : run.code;
+    // A null status reads as "killed before exiting" in the reason.
+    if (code !== 0) narrate({ status: run.interrupted ? null : code }, report, root);
+    return { ...run, code };
   } finally {
     try {
       if (dir) rmSync(dir, { recursive: true, force: true });
@@ -267,8 +272,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     );
     process.exitCode = 1;
   } else {
-    process.exitCode = await runRelatedTests(process.cwd(), { staged });
+    const run = await runRelatedTests(process.cwd(), { staged });
     // The raw set, not relatedPaths: a staged vitest.setup.mjs must still mark its forced test as run.
-    noteUnmapped(process.cwd(), staged);
+    if (!run.interrupted) noteUnmapped(process.cwd(), staged);
+    process.exitCode = run.code;
   }
 }
