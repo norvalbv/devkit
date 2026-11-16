@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
+import { devkitVersion } from '../../../../gate-engine/devkit-version.mts';
 import { appendShipRow } from '../telemetry/row.mts';
 
 /** Per-call cap: this runs after the PR is open, so a hung gh must not hold the ship's exit. */
@@ -175,7 +176,7 @@ export function recordStackEvent(result: StackResult, pr: number, env = process.
   const row = {
     type: 'ship_stack',
     ship_id: shipId,
-    devkit_version: env.DEVKIT_TELEMETRY_VERSION ?? null,
+    devkit_version: devkitVersion(),
     pr_number: pr,
     parent_pr: result.parent ?? null,
     stack_number: result.stack ?? null,
