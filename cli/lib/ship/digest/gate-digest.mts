@@ -99,6 +99,8 @@ export interface DigestRow {
   advisory?: true;
   /** A gate a flag or config skipped: never capped, since a hidden skip is what this row ends. */
   skipped?: true;
+  /** A finding that did not stop an attributed run: why not, and what to do about it. */
+  why?: string;
 }
 
 /** A row that COULD have stopped the run, so its blocking status must be computed, never assumed. */
@@ -241,7 +243,7 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
   // target's lib does not carry.
   const results = mine.filter((e) => e.type === 'ship_result');
   const result = results[results.length - 1];
-  const blocked = result?.blocked_gate ?? '';
+  const blocked = textOf(result?.blocked_gate ?? undefined);
   // 'unknown': the run failed and none of the shell's prose greps matched. 'interrupted':
   // a signal stopped the chain. No ship_result at all: a --dry-gates rehearsal. Either way the
   // blocking gate is not knowable, and "did NOT block this run" would state something this digest
@@ -376,10 +378,13 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
   const seen = new Set<string>();
   const key = (a: Attributable): string => `${a.state}:${a.gate}:${a.fp ?? ''}`;
   const unique = attributable.filter((a) => !seen.has(key(a)) && seen.add(key(a)) !== undefined);
+  const stoppers = unattributed ? [] : unique.filter((a) => isBlocking(a, blocked, unique));
+  const why = notBlockingWhy([...new Set(stoppers.map((a) => a.gate))], blocked, exitCode);
   return [
     ...unique.map((a) => {
-      const blocking = unattributed ? null : isBlocking(a, blocked, unique);
+      const blocking = unattributed ? null : stoppers.includes(a);
       const row: DigestRow = { gate: a.gate, state: a.state, blocking, detail: a.detail };
+      if (blocking === false && a.state === 'finding') row.why = why;
       if (a.fp) row.fp = a.fp;
       if (a.findings) row.findings = a.findings;
       return row;
@@ -393,6 +398,14 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
     ...waivedRows(mine),
     ...cached,
   ];
+}
+
+/** Why a finding did not stop the run, from facts this digest holds — never a guess at the retry. */
+function notBlockingWhy(stoppers: string[], blocked: string, exitCode: number | null): string {
+  if (exitCode === 0) return ' (its gate let the run pass) — read it before merging';
+  if (stoppers.length)
+    return ` only because ${stoppers.join(', ')} stopped it first — read it before retrying`;
+  return ` — the run ended on ${oneLine(blocked)} — read it before retrying`;
 }
 
 /** A cache_hit's gate label; completeness's intent key reports under the judge's own gate name. */
@@ -409,6 +422,9 @@ function firstPerGate(rows: DigestRow[]): DigestRow[] {
     return true;
   });
 }
+
+/** A row built outside summarise() carries no reason, so it keeps the plain retry hint. */
+const whyNot = (r: DigestRow): string => r.why ?? ' — read it before retrying';
 
 /** Pure: rows → the block printed below the blocking gate's remediation, or '' for silence. */
 export function render(rows: DigestRow[], logPath = ''): string {
@@ -437,11 +453,7 @@ export function render(rows: DigestRow[], logPath = ''): string {
     else if (r.blocking === null) {
       // No "did NOT block" claim: the blocking gate is unknowable on this run.
       out.push(`   ⚠ ${r.gate} — finding recorded — read it before retrying${tail}`);
-    } else {
-      out.push(
-        `   ⚠ ${r.gate} — finding recorded, did NOT block this run — read it before retrying${tail}`,
-      );
-    }
+    } else out.push(`   ⚠ ${r.gate} — finding recorded, did NOT block this run${whyNot(r)}${tail}`);
   }
   if (others.length > MAX_FINDINGS) {
     out.push(`   … ${others.length - MAX_FINDINGS} more finding(s) — all of them are in the log`);
