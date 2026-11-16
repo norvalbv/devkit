@@ -11,6 +11,8 @@
 //
 // Deterministic EVIDENCE selection only — the LLM still decides the verdict.
 
+import { parsePatch } from 'diff';
+
 // Real `git diff --cached` prefixes each file with `diff --git`; a hand-authored / preamble-free diff
 // (some eval fixtures) starts each file at `--- `. Split on whichever the diff uses so a next file's
 // header can never leak into the previous file's segment (a path like `catch-utils.ts` must not trip a
@@ -18,8 +20,6 @@
 const GIT_HEADER_RE = /^diff --git /m;
 const GIT_SPLIT_RE = /^(?=diff --git )/m;
 const OLD_FILE_SPLIT_RE = /^(?=--- )/m;
-const POST_PATH_RE = /^\+\+\+ (?:b\/)?(\S+)/m;
-const GIT_PATH_RE = /^diff --git (?:a\/)?(\S+)/m;
 const HUNK_SPLIT_RE = /\n(?=@@ )/;
 
 /** Split a unified diff into per-file segments (each = one file's header + its hunks). Empty leading
@@ -32,11 +32,33 @@ export function splitDiffByFile(diff: string): string[] {
   return text.split(boundary).filter((s) => s.trim());
 }
 
-/** The post-image path of a diff segment (`+++ b/<path>`, else the `diff --git` path), or null. */
+const sidePath = (name: string | undefined, prefix: string): string | null =>
+  !name || name === '/dev/null' ? null : name.startsWith(prefix) ? name.slice(prefix.length) : name;
+
+/** jsdiff's parse of a segment's header (the hunk counts are not ours to validate), or undefined
+ * when it is not a patch header — e.g. a `--- ` line with no `+++` after it. */
+function headerPatch(segment: string) {
+  const hunk = segment.indexOf('\n@@');
+  try {
+    return parsePatch(hunk === -1 ? segment : segment.slice(0, hunk + 1))[0];
+  } catch {
+    return undefined;
+  }
+}
+
+/** Both sides' paths of a segment (null = absent side or not a diff), via jsdiff's git-header parse. */
+export function diffPathsOf(segment: string) {
+  const patch = headerPatch(segment);
+  return {
+    oldPath: patch?.isCreate ? null : sidePath(patch?.oldFileName, 'a/'),
+    newPath: patch?.isDelete ? null : sidePath(patch?.newFileName, 'b/'),
+  };
+}
+
+/** The post-image path of a diff segment (a deletion's pre-image path), or null. */
 export function filePathOf(segment: string): string | null {
-  const post = segment.match(POST_PATH_RE)?.[1];
-  if (post && post !== '/dev/null') return post;
-  return segment.match(GIT_PATH_RE)?.[1] ?? null;
+  const { oldPath, newPath } = diffPathsOf(segment);
+  return newPath ?? oldPath;
 }
 
 /** One file's RELEVANT hunks, in diff order — the unit a cap-aware packer drops or keeps. */

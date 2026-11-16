@@ -1,5 +1,4 @@
-import { splitDiffByFile } from '../judge/diff-focus.mts';
-import { unquoteGitPath } from './lens/chunk.mts';
+import { filePathOf, splitDiffByFile } from '../judge/diff-focus.mts';
 import { shellWord } from './valve/shell-word.mts';
 // Capped, omission-accounted stdin evidence for a checklist-less gate judge that has no Bash of
 // its own to fetch its own diff (sc-1060's completeness lesson, generalized). The old contract was
@@ -104,35 +103,6 @@ export function renderCappedSegments(segments: NamedSegment[], opts: CapOptions)
 const EVIDENCE_TOTAL_CAP = 60000; // same total budget as the old blunt cap — no cost claim
 const SEGMENT_CAP = 8000; // no single file may eat the budget (greedy in diff order)
 const OMITTED_LIST_MAX = 40; // OMITTED pointer lines; the --stat header is the full inventory
-const SEGMENT_PATH_RE = /^diff --git (?:a\/)?(\S+)/;
-
-// The POST-image path, whole even with spaces: `+++ b/<p>` (git tab-terminates a spaced name), else
-// `rename to`/`copy to` (a pure rename has no hunks), else the same-path `diff --git` header.
-const POST_IMAGE_RES = [
-  /^\+\+\+ b\/(.+?)\t?$/m,
-  /^(?:rename|copy) to (.+)$/m,
-  /^diff --git a\/(.+) b\/\1$/m,
-];
-// The same three shapes as git C-quotes them (a `"`, `\\`, control or non-ASCII byte in the path).
-const QUOTED_POST_IMAGE_RES = [
-  /^\+\+\+ "b\/((?:[^"\\]|\\.)*)"\t?$/m,
-  /^(?:rename|copy) to "((?:[^"\\]|\\.)*)"$/m,
-  /^diff --git "a\/(?:[^"\\]|\\.)*" "b\/((?:[^"\\]|\\.)*)"$/m,
-];
-function segmentPath(seg: string): string {
-  const hunk = seg.indexOf('\n@@');
-  const header = hunk === -1 ? seg : seg.slice(0, hunk);
-  for (const re of QUOTED_POST_IMAGE_RES) {
-    const quoted = re.exec(header)?.[1];
-    if (quoted !== undefined) return unquoteGitPath(`"${quoted}"`);
-  }
-  for (const re of POST_IMAGE_RES) {
-    const path = re.exec(header)?.[1];
-    if (path) return path;
-  }
-  return seg.match(SEGMENT_PATH_RE)?.[1] ?? '(unknown path)';
-}
-
 const diffHint = (label: string) => `run \`git diff --cached -- ${shellWord(label)}\``;
 
 /** The recovery hint for a judge with Read but no shell (a claude-runtime reviewer without a
@@ -149,7 +119,10 @@ export interface DiffEvidenceCap {
 }
 
 function namedDiffSegments(diff: string): NamedSegment[] {
-  return splitDiffByFile(diff).map((content) => ({ label: segmentPath(content), content }));
+  return splitDiffByFile(diff).map((content) => ({
+    label: filePathOf(content) ?? '(unknown path)',
+    content,
+  }));
 }
 
 function capDiffSegments(segments: NamedSegment[]): CappedSegments {
