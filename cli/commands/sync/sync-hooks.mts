@@ -53,6 +53,9 @@ function listFlag(args: string[], name: string): string[] | undefined {
     .filter(Boolean);
 }
 
+/** Guards the recorded selection enables; none when the repo has no devkit config. */
+const recordedGuards = (cfg: DevkitConfig | null): string[] => cfg?.components?.guards ?? [];
+
 export const meta = {
   name: 'sync-hooks',
   agentFacing: false,
@@ -84,7 +87,8 @@ export default function run(args: string[], cwd: string): number {
   const { gitRoot } = detectGitRoot(cwd);
   // Config is package-local in a monorepo even though hook assets are repo-wide.
   const cfg: DevkitConfig | null = readJson(join(cwd, '.devkit', 'config.json'));
-  const decisions = cfg?.components?.guards?.includes('decisions') ?? false;
+  const guards = recordedGuards(cfg);
+  const decisions = guards.includes('decisions');
   // The fallow staged gate belongs to the FALLOW component, so a full sync must read the recorded
   // selection: omitting it makes `desired` exclude an installed gate, and exact reconciliation then
   // prunes it as deselected — silently disabling the gate on every `devkit sync-hooks`.
@@ -102,6 +106,8 @@ export default function run(args: string[], cwd: string): number {
   const fanout = cfg?.components?.guards?.includes('fanout') ?? false;
   // And for the placement brief, owned by the fanout guard or the structure component.
   const placement = placementSelected(cfg?.components ?? {});
+  // And for the after-edit line-ceiling advisory, owned by the size guard.
+  const size = guards.includes('size');
   const explicitTargets = listFlag(args, '--targets');
   const targets =
     explicitTargets ??
@@ -126,6 +132,7 @@ export default function run(args: string[], cwd: string): number {
     antiSlop,
     fanout,
     placement,
+    size,
   });
   syncHookScripts(gitRoot, {
     dryRun: args.includes('--dry-run'),

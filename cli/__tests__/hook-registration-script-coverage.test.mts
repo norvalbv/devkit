@@ -34,6 +34,7 @@ const SCRIPT_OWNING_COMPONENTS = [
   'antiSlop',
   'fanout',
   'placement',
+  'size',
 ] as const;
 
 /** A selection with exactly ONE component on — notably agentHooks OFF for every other component. */
@@ -47,6 +48,7 @@ const only = (component: string) => ({
   antiSlop: component === 'antiSlop',
   fanout: component === 'fanout',
   placement: component === 'placement',
+  size: component === 'size',
 });
 
 /** The hook-dir script a registration command invokes, or null for an engine-bin command. */
@@ -77,6 +79,7 @@ describe('hook registrations resolve to installable scripts', () => {
       comments: true,
       fanout: true,
       placement: true,
+      size: true,
     });
     const dangling = Object.values(HOOK_REGISTRATIONS)
       .flat()
