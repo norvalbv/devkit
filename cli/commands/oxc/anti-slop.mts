@@ -91,8 +91,9 @@ Configure per-rule off/warn/error and scoped overrides in the repository Oxlint 
 to the repository root. Check and inspect never write. Create refuses an existing baseline unless
 --force is explicit; a whole-repository replacement that removes debt from existing files also requires
 --confirm-baseline-removals. Once a baseline is committed, create refuses any snapshot the commit
-gate would reject against HEAD, so a new finding is fixed, not adopted. Prune refuses to write while
-new error-severity findings exist.
+gate would reject against HEAD, so a new finding is fixed, not adopted. While new error-severity
+findings exist, prune keeps fixed debt; an unscoped prune still drops the debt of deleted files unless
+the same finding reappears elsewhere (adopt that rename or move first).
 
 In an OVERLAY install the baseline is per-clone and git-ignored, so no committed tree carries one to
 compare against: check and adopt-relocations refuse --base, adopt-renames [--base <ref>] re-keys a
