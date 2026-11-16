@@ -157,7 +157,7 @@ Every consumer reads the **current (last) Target block** of an axis. None is sho
 | Consumer | Sees | Limit |
 |---|---|---|
 | Pre-edit brief | Ruling | 3 axes, first 2000 chars of each Ruling |
-| Decision judge (`detect`) | Ruling of scope-matched axes | 4,096-byte block |
+| Decision judge (`detect`) | Ruling of scope-matched axes | 8,192-byte block |
 | Domain reviewers | Ruling of scope-matched axes, plus semantic hits | 8,192-byte block |
 | Completeness judge | Ruling of scope-matched axes, plus semantic hits | none |
 | `check-alignment` | Ruling, plus Vision-fit (Context when there is none) | per Target |
