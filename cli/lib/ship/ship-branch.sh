@@ -341,11 +341,17 @@ if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; then
   case "$remote_check" in
     0) # A merged or closed PR's branch reaches no base, so --pr would only refuse in turn.
        REPO=$( (git config --get remote.origin.url || git remote get-url origin) | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git$##')
-       PR_CLOSED=; ! read_pr_state || [ "$PR_SEEN_STATE" = OPEN ] || PR_CLOSED=1
+       PR_CLOSED=; PR_UNREAD=
+       if read_pr_state; then [ "$PR_SEEN_STATE" = OPEN ] || PR_CLOSED=1; else PR_UNREAD=1; fi
        # A preserved commit already on origin (lost push response, manual push) is adopted; the
        # receipt checks below still decide whether it may be published.
        if [ -z "$PR_CLOSED" ] && [ -n "$LOCAL_BRANCH_EXISTS" ] &&
          [ "${remote_line%%[[:space:]]*}" = "$(git rev-parse -q --verify "refs/heads/$BR")" ]; then
+         if [ -n "$PR_UNREAD" ] && ! pr_absent; then
+           echo "could not confirm origin/$BR has no merged or closed PR (gh could not read its PR state) — refusing to adopt it" >&2
+           echo "  re-run once gh answers, or check by hand: gh pr view $(ship_shell_quote "$BR") --repo $(ship_shell_quote "$REPO")" >&2
+           exit 1
+         fi
          REMOTE_HOLDS_PRESERVED=1
        else
          echo "remote branch already exists: origin/$BR" >&2
