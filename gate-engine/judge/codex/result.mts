@@ -229,6 +229,9 @@ export function codexExecArgs(
       : ['--sandbox', parts.readOnly ? 'read-only' : 'workspace-write']),
     '-c',
     'web_search="disabled"',
+    // No AGENTS.md project docs, matching the claude judge's disabled CLAUDE.md memory.
+    '-c',
+    'project_doc_max_bytes=0',
     ...mcpArgv,
     '--ignore-user-config',
     '--ignore-rules',
@@ -261,7 +264,7 @@ const codexBin = (): string => process.env.GUARD_CODEX_BIN || 'codex';
  * The ONE routing decision, taken from the caller's untouched claude-shaped argv — every consumer
  * (spawn, outage wording, output parsing) derives from this, so first-vs-last `--model` ambiguity
  * cannot make two call sites disagree about which binary ran. The claude branch reproduces the
- * pre-adapter spawn exactly (withResultArgs included), which the routing test pins.
+ * pre-adapter argv exactly (withResultArgs included), which the routing test pins.
  */
 export function judgeCliFor(
   args: string[],
