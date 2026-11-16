@@ -8,10 +8,15 @@
  *
  * Samples cases deterministically (seeded by --seed, default 1118), relabels them BLIND (the
  * second labeler never sees the first pass — label.mts has no access to proposals when writing to
- * a fresh LABEL_OUT), matches the two passes' findings via the SAME pre-registered match rule the
- * bench uses (category + suffix-tolerant file overlap, greedy one-to-one by file-overlap count
- * then claim-token Jaccard), and reports Cohen's κ on verdict and on wasLiveBug over matched
- * pairs, plus the unmatched rate (segmentation disagreement — itself a noise signal).
+ * a fresh LABEL_OUT), matches the two passes' findings via the SHARED pre-registered match rule
+ * (lib/match.mts `matchFindings` — the one implementation the bench and ceiling calibration also
+ * run), and reports Cohen's κ on verdict and on wasLiveBug over matched pairs, plus the unmatched
+ * rate (segmentation disagreement — itself a noise signal).
+ *
+ * sc-1119 note: the matcher moved into lib/match.mts and gained the contract's item-3 exception
+ * (one broad finding covering two counterparts) — a behavior change TOWARD the registered
+ * contract. κ math still runs over greedy one-to-one pairs (an item-3 credit pairs one finding
+ * with two labels, which κ cannot use); credits are surfaced in the unmatched accounting instead.
  *
  * Interpretation contract (README): report κ next to every sc-1119 results table; a variant delta
  * smaller than the disagreement floor is unresolved. Target α ≥ 0.667 (Krippendorff's threshold
@@ -22,14 +27,13 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { overlapCount } from './lib/match.mts';
+import { matchFindings } from './lib/match.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const rawDir = path.join(here, 'raw');
 const firstPassPath = path.join(rawDir, 'proposals.jsonl');
 const secondPassPath = path.join(rawDir, 'proposals.kappa.jsonl');
 
-const WORD_SPLIT_RE = /\W+/;
 const KAPPA_MODEL = process.env.KAPPA_MODEL ?? 'haiku';
 const argv = process.argv.slice(2);
 const flag = (name) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : null);
@@ -45,13 +49,18 @@ const readJsonl = (file) =>
         .map((l) => JSON.parse(l))
     : [];
 
-// deterministic PRNG (mulberry32) — the sample must be reproducible and pre-registerable
-const mulberry32 = (a) => () => {
-  a += 0x6d2b79f5;
-  let t = a;
-  t = Math.imul(t ^ (t >>> 15), t | 1);
-  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+// deterministic PRNG (mulberry32) — the sample must be reproducible and pre-registerable.
+// Same generator as lib/stats.mts's export; kept local so the historical seed-1118 sample
+// stays byte-identical regardless of stats.mts evolution.
+const mulberry32 = (seed) => {
+  let a = seed;
+  return () => {
+    a += 0x6d2b79f5;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 };
 
 const first = readJsonl(firstPassPath);
@@ -72,53 +81,21 @@ if (!reportOnly) {
   });
 }
 
-// ── match the two passes with the pre-registered bench rule ──────────────────────────────────────
-const tokens = (s) =>
-  new Set(
-    (s ?? '')
-      .toLowerCase()
-      .split(WORD_SPLIT_RE)
-      .filter((w) => w.length > 2),
-  );
-const jaccard = (a, b) => {
-  const A = tokens(a);
-  const B = tokens(b);
-  const inter = [...A].filter((x) => B.has(x)).length;
-  return inter / (A.size + B.size - inter || 1);
-};
-// shared with finalize/sources — one overlap implementation (drift here would distort κ)
-
+// ── match the two passes with the SHARED pre-registered rule (lib/match.mts) ─────────────────────
 const second = readJsonl(secondPassPath);
 const firstById = new Map(first.map((p) => [p.id, p]));
 const pairs = [];
 let unmatchedA = 0;
 let unmatchedB = 0;
+let item3 = 0;
 for (const b of second) {
   const a = firstById.get(b.id);
   if (!a) continue;
-  const candidates = [];
-  for (const fa of a.findings ?? [])
-    for (const fb of b.findings ?? []) {
-      const files = overlapCount(fa.files, fb.files);
-      const sameCat = fa.category === fb.category;
-      const jac = jaccard(fa.claim, fb.claim);
-      // the PRE-REGISTERED rule, exactly: category + file overlap; the Jaccard fallback applies
-      // ONLY when a side has no files (a looser matcher here would inflate the reported κ)
-      const emptySide = !(fa.files ?? []).length || !(fb.files ?? []).length;
-      if ((sameCat && files > 0) || (emptySide && jac >= 0.35))
-        candidates.push({ fa, fb, files, jac, sev: fa.severity === fb.severity ? 1 : 0 });
-    }
-  candidates.sort((x, y) => y.files - x.files || y.jac - x.jac || y.sev - x.sev);
-  const usedA = new Set();
-  const usedB = new Set();
-  for (const cnd of candidates) {
-    if (usedA.has(cnd.fa) || usedB.has(cnd.fb)) continue;
-    usedA.add(cnd.fa);
-    usedB.add(cnd.fb);
-    pairs.push([cnd.fa, cnd.fb]);
-  }
-  unmatchedA += (a.findings ?? []).length - usedA.size;
-  unmatchedB += (b.findings ?? []).length - usedB.size;
+  const m = matchFindings(a.findings, b.findings);
+  for (const { j, g } of m.pairs) pairs.push([j, g]);
+  item3 += m.item3Credits.length;
+  unmatchedA += m.unmatchedJudge.length;
+  unmatchedB += m.unmatchedGold.length;
 }
 
 const kappaOf = (key) => {
@@ -141,7 +118,7 @@ const fmtKappa = (k) =>
   Number.isNaN(k) ? 'undefined (single-class — see raw agreement)' : k.toFixed(3);
 
 console.log(
-  `kappa: ${pairs.length} matched finding pairs (unmatched: ${unmatchedA} first-pass, ${unmatchedB} second-pass)`,
+  `kappa: ${pairs.length} matched finding pairs (unmatched: ${unmatchedA} first-pass, ${unmatchedB} second-pass; item-3 covered credits: ${item3})`,
 );
 console.log(`  verdict    κ = ${fmtKappa(kappaOf('verdict'))}`);
 console.log(`  wasLiveBug κ = ${fmtKappa(kappaOf('wasLiveBug'))}`);
