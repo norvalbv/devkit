@@ -165,7 +165,10 @@ same directory, kept for the newest 300 runs only (`DEVKIT_TELEMETRY_KEEP`), and
   machine up` + `run <flow>`, then `devkit machine attach <pr>`, which puts the capture in the PR. A judge outage
   means no advice, and the judge can miss: when a change showed in the UI, attach the screenshots
   even if the reminder stayed silent. `uiEvidence.paths` adds globs to the defaults, for backend or
-  `.ts` files whose output a repo knows the UI renders.
+  `.ts` files whose output a repo knows the UI renders. `devkit ship --dry-gates` applies the path
+  rule only, with no model call. When a ship writes the PR body (opening the PR, or a re-ship with
+  `--body`/`--body-file`), a fired reminder becomes an unticked `📸` task item in that body. Tick
+  it once the screenshots or the "nothing visible changed" note are there; re-ships keep it.
 
 ## Comment budget
 
