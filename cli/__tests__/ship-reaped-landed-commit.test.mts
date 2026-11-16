@@ -13,6 +13,7 @@ import {
   GIT_ENV,
   localBranchExists,
   publishEnvFor,
+  REAPED_SLEEP_NOTICE,
   remoteBranchExists,
   reshipScript,
   scriptPath,
@@ -56,6 +57,7 @@ describe('ship — a landed commit whose hook left a process behind', () => {
 
     expect(r.status, r.stderr).toBe(0);
     expect(r.stderr).toMatch(REAPED_NOTICE);
+    expect(r.stderr).toMatch(REAPED_SLEEP_NOTICE);
     expect(r.stderr).not.toMatch(/exit 124|--resume/);
     expect(r.stdout).toContain('https://github.com/acme/app/pull/42');
     const pushed = bareSha(bare, 'feat/reaped');
