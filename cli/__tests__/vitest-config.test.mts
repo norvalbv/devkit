@@ -1,4 +1,11 @@
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -34,11 +41,14 @@ function nestedCoverage(
   env: NodeJS.ProcessEnv = {},
 ) {
   const root = realpathSync(scratch);
+  // The native runner resolves the fixture's `vitest` import the way Node does: up from the file.
+  symlinkSync(path.join(REPO, 'node_modules'), path.join(root, 'node_modules'));
   for (const [name, body] of Object.entries(files)) writeFileSync(path.join(root, name), body);
   writeFileSync(
     path.join(root, 'vitest.config.mjs'),
     `import base from ${JSON.stringify(pathToFileURL(path.join(REPO, 'vitest.config.mjs')).href)};\n` +
-      "export default { test: { include: ['*.test.mts'], coverage: base.test.coverage } };\n",
+      'const { experimental } = base.test.projects[0].test;\n' +
+      "export default { test: { include: ['*.test.mts'], coverage: base.test.coverage, experimental } };\n",
   );
   const coverageArgs = [
     'run',
@@ -83,6 +93,14 @@ describe('devkit vitest config under vitest 5', () => {
     expect(e2eConfig.test).toMatchObject({ fsModuleCache: false });
   });
 
+  // A root-level flag never reaches an `extends: false` project, so each one carries its own.
+  it('runs every project on the native module runner', () => {
+    for (const project of config.test?.projects ?? [])
+      expect(project.test?.experimental, project.test?.name).toMatchObject({
+        viteModuleRunner: false,
+      });
+  });
+
   it('attaches v8 coverage to spawned child processes', () => {
     expect(config.test?.coverage).toMatchObject({ provider: 'v8', autoAttachSubprocess: true });
   });
@@ -104,8 +122,8 @@ describe('devkit vitest config under vitest 5', () => {
     expect(result.stdout).toBe(marker);
   });
 
-  // Runs devkit's own coverage block end to end.
-  it('counts lines that only a spawned `node <file>.mts` child executes', () => {
+  // Runs devkit's own coverage block end to end: the fixture is imported in the worker and spawned.
+  it('adds the hits of a spawned `node <file>.mts` child to the in-process hits', () => {
     const { root, result } = nestedCoverage(
       {
         'cli.mts': [
@@ -116,13 +134,15 @@ describe('devkit vitest config under vitest 5', () => {
           'export function neverCalled(): number {',
           '  return 1;',
           '}',
-          'if (process.argv[2]) console.log(classify(Number(process.argv[2])));',
+          "if (process.argv[1]?.endsWith('cli.mts')) console.log(classify(Number(process.argv[2])));",
           '',
         ].join('\n'),
         'cli.test.mts': [
           "import { spawnSync } from 'node:child_process';",
           "import { expect, it } from 'vitest';",
-          "it('spawns', () => {",
+          "import { classify } from './cli.mts';",
+          "it('imports and spawns', () => {",
+          "  expect(classify(5)).toBe('non-neg');",
           "  const cli = new URL('./cli.mts', import.meta.url).pathname;",
           "  expect(spawnSync(process.execPath, [cli, '-1'], { encoding: 'utf8' }).stdout).toBe('neg\\n');",
           '});',
@@ -141,8 +161,8 @@ describe('devkit vitest config under vitest 5', () => {
         ),
       ].map(([, line, count]) => [Number(line), Number(count)]),
     );
-    expect(hits.get(2)).toBeGreaterThan(0);
-    expect(hits.get(6)).toBe(0);
+    // Line 2 runs once in the worker and once in the child; line 3 only in the worker.
+    expect([hits.get(2), hits.get(3), hits.get(6)]).toEqual([2, 1, 0]);
   });
 
   // Piped, vitest clamps the table to 80 columns, and under an agent it hides fully covered files.

@@ -80,7 +80,7 @@ const OPERATOR_DOCS = ['docs/troubleshooting.md', 'skills/commit-gates/SKILL.md'
 const DOCTOR_BULLET_ANCHOR = '`devkit doctor --fix` writes the same four keys';
 
 function readDoc(rel: string): string {
-  return readFileSync(join(__dirname, '..', '..', rel), 'utf8');
+  return readFileSync(join(import.meta.dirname, '..', '..', rel), 'utf8');
 }
 
 /** The doc bullet that offers the doctor route, whitespace-collapsed; '' when the anchor is gone. */

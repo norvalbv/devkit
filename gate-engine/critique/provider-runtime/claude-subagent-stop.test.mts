@@ -2,7 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { closeSync, existsSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   context,
   createRepository,
@@ -314,27 +314,27 @@ describe('Claude plan critique runtime wrapper', () => {
     expect(listPlanCritiqueRecordMetadata({ root })).toHaveLength(1);
   });
 
-  it('returns before reading stdin when fd 0 is a TTY', async () => {
+  it('returns before reading stdin when fd 0 is a TTY', () => {
     const home = temporaryDirectory('critique-wrapper-tty-home-');
-    const inputIsTTY = vi.fn(() => true);
-    const readFromStdin = vi.fn();
-    vi.doMock('node:tty', () => ({ isatty: inputIsTTY }));
-    vi.doMock('node:fs', async (importOriginal) => ({
-      ...(await importOriginal<typeof import('node:fs')>()),
-      readSync: readFromStdin,
-    }));
-    vi.stubEnv('DEVKIT_NO_TELEMETRY', '');
-    vi.stubEnv('HOME', home);
-    try {
-      await import('./claude-subagent-stop.mts');
-      expect(inputIsTTY).toHaveBeenCalledWith(0);
-      expect(readFromStdin).not.toHaveBeenCalled();
-      expect(existsSync(evidenceRoot(home))).toBe(false);
-    } finally {
-      vi.unstubAllEnvs();
-      vi.doUnmock('node:fs');
-      vi.doUnmock('node:tty');
-      vi.resetModules();
-    }
+    // vi.doMock does not reach Node builtins on the native module runner, so the child patches
+    // them before it imports the wrapper.
+    const source =
+      `import fs from 'node:fs'; import { syncBuiltinESMExports } from 'node:module';` +
+      `import tty from 'node:tty'; const calls = []; const read = fs.readSync;` +
+      `tty.isatty = (fd) => (calls.push(['isatty', fd]), true);` +
+      `fs.readSync = (fd, ...rest) => (fd ? read(fd, ...rest) : (calls.push(['readSync']), 0));` +
+      `syncBuiltinESMExports();` +
+      `await import(${JSON.stringify(pathToFileURL(wrapper).href)});` +
+      `process.stdout.write(JSON.stringify(calls));`;
+    const result = spawnSync(process.execPath, ['--input-type=module', '--eval', source], {
+      cwd: createRepository(),
+      env: hookEnvironment(home, ''),
+      input: JSON.stringify(payload()),
+      encoding: 'utf8',
+    });
+
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toBe('[["isatty",0]]');
+    expect(existsSync(evidenceRoot(home))).toBe(false);
   });
 });
