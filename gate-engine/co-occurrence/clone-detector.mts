@@ -454,6 +454,9 @@ if (isMain) {
       if (novel.length > APPROVE_CAP) {
         console.log(`  (+${novel.length - APPROVE_CAP} more — re-run after addressing these)`);
       }
+      console.log(
+        'An approval lasts until the duplicated code changes; append --decay-days N for a temporary waiver.',
+      );
     }
     exitGate(rows.length > 0 ? 1 : 0, [headline, ...rows]);
   }
