@@ -374,7 +374,8 @@ const defaultExec =
 
 export interface ChecksPollerOptions {
   pr: string;
-  repo: string;
+  /** Omitted: gh resolves the repository from `cwd`. */
+  repo?: string;
   cwd: string;
   /** Narrow to branch-protection required checks. Never the default — see the decision record. */
   required?: boolean;
@@ -386,11 +387,12 @@ export interface ChecksPollerOptions {
 /** Build the poller `waitForChecks` drives. It never throws: every outcome is a PollResult. */
 export function ghChecksPoller(options: ChecksPollerOptions): () => PollResult {
   const exec = options.exec ?? defaultExec(options.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS);
-  const args = ['pr', 'checks', options.pr, '--repo', options.repo, '--json', CHECKS_JSON_FIELDS];
+  const repo = options.repo ? ['--repo', options.repo] : [];
+  const args = ['pr', 'checks', options.pr, ...repo, '--json', CHECKS_JSON_FIELDS];
   if (options.required) args.push('--required');
   const read = (raw: string): PollResult => {
     const rows = parseChecksJson(raw);
-    if (rows) return { kind: 'rows', rows: withFailedSteps(rows, { ...options, exec }) };
+    if (rows) return { kind: 'rows', rows: withFailedSteps(rows, { ...options, repo: options.repo ?? '{owner}/{repo}', exec }) };
     return {
       kind: 'unavailable',
       reason: 'gh-json-unparseable',
