@@ -118,6 +118,7 @@ describe('rebaseWorktreeCoverage — a private rekeyed copy for fallow', () => {
 function bindManifest(source: string, args: string[]) {
   const report = join(source, 'coverage-final.json');
   const snapshot = { roots: [], head: '', dirty: {}, args };
+  mkdirSync(join(source, '.runs'), { recursive: true });
   publishManifest(stageManifest(join(source, '.runs'), report, snapshot, 'run-1'), source);
 }
 
