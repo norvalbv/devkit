@@ -62,7 +62,7 @@ import {
   structureBypassed,
 } from './command-gates.mts';
 import { recheckLines, registryRecheck } from './recheck.mts';
-import { DETERMINISTIC } from './registry.mts';
+import { COULD_NOT_RUN, DETERMINISTIC } from './registry.mts';
 import { type FailedGate, reportFailures, reportOptedOut } from './report.mts';
 import { canonicalIds, resolveSelection, reviewIds } from './selection.mts';
 
@@ -72,10 +72,6 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // module so the same literals resolve in both — string-literal paths are NOT rewritten by tsc emit.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 
-// The suffix a STRICT run appends to a gate that opted out. Distinct from `(unexpected:2)`, which
-// stays reserved for a gate whose exit 2 was never an opt-out (an `--extra` command's fatal config
-// error): both are could-not-run for telemetry, but only this one is an opt-out we chose to reject.
-const COULD_NOT_RUN = '(could-not-run)';
 const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
 // Rewrites a sibling gate module's `.mjs` literal to the runtime extension. Hoisted (perf: no
