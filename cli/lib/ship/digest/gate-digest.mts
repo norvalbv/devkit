@@ -20,7 +20,7 @@ import { count, oneLine, textOf } from './fields.mts';
 import { withRecurrence } from './recurrence.mts';
 import { SKIP_CONTROLS } from './skip-controls.mts';
 import { scanBackward } from './tail.mts';
-import { readBranchHistory, trendNarration } from './trend.mts';
+import { renderBranchHistory } from './trend.mts';
 import { waivedRows } from './waived.mts';
 
 /**
@@ -481,7 +481,7 @@ if (/[/\\]gate-digest\.m[jt]s$/.test(process.argv[1] ?? '') && process.argv[2] =
   const key = { shipId, repo, branch };
   const text = [
     render(withRecurrence(summarise(readShipEvents(sink, shipId), shipId), sink, key), logPath),
-    trendNarration(readBranchHistory(sink, key), key),
+    renderBranchHistory(sink, key),
   ]
     .filter(Boolean)
     .join('\n');
