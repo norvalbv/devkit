@@ -134,7 +134,7 @@ All four acceptance criteria are implemented. What a reader needs to know:
 ### Commands added
 
 ```
-guard-decisions drift                          # rulings whose Scope matches no code (exit 1 if any)
+guard-decisions drift                          # rulings whose Scope matches no code (exit 1 if any; 2 if it could not conclude)
 guard-decisions rescope <slug> --scope … --reason …   # append-only Scope correction
 guard-decisions categories                     # category -> axis -> current ruling
 guard-decisions query "…" --full               # whole matched records, not truncated rulings
