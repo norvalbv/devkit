@@ -118,8 +118,11 @@ devkit command.
   `guard.config.json` has an `evidence` entry and the diff adds or changes tests, ship runs them on
   red (PR base plus only the PR's test files) and green (PR head) after the PR opens and writes the
   outcome there: captured, inconclusive or not-run, never "proved", and stale once the head moves.
-  An explicit `--body` keeps the current block, a block pasted into a body is dropped, and a
-  re-ship that pushes rewrites only the block. It can never fail the ship.
+  A changed test that imports a module the same PR adds reads `inconclusive: red failed only
+  at file level …` by design, because red lacks that module: expected, not something to report or
+  work around, though any other file-level failure on red still deserves a look. An explicit
+  `--body` keeps the current block, a block pasted into a body is dropped, and a re-ship that
+  pushes rewrites only the block. It can never fail the ship.
 - **The block also carries a "Reviewer notes" section** (`devkit:evidence:notes`): every PASS
   reviewer advisory, one bullet per finding with the commit it was raised at, even when no
   `evidence` entry is configured. A `--pr` re-ship adds its own and keeps the earlier ones; a
