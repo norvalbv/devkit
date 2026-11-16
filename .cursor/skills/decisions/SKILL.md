@@ -174,6 +174,9 @@ Every consumer reads the **current (last) Target block** of an axis. None is sho
   not a re-target. It replaces the effective Scope of the current Target.
 - A new Target starts from its own `--scope`. Nothing is inherited from the previous block or its
   `rescope` notes, and omitting `--scope` leaves the axis unscoped. Run `show <slug>` first.
+- Cite code by symbol, never by line. `add` and `amend` refuse a `<file>.<ext>:<line>` anchor,
+  because the next edit moves the line and the record cannot be corrected. An upstream source gets
+  its version and a SHA-pinned permalink (`…/blob/<sha>/path#L12`).
 
 ## Append-only — the core invariant (incl. migration)
 
