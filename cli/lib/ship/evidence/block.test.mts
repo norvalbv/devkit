@@ -5,7 +5,7 @@ import {
   type RegressionEvidence,
   type RegressionFailureSummary,
   type RegressionOperandEvidence,
-} from '../../baseline-status/regression-evidence.mts';
+} from '../../baseline-status/regression/evidence.mts';
 import {
   callerText,
   carryEvidenceBlock,

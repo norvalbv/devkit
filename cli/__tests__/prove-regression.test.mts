@@ -24,11 +24,11 @@ import {
   type RegressionEvidence,
   type RegressionOperandEvidence,
   SKIPPED_ON_GREEN,
-} from '../lib/baseline-status/regression-evidence.mts';
+} from '../lib/baseline-status/regression/evidence.mts';
 import { renderEvidenceBlock } from '../lib/ship/evidence/block.mts';
 import { inconclusive } from '../lib/ship/evidence/outcome.mts';
-import * as windowsSupervisor from '../lib/baseline-status/regression-windows-supervisor.mts';
-import { captureRegressionEvidence } from '../lib/baseline-status/regression-proof.mts';
+import * as windowsSupervisor from '../lib/baseline-status/regression/windows-supervisor.mts';
+import { captureRegressionEvidence } from '../lib/baseline-status/regression/proof.mts';
 import {
   createRegressionClone,
   linkRegressionDependencies,
@@ -36,11 +36,11 @@ import {
   prepareRegressionRepository,
   snapshotRegressionCaller,
   splitNulPathBytes,
-} from '../lib/baseline-status/regression-repository.mts';
+} from '../lib/baseline-status/regression/repository.mts';
 
 // Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
 void (() => import('../commands/baseline/prove-regression.mts'));
-void (() => import('../lib/baseline-status/regression-exec.mts'));
+void (() => import('../lib/baseline-status/regression/exec.mts'));
 
 const roots: string[] = [];
 

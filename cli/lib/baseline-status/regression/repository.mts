@@ -16,9 +16,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { digest } from '../fs-helpers.mts';
-import { reviewRepositorySnapshotFingerprint } from '../ship/review/repository/state.mts';
-import { gitEnvironment } from '../ship/review/shared/common.mts';
+import { digest } from '../../fs-helpers.mts';
+import { reviewRepositorySnapshotFingerprint } from '../../ship/review/repository/state.mts';
+import { gitEnvironment } from '../../ship/review/shared/common.mts';
 
 const MAX_GIT_OUTPUT = 64 * 1024 * 1024;
 const MAX_REPORT_BYTES = 64 * 1024 * 1024;

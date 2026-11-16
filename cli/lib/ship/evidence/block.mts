@@ -9,7 +9,7 @@ import {
   type RegressionEvidence,
   type RegressionFailureSummary,
   type RegressionOperandEvidence,
-} from '../../baseline-status/regression-evidence.mts';
+} from '../../baseline-status/regression/evidence.mts';
 import type { MergeVerdict } from '../merge-verdict/verdict.mts';
 import {
   EVIDENCE_ABSTENTIONS,
