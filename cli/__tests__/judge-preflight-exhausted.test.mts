@@ -356,7 +356,7 @@ describe('the preflight report for an exhausted window (sc-3207 acceptance)', ()
     expect(out).toContain('resets in 4d');
     expect(out).toContain('re-running will not help');
     for (const knob of [
-      'GUARD_REVIEW_MODEL=haiku',
+      'GUARD_REVIEW_MODEL=sonnet',
       'GUARD_REVIEW_ESCALATION_MODEL=opus',
       'GUARD_CORRECTNESS_MODEL=claude-haiku-5-5',
       'GUARD_CORRECTNESS_CHUNK=off',
@@ -431,7 +431,7 @@ describe('the preflight report for an exhausted window (sc-3207 acceptance)', ()
       'EXHAUSTED — USAGE LIMIT REACHED (plan free, 100% of a 30d window used, resets in 4d',
     );
     expect(out).toContain('re-running will not help for another 4d');
-    expect(out).toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(out).toContain('GUARD_REVIEW_MODEL=sonnet');
     expect(out).not.toContain('— reachable');
   });
 });

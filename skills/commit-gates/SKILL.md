@@ -213,7 +213,7 @@ authorization those require. Run it in the shell the ship runs in.
 `codex` dark — all four knobs, never a subset, plus any sentry pin:
 
 ```
-export GUARD_REVIEW_MODEL=haiku GUARD_REVIEW_ESCALATION_MODEL=opus \
+export GUARD_REVIEW_MODEL=sonnet GUARD_REVIEW_ESCALATION_MODEL=opus \
   GUARD_CORRECTNESS_MODEL=claude-haiku-5-5 GUARD_CORRECTNESS_CHUNK=off
 unset GUARD_SENTRY_MODEL FRINK_SENTRY_MODEL
 devkit ship --resume <branch>
