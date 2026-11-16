@@ -17,6 +17,7 @@ import { HOOK_REGISTRATIONS } from '../lib/install/hook-registration-ledger/regi
 import {
   DECISION_EDIT_HOOK,
   DECISION_SCOPE_BRIEF_HOOK,
+  EDIT_TARGETS_LIB,
   hookScriptsFor,
   PLACEMENT_BRIEF_HOOK,
   selectedHookAssets,
@@ -95,7 +96,9 @@ describe('hook registrations resolve to installable scripts', () => {
     };
     const owned = [DECISION_EDIT_HOOK, DECISION_SCOPE_BRIEF_HOOK];
     // Selecting the guard is sufficient — the brief must not need the agent-hook bundle.
-    expect(hookScriptsFor({ ...base, decisions: true }).sort()).toEqual([...owned].sort());
+    expect(hookScriptsFor({ ...base, decisions: true }).sort()).toEqual(
+      [...owned, EDIT_TARGETS_LIB].sort(),
+    );
     // …and the bundle alone must not drag in a script only the guard registers, or `desired`
     // reconciliation would install a hook no registration ever invokes.
     for (const hook of owned)
