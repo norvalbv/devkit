@@ -125,7 +125,7 @@ describe('a checklist contract miss whose judge was refused tool calls', () => {
 
   it('the reason counts unrelated refusals without calling them checklist commands', () => {
     expect(verifyChecklist(null, 'PASS', ['Bash: vitest run', 'Bash: bun test'])).toBe(
-      `${MISSING}2 tool call(s) were denied by the judge's tool allowlist (the allowlist runs Bash only for the checklist commands, spelled as given)`,
+      `${MISSING}2 tool call(s) were denied by the judge's tool allowlist; run each checklist command as its own plain node call, with no chains, loops or variables`,
     );
   });
 
