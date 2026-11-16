@@ -16,150 +16,15 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { computePercentages } from '../../../../gate-engine/coverage/run.mts';
+import { entry } from '../../../../gate-engine/coverage/__tests__/_provenance-fixtures.mts';
 import { coverageMapSchema } from '../../../../gate-engine/coverage/fallow-copy.mts';
-import {
-  deriveForeignRoot,
-  rebaseCoverageMap,
-  rebaseWorktreeCoverage,
-} from './coverage-rebase.mts';
+import { rebaseWorktreeCoverage } from './coverage-rebase.mts';
 
 const helper = fileURLToPath(new URL('./coverage-rebase.mts', import.meta.url));
 const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 const dirs: string[] = [];
 afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
-});
-
-/** A minimal istanbul entry: one statement, one function, one branch pair, all hit `hits` times. */
-const entry = (path: string, hits = 1) => ({
-  path,
-  statementMap: { 0: { start: { line: 1, column: 0 }, end: { line: 1, column: 1 } } },
-  fnMap: { 0: { name: 'f', line: 1 } },
-  branchMap: { 0: { type: 'if', line: 1 } },
-  s: { 0: hits },
-  f: { 0: hits },
-  b: { 0: [hits, 0] },
-});
-
-describe('deriveForeignRoot', () => {
-  const tracked = new Set(['src/a.ts', 'src/index.ts', 'index.ts', 'packages/app/src/x.ts']);
-
-  it('names the checkout the absolute keys were produced under', () => {
-    expect(deriveForeignRoot(['/dev/checkout/src/a.ts'], tracked, '/tmp/ship-wt')).toBe(
-      '/dev/checkout',
-    );
-  });
-
-  it('returns null when the keys already sit under the worktree, trailing slash or not', () => {
-    expect(deriveForeignRoot(['/tmp/ship-wt/src/a.ts'], tracked, '/tmp/ship-wt')).toBeNull();
-    expect(deriveForeignRoot(['/tmp/ship-wt/src/a.ts'], tracked, '/tmp/ship-wt/')).toBeNull();
-  });
-
-  it('returns null for repo-relative keys, which fallow already joins', () => {
-    expect(deriveForeignRoot(['src/a.ts'], tracked, '/tmp/ship-wt')).toBeNull();
-  });
-
-  it('returns null when no key reaches a tracked path (stale or foreign-repo coverage)', () => {
-    expect(deriveForeignRoot(['/dev/checkout/gen/out.js'], tracked, '/tmp/ship-wt')).toBeNull();
-    expect(deriveForeignRoot([], tracked, '/tmp/ship-wt')).toBeNull();
-  });
-
-  it('does not let a shallow tracked file claim a deeper key with the wrong prefix', () => {
-    // `index.ts` is tracked at the root AND under src/ — the prefix must be /dev/checkout, never
-    // /dev/checkout/src (which would rebase src/index.ts onto <wt>/index.ts).
-    expect(deriveForeignRoot(['/dev/checkout/src/index.ts'], tracked, '/wt')).toBe('/dev/checkout');
-  });
-
-  it('takes the majority root when the map merges runs from several checkouts', () => {
-    const keys = ['/a/src/a.ts', '/b/src/a.ts', '/b/src/index.ts', '/b/index.ts'];
-    expect(deriveForeignRoot(keys, tracked, '/wt')).toBe('/b');
-  });
-
-  it('resolves a monorepo package key to the repo root, not the package root', () => {
-    expect(deriveForeignRoot(['/dev/mono/packages/app/src/x.ts'], tracked, '/wt')).toBe(
-      '/dev/mono',
-    );
-  });
-
-  it('handles a producing root with spaces (a real consumer path shape)', () => {
-    expect(
-      deriveForeignRoot(['/Users/me/Personal and learning/frink/src/a.ts'], tracked, '/wt'),
-    ).toBe('/Users/me/Personal and learning/frink');
-  });
-
-  it('handles coverage produced at the filesystem root (a container WORKDIR of /)', () => {
-    expect(deriveForeignRoot(['/src/a.ts'], tracked, '/wt')).toBe('/');
-  });
-});
-
-describe('rebaseCoverageMap', () => {
-  it('moves the key and its istanbul path, and keeps keys outside the root untouched', () => {
-    const out = rebaseCoverageMap(
-      { '/dev/c/src/a.ts': entry('/dev/c/src/a.ts'), '/elsewhere/z.ts': entry('/elsewhere/z.ts') },
-      '/dev/c',
-      '/wt',
-    );
-    expect(Object.keys(out).sort()).toEqual(['/elsewhere/z.ts', '/wt/src/a.ts']);
-    expect(out['/wt/src/a.ts']?.path).toBe('/wt/src/a.ts');
-    expect(out['/elsewhere/z.ts']?.path).toBe('/elsewhere/z.ts');
-  });
-
-  it('respects the path boundary: a sibling dir sharing the prefix string is not rewritten', () => {
-    const out = rebaseCoverageMap(
-      { '/dev/c2/src/a.ts': entry('/dev/c2/src/a.ts') },
-      '/dev/c',
-      '/wt',
-    );
-    expect(Object.keys(out)).toEqual(['/dev/c2/src/a.ts']);
-  });
-
-  it('keeps the key already under the worktree when a rebased key would collide with it', () => {
-    const local = entry('/wt/src/a.ts', 7);
-    const out = rebaseCoverageMap(
-      { '/dev/c/src/a.ts': entry('/dev/c/src/a.ts', 1), '/wt/src/a.ts': local },
-      '/dev/c',
-      '/wt',
-    );
-    expect(out['/wt/src/a.ts']).toBe(local);
-    expect(Object.keys(out)).toEqual(['/wt/src/a.ts']);
-  });
-
-  it('moves a key whose entry names a different path, or none, without inventing one', () => {
-    const out = rebaseCoverageMap(
-      { '/dev/c/src/a.ts': { path: 'other' }, '/dev/c/b.ts': {} },
-      '/dev/c',
-      '/wt',
-    );
-    expect(out).toEqual({ '/wt/src/a.ts': { path: 'other' }, '/wt/b.ts': {} });
-  });
-
-  it('rebases an entry path under the foreign root even when it differs from its key', () => {
-    const out = rebaseCoverageMap(
-      { '/dev/c/src/a.ts': { path: '/dev/c/src/b.ts' }, 'rel/z.ts': { path: '/dev/c/z.ts' } },
-      '/dev/c',
-      '/wt',
-    );
-    expect(out).toEqual({
-      'rel/z.ts': { path: '/wt/z.ts' },
-      '/wt/src/a.ts': { path: '/wt/src/b.ts' },
-    });
-  });
-
-  it('rebases from a filesystem-root producer', () => {
-    expect(Object.keys(rebaseCoverageMap({ '/src/a.ts': entry('/src/a.ts') }, '/', '/wt'))).toEqual(
-      ['/wt/src/a.ts'],
-    );
-  });
-
-  it('leaves the coverage gate totals exactly as they were', () => {
-    const map = {
-      '/dev/c/src/a.ts': entry('/dev/c/src/a.ts', 3),
-      '/dev/c/b.ts': entry('/dev/c/b.ts', 0),
-    };
-    expect(computePercentages(rebaseCoverageMap(map, '/dev/c', '/wt'))).toEqual(
-      computePercentages(map),
-    );
-  });
 });
 
 /** A git worktree with tracked src/a.ts, plus a producer checkout's coverage dir keyed under `producer`. */
