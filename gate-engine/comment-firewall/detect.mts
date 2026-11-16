@@ -5,18 +5,10 @@
  * added-line attribution selects candidates, then a real TypeScript lexer reconstructs the entire
  * comment token. Delimiters inside strings, regexes, templates, and JSX text are therefore inert.
  */
-import { execFileSync } from 'node:child_process';
-import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { resolveGuardConfig, sourceMatchers } from '../config.mts';
-import {
-  gitPrefix,
-  nameStatusRecords,
-  type Renames,
-  renamesFrom,
-  splitNul,
-} from '../ratchets/git-index.mts';
+import { gitPrefix, type Renames } from '../ratchets/git-index.mts';
 import {
   anchorContext,
   anchorFor,
@@ -29,8 +21,10 @@ import {
 } from './inventory.mts';
 import { commentTouchLines, type PatchHunk, parsePatchHunks } from './patch.mts';
 import { loadCommentPolicy } from './policy.mts';
+import { addedCommentText, meaningfulLine, movedLines, movedPool } from './moved.mts';
 import { refFindings } from './refs.mts';
 import { type CommentToken, scanCommentTokens } from './scan.mts';
+import { git, patch, stagedPaths, stagedRenames } from './staged.mts';
 import type { CommentFinding, CommentInventory, DetectionResult } from './types.mts';
 
 export { parsePatchHunks } from './patch.mts';
@@ -38,66 +32,13 @@ export { parsePatchHunks } from './patch.mts';
 export const COMMENT_ADAPTER_VERSION = 'typescript-scanner-v2';
 export const COMMENT_FINDING_POLICY = 'changed-comment-paragraph-v6';
 const SUPPORTED_EXTENSIONS = new Set(['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'mts', 'cts']);
-const MAX_GIT_OUTPUT = 16 * 1024 * 1024;
 const CONTEXT_LINES = 4;
 const LEADING_DOT_SLASH = /^\.\//;
 const TRAILING_SLASH = /\/$/;
-const TRAILING_CARRIAGE_RETURN = /\r$/;
 const TRAILING_BLANKS = /[ \t\r]+$/;
 const LEADING_BLANKS = /^[ \t]+/;
-const LINE_COMMENT_PREFIX = /^\s*\/\/[/!]?[ \t]?/;
-const BLOCK_COMMENT_PREFIX = /^\s*\/\*+!?[ \t]?/;
-const BLOCK_COMMENT_SUFFIX = /[ \t]*\*\/[ \t]*$/;
-const BLOCK_COMMENT_CONTINUATION = /^\s*\*[ \t]?/;
 
 const sha12 = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 12);
-
-function git(cwd: string, args: string[]): string {
-  return execFileSync('git', args, {
-    cwd,
-    env: commitIndexEnv(cwd),
-    encoding: 'utf8',
-    maxBuffer: MAX_GIT_OUTPUT,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-}
-
-function stagedPaths(cwd: string, ref?: string): Set<string> {
-  const args = [
-    'diff',
-    '--cached',
-    '--name-only',
-    '-z',
-    '--relative',
-    '--diff-filter=ACMR',
-    '--no-ext-diff',
-  ];
-  if (ref) args.push(ref);
-  return new Set(splitNul(git(cwd, args)));
-}
-
-/** Staged renames keyed by cwd-relative new path. `--relative` would drop a source outside the cwd
- * before git pairs it, so pairing runs repo-wide and `from` comes back cwd-relative (maybe `../`). */
-function stagedRenames(cwd: string, ref?: string): Renames {
-  const args = [
-    'diff',
-    '--cached',
-    '--name-status',
-    '-z',
-    '--no-relative',
-    '--find-renames',
-    '--diff-filter=R',
-    '--no-ext-diff',
-  ];
-  if (ref) args.push(ref);
-  const prefix = gitPrefix(cwd);
-  const renamed: Renames = new Map();
-  for (const [newPath, { from, pure }] of renamesFrom(nameStatusRecords(git(cwd, args)))) {
-    if (!newPath.startsWith(prefix)) continue;
-    renamed.set(newPath.slice(prefix.length), { from: path.posix.relative(prefix, from), pure });
-  }
-  return renamed;
-}
 
 function isPure(renames: Renames | null, file: string): boolean {
   return renames?.get(file)?.pure === true;
@@ -126,22 +67,6 @@ function changedPaths(cwd: string): ChangedPaths {
   }
 }
 
-function patch(cwd: string, file: string, ref?: string, from?: string): string {
-  const args = [
-    '--literal-pathspecs',
-    'diff',
-    '--cached',
-    '--no-color',
-    '--no-ext-diff',
-    '--find-renames',
-    '--unified=4',
-    '--no-relative',
-    '--diff-filter=ACMR',
-  ];
-  if (ref) args.push(ref);
-  args.push('--', ...(from ? [from, file] : [file]));
-  return git(cwd, args);
-}
 
 function stagedBlob(cwd: string, file: string): string {
   const repoPath = `${gitPrefix(cwd)}${file}`;
@@ -149,6 +74,12 @@ function stagedBlob(cwd: string, file: string): string {
 }
 
 const extensionOf = (file: string) => path.extname(file).slice(1).toLowerCase();
+
+function lexerFor(file: string): ((source: string) => CommentToken[]) | null {
+  const extension = extensionOf(file);
+  if (!SUPPORTED_EXTENSIONS.has(extension)) return null;
+  return (source) => scanCommentTokens(source, extension);
+}
 
 /** Each comment line of `ref`'s version of the file, lexed by that path's own extension. */
 function commentFragmentsAt(cwd: string, file: string, ref: string) {
@@ -189,16 +120,6 @@ function contextFor(source: string, token: CommentToken): string {
   const from = Math.max(0, token.startLine - 1 - CONTEXT_LINES);
   const to = Math.min(lines.length, token.endLine + CONTEXT_LINES);
   return lines.slice(from, to).join('\n').slice(0, 8_000);
-}
-
-function meaningfulLine(line: string): string {
-  return line
-    .replace(TRAILING_CARRIAGE_RETURN, '')
-    .replace(LINE_COMMENT_PREFIX, '')
-    .replace(BLOCK_COMMENT_PREFIX, '')
-    .replace(BLOCK_COMMENT_SUFFIX, '')
-    .replace(BLOCK_COMMENT_CONTINUATION, '')
-    .trim();
 }
 
 /** Gap lines between grouped tokens are kept in `text`, so `startLine + index` stays a source line. */
@@ -373,6 +294,54 @@ function parentAttribution(cwd: string, file: string, renames: Renames | null, r
   return { hunks, fragments, touch: commentTouchLines(hunks, new Set(fragments.keys())) };
 }
 
+interface StagedFile {
+  file: string;
+  extension: string;
+  source: string;
+  tokens: CommentToken[];
+  effective: PatchHunk[];
+  added: Set<number>;
+  touchLines: Set<number>;
+  headFragments: Map<number, string[]>;
+}
+
+/** One staged file's comments and the added lines attributed to this change. */
+function attributed(
+  cwd: string,
+  file: string,
+  extension: string,
+  headRenames: Renames,
+  mergeRenamed: Renames | null,
+): StagedFile {
+  const first = parentAttribution(cwd, file, headRenames);
+  let effective = first.hunks;
+  let touchLines = first.touch;
+  try {
+    const second = parentAttribution(cwd, file, mergeRenamed, 'MERGE_HEAD');
+    const secondLines = new Set(second.hunks.flatMap((hunk) => [...hunk.addedLines]));
+    effective = first.hunks.map((hunk) => ({
+      ...hunk,
+      addedLines: new Set([...hunk.addedLines].filter((line) => secondLines.has(line))),
+    }));
+    touchLines = new Set([...touchLines].filter((line) => second.touch.has(line)));
+  } catch {
+    // Ordinary commit: the first-parent staged patch is the complete attribution set.
+  }
+  const source = stagedBlob(cwd, file);
+  const tokens = scanCommentTokens(source, extension);
+  const added = new Set(effective.flatMap((hunk) => [...hunk.addedLines]));
+  return {
+    file,
+    extension,
+    source,
+    tokens,
+    effective,
+    added,
+    touchLines,
+    headFragments: first.fragments,
+  };
+}
+
 export function detectChangedComments(
   cwd = process.cwd(),
   only?: ReadonlySet<string>,
@@ -389,6 +358,7 @@ export function detectChangedComments(
   inventory.decisionsStaged =
     decisionsDir !== '' && [...stagedPaths(cwd)].some((file) => insideRoots(file, [decisionsDir]));
   const { files, head: headRenames, merge: mergeRenamed } = changedPaths(cwd);
+  const staged: StagedFile[] = [];
   for (const file of files.sort()) {
     if (only && !only.has(file)) continue;
     if (!insideRoots(file, roots) || !isConfiguredSource(file)) continue;
@@ -398,31 +368,31 @@ export function detectChangedComments(
       continue;
     }
     inventory.files += 1;
-    const first = parentAttribution(cwd, file, headRenames);
-    let effective = first.hunks;
-    let touchLines = first.touch;
-    try {
-      const second = parentAttribution(cwd, file, mergeRenamed, 'MERGE_HEAD');
-      const secondLines = new Set(second.hunks.flatMap((hunk) => [...hunk.addedLines]));
-      effective = first.hunks.map((hunk) => ({
-        ...hunk,
-        addedLines: new Set([...hunk.addedLines].filter((line) => secondLines.has(line))),
-      }));
-      touchLines = new Set([...touchLines].filter((line) => second.touch.has(line)));
-    } catch {
-      // Ordinary commit: the first-parent staged patch is the complete attribution set.
-    }
-    const source = stagedBlob(cwd, file);
-    const tokens = scanCommentTokens(source, extension);
-    cited.push(
-      ...refFindings(
-        { file, tokens, hunks: effective, headFragments: first.fragments },
-        policy.refs,
-      ),
-    );
-    const paragraphs = changedParagraphs(file, source, tokens, effective, touchLines, inventory);
+    staged.push(attributed(cwd, file, extension, headRenames, mergeRenamed));
+  }
+  const candidates = new Set(
+    staged.flatMap(({ source, tokens, added }) => addedCommentText(source, tokens, added)),
+  );
+  const pool = mergeRenamed ? new Map<string, number>() : movedPool(cwd, lexerFor, candidates);
+  for (const {
+    file,
+    extension,
+    source,
+    tokens,
+    effective,
+    added,
+    touchLines,
+    headFragments,
+  } of staged) {
+    const moved = movedLines(source, tokens, added, pool);
+    const hunks = effective.map((hunk) => ({
+      ...hunk,
+      addedLines: new Set([...hunk.addedLines].filter((line) => !moved.has(line))),
+    }));
+    cited.push(...refFindings({ file, tokens, hunks, headFragments }, policy.refs));
+    const paragraphs = changedParagraphs(file, source, tokens, hunks, touchLines, inventory);
     for (const paragraph of paragraphs) {
-      findings.push(findingFor(file, extension, source, paragraph, effective));
+      findings.push(findingFor(file, extension, source, paragraph, hunks));
     }
   }
   return { findings, refFindings: cited, unsupported, inventory };
