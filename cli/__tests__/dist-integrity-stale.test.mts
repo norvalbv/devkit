@@ -1,9 +1,10 @@
 /** A briefed NEW dist artifact must match a fresh build of its source; tracked dist is never compared. */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { inspectDistIntegrity, printDistIntegrityFailure } from '../lib/ship/dist-integrity.mts';
+import { staleNewDist } from '../lib/ship/preflight/stale-new-dist.mts';
 import { buildableFixture, rootRegistry } from './_helpers.mts';
 
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
@@ -141,4 +142,39 @@ describe('inspectDistIntegrity — stale new artifacts', () => {
       'no TypeScript compiler in',
     );
   });
+
+  it('kills a compiler that ignores SIGTERM at its bound, failing closed instead of stale', () => {
+    const root = fakeTscRoot((marker) =>
+      [
+        "process.on('SIGTERM', () => {});",
+        `setTimeout(() => { require('node:fs').writeFileSync(${JSON.stringify(marker)}, ''); process.exit(0); }, 5000);`,
+      ].join('\n'),
+    );
+
+    expect(() => staleFake(root, 300)).toThrow('tsc did not finish within 0.3s');
+    expect(existsSync(join(root, 'finished'))).toBe(false);
+  });
+
+  it('fails closed, not stale, when the compiler is killed by a signal before its bound', () => {
+    const root = fakeTscRoot(() => "process.kill(process.pid, 'SIGKILL');");
+
+    expect(() => staleFake(root, 60_000)).toThrow('tsc was killed by SIGKILL');
+  });
 });
+
+/** A root whose checkout tsc is the given script, briefing one new compiled artifact. */
+function fakeTscRoot(script: (marker: string) => string): string {
+  const root = mkTmp('dist-integrity-fake-tsc-');
+  write(root, 'package.json', '{}\n');
+  write(root, 'cli/new.mts', 'export const value = 2;\n');
+  write(root, 'dist/cli/new.mjs', 'export const value = 2;\n');
+  write(root, 'node_modules/@typescript/native/package.json', '{"name":"@typescript/native"}\n');
+  write(root, 'node_modules/@typescript/native/bin/tsc', `${script(join(root, 'finished'))}\n`);
+  return root;
+}
+
+function staleFake(root: string, tscTimeoutMs: number): string[] {
+  const toArtifact = (source: string) =>
+    source === 'cli/new.mts' ? 'dist/cli/new.mjs' : undefined;
+  return staleNewDist(root, ['dist/cli/new.mjs'], new Map(), toArtifact, tscTimeoutMs);
+}
