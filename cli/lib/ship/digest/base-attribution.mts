@@ -9,7 +9,7 @@ import {
   mkdirSync,
   mkdtempSync,
   openSync,
-  readlinkSync,
+  readFileSync,
   rmSync,
   symlinkSync,
 } from 'node:fs';
@@ -26,6 +26,8 @@ const CAP_MS = 120_000;
 const KILL_GRACE_MS = 2_000;
 const CLEANUP_MS = 30_000;
 const WHITESPACE_RE = /\s+/;
+/** Written by commit-with-gate-capture.sh into the gate worktree's own git dir. */
+const PRE_GATE_SNAPSHOT = 'devkit-pre-gate-untracked';
 const PGID_RE = /^[1-9]\d*$/;
 const FORWARDED_SIGNALS = ['SIGHUP', 'SIGINT', 'SIGTERM'] as const;
 /** Ship context a base rerun must not inherit, or its rows would join this attempt's digest. */
@@ -127,14 +129,27 @@ function failedConfigGates(wt: string, sink: string, shipId: string): CommandGat
   );
 }
 
-/** Recreate the gate worktree's untracked symlinks (node_modules, untracked configs) at the base. */
-function mirrorLinks(wt: string, baseWt: string, deadline: number): void {
-  for (const rel of git(wt, deadline, 'ls-files', '--others', '-z').split('\0').filter(Boolean)) {
-    const from = join(wt, rel);
-    if (!lstatSync(from).isSymbolicLink()) continue;
+/** The untracked entries the ship recorded before its gates ran, or undefined when it recorded none. */
+function preGateUntracked(wt: string, deadline: number): string[] | undefined {
+  const args = ['rev-parse', '--path-format=absolute', '--git-path', PRE_GATE_SNAPSHOT];
+  try {
+    return readFileSync(git(wt, deadline, ...args).trim(), 'utf8')
+      .split('\0')
+      .filter(Boolean);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Link each pre-gate entry, live, into the base; an entry a gate added during the run was never recorded. */
+function linkPreGate(wt: string, baseWt: string, entries: string[]): void {
+  for (const entry of entries) {
+    const rel = entry.replace(/\/$/, '');
     const to = join(baseWt, rel);
+    // A path the base already holds keeps the base's copy.
+    if (lstatSync(to, { throwIfNoEntry: false })) continue;
     mkdirSync(dirname(to), { recursive: true });
-    symlinkSync(resolve(dirname(from), readlinkSync(from)), to);
+    symlinkSync(join(wt, rel), to);
   }
 }
 
@@ -221,7 +236,8 @@ export async function attributeToBase(wt: string, outPrefix: string, capMs = CAP
   // A HEAD that is not the cut commit means something moved it; the base is then unknown.
   if (!wt || !sha || git(wt, deadline, 'rev-parse', 'HEAD').trim() !== sha) return [];
   const gates = failedConfigGates(wt, telemetrySink() ?? '', shipId);
-  if (gates.length === 0) return [];
+  const untracked = gates.length > 0 ? preGateUntracked(wt, deadline) : undefined;
+  if (!untracked) return [];
 
   // Not `--path-format=absolute`: git before 2.31 rejects it, which would silence every narration.
   const commonDir = resolve(
@@ -235,7 +251,7 @@ export async function attributeToBase(wt: string, outPrefix: string, capMs = CAP
   try {
     const add = ['worktree', 'add', '-q', '--detach', baseWt, sha];
     git(wt, deadline, '-c', 'core.hooksPath=/dev/null', ...add);
-    mirrorLinks(wt, baseWt, deadline);
+    linkPreGate(wt, baseWt, untracked);
     const alsoFailing = await rerunAtBase(gates, baseWt, outPrefix, deadline);
     if (interrupted) throw new Error('interrupted before every rerun finished');
     return [...alsoFailing].map(

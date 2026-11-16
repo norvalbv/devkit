@@ -181,6 +181,12 @@ commit_with_gate_capture() {
     rc=1
   fi
 
+  # The worktree's untracked inputs before any gate or hook dir writes there; base attribution
+  # links exactly these. Narration plumbing: silent, and absent (never empty) when it fails.
+  local snap
+  { snap=$(git -C "$wt" rev-parse --path-format=absolute --git-path devkit-pre-gate-untracked) &&
+    rm -f "$snap" && git -C "$wt" ls-files --others --directory -z > "$snap.tmp" && mv -f "$snap.tmp" "$snap"; } 2>/dev/null || true
+
   local ship_hook_rel="" ship_hook_marker source_hook source_name
   ship_hook_marker="devkit-ship-hook-start:$ship_id_safe"
   if [ "$hook_setup_failed" -eq 0 ]; then
@@ -531,6 +537,18 @@ SHIP_HOOK_WRAPPER
   # Name the per-attempt archive: $log is the per-branch file the next attempt overwrites.
   if [ "$rc" -ne 0 ] && [ "$ship_dry_gates" -eq 0 ] && [ -s "$ship_log" ]; then
     echo "ship: this attempt's gate log is kept at $ship_log (ship id ${DEVKIT_SHIP_ID:-}); $log is overwritten by the next attempt." >&2 || true
+  fi
+
+  # A failed config extraGates command is re-run at the cut commit: one line when it fails there too.
+  # Narration under the digest's rules above: after $rc, errexit-suppressed, silent when unsure.
+  if [ "$blocked_json" = '"deterministic"' ]; then
+    local base_tool base_text=""
+    base_tool="$(dirname "${BASH_SOURCE[0]}")/digest/base-attribution.mts"
+    [ -f "$base_tool" ] || base_tool="${base_tool%.mts}.mjs"
+    if [ -f "$base_tool" ]; then
+      base_text="$(node "$base_tool" "$wt" "${ship_log%.log}" 2>/dev/null)" || base_text=""
+    fi
+    [ -z "$base_text" ] || printf '%s\n' "$base_text" | tee -a "$log" "$ship_log" >&2 2>/dev/null || true
   fi
 
   # A failed config extraGates command is re-run at the cut commit: one line when it fails there too.
