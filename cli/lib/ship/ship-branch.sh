@@ -1767,6 +1767,9 @@ git update-ref -d "$RECOVERY_GATE_ADDS_REF" 2>/dev/null || true
 # Joins the PR to its base PR's GitHub stack; best-effort, so it runs only once nothing is at stake.
 STACK_LINK="$SCRIPT_DIR/stack/link.mts"; [ -f "$STACK_LINK" ] || STACK_LINK="$SCRIPT_DIR/stack/link.mjs"
 [ "$NO_STACK" -eq 1 ] || [ -z "$PR_NUM" ] || node "$STACK_LINK" "$REPO" "$PR_NUM" || true
+# Only a gate-skipped recovery leaves the PR body without its UI item: every other run wrote it.
+GATES_SKIPPED_COMMIT=${LOCAL_BRANCH_EXISTS:+${RECOVERY_COMMIT:-}}
+[ -z "$PR_NUM" ] || [ -z "$GATES_SKIPPED_COMMIT" ] || publish_ui_item "$ROOT" "$PR_NUM" "$REPO" "$GATES_SKIPPED_COMMIT"
 # After every ref is settled, so a ship killed during the bounded test runs loses no recovery state.
 [ -z "$PR_NUM" ] || publish_reviewer_notes "$PR_NUM" "$REPO" "${RECOVERY_COMMIT:-$SHIP_COMMIT}" "$ROOT"
 [ -z "$PR_NUM" ] || publish_evidence_block "$WT" "$PR_NUM" "$REPO" "${RECOVERY_COMMIT:-$SHIP_COMMIT}" "$ROOT"
