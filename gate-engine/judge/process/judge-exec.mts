@@ -63,6 +63,8 @@ export interface ExecJudgeOpts extends CodexSandboxOpts {
   lens?: string;
   /** Fires once per measured claude spawn with the tool calls its permission gate refused. */
   onPermissionDenials?: (denied: string[]) => void;
+  /** Receives the ref of the transcript this spawn stored, for a gate line that names it. */
+  onTranscript?: (ref: string) => void;
 }
 
 /** The prepared resources of one spawn; `ws` is set by routeJudge so cleanup sees it even on a throw. */
@@ -195,7 +197,7 @@ function emitJudgeExec(
   const commandsRef = saveCodexCommands(opts.label, stdout, opts.lens);
   if (commandsRef) extra.commands_ref = commandsRef;
   Object.assign(extra, recordPermissionDenials(opts, stdout));
-  recordAgentRun({
+  const { ref } = recordAgentRun({
     label: opts.label,
     output,
     input: opts.input,
@@ -205,6 +207,7 @@ function emitJudgeExec(
     transcript: opts.transcript,
     extra: Object.keys(extra).length > 0 ? extra : undefined,
   });
+  if (ref) opts.onTranscript?.(ref);
 }
 
 // Verdict text and spend come from ONE parse of the same bytes, by the binary that produced them.

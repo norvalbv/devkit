@@ -403,7 +403,7 @@ export async function runLensWave(
         issues: capture.items.flatMap((it) => it.issues.map((text) => ({ lens: it.lens, text }))),
         advisories:
           res.status === 'pass'
-            ? parseAdvisories(res.transcript ?? '', Infinity).map((text) => ({
+            ? parseAdvisories(res.transcript ?? '').map((text) => ({
                 lens: lensGroupId(t.group),
                 text,
               }))
