@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +8,7 @@ import { testSpawnSync } from './_helpers.mts';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GATE_RUNNER = join(HERE, '../lib/ship/run-gates-with-capture.sh');
 const HANDOFF = join(HERE, '../lib/ship/review/process/gate-signal-handoff.sh');
+const DETERMINISTIC = join(HERE, '../../gate-engine/deterministic/run.mts');
 const created: string[] = [];
 
 afterEach(() => {
@@ -172,5 +173,26 @@ describe('run_gates_with_capture — timeout attribution', () => {
       'hit the 1s ceiling (exit 124) DURING: 🛰️ Sentry gate (commit-msg judge)...',
     );
     expect(result.stderr).toContain('More room per attempt: export SHIP_COMMIT_TIMEOUT.');
+  });
+
+  // Drives the real guard-deterministic, so its per-gate line and the banner's grep stay in step. The
+  // label uses every character class an extraGates label allows: case, digit, `_` and `.`.
+  it('names the extraGates gate that was running when the ceiling fires', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'devkit-capture-det-'));
+    created.push(repo);
+    mkdirSync(join(repo, '.devkit'));
+    writeFileSync(join(repo, '.devkit', 'config.json'), '{"components":{"guards":[]}}');
+    const slow = { 'Slow_lint.2': `${process.execPath} -e setInterval(()=>{},1e3)` };
+    writeFileSync(join(repo, 'guard.config.json'), JSON.stringify({ extraGates: slow }));
+    const result = runWithShim(
+      ':',
+      `require('node:child_process').spawnSync(process.execPath, [${JSON.stringify(DETERMINISTIC)}], { cwd: ${JSON.stringify(repo)}, stdio: 'inherit' });`,
+      3,
+    );
+
+    expect(result.stdout, result.stderr).toContain('RUNNER_RC=124');
+    expect(result.stderr).toContain(
+      'hit the 3s ceiling (exit 124) DURING: ▶ deterministic: Slow_lint.2',
+    );
   });
 });

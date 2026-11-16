@@ -254,6 +254,7 @@ function runGates(
       if (!gate.argv) return;
       const reasonFile = fileFor(i);
       const startedAt = Date.now();
+      console.log(`▶ deterministic: ${gate.label}`);
       const rc = runArgv(cwd, gate.argv, exec, reasonFile, timeoutMs);
       const [nFailed, nSkipped] = [out.failed.length, out.skipped.length];
       // Its own outcome, not an exit code: no rcLabel, opt-out or strict rule applies to it.
