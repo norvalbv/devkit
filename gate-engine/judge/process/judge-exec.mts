@@ -9,7 +9,7 @@ import {
   unwrapClaudeResult,
   withResultArgs,
 } from '../claude-result.mts';
-import { saveCodexCommands } from '../codex/commands.mts';
+import { codexGateDenials, saveCodexCommands } from '../codex/commands.mts';
 import {
   codexFailure,
   judgeBinFor,
@@ -194,7 +194,7 @@ function emitJudgeExec(
   if (outageDetail !== undefined) extra.outage_detail = outageDetail;
   const commandsRef = saveCodexCommands(opts.label, stdout, opts.lens);
   if (commandsRef) extra.commands_ref = commandsRef;
-  Object.assign(extra, recordPermissionDenials(opts, stdout));
+  Object.assign(extra, recordPermissionDenials(opts, stdout, codexGateDenials(opts.label, stdout)));
   recordAgentRun({
     label: opts.label,
     output,
