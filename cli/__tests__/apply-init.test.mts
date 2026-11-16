@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Mock the fallow installer so the fallow apply step never shells out to bun/npm/cargo/fallow.
 // hoisted spies let each test assert the exact call order applyInit drives.
 const fallowSpies = vi.hoisted(() => ({
-  installFallow: vi.fn(() => ({ ok: true, method: 'bun', message: 'installed fallow' })),
+  ensureFallow: vi.fn(() => ({ ok: true, message: 'installed fallow' })),
 }));
 vi.mock('../lib/install/install-fallow.mts', () => fallowSpies);
 
@@ -744,7 +744,7 @@ describe('fallow apply step (mocked installer — never shells out)', () => {
       },
       devkitRef: 'v0.3.0',
     });
-    expect(fallowSpies.installFallow).toHaveBeenCalledTimes(1);
+    expect(fallowSpies.ensureFallow).toHaveBeenCalledTimes(1);
     expect(log.mock.calls.flat().join('\n')).toContain('fallow gate not wired');
     expect(existsSync(join(root, 'fallow-baselines'))).toBe(false);
     expect(config(root).components.fallow).toBe(true);
@@ -778,7 +778,7 @@ describe('fallow apply step (mocked installer — never shells out)', () => {
       selection: { ...defaultSelection(), fallow: false },
       devkitRef: 'v0.3.0',
     });
-    expect(fallowSpies.installFallow).not.toHaveBeenCalled();
+    expect(fallowSpies.ensureFallow).not.toHaveBeenCalled();
     expect(readFileSync(join(root, '.husky', 'pre-commit'), 'utf8')).not.toContain('fallow');
     expect(config(root).components.fallow).toBe(false);
   });

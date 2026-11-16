@@ -57,7 +57,7 @@ import { lockedCommand } from '../lib/install/init/init-lock.mts';
 import { applyScanRoots } from '../lib/install/init/scan-roots.mts';
 import { reviewPlanFromFlags } from '../lib/install/flags/review-profile.mts';
 import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mts';
-import { installFallow } from '../lib/install/install-fallow.mts';
+import { ensureFallow } from '../lib/install/install-fallow.mts';
 import { installSearchCode } from '../lib/install/install-search-code.mts';
 import * as oxcLifecycle from '../lib/install/oxc/lifecycle.mts';
 import { type PackageJson, patchPackageJson } from '../lib/install/package-json.mts';
@@ -383,7 +383,7 @@ function runFallowInit(cwd: string, dryRun: boolean): string {
 // fallow-ignore-next-line complexity
 async function applyFallow(cwd: string, dryRun: boolean, interactive: boolean, gateLine: string) {
   // The gate is the staged audit in devkit's hook block (step 3); fallow's installer is never run.
-  const r = installFallow({ cwd, dryRun });
+  const r = ensureFallow({ cwd, dryRun });
   console.log(`  ${r.ok ? '✓' : '!'} ${r.message}`);
 
   const doInit = await subConfirm('Run `fallow init`? (optional — fallow is zero-config)', {

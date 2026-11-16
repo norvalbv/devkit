@@ -58,13 +58,11 @@ const preLedgerAll = () => {
   };
 };
 
-// Stub fallow's external CLI (detect/install) so overlay's fallow flow runs without
-// a real `fallow` binary or a global network install. detectFallow → present, so resolveOverlayFallow
-// wires the gate without installing. Plain fns (not vi.fn) so afterEach's restoreAllMocks can't clear them.
+// Stub the overlay fallow resolver (detect/install) at overlay.mts's import, so no test
+// spawns a real `fallow` or a global install. Plain fn (not vi.fn) so restoreAllMocks can't clear it.
 vi.mock('../lib/install/install-fallow.mts', async (importOriginal) => ({
   ...(await importOriginal()),
-  detectFallow: () => ({ available: true, version: '2.89.0' }),
-  installFallow: () => ({ ok: true, method: 'bun', message: 'installed fallow@2.89.0 via bun' }),
+  resolveOverlayFallow: () => true,
 }));
 
 // For the overlay-upgrade suite below: keep needsRerun / repoUrl REAL, but stub the
