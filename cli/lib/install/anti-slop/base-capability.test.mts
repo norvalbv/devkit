@@ -34,6 +34,11 @@ import {
 } from './constants.mts';
 import { syncAntiSlopCapability } from './lifecycle.mts';
 import { collectAntiSlopGroups } from './runner.mts';
+import {
+  writeManagedAntiSlopConfig,
+  writePublishedV059AntiSlopConfig,
+  writeV060AntiSlopConfig,
+} from '../../../__tests__/_anti-slop-previous-profile.mts';
 
 const roots: string[] = [];
 const EMPTY_BASELINE = `${JSON.stringify(
@@ -183,40 +188,6 @@ function currentManagedBytes(cwd: string): Map<string, string> {
 
 function restore(cwd: string, bytes: Map<string, string>): void {
   for (const [rel, content] of bytes) writeFileSync(join(cwd, rel), content);
-}
-
-function writeManagedAntiSlopConfig(cwd: string, config: string): void {
-  writeFileSync(join(cwd, ANTI_SLOP_CONFIG_REL), config);
-  const manifestPath = join(cwd, ANTI_SLOP_MANIFEST_REL);
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  manifest.configDigest = digest(config);
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-}
-
-function writeDisabledExternalRecordConfig(cwd: string, currentConfig: string): void {
-  const previous = JSON.parse(currentConfig);
-  previous.rules['anti-slop/no-unsafe-external-record-access'] = 'off';
-  previous.rules['anti-slop/no-unsafe-external-record-enumeration'] = 'off';
-  writeManagedAntiSlopConfig(cwd, `${JSON.stringify(previous, null, 2)}\n`);
-}
-
-function writePublishedV059AntiSlopConfig(cwd: string, currentConfig: string): void {
-  const previous = JSON.parse(currentConfig);
-  previous.jsPlugins[0].specifier = './plugin/index.js';
-  delete previous.rules['anti-slop/no-unsafe-external-record-access'];
-  delete previous.rules['anti-slop/no-unsafe-external-record-enumeration'];
-  delete previous.overrides[0].rules['anti-slop/no-unsafe-external-record-access'];
-  delete previous.overrides[0].rules['anti-slop/no-unsafe-external-record-enumeration'];
-  const config = `${JSON.stringify(previous, null, 2)}\n`;
-  writeFileSync(join(cwd, ANTI_SLOP_CONFIG_REL), config);
-  const manifestPath = join(cwd, ANTI_SLOP_MANIFEST_REL);
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  delete manifest.devkitVersion;
-  manifest.ruleIds = manifest.ruleIds.filter(
-    (ruleId: string) => !EXTERNAL_RECORD_RULE_IDS.includes(ruleId),
-  );
-  manifest.configDigest = digest(config);
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 function managedMigrationReceipt(cwd: string): string {
@@ -415,7 +386,7 @@ describe('staged anti-slop check across a capability upgrade', () => {
     const cwd = installedRepository();
     const configPath = join(cwd, ANTI_SLOP_CONFIG_REL);
     const currentConfig = readFileSync(configPath, 'utf8');
-    writeDisabledExternalRecordConfig(cwd, currentConfig);
+    writeV060AntiSlopConfig(cwd, currentConfig, true);
     writeFileSync(
       join(cwd, 'src', 'unscoped.ts'),
       'const parsed = JSON.parse(raw); parsed["constructor"];\n',
@@ -450,7 +421,7 @@ describe('staged anti-slop check across a capability upgrade', () => {
     const cwd = installedRepository();
     const configPath = join(cwd, ANTI_SLOP_CONFIG_REL);
     const currentConfig = readFileSync(configPath, 'utf8');
-    writeDisabledExternalRecordConfig(cwd, currentConfig);
+    writeV060AntiSlopConfig(cwd, currentConfig, true);
     commit(cwd, 'base before the external-record access rule was enabled');
 
     writeManagedAntiSlopConfig(cwd, currentConfig);
@@ -476,7 +447,7 @@ describe('staged anti-slop check across a capability upgrade', () => {
     const cwd = installedRepository();
     const configPath = join(cwd, ANTI_SLOP_CONFIG_REL);
     const currentConfig = readFileSync(configPath, 'utf8');
-    writeDisabledExternalRecordConfig(cwd, currentConfig);
+    writeV060AntiSlopConfig(cwd, currentConfig, true);
     commit(cwd, 'base before a zero-debt activation');
 
     writeManagedAntiSlopConfig(cwd, currentConfig);
@@ -498,8 +469,9 @@ describe('staged anti-slop check across a capability upgrade', () => {
   it('rejects a receipt staged before the managed config that issued it', () => {
     const cwd = installedRepository();
     const targetReceipt = managedMigrationReceipt(cwd);
-    const configPath = join(cwd, ANTI_SLOP_CONFIG_REL);
-    writeDisabledExternalRecordConfig(cwd, readFileSync(configPath, 'utf8'));
+    const previous = JSON.parse(readFileSync(join(cwd, ANTI_SLOP_CONFIG_REL), 'utf8'));
+    previous.rules['anti-slop/no-elapsed-time-assertions'] = 'off';
+    writeManagedAntiSlopConfig(cwd, `${JSON.stringify(previous, null, 2)}\n`);
     commit(cwd, 'base before the managed activation');
 
     const premature = baselineFromGroups([]);

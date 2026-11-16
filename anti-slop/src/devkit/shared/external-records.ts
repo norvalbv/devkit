@@ -27,7 +27,7 @@ export function unwrapExpression(expression: ESTree.Expression): ESTree.Expressi
   return current;
 }
 
-function resolveVariable(
+export function resolveVariable(
   sourceCode: SourceCode,
   identifier: ESTree.IdentifierReference,
 ): Variable | null {
@@ -40,7 +40,7 @@ function resolveVariable(
   return null;
 }
 
-function stableConstInitializer(variable: Variable): ESTree.Expression | null {
+export function stableConstInitializer(variable: Variable): ESTree.Expression | null {
   if (variable.defs.length !== 1) return null;
   const definition = variable.defs[0];
   if (definition?.type !== 'Variable' || definition.node.type !== 'VariableDeclarator') return null;

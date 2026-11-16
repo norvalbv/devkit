@@ -93,6 +93,12 @@ So:
 - Never assert an elapsed-time *lower* bound (`expect(elapsed).toBeGreaterThan(n)`) to prove something waited. Raising `n` makes it strictly more flaky; assert the effect of waiting instead.
 - Put the budget in one named constant per file, with a comment, so it is not quietly tightened later.
 
+With the anti-slop capability on, `anti-slop/no-elapsed-time-assertions` enforces the elapsed-time bullets. It fails any ordering matcher (`toBeLessThan`, `toBeGreaterThan` and their `OrEqual` forms) whose subject is a `Date.now()` or `performance.now()` delta, or a `const` holding one, whatever the bound. Three shapes it cannot see stay with the author and the reviewer:
+
+- a per-call subprocess `timeout` set below the suite's shared subprocess default;
+- a short deadline passed into the code under test when the test then expects real work to finish inside it. A 700ms read timeout is fine when the test expects `null`, and wrong when it expects a parsed result;
+- a product ceiling set through an environment string, such as a 3-second commit timeout that can fire before the hook starts.
+
 Making these changes is fixing a broken test, not weakening a real one — the timing claim was never what the test was protecting.
 
 A test that asserts a product's **own** timeout (for example, "the ceiling fires and names the stuck step") races setup against that timeout. Have the stuck step print a marker. Before the strict assertions, check for it: if the timeout fired and the marker is absent, the timeout won the race before the step under test ran. Fail with a distinct, greppable label that says so, and include the machine load. Do not reuse the assertion's message. A reached marker with the wrong outcome is a real regression and must keep failing on the strict assertions.
