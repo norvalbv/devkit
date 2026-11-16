@@ -456,7 +456,10 @@ re-commit. To converge without a ship round, stage the paths and run `guard-dete
 `guard-comments(unreadable-evidence)` is not a rejection: the gate could not read the staged content.
 On a commit or ship, the staged fallow audit and overlay eslint/biome steps still run after a failure
 here, then `✗ commit blocked before the AI gates: <names>` stops the commit with every cheap finding
-above it. The decision and reviewer gates run only after all of them pass, one finding at a time, by design.
+above it. A slow `extraGates` entry declared `{ "cmd": …, "afterGreen": true }` runs last and only when
+every other gate passed, so a red run lists it under `NOT run (an earlier gate failed)` and it runs on the
+next attempt. `devkit review` runs it regardless. The decision and reviewer gates run only after all of
+them pass, one finding at a time, by design.
 
 ## `✗ staged gate blocked: <gate>`
 

@@ -189,6 +189,8 @@ interface GateOutcome {
   failed: FailedGate[];
   rechecks: string[];
   skipped: string[];
+  /** afterGreen gates not run because an earlier gate failed. */
+  notRun: string[];
 }
 
 // A cache hit names the gates it did not re-run and every bypass; otherwise a structure bypass is loud.
@@ -229,9 +231,15 @@ function buildGates(plan: RunPlan): Gate[] {
     registryGate(g, cwd, plan.reviewMode),
   );
   if (skip) return gates;
-  for (const x of plan.extra) gates.push(commandGate(x.label, cwd, x.cmd));
+  for (const x of plan.extra.filter((g) => !g.afterGreen)) {
+    gates.push(commandGate(x.label, cwd, x.cmd));
+  }
   if (plan.structure && !plan.bypassStructure) {
     gates.push(commandGate('structure-lint', cwd, plan.structure));
+  }
+  // afterGreen gates are slow, and their verdict on an already-red tree is discarded by the fix.
+  for (const x of plan.extra.filter((g) => g.afterGreen)) {
+    gates.push({ ...commandGate(x.label, cwd, x.cmd), afterGreen: true });
   }
   return gates;
 }
@@ -249,10 +257,19 @@ function recordFailure(
   out.rechecks.push(...recheckLines(`${gate.label}${suffix}`, gate));
 }
 
-function runGates(cwd: string, gates: Gate[], exec: typeof execFileSync): GateOutcome {
-  const out: GateOutcome = { fails: [], failed: [], rechecks: [], skipped: [] };
+function runGates(
+  cwd: string,
+  gates: Gate[],
+  exec: typeof execFileSync,
+  reviewMode: boolean,
+): GateOutcome {
+  const out: GateOutcome = { fails: [], failed: [], rechecks: [], skipped: [], notRun: [] };
   withReasonFiles((fileFor) => {
     gates.forEach((gate, i) => {
+      if (gate.afterGreen && out.fails.length > 0 && !reviewMode) {
+        out.notRun.push(gate.label);
+        return;
+      }
       if (gate.notRun) console.log(`${gate.label}: ${gate.notRun}`);
       else if (!gate.argv) {
         recordFailure(out, gate, `(unrunnable: ${gate.unrunnable ?? 'empty command'})`, true);
@@ -304,7 +321,7 @@ function finishRun(
 ): number {
   const { skip, cachedPrefix } = plan;
   if (out.fails.length > 0) {
-    reportFailures(out.fails, out.failed, out.rechecks);
+    reportFailures(out.fails, out.failed, out.rechecks, out.notRun);
     return finishGateTiming('deterministic', startedAt, 1, skip ? 'partial' : 'none');
   }
   if (!skip) {
@@ -357,7 +374,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
   };
   narrateRun(plan);
   const gates = buildGates(plan);
-  const out = runGates(cwd, gates, opts.exec ?? execFileSync);
+  const out = runGates(cwd, gates, opts.exec ?? execFileSync, reviewMode);
   // Before the failure report: a GREEN run names its opt-outs too, as does review's verdict line.
   reportOptedOut(out.skipped);
   return finishRun(plan, startedAt, { hookPath: opts.hookPath, scope: cacheScope }, gates, out);

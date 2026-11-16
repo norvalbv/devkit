@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { configExtraGates } from '../../gate-engine/deterministic/command-gates.mts';
 import {
   forcedTests,
   listRelated,
@@ -378,4 +379,15 @@ describe('related-tests gate process', () => {
     expect(stripVTControlCharacters(r.stdout)).toMatch(/Tests\s+1 passed/);
     expect(r.status).toBe(0);
   }, 90_000);
+});
+
+describe('self-host registration', () => {
+  it("devkit's guard.config.json declares related-tests afterGreen, so a cheap failure skips it", () => {
+    const root = join(import.meta.dirname, '..', '..');
+    expect(configExtraGates(root)).toContainEqual({
+      label: 'related-tests',
+      cmd: 'node cli/lib/husky/gate-policy/related-tests.mts {staged}',
+      afterGreen: true,
+    });
+  });
 });
