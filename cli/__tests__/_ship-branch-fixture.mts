@@ -11,6 +11,8 @@ import {
 } from './_helpers.mts';
 import { readIntent } from '../lib/ship/ship-intent.mts';
 
+export { bareSha, localBranchExists, manifestOf, remoteBranchExists } from './_ship-branch-queries.mts';
+
 export const scriptPath = fileURLToPath(new URL('../lib/ship/ship-branch.sh', import.meta.url));
 export const reshipScript = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
 export const packagedApiSecurityAgent = fileURLToPath(
@@ -365,39 +367,6 @@ export function ghStub(prBody) {
   );
   chmodSync(join(stubBin, 'gh'), 0o755);
   return stubBin;
-}
-
-export function localBranchExists(git, br) {
-  try {
-    return Boolean(git(['rev-parse', '--verify', '--quiet', br], { stdio: 'pipe' }).trim());
-  } catch {
-    return false;
-  }
-}
-
-export function manifestOf(dir) {
-  return JSON.parse(readFileSync(join(dir, '.devkit/reconcile-manifest.json'), 'utf8'));
-}
-
-/** The sha a ref names in a bare remote. */
-export function bareSha(bare, ref) {
-  return execFileSync('git', ['-C', bare, 'rev-parse', ref], {
-    env: { ...process.env, ...GIT_ENV },
-    encoding: 'utf8',
-  }).trim();
-}
-
-export function remoteBranchExists(bare, br) {
-  try {
-    return Boolean(
-      execFileSync('git', ['-C', bare, 'rev-parse', '--verify', '--quiet', br], {
-        env: { ...process.env, ...GIT_ENV },
-        encoding: 'utf8',
-      }).trim(),
-    );
-  } catch {
-    return false;
-  }
 }
 
 /** A GitHub-shaped append reship with real local Git transport and a recording gh boundary. */

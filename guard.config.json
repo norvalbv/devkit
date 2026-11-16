@@ -149,6 +149,7 @@
         "sourceExtensions": ["mts"],
         "entryAllowlist": [
           "config-json.mts",
+          "config-source-matchers.mts",
           "config.mts",
           "devkit-version.mts",
           "overlay-mode.mts"
@@ -177,7 +178,7 @@
           ]
         },
         "grammar": {
-          "files": ["config-json.mts", "config.mts"],
+          "files": ["config-json.mts", "config-source-matchers.mts", "config.mts"],
           "domainGate": "@root",
           "recurse": "engineModule",
           "rules": {
