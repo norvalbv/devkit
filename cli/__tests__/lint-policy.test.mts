@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,7 @@ function fixture(name: string, source: string) {
   const root = mkdtempSync(join(tmpdir(), 'devkit-lint-policy-'));
   roots.push(root);
   const path = join(root, name);
+  mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, source);
   return path;
 }
@@ -31,6 +32,27 @@ describe('Devkit lint ownership', () => {
     });
 
     expect(result.status).toBe(1);
+  });
+
+  // RuleTester proves the rule; this proves the config loads it and its override globs match.
+  it('blocks an unnamed raw CLI spawn only in a git-integration file', () => {
+    const source = [
+      "import { spawnSync } from 'node:child_process';",
+      "import { CLI } from './_helpers.mts';",
+      "spawnSync(process.execPath, [CLI, 'review']);",
+      '',
+    ].join('\n');
+    const lint = (name: string) => {
+      const path = fixture(join('cli', '__tests__', name), source);
+      return spawnSync(OXLINT, ['--config', OXLINT_CONFIG, '--disable-nested-config', path], {
+        encoding: 'utf8',
+      });
+    };
+
+    const scoped = lint('review.test.mts');
+    expect(scoped.status).toBe(1);
+    expect(scoped.stdout).toContain('devkit(spawn-site-boundary)');
+    expect(lint('parallel-only.test.mts').status).toBe(0);
   });
 
   it('runs the policy without a Biome fallback command', () => {
