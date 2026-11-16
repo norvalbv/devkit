@@ -39,12 +39,16 @@ export interface Gate {
   unrunnable?: string;
   /** Why a null-argv gate passes without running. */
   notRun?: string;
+  /** Runs last, and only when no gate has failed so far in this run. */
+  afterGreen?: true;
 }
 
 /** One command gate. A missing `cmd` marks a malformed spec, which blocks as unrunnable. */
 export interface ExtraGate {
   label: string;
   cmd?: string;
+  /** Runs last, and only when no gate has failed so far in this run (review mode runs it anyway). */
+  afterGreen?: true;
 }
 
 // Strips a built-in gate's `guard-` bin prefix to its bare telemetry name.
@@ -56,11 +60,25 @@ const labelSchema = z
   .string()
   .regex(/^[a-z0-9][\w.-]*$/i)
   .refine((l) => !RESERVED.has(l) && !l.startsWith('guard-'), 'is a built-in gate name');
-const extraGatesSchema = z.record(labelSchema, z.string().trim().min(1)).optional();
+const commandSchema = z.string().trim().min(1);
+const extraGatesSchema = z
+  .record(
+    labelSchema,
+    z.union(
+      [
+        commandSchema.transform((cmd) => ({ cmd })),
+        z.object({ cmd: commandSchema, afterGreen: z.literal(true) }).strict(),
+      ],
+      {
+        error: 'must be a command string or { "cmd": "<command>", "afterGreen": true }',
+      },
+    ),
+  )
+  .optional();
 
 /**
- * The gates guard.config.json `extraGates` declares (label → command), in declaration order. A
- * malformed block becomes one command-less spec, so a gate the repo meant to run never vanishes.
+ * The gates guard.config.json `extraGates` declares (label → command, or → { cmd, afterGreen }), in
+ * declaration order. A malformed block becomes one command-less spec, so a gate never vanishes.
  */
 export function configExtraGates(cwd: string): ExtraGate[] {
   let raw: unknown;
@@ -82,7 +100,7 @@ export function configExtraGates(cwd: string): ExtraGate[] {
     console.error(`✗ ${CONFIG_FILENAME} extraGates${at}: ${issue.message}`);
     return [{ label: 'extraGates' }];
   }
-  return Object.entries(parsed.data ?? {}).map(([label, cmd]) => ({ label, cmd }));
+  return Object.entries(parsed.data ?? {}).map(([label, spec]) => ({ label, ...spec }));
 }
 
 /**

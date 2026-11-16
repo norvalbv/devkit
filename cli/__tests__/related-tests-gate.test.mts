@@ -12,6 +12,7 @@ import {
   reasonDetail,
   reasonReport,
 } from '../../gate-engine/deterministic/reason.mts';
+import { configExtraGates } from '../../gate-engine/deterministic/command-gates.mts';
 import {
   forcedTests,
   listRelated,
@@ -585,5 +586,16 @@ describe('runRelatedTests failure reason', () => {
     const exec = fakeExec(0);
     expect(await runRelatedTests('/repo', { staged: ['cli/a.mts'], list, exec })).toBe(0);
     expect(exec.mock.calls[0][1]).toEqual(['run', '--reporter=dot', '/repo/cli/a.test.mts', join('/repo', REACH)]);
+  });
+});
+
+describe('self-host registration', () => {
+  it("devkit's guard.config.json declares related-tests afterGreen, so a cheap failure skips it", () => {
+    const root = join(import.meta.dirname, '..', '..');
+    expect(configExtraGates(root)).toContainEqual({
+      label: 'related-tests',
+      cmd: 'node cli/lib/husky/gate-policy/related-tests.mts {staged}',
+      afterGreen: true,
+    });
   });
 });

@@ -63,8 +63,15 @@ export function recheckLines(
 export const SHIP_REHEARSAL_LEAD = "Ship's exact staging, no judges:";
 
 /** Footer after the aggregated failure: what runs next, one re-check per failed gate, then ship's. */
-export function printFailureFooter(rechecks: string[]): void {
-  console.error('   Fix every failure above together, then commit once.');
+export function printFailureFooter(rechecks: string[], notRun: readonly string[] = []): void {
+  if (notRun.length > 0) {
+    console.error(
+      `   NOT run (an earlier gate failed): ${notRun.join(' ')} — they run on the next attempt once the failures above are fixed.`,
+    );
+    console.error('   Fix every failure above together, then commit again.');
+  } else {
+    console.error('   Fix every failure above together, then commit once.');
+  }
   // review and dry-gates defer this block (`__dk_block_deterministic`), so the selected gates still run.
   const deferred = ['review', 'dry-gates'].includes(process.env.DEVKIT_RUN_MODE ?? '');
   console.error(
