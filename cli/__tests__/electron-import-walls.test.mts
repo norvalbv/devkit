@@ -1,7 +1,6 @@
 import {
   copyFileSync,
   existsSync,
-  readFileSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -43,6 +42,7 @@ const PROBES = {
     "import path from 'node:path';\nexport const x = path;\n",
   'src/renderer/lib/tasks/import-browser-path.ts':
     "import path from 'path';\nexport const x = path;\n",
+  'src/renderer/lib/tasks/import-local-package.ts': "import 'only-local-pkg';\nexport {};\n",
   [GRANDFATHERED]: "import '../../../main/index';\nexport {};\n",
   'src/renderer/lib/trpc.ts':
     "import type { AppRouter } from '../../main/lib/trpc/routers';\nexport type Router = AppRouter;\n",
@@ -59,23 +59,24 @@ function removeTree(path: string, protectedRoot = DEVKIT_ROOT) {
   rmSync(path, { recursive: true, force: true });
 }
 
-function writeTestConfig(repoRoot: string, root: string) {
+function writeTestConfig(root: string) {
   write(root, 'package.json', '{"type":"module"}\n');
   write(
     root,
     'guard.config.json',
     JSON.stringify({ scanRoots: ['src'], backends: { socketServer: false, vercel: false } }),
   );
-  const configPath = join(root, 'eslint.config.mjs');
-  copyFileSync(join(DEVKIT_ROOT, 'templates/electron/eslint.config.mjs'), configPath);
-  const config = readFileSync(configPath, 'utf8');
-  const fixtureBase = relative(repoRoot, root).replaceAll('\\', '/');
-  const isolatedConfig = config.replace(
-    "pathAliases: { baseUrl: '.',",
-    `pathAliases: { baseUrl: '${fixtureBase}',`,
+  copyFileSync(
+    join(DEVKIT_ROOT, 'templates/electron/eslint.config.mjs'),
+    join(root, 'eslint.config.mjs'),
   );
-  if (isolatedConfig === config) throw new Error('Electron template path-alias anchor changed');
-  writeFileSync(configPath, isolatedConfig);
+  // Installed only beside the fixture, so the plugin's root (repoRoot) cannot see it.
+  write(
+    root,
+    'node_modules/only-local-pkg/package.json',
+    '{"name":"only-local-pkg","main":"index.js"}\n',
+  );
+  write(root, 'node_modules/only-local-pkg/index.js', 'module.exports = {};\n');
   mkdirSync(join(root, 'eslint'), { recursive: true });
   copyFileSync(
     join(DEVKIT_ROOT, 'templates/electron/eslint/domains.mjs'),
@@ -113,11 +114,11 @@ function writeTargetSources(root: string) {
   for (const [relativePath, content] of Object.entries(PROBES)) write(root, relativePath, content);
 }
 
-function collectRuleErrors(repoRoot: string, root: string) {
+function collectRuleErrors(repoRoot: string, root: string, nodeFlags: string[]) {
   const result = spawnSync(
     process.execPath,
     [
-      '--preserve-symlinks',
+      ...nodeFlags,
       join(repoRoot, 'node_modules', 'eslint', 'bin', 'eslint.js'),
       '--config',
       join(root, 'eslint.config.mjs'),
@@ -158,9 +159,9 @@ function collectRuleErrors(repoRoot: string, root: string) {
   if ([...wallErrors.values()].reduce((total, errors) => total + errors, 0) === 0) {
     throw new Error(
       `Electron import-wall fixture (sc-1991): ${WALL_RULE} reported nothing on ANY probe, so the wall never ran. ` +
-        'The structure plugin resolved a project root outside this fixture -- typically a symlinked ' +
-        'node_modules realpath-escaping to the owning checkout. Spawn eslint the way ' +
-        'gate-engine/structure/run.mts does (--preserve-symlinks, bin resolved from the repo under test).',
+        'The structure plugin roots at the directory above its own node_modules, and the template ' +
+        "no longer re-roots it at the linted package: check ROOT_OFFSET and each rule's projectRoot " +
+        'in templates/electron/eslint.config.mjs.',
     );
   }
   return { wallErrors, builtinErrors };
@@ -172,37 +173,47 @@ function removeLinkedRepoRoot(repoRoot: string) {
   removeTree(repoRoot);
 }
 
+function createLinkedRepoRoot() {
+  const repoRoot = realpathSync(mkdtempSync(join(tmpdir(), 'electron-import-walls-linked-')));
+  try {
+    const link = join(repoRoot, 'node_modules');
+    symlinkSync(join(DEVKIT_ROOT, 'node_modules'), link, 'dir');
+    if (!lstatSync(link).isSymbolicLink()) {
+      throw new Error(`linked environment produced a real node_modules, not a symlink: ${link}`);
+    }
+  } catch (error) {
+    removeLinkedRepoRoot(repoRoot);
+    throw error;
+  }
+  return repoRoot;
+}
+
+// The fixture is a package below the plugin's root in every row, so the template must re-root both
+// rules itself; the flag row is the spawn the overlay hook and guard-structure use today.
 const ENVIRONMENTS = [
   {
     name: 'a real checkout',
+    nodeFlags: [],
     createRepoRoot: () => DEVKIT_ROOT,
     removeRepoRoot: (_repoRoot: string) => {},
   },
   {
     name: 'a worktree whose node_modules is a symlink',
-    createRepoRoot: () => {
-      const repoRoot = realpathSync(mkdtempSync(join(tmpdir(), 'electron-import-walls-linked-')));
-      try {
-        const link = join(repoRoot, 'node_modules');
-        symlinkSync(join(DEVKIT_ROOT, 'node_modules'), link, 'dir');
-        if (!lstatSync(link).isSymbolicLink()) {
-          throw new Error(
-            `linked environment produced a real node_modules, not a symlink: ${link}`,
-          );
-        }
-      } catch (error) {
-        removeLinkedRepoRoot(repoRoot);
-        throw error;
-      }
-      return repoRoot;
-    },
+    nodeFlags: [],
+    createRepoRoot: createLinkedRepoRoot,
+    removeRepoRoot: removeLinkedRepoRoot,
+  },
+  {
+    name: 'a worktree whose node_modules is a symlink, under --preserve-symlinks',
+    nodeFlags: ['--preserve-symlinks'],
+    createRepoRoot: createLinkedRepoRoot,
     removeRepoRoot: removeLinkedRepoRoot,
   },
 ];
 
 describe.each(ENVIRONMENTS)(
   'shipped Electron import walls in $name',
-  ({ createRepoRoot, removeRepoRoot }) => {
+  ({ nodeFlags, createRepoRoot, removeRepoRoot }) => {
     let repoRoot = '';
     let root = '';
     let wallErrors: Map<string, number>;
@@ -211,9 +222,9 @@ describe.each(ENVIRONMENTS)(
     beforeAll(() => {
       repoRoot = createRepoRoot();
       root = realpathSync(mkdtempSync(join(repoRoot, '.electron-import-walls-')));
-      writeTestConfig(repoRoot, root);
+      writeTestConfig(root);
       writeTargetSources(root);
-      ({ wallErrors, builtinErrors } = collectRuleErrors(repoRoot, root));
+      ({ wallErrors, builtinErrors } = collectRuleErrors(repoRoot, root, nodeFlags));
     }, 120_000);
 
     afterAll(() => {
@@ -248,6 +259,10 @@ describe.each(ENVIRONMENTS)(
     it('blocks frozen-directory consumption, including a fresh sibling import', () => {
       expect(wallErrors.get('src/renderer/lib/tasks/import-frozen-dir.ts')).toBeGreaterThan(0);
       expect(wallErrors.get('src/renderer/utils/import-frozen-sibling.ts')).toBeGreaterThan(0);
+    });
+
+    it('resolves a dependency installed only in the linted package', () => {
+      expect(wallErrors.get('src/renderer/lib/tasks/import-local-package.ts')).toBe(0);
     });
 
     it('allows the renderer base surface and bundler virtual imports', () => {
