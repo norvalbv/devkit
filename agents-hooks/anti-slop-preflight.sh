@@ -28,9 +28,11 @@ if [ -n "$cwd" ] &&
   project=$(cd "$cwd/$cdup" && pwd) || { echo '{}'; exit 0; }
 fi
 
+# Codex apply_patch carries no file_path: edit-targets-lib.mjs reads the patched paths instead.
+patched=$(printf '%s' "$input" | node "$HOOK_DIR/edit-targets-lib.mjs" 2>/dev/null)
 # Node resolves file_path/path at any payload level, realpaths it, and finds the nearest anti-slop
 # install inside the project. Output: `<package dir>\t<package-relative path>` per checkable file.
-targets=$(printf '%s' "$input" | ANTI_SLOP_PROJECT="$project" node -e '
+targets=$(printf '%s' "$input" | ANTI_SLOP_PROJECT="$project" ANTI_SLOP_PATCHED="$patched" node -e '
 const { existsSync, realpathSync, statSync } = require("node:fs");
 const { dirname, join, relative, sep } = require("node:path");
 let raw = "";
@@ -39,7 +41,8 @@ process.stdin.on("data", (chunk) => (raw += chunk)).on("end", () => {
     const payload = JSON.parse(raw);
     const root = realpathSync(process.env.ANTI_SLOP_PROJECT);
     const holders = [payload, payload?.tool_input, ...(Array.isArray(payload?.tool_input?.edits) ? payload.tool_input.edits : [])];
-    const named = holders.flatMap((h) => [h?.file_path, h?.path]).filter((p) => typeof p === "string" && p !== "");
+    const patched = (process.env.ANTI_SLOP_PATCHED || "").split("\n");
+    const named = [...holders.flatMap((h) => [h?.file_path, h?.path]), ...patched].filter((p) => typeof p === "string" && p !== "");
     const lines = new Set();
     for (const path of new Set(named)) {
       if (!/\.(?:[cm]?[jt]s|[jt]sx)$/.test(path) || !existsSync(path) || !statSync(path).isFile()) continue;
