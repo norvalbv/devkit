@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { CONFIG_FILENAME, coverageBypassed, envFlag, envVar, resolveGuardConfig } from '../config.mts';
 import { emitGateBypass, emitGateEvent } from '../judge/gate-events.mts';
 import { gitPrefix, stagedSet } from '../ratchets/git-index.mts';
-import { gateEnv } from './reason.mts';
+import { crashGuarded, gateEnv } from './reason.mts';
 import { recheckCommand } from './recheck.mts';
 import { DETERMINISTIC } from './registry.mts';
 
@@ -167,7 +167,7 @@ export function commandGate(label: string, cwd: string, cmd?: string): Gate {
   const argv = structure ? ['node', STRUCTURE_RUN, ...x.argv.slice(1)] : x.argv;
   // The tokens that RUN, quoted. An expanded path list would go stale once the fix is staged.
   const recheck = usesStaged ? undefined : recheckCommand(argv, structure ? cwd : undefined);
-  return { label, argv, failOpen2: structure, recheck };
+  return { label, ...(structure ? crashGuarded(argv) : { argv }), failOpen2: structure, recheck };
 }
 
 /** Did this gate exit 0 only because its own one-run bypass flag told it to skip? */

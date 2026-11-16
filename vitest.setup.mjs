@@ -135,6 +135,8 @@ export const TEST_ONLY_ADDITIONS = [
   // replace the deadline the deterministic gate tests assert.
   'GUARD_GATE_TIMEOUT_MS',
   'FRINK_GATE_TIMEOUT_MS',
+  // related-tests runs this suite as a gate: inherited, a spawned CLI's throw exits 70, not 1.
+  'DEVKIT_GATE_REASON_FILE',
 ];
 
 // One-run gate bypasses (BYPASS_FLAGS in cli/lib/ship/merge-verdict/bypasses.mts), in both
