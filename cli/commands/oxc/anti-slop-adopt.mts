@@ -9,14 +9,17 @@ import {
   type AntiSlopBaseline,
   adoptBaselineRuleFindings,
   compareBaseline,
+  hasCurrentIdentity,
   migrateBaselineRenames,
   pruneBaseline,
   readBaseline,
+  rekeySummary,
   writeBaseline,
 } from '../../lib/install/anti-slop/baseline.mts';
 import {
   inheritedBaseAllowance,
   printNewAntiSlopFindings,
+  rekeyWorkingBaseline,
   relocationBound,
   relocationEvidence,
 } from '../../lib/install/anti-slop/baseline-envelope.mts';
@@ -53,14 +56,40 @@ import {
 } from '../../lib/install/anti-slop/runner.mts';
 import { isOverlayOxcInstall } from '../../lib/install/oxc/lifecycle.mts';
 
-export function baselineOrExplain(cwd: string): AntiSlopBaseline | null {
+/** A line-identity baseline matches no current finding, so every verb but rekey refuses it. */
+export function refuseLegacyIdentity(baseline: AntiSlopBaseline): boolean {
+  if (hasCurrentIdentity(baseline)) return false;
+  failLine(
+    `anti-slop: FAIL — ${ANTI_SLOP_BASELINE_REL} predates span-anchored finding identity; run \`devkit anti-slop rekey\`, then stage it`,
+  );
+  return true;
+}
+
+export function baselineOrExplain(cwd: string, requireCurrent = true): AntiSlopBaseline | null {
   const baseline = readBaseline(cwd);
   if (!baseline) {
     failLine(
       `anti-slop: ${ANTI_SLOP_BASELINE_REL} is missing; run \`devkit anti-slop create\` explicitly`,
     );
   }
-  return baseline;
+  return baseline && requireCurrent && refuseLegacyIdentity(baseline) ? null : baseline;
+}
+
+/** `devkit anti-slop rekey` — move line-identity debt to span identity; never adds a finding. */
+export function rekeyIdentity(cwd: string): number {
+  if (!capabilityReady(cwd)) return 2;
+  return withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
+    const baseline = baselineOrExplain(cwd, false);
+    if (!baseline) return 2;
+    if (hasCurrentIdentity(baseline)) {
+      console.log('anti-slop: baseline already uses span identity; unchanged');
+      return 0;
+    }
+    const next = rekeyWorkingBaseline(cwd, baseline);
+    writeBaseline(cwd, next);
+    console.log(`anti-slop: ${rekeySummary(baseline, next)}; stage ${ANTI_SLOP_BASELINE_REL}`);
+    return 0;
+  });
 }
 
 export function count(groups: readonly { count: number }[]): number {

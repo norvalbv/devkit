@@ -15,7 +15,12 @@ import {
   ANTI_SLOP_EXECUTION_MODE_ENV,
   ANTI_SLOP_IGNORE_PATTERNS,
 } from './constants.mts';
-import { type FindingGroup, groupFindings, parseAntiSlopFindings } from './diagnostics.mts';
+import {
+  type AntiSlopFinding,
+  type FindingGroup,
+  groupFindings,
+  parseAntiSlopFindings,
+} from './diagnostics.mts';
 import { antiSlopCapabilityIssue } from './lifecycle.mts';
 
 const MAX_OUTPUT = 64 * 1024 * 1024;
@@ -78,17 +83,26 @@ export function collectAntiSlopGroups(
   args: readonly string[],
   pinCapabilityTo?: string,
 ): FindingGroup[] {
+  return groupFindings(collectAntiSlopFindings(cwd, args, pinCapabilityTo));
+}
+
+/** Ungrouped findings, each still carrying its legacy fingerprint for a baseline re-key. */
+export function collectAntiSlopFindings(
+  cwd: string,
+  args: readonly string[],
+  pinCapabilityTo?: string,
+): AntiSlopFinding[] {
   if (!existsSync(resolve(cwd, '.devkit'))) {
     throw new Error('anti-slop is not installed — run `devkit init --anti-slop`');
   }
   return withManagedCapabilityLock(cwd, () => {
-    const groups = collectAntiSlopGroupsUnlocked(cwd, args);
+    const findings = collectAntiSlopFindingsUnlocked(cwd, args);
     if (pinCapabilityTo) adoptManagedCapability(cwd, pinCapabilityTo);
-    return groups;
+    return findings;
   });
 }
 
-function collectAntiSlopGroupsUnlocked(cwd: string, args: readonly string[]): FindingGroup[] {
+function collectAntiSlopFindingsUnlocked(cwd: string, args: readonly string[]): AntiSlopFinding[] {
   const issue = antiSlopCapabilityIssue(cwd);
   if (issue) throw new AntiSlopCapabilityError(issue);
   const scope = resolveAntiSlopScope(cwd, args);
@@ -130,5 +144,5 @@ function collectAntiSlopGroupsUnlocked(cwd: string, args: readonly string[]): Fi
       `Oxlint returned no diagnostics JSON: ${result.stderr.trim().split('\n')[0] || 'no detail'}`,
     );
   }
-  return groupFindings(parseAntiSlopFindings(cwd, result.stdout));
+  return parseAntiSlopFindings(cwd, result.stdout);
 }
