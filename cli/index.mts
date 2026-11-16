@@ -72,11 +72,13 @@ const COMMANDS: Record<string, CommandLoader> = {
   'baseline-status': () => import('./commands/baseline/status.mts'),
   'prove-regression': () => import('./commands/baseline/prove-regression.mts'),
   'subtraction-trial': () => import('./commands/baseline/subtraction-trial.mts'),
+  'ci-verdict': () => import('./commands/baseline/ci-verdict.mts'),
 };
 
 // The subcommands that shell out to git — they get a friendly missing-git preflight (require-git).
 const GIT_COMMANDS = new Set([
   'baseline-status',
+  'ci-verdict',
   'coverage-diff',
   'base-status',
   'prove-regression',
