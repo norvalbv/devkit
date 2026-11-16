@@ -28,14 +28,6 @@ const EXCLUDED = new Map([
     'runs only the Checks linked to decision Targets, which a fixture has none of',
   ],
 ]);
-// Git spawns per in-scope staged file today. Lower one when a gate gets cheaper; never raise it.
-const IN_SCOPE_SLOPE = {
-  'rename-in-scope': new Map([['size', 2]]),
-  'codemod-in-scope': new Map([
-    ['size', 2],
-    ['comments', 6],
-  ]),
-};
 const MEASURED = DETERMINISTIC.filter((gate) => !EXCLUDED.has(gate.id));
 
 const dirs: string[] = [];
@@ -192,18 +184,20 @@ describe('deterministic gate cost against the staged-set size', () => {
         MEASURED.map((gate) => [gate.id, { starts: 0, blobs: 0 }]),
       );
       // whitespace judges every staged path, not scanRoots, so it reads each renamed or edited file.
-      if (change !== 'delete-out-of-scope') expected.whitespace = { starts: 0, blobs: 1 };
+      // comments takes one whole-set patch diff, which reads each renamed or edited blob once.
+      if (change !== 'delete-out-of-scope') {
+        expected.whitespace = { starts: 0, blobs: 1 };
+        expected.comments = { starts: 0, blobs: 1 };
+      }
       expect(slopes(change)).toEqual(expected);
     },
   );
 
   it.each(['rename-in-scope', 'codemod-in-scope'] as const)(
-    'starts at most the pinned git processes per staged file inside scanRoots (%s)',
+    'starts no git process per staged file inside scanRoots (%s)',
     (change) => {
       const measured = slopes(change);
-      for (const [id, slope] of Object.entries(measured)) {
-        expect(slope.starts, id).toBeLessThanOrEqual(IN_SCOPE_SLOPE[change].get(id) ?? 0);
-      }
+      for (const [id, slope] of Object.entries(measured)) expect(slope.starts, id).toBe(0);
       expect(
         measured.size.blobs,
         'size reads each in-scope blob it line-counts, so 0 means the blob count is blind',
