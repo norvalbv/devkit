@@ -53,3 +53,4 @@ created: 2026-10-23
 **Scope:** cli/lib/machine/**,cli/commands/machine/**
 **Source:** manual
 **Evidence-change:** The 2026-10-24 Target said macOS-native apps still cannot be QA-ed and assumed frink would run its Linux build in the box. A spike on 2026-11-16 showed the pinned Playwright can drive and record a native Electron window over CDP with the existing light-mode recorder, and reading frink showed its QA app is macOS-only. The Revisit trigger of the 2026-10-23 Target (an Electron consumer ships a slot-aware boot recipe) has not fired yet: frink still keys its profile to a build-time port, and that recipe is its follow-up.
+- 2026-11-16 — An attach also skips chrome-error:// pages: a window whose load failed is not the app, so run waits out its 30 s and fails naming the pages it saw instead of recording the error page.

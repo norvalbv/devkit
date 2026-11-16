@@ -88,9 +88,9 @@ async function openInBox(box: Box): Promise<Opened> {
 
 /** DevTools answers before an app shows its first window, so an attach waits this long for one. */
 const APP_PAGE_MS = 30_000;
-const NOT_THE_APP = /^(devtools:|chrome-extension:|about:blank$)/;
+const NOT_THE_APP = /^(devtools:|chrome-extension:|chrome-error:|about:blank$)/;
 
-/** The app's own page among DevTools targets: never an inspector, an extension or a blank page. */
+/** The app's own page among DevTools targets: no inspector, extension, blank or failed-load page. */
 export const appPage = <P extends { url: () => string }>(pages: P[]): P | undefined =>
   pages.find((page) => !NOT_THE_APP.test(page.url()));
 

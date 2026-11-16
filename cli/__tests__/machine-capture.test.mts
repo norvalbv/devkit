@@ -223,15 +223,16 @@ describe.runIf(browserReady)("machine capture (the app's own DevTools)", () => {
 describe('the app page among DevTools targets', () => {
   const target = (address: string) => ({ url: () => address });
 
-  it('is the first page that is not an inspector, an extension or a blank one', () => {
+  it('is the first page that is not an inspector, an extension, blank or a failed load', () => {
     const pages = [
       'devtools://devtools/x',
       'chrome-extension://y/z',
       'about:blank',
+      'chrome-error://chromewebdata/',
       'file:///app/index.html',
     ];
     expect(appPage(pages.map(target))?.url()).toBe('file:///app/index.html');
-    expect(appPage(pages.slice(0, 3).map(target))).toBeUndefined();
+    expect(appPage(pages.slice(0, 4).map(target))).toBeUndefined();
   });
 });
 
