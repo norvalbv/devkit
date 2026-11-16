@@ -13,7 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { gateBlockPrelude } from '../lib/husky/gate-policy/block-helpers.mts';
+import { CHEAP_GATE_FLUSH, gateBlockPrelude } from '../lib/husky/gate-policy/block-helpers.mts';
 import { buildFullHook, buildOverlayHook } from '../lib/husky/husky-block.mts';
 import { testSpawnSync } from './_helpers.mts';
 
@@ -43,7 +43,7 @@ export function runHookFragment(
   fragment: string,
   { cwd, env, shell = 'sh', binOpen = '' }: FragmentRun,
 ) {
-  const script = [...gateBlockPrelude(binOpen), fragment].join('\n');
+  const script = [...gateBlockPrelude(binOpen), fragment, CHEAP_GATE_FLUSH].join('\n');
   return testSpawnSync(shell, ['-e', '-c', script], { cwd, env, encoding: 'utf8' });
 }
 

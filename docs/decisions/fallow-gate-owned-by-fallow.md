@@ -98,3 +98,4 @@ created: 2026-07-25
 **Scope:** cli/lib/install/install-fallow.mts,cli/commands/init.mts,cli/lib/husky/husky-block.mts,cli/lib/husky/self-host.mts,agents-hooks/**
 **Source:** shortcut · sc-2341
 **Evidence-change:** Target 2 assumed fallow's git hook was installed and adequate. Measured: on every devkit repo the install fails because .husky/pre-commit exists, and the fallback fallow prints is merge-base scoped (frink, zero staged files: 1514 changed files, verdict=fail). The git surface was never actually gated.
+- 2026-10-15 — sc-4550 — On commit and ship the staged fallow audit now runs even after guard-deterministic fails; its exit-1 block is recorded and the cheap-gate flush stops the commit before the AI guards, so a fallow finding reports in the same attempt as a coverage or anti-slop failure. Blocking stays exit-1-only; self-host stays advisory.

@@ -222,8 +222,7 @@ __dk_block_deterministic() {
             __dk_no_git_env node gate-engine/review/cli.mts record-gate "$1" >/dev/null 2>&1 || true
     fi
     case "${DEVKIT_RUN_MODE:-}" in review|dry-gates) ;; *)
-        [ "$1" = deterministic-gates ] || echo "✗ staged gate blocked: $1 (its report is above)" >&2
-        exit 1 ;;
+        [ "$1" = deterministic-gates ] || echo "✗ staged gate blocked: $1 (its report is above)" >&2 ;;
     esac
     dk_review_failed=1
     dk_review_failed_gates="$dk_review_failed_gates $1"
@@ -312,6 +311,15 @@ __dk_gate_deterministic() {
 echo "🚧 Deterministic gates (aggregated)..."
 __dk_gate_deterministic node gate-engine/deterministic/run.mts --hook "${DK_HOOK_PATH:-$0}" --structure "guard-structure staged" --extra "lint=bun run lint" --extra "hook-parity=node cli/lib/husky/hook-parity.mts --gate" --extra "formatter-identity=node cli/lib/husky/format-identity/formatter-identity.mts --gate" --extra "decisions-integrity=node gate-engine/decisions/cli.mts integrity --staged" --extra "skill-projection=node cli/lib/husky/skill-projection-integrity.mts --root . --gate" --extra "release-only-dist=node cli/lib/ship/dist-integrity.mts --ship-staged" --extra "benchmarks=bun run benchmarks:check -- --mode staged" --extra "corpus-lint=bun run benchmarks:corpus"
 # /devkit:deterministic
+
+# devkit:cheap-gate-flush
+case "${DEVKIT_RUN_MODE:-}" in review|dry-gates) ;; *)
+    if [ "${dk_review_failed:-0}" -ne 0 ]; then
+        echo "✗ commit blocked before the AI gates:$dk_review_failed_gates (findings above) — fix them together, then commit once."
+        exit 1
+    fi ;;
+esac
+# /devkit:cheap-gate-flush
 
 if __dk_gate_selected decisions; then
 # devkit:guard-decisions

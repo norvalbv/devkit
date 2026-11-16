@@ -494,6 +494,17 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     ['✗ deterministic gates failed: guard-anti-slop guard-comments', 'deterministic'],
     ['✗ deterministic gates failed: guard-comments guard-anti-slop', 'deterministic'],
     ['✗ deterministic gates failed: guard-comments-lint', 'deterministic'],
+    // The cheap-gate flush names every gate; comments keeps its name only when alone.
+    [
+      '✗ deterministic gates failed: guard-comments\n✗ commit blocked before the AI gates: deterministic-gates (findings above)',
+      'comments',
+    ],
+    [
+      '✗ deterministic gates failed: guard-comments\n✗ commit blocked before the AI gates: deterministic-gates fallow (findings above)',
+      'deterministic',
+    ],
+    ['✗ commit blocked before the AI gates: fallow (findings above)', 'deterministic'],
+    ['✗ commit blocked before the AI gates: eslint-overlay (findings above)', 'deterministic'],
     ['✗ staged gate blocked: fallow (its report is above)', 'fallow'],
     ['✗ staged gate blocked: eslint-overlay (its report is above)', 'eslint-overlay'],
     ['✗ staged gate blocked: biome-overlay (its report is above)', 'biome-overlay'],
