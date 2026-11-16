@@ -86,10 +86,11 @@ const eventsOf = (sink) =>
     .filter((e) => e.type === 'gate_result');
 
 // Fake `node <guard-module> <args>` runner: maps a guard module basename → exit code. Throws
-// { status } for non-zero (like execFileSync), returns for 0. argv[0] is the resolved module path.
+// { status } for non-zero (like execFileSync), returns for 0. argv[2] is the resolved module path,
+// after the `--import <crash preload>` pair.
 function mkExec(codeByModule) {
   return vi.fn((_node, argv) => {
-    const mod = argv[0];
+    const mod = argv[2];
     const hit = Object.entries(codeByModule).find(([k]) => mod.includes(k));
     const code = hit ? hit[1] : 0;
     if (code !== 0) {
@@ -168,7 +169,14 @@ describe('runDeterministic — aggregation + trichotomy', () => {
     );
     expect(exec).toHaveBeenCalledWith(
       'node',
-      [expect.stringContaining('cli/index.mts'), 'anti-slop', 'check', '--staged'],
+      [
+        '--import',
+        expect.stringContaining('crash-exit'),
+        expect.stringContaining('cli/index.mts'),
+        'anti-slop',
+        'check',
+        '--staged',
+      ],
       expect.anything(),
     );
   });
@@ -196,7 +204,7 @@ describe('runDeterministic — a gate that never reached an exit code', () => {
   // Throws `fields` (an execFileSync error shape) for the module matching `match`; others pass.
   const throwing = (match, fields) =>
     vi.fn((_node, argv) => {
-      if (argv[0].includes(match)) throw Object.assign(new Error('gate'), fields);
+      if (argv[2].includes(match)) throw Object.assign(new Error('gate'), fields);
     });
   const run = (guards, opts) => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -358,7 +366,12 @@ describe('runDeterministic — comments joins the aggregated set', () => {
     );
     expect(exec).toHaveBeenCalledWith(
       'node',
-      [expect.stringMatching(/comment-firewall[/\\]cli\.m[tj]s$/), 'gate'],
+      [
+        '--import',
+        expect.stringContaining('crash-exit'),
+        expect.stringMatching(/comment-firewall[/\\]cli\.m[tj]s$/),
+        'gate',
+      ],
       expect.anything(),
     );
   });
@@ -480,7 +493,7 @@ describe('runDeterministic — comments joins the aggregated set', () => {
     const exec = mkExec({});
     expect(runDeterministic(repo(['size', 'comments']), { exec, only: ['comments'] })).toBe(0);
     expect(exec).toHaveBeenCalledTimes(1);
-    expect(exec.mock.calls[0][1][0]).toMatch(/comment-firewall/);
+    expect(exec.mock.calls[0][1][2]).toMatch(/comment-firewall/);
   });
 
   it('runs the REAL firewall end-to-end: a staged 3-line comment paragraph blocks in the aggregate', () => {
@@ -517,9 +530,9 @@ describe('runDeterministic — --structure / --extra / --only', () => {
     expect(runDeterministic(d, { exec, structure: 'guard-structure gate' })).toBe(1);
     expect(err.mock.calls.flat().join('\n')).toContain('structure-lint');
     // resolved as `node <sibling structure/run.mts> gate`, never via bunx/PATH
-    const call = exec.mock.calls.find(([, argv]) => argv[0].includes('structure/run.mts'));
+    const call = exec.mock.calls.find(([, argv]) => argv[2].includes('structure/run.mts'));
     expect(call[0]).toBe('node');
-    expect(call[1][1]).toBe('gate');
+    expect(call[1][3]).toBe('gate');
     // exit 2 = could-not-run → fail-open for the guard form
     const exec2 = mkExec({ 'structure/run.mts': 2 });
     expect(runDeterministic(d, { exec: exec2, structure: 'guard-structure gate' })).toBe(0);
@@ -645,7 +658,7 @@ describe('runDeterministic — --structure / --extra / --only', () => {
     const failing = mkExec({ 'coverage/run': 1 });
     expect(runDeterministic(d, { exec: failing })).toBe(1);
     expect(failing).toHaveBeenCalledTimes(1);
-    expect(failing.mock.calls[0][1][0]).toMatch(/coverage[\\/]run\.m?ts$/);
+    expect(failing.mock.calls[0][1][2]).toMatch(/coverage[\\/]run\.m?ts$/);
     expect(cacheStates(process.env.DEVKIT_GATE_EVENTS)).toEqual(['none', 'partial', 'partial']);
   });
 
@@ -841,7 +854,7 @@ describe('runDeterministic — --structure / --extra / --only', () => {
     const exec = mkExec({});
     expect(runDeterministic(d, { exec, only: ['size', 'fanout'] })).toBe(0);
     expect(exec).toHaveBeenCalledTimes(2);
-    const mods = exec.mock.calls.map(([, argv]) => argv[0]).join(' ');
+    const mods = exec.mock.calls.map(([, argv]) => argv[2]).join(' ');
     expect(mods).toContain('size-disable');
     expect(mods).toContain('folder-fanout');
   });
@@ -882,7 +895,7 @@ describe('runDeterministic — --structure / --extra / --only', () => {
 
     expect(runDeterministic(repo(['clone']), { exec, only: ['fanout', 'fanout'] })).toBe(0);
     expect(exec).toHaveBeenCalledTimes(1);
-    expect(exec.mock.calls[0][1][0]).toContain('folder-fanout');
+    expect(exec.mock.calls[0][1][2]).toContain('folder-fanout');
   });
 });
 
@@ -892,14 +905,14 @@ describe('coverage — opt-in wiring through runDeterministic', () => {
     const exec = mkExec({});
     expect(runDeterministic(repo(['size', 'coverage']), { exec })).toBe(0);
     expect(exec).toHaveBeenCalledTimes(2);
-    expect(exec.mock.calls.some(([, argv]) => argv[0].includes('coverage/run'))).toBe(true);
+    expect(exec.mock.calls.some(([, argv]) => argv[2].includes('coverage/run'))).toBe(true);
   });
 
   it('does NOT spawn coverage on the missing-config fallback', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const exec = mkExec({});
     expect(runDeterministic(repo(null), { exec })).toBe(0);
-    expect(exec.mock.calls.some(([, argv]) => argv[0].includes('coverage/run'))).toBe(false);
+    expect(exec.mock.calls.some(([, argv]) => argv[2].includes('coverage/run'))).toBe(false);
   });
 });
 
@@ -1239,7 +1252,7 @@ describe('runDeterministic — failure reasons (sc-1231)', () => {
     const calls = [];
     const exec = vi.fn((_node, argv, opts) => {
       calls.push(opts);
-      const hit = Object.entries(byModule).find(([k]) => argv[0].includes(k));
+      const hit = Object.entries(byModule).find(([k]) => argv[2].includes(k));
       const { code = 0, reason } = hit ? hit[1] : {};
       if (reason) writeFileSync(opts.env.DEVKIT_GATE_REASON_FILE, reason);
       if (code !== 0) {
@@ -1356,7 +1369,7 @@ describe('runDeterministic — failure reasons (sc-1231)', () => {
   });
 
   it('strict could-not-run and unexpected codes carry the reason too, and the gate name stays bare', () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     process.env.GUARD_DETERMINISTIC_STRICT = '1';
     const d = repo(['size', 'fanout']);
     const sink = sinkIn(d);
@@ -1374,6 +1387,10 @@ describe('runDeterministic — failure reasons (sc-1231)', () => {
       status: 'could_not_run',
       detail: 'guard-fanout(unexpected:5): boom',
     });
+    // The remedy keys on "no verdict", not on the crash label: neither gate judged the diff.
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('No gate above judged your diff');
+    expect(out).not.toContain('Fix every failure above together');
   });
 
   it('an unusable TMPDIR never stops the gates: the verdict stands, reasons degrade to the note', () => {
@@ -1666,7 +1683,7 @@ describe('recheckCommand — repo-written argv is never rewritten', () => {
 function hangExec(hang, codes = {}, status = null) {
   const rest = mkExec(codes);
   return vi.fn((node, argv, opts) => {
-    if (hang.some((m) => argv[0].includes(m))) {
+    if (hang.some((m) => argv[2].includes(m))) {
       throw Object.assign(new Error('spawnSync node ETIMEDOUT'), { code: 'ETIMEDOUT', status });
     }
     return rest(node, argv, opts);

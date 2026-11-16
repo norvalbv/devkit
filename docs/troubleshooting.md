@@ -488,6 +488,8 @@ re-commit. To converge without a ship round, stage the paths and run `guard-dete
 was signalled, so re-run. A gate that is legitimately that slow needs a higher `gateTimeoutMs` in
 `guard.config.json`, or `export GUARD_GATE_TIMEOUT_MS=<ms>` for one run. Work the gate itself started
 may still be running after the signal.
+`guard-<id>(crashed)` is not one either: the gate threw before judging the diff. Act on the error
+line printed under it, often a setup step it names, not on your code.
 On a commit or ship, the staged fallow audit and overlay eslint/biome steps still run after a failure
 here, then `✗ commit blocked before the AI gates: <names>` stops the commit with every cheap finding
 above it. A slow `extraGates` entry declared `{ "cmd": …, "afterGreen": true }` runs last and only when
