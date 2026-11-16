@@ -3,14 +3,13 @@
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mjs';
 import { taskLabel } from '../lens/split.mjs';
 import { isShipLane } from '../cascade/consumer-assets.mjs';
-import { emitAdvisoryResult, FINDING_SEPARATOR } from '../../judge/advisory/emit.mjs';
-import { ADVISORY_CAP, parseAdvisories } from '../contracts/response.mjs';
+import { emitAdvisoryResult } from '../../judge/advisory/emit.mjs';
+import { parseAdvisories } from '../contracts/response.mjs';
 import { printAdvisories } from '../evidence/base-context.mjs';
 import { emitReviewSkipped } from '../evidence/scope.mjs';
 import { lensGroupId, resolveLensGroups } from '../lens/groups.mjs';
 import { REVIEWERS } from '../reviewers.mjs';
-import { reviewerSkipRemedy } from '../overrides.mjs';
-import { skippedReviewers } from '../runtime.mjs';
+import { reviewerSkipRemedy, skippedReviewers } from '../overrides.mjs';
 /** The only reviewer the gate fans out into lens groups (lens/split.mts planReviewWork). */
 const SPLIT_REVIEWER = 'correctness-reviewer';
 /** Parse `<reviewer>[:<lens>]`; throws a message naming the valid choices on anything else. */
@@ -73,7 +72,7 @@ export function printRemedy(f, splitParts, only) {
         console.error(recheckHint(f.name, splitParts.get(f.name), isShipLane()));
 }
 /** A lens recheck emits no merged row, so each live PASS part prints its own advisories, and each
- * reviewer still gets ONE advisory_result. A cached part carries no transcript: it already replayed. */
+ * advisory still gets its own advisory_result. A cached part carries no transcript: it already replayed. */
 export function reportLensPartAdvisories(splitParts) {
     for (const [name, parts] of splitParts) {
         const all = [];
@@ -88,8 +87,7 @@ export function reportLensPartAdvisories(splitParts) {
             printAdvisories(label, advisories, saveTranscript(`review-${label}`, text));
             all.push(...advisories);
         }
-        const unique = [...new Set(all)].slice(0, ADVISORY_CAP);
-        if (unique.length)
-            emitAdvisoryResult(`review:${name}`, 'finding', unique.join(FINDING_SEPARATOR));
+        for (const a of new Set(all))
+            emitAdvisoryResult(`review:${name}`, 'finding', a);
     }
 }

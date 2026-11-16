@@ -61,6 +61,8 @@ export const DEFAULTS = Object.freeze({
     maxLines: 0,
     // Separate loose test-file ceiling. 0 = OFF; init/upgrade enables it alongside maxLines.
     maxTestLines: 0,
+    // Extra extensions only the raw-line ratchet governs (e.g. `["sh"]`); no other gate reads them.
+    maxLinesExtensions: [],
     // Flat-by-design folders exempt from the fanout cap (was frink's hardcoded
     // grandfathered roots — now opt-in per consumer).
     fanoutExempt: [],
@@ -74,6 +76,7 @@ export const DEFAULTS = Object.freeze({
         driftDesc: 0.88, // description cosine gate for the drifted tier
         minLoc: 15, // min lines per chunk to qualify as a drifted candidate
         minTokens: 50, // jscpd token-clone floor (clone-detector)
+        similarity: 0.9, // jscpd --similarity floor: same-structure functions under other names
     }),
     // search-code index path for the embedding matcher. null => matcher opt-out:
     // no index configured means the semantic matcher fails open / does nothing
@@ -245,6 +248,7 @@ function resolveLoadedGuardConfig(file, cwd) {
         maxTestLines: typeof file.maxTestLines === 'number' && Number.isFinite(file.maxTestLines)
             ? file.maxTestLines
             : DEFAULTS.maxTestLines,
+        maxLinesExtensions: arr(file.maxLinesExtensions, DEFAULTS.maxLinesExtensions),
         fanoutExempt: arr(file.fanoutExempt, DEFAULTS.fanoutExempt),
         allowlistPath: allowlistEnv ?? file.allowlistPath ?? DEFAULTS.allowlistPath,
         // Shallow-merge thresholds so a consumer can override one knob without restating all.
@@ -290,6 +294,7 @@ function resolveLoadedGuardConfig(file, cwd) {
         uiEvidence: { paths: globs(file.uiEvidence?.paths) },
         extraGates: file.extraGates,
         structureRaw: file.structure,
+        gateTimeoutMs: file.gateTimeoutMs,
         noLog: noLogEnv ?? Boolean(file.noLog ?? DEFAULTS.noLog),
         noLlm: noLlmEnv ?? Boolean(file.noLlm ?? DEFAULTS.noLlm),
         // Echo the resolution base so engines never have to re-derive it (and never reach

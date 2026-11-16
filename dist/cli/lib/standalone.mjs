@@ -53,11 +53,10 @@ function writeExtends(cwd, dest, relPath, force, dryRun) {
         console.log(`  [dry-run] ${existsSync(target) && !force ? 'skip (exists)' : 'write'} ${dest}`);
         return;
     }
-    if (existsSync(target) && !force) {
+    if (writeIfAbsent(target, content, { force }) === 'exists') {
         console.log(`  • ${dest} exists — add "extends": ${JSON.stringify(relPath)} yourself (or --force)`);
         return;
     }
-    writeFileSync(target, content);
     console.log(`  ✓ wrote ${dest} (extends ${relPath})`);
 }
 /**
@@ -131,11 +130,11 @@ export function installStandaloneHook(gitRoot, pkgRel, sel, dryRun) {
             console.log('  [dry-run] write .husky/pre-commit (standalone, fail-open global gates)');
             return;
         }
-        mkdirSync(huskyDir, { recursive: true });
-        writeFileSync(hookPath, buildFullHook(sel, pkgRel, 'global-optional'));
-        chmodSync(hookPath, 0o755);
-        console.log('  ✓ created .husky/pre-commit (standalone, fail-open global gates)');
-        return;
+        if (writeIfAbsent(hookPath, buildFullHook(sel, pkgRel, 'global-optional')) === 'created') {
+            chmodSync(hookPath, 0o755);
+            console.log('  ✓ created .husky/pre-commit (standalone, fail-open global gates)');
+            return;
+        }
     }
     const current = readFileSync(hookPath, 'utf8');
     const merged = replaceGuardBlock(current, buildGuardBlock(sel, pkgRel, { binDir: 'global-optional' }), pkgRel);

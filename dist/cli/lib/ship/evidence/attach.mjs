@@ -18,7 +18,7 @@ const pullSchema = z.object({
 });
 const say = (line) => console.error(`devkit machine attach: ${line}`);
 /** The PR number `target` names in origin's repo, which is the repo devkit ship pushes to. */
-function prIn(repo, target) {
+export function prIn(repo, target) {
     if (!target)
         return { reason: 'usage: devkit machine attach <pr-number|pr-url>' };
     if (PR_NUMBER.test(target))

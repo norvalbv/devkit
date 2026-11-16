@@ -5,6 +5,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { CONFIG_FILENAME, resolveGuardConfigJson } from '../config.mjs';
 import { parseJsonObject } from '../config-json.mjs';
+import { LINE_ANCHOR_RE } from '../markdown/referenced-paths.mjs';
 import { commitIndexEnv } from '../ratchets/commit-index.mjs';
 import { gitIgnores, indexFile } from '../review/evidence/staged-git.mjs';
 const commentsSchema = z.looseObject({
@@ -12,6 +13,7 @@ const commentsSchema = z.looseObject({
         .object({
         forbiddenRefs: z.array(z.string()).optional(),
         forbidDecisionRefs: z.boolean().optional(),
+        forbidLineAnchors: z.boolean().optional(),
     })
         .optional(),
 });
@@ -70,5 +72,7 @@ export function loadCommentPolicy(cwd) {
         : null;
     if (decisions)
         refs.push(decisions);
+    if (comments.forbidLineAnchors)
+        refs.push(LINE_ANCHOR_RE);
     return { refs };
 }

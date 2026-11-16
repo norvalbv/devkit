@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 const UNAVAILABLE = '## RECORDED TARGETS — UNAVAILABLE\nDecision log could not be read. Judge the diff without assuming prior approval.';
 export async function loadRecordedTargets(files, cwd) {
     try {
-        const [{ scopedTargets }, { renderTargets }] = await Promise.all([
+        const [{ scopedTargets }, { renderTargets, DETECT_TARGETS_BYTES }] = await Promise.all([
             import('../scoped-targets.mjs'),
             import('../../review/evidence/targets-block.mjs'),
         ]);
@@ -13,7 +13,7 @@ export async function loadRecordedTargets(files, cwd) {
             header: '## RECORDED TARGETS (current rulings matching changed files)',
             skipHeader: '## RECORDED TARGETS — NONE',
             skipNote: 'No scoped Target matches. Judge the diff without assuming prior approval.',
-        }, 4096);
+        }, DETECT_TARGETS_BYTES);
         return { slugs: blocks.map((b) => b.slug), text };
     }
     catch {
@@ -26,13 +26,9 @@ export function recordStageable(cwd, decisionsDir) {
     return (spawnSync('git', ['check-ignore', '-q', '--no-index', '--', probe], { cwd, stdio: 'ignore' })
         .status === 1);
 }
-/** The changed files behind the smells: a dep-change source names a dependency, not a file. */
-export function smellFiles(sources, entries) {
-    const files = entries.filter((e) => e.depChanged).map((e) => e.path);
-    for (const s of sources)
-        if (s.label !== 'dep-change')
-            files.push(s.path);
-    return [...new Set(files)];
+/** The changed files behind the smells (a dep-change source's path is the manifest that declares it). */
+export function smellFiles(sources) {
+    return [...new Set(sources.map((s) => s.path))];
 }
 export function renderBlockRemedy(r) {
     const governing = r.slugs === null

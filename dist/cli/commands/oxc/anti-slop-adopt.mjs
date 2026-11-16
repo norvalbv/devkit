@@ -1,21 +1,49 @@
-/** `devkit anti-slop adopt-renames|adopt-relocations` — re-anchor moved debt, never re-snapshot. */
+/** `devkit anti-slop adopt-renames|adopt-relocations|adopt-activation|prune` — never re-snapshot. */
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { failLine } from '../../../gate-engine/deterministic/reason.mjs';
 import { withLock } from '../../lib/atomic-write.mjs';
-import { compareBaseline, migrateBaselineRenames, readBaseline, writeBaseline, } from '../../lib/install/anti-slop/baseline.mjs';
-import { inheritedBaseAllowance, relocationBound, relocationEvidence, } from '../../lib/install/anti-slop/baseline-envelope.mjs';
+import { adoptBaselineRuleFindings, compareBaseline, hasCurrentIdentity, migrateBaselineRenames, pruneBaseline, readBaseline, rekeySummary, writeBaseline, } from '../../lib/install/anti-slop/baseline.mjs';
+import { inheritedBaseAllowance, printNewAntiSlopFindings, rekeyWorkingBaseline, relocationBound, relocationEvidence, } from '../../lib/install/anti-slop/baseline-envelope.mjs';
 import { ANTI_SLOP_BASELINE_LOCK_REL, ANTI_SLOP_BASELINE_REL, } from '../../lib/install/anti-slop/constants.mjs';
 import { git } from '../../lib/install/anti-slop/git-index-lock.mjs';
 import { gitBaselineEnvelope, withStableGitIndex, withStagedAntiSlopSnapshot, } from '../../lib/install/anti-slop/git-snapshot.mjs';
-import { classifyRelocations, formatSources, printRelocatedAntiSlopFindings, reanchorBaseline, relocationKey, relocationRemedy, unstagedRelocationSources, } from '../../lib/install/anti-slop/relocations.mjs';
+import { clearPendingAntiSlopBaselineActivation, readInstalledAntiSlopBaselineMigrationId, readPendingAntiSlopBaselineActivation, } from '../../lib/install/anti-slop/managed-state.mjs';
+import { classifyRelocations, deletedDebt, formatSources, printRelocatedAntiSlopFindings, reanchorBaseline, relocationKey, relocationRemedy, unstagedRelocationSources, } from '../../lib/install/anti-slop/relocations.mjs';
 import { collectAntiSlopGroups, resolveAntiSlopScope, } from '../../lib/install/anti-slop/runner.mjs';
-export function baselineOrExplain(cwd) {
+import { isOverlayOxcInstall } from '../../lib/install/oxc/lifecycle.mjs';
+/** A line-identity baseline matches no current finding, so every verb but rekey refuses it. */
+export function refuseLegacyIdentity(baseline) {
+    if (hasCurrentIdentity(baseline))
+        return false;
+    failLine(`anti-slop: FAIL — ${ANTI_SLOP_BASELINE_REL} predates span-anchored finding identity; run \`devkit anti-slop rekey\`, then stage it`);
+    return true;
+}
+export function baselineOrExplain(cwd, requireCurrent = true) {
     const baseline = readBaseline(cwd);
     if (!baseline) {
-        console.error(`anti-slop: ${ANTI_SLOP_BASELINE_REL} is missing; run \`devkit anti-slop create\` explicitly`);
+        failLine(`anti-slop: ${ANTI_SLOP_BASELINE_REL} is missing; run \`devkit anti-slop create\` explicitly`);
     }
-    return baseline;
+    return baseline && requireCurrent && refuseLegacyIdentity(baseline) ? null : baseline;
+}
+/** `devkit anti-slop rekey` — move line-identity debt to span identity; never adds a finding. */
+export function rekeyIdentity(cwd) {
+    if (!capabilityReady(cwd))
+        return 2;
+    return withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
+        const baseline = baselineOrExplain(cwd, false);
+        if (!baseline)
+            return 2;
+        if (hasCurrentIdentity(baseline)) {
+            console.log('anti-slop: baseline already uses span identity; unchanged');
+            return 0;
+        }
+        const next = rekeyWorkingBaseline(cwd, baseline);
+        writeBaseline(cwd, next);
+        console.log(`anti-slop: ${rekeySummary(baseline, next)}; stage ${ANTI_SLOP_BASELINE_REL}`);
+        return 0;
+    });
 }
 export function count(groups) {
     return groups.reduce((sum, group) => sum + group.count, 0);
@@ -23,7 +51,7 @@ export function count(groups) {
 export function capabilityReady(cwd) {
     if (existsSync(join(cwd, '.devkit', 'anti-slop', 'manifest.json')))
         return true;
-    console.error('anti-slop: not installed — run `devkit init --anti-slop`');
+    failLine('anti-slop: not installed — run `devkit init --anti-slop`');
     return false;
 }
 /** A base a write can be locked to: a symbolic ref, a full object ID, or HEAD ancestry. */
@@ -157,5 +185,75 @@ export function adoptRelocations(cwd, overlay, baseRef = 'HEAD', explicitBase = 
             console.log(`anti-slop: re-anchored ${moved} relocated finding(s) from ${formatSources(sources)} into ${formatSources(plan.relocated.map((group) => group.file))}${overlay ? '' : `; stage ${ANTI_SLOP_BASELINE_REL}`}`);
             return 0;
         });
+    });
+}
+/**
+ * Adopt ONLY the pre-existing findings of rules a devkit release just activated, leaving all other
+ * fingerprint counts untouched — overlay's sole route to adopt debt without laundering it.
+ */
+export function adoptActivation(cwd) {
+    if (!capabilityReady(cwd))
+        return 2;
+    return withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
+        const existing = baselineOrExplain(cwd);
+        if (!existing)
+            return 2;
+        const pending = readPendingAntiSlopBaselineActivation(cwd);
+        if (!pending) {
+            console.log('anti-slop: no pending rule activation to adopt');
+            return 0;
+        }
+        const installed = readInstalledAntiSlopBaselineMigrationId(cwd);
+        if (pending.migrationId !== installed) {
+            console.error(`anti-slop: pending activation ${pending.migrationId} does not match the installed capability (${installed ?? 'none'}); run \`devkit doctor --fix\` first`);
+            return 2;
+        }
+        const groups = collectAntiSlopGroups(cwd, []);
+        const next = adoptBaselineRuleFindings(existing, groups, pending.activatedRuleIds, pending.migrationId);
+        writeBaseline(cwd, next);
+        clearPendingAntiSlopBaselineActivation(cwd, pending.migrationId);
+        console.log(`anti-slop: adopted ${pending.activatedRuleIds.size} newly activated rule(s) into ${ANTI_SLOP_BASELINE_REL} — ${count(next.entries)} finding(s) in ${next.entries.length} fingerprint(s)`);
+        return 0;
+    });
+}
+export function prune(cwd, args) {
+    if (!capabilityReady(cwd))
+        return 2;
+    return withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
+        const baseline = baselineOrExplain(cwd);
+        if (!baseline)
+            return 2;
+        const scope = resolveAntiSlopScope(cwd, args);
+        const groups = collectAntiSlopGroups(cwd, args);
+        const selected = {
+            ...baseline,
+            entries: baseline.entries.filter((entry) => scope.includes(entry.file)),
+        };
+        const comparison = compareBaseline(selected, groups);
+        printNewAntiSlopFindings(comparison.newGroups);
+        if (comparison.newGroups.some((group) => group.severity === 'error')) {
+            // A scoped lint cannot see a rename destination outside its paths, so only unscoped drops.
+            const exists = (file) => existsSync(join(cwd, file));
+            const dead = args.length ? [] : deletedDebt(selected.entries, comparison.newGroups, exists);
+            const entries = baseline.entries.filter((entry) => !dead.includes(entry));
+            if (dead.length)
+                writeBaseline(cwd, { ...baseline, entries });
+            const stage = isOverlayOxcInstall(cwd) ? '' : `; stage ${ANTI_SLOP_BASELINE_REL}`;
+            console.error(dead.length
+                ? `anti-slop: dropped ${count(dead)} finding(s) for deleted file(s)${stage}; prune of fixed findings refused — new error finding(s) exist`
+                : 'anti-slop: prune refused — new error finding(s) exist; baseline unchanged');
+            return 1;
+        }
+        const pruned = pruneBaseline(selected, groups);
+        const next = {
+            ...baseline,
+            entries: [
+                ...baseline.entries.filter((entry) => !scope.includes(entry.file)),
+                ...pruned.entries,
+            ].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint)),
+        };
+        writeBaseline(cwd, next);
+        console.log(`anti-slop: pruned ${comparison.resolvedCount} fixed finding(s); ${next.entries.reduce((sum, entry) => sum + entry.count, 0)} remain`);
+        return 0;
     });
 }

@@ -1,5 +1,6 @@
 import { failLine, writeGateReason } from '../deterministic/reason.mjs';
-import { detectChangedComments } from './detect.mjs';
+import { lineAnchors } from '../markdown/referenced-paths.mjs';
+import { detectChangedComments, PARAGRAPH_CHANGED_LINE_LIMIT } from './detect.mjs';
 import { emptyInventory } from './inventory.mjs';
 import { recordShown, shownAnchors } from './shown.mjs';
 import { emitCommentBudget } from './telemetry.mjs';
@@ -14,10 +15,12 @@ export function findingLocation(finding) {
 }
 function printFinding(finding) {
     const summary = finding.comment.replace(/\s+/g, ' ').slice(0, 140);
-    console.error(`  • [${finding.id}] ${findingLocation(finding)} — ${summary}`);
+    console.error(`  • [${finding.id}] ${findingLocation(finding)} (${finding.textLines} changed text lines) — ${summary}`);
 }
 export const PARAGRAPH_ADVICE = [
-    'Each paragraph has 3+ changed text lines. Shorten the comment where possible.',
+    'A paragraph is one block comment, or a run of same-style single-line comments with only blank lines between them.',
+    `Blank lines never split it. It blocks at ${PARAGRAPH_CHANGED_LINE_LIMIT} or more changed lines with text. Only lines you added or edited count; leave unchanged lines as they are.`,
+    'Shorten the comment where possible.',
     'If you need a paragraph-long comment to justify a workaround, the code is wrong — fix the code.',
 ];
 const PARAGRAPH_REMEDY = [
@@ -35,13 +38,17 @@ function printParagraphs(findings) {
     for (const finding of findings)
         printFinding(finding);
     console.error(PARAGRAPH_REMEDY);
-    writeGateReason(findings.map((f) => `[${f.id}] ${findingLocation(f)} — 3+-line comment paragraph: shorten it, or retry unchanged (blocks once)`));
+    writeGateReason(findings.map((f) => `[${f.id}] ${findingLocation(f)} — ${f.textLines} changed text lines in one comment paragraph: shorten it, or retry unchanged (blocks once)`));
 }
+const ANCHOR_REMEDY = 'A file:line anchor rots on the next edit to that file: cite the function or test name instead.';
 function printRefs(findings) {
     for (const { path, line, refs, comment } of findings) {
         console.error(`  • ${path}:${line} cites ${refs.join(', ')} — ${comment}`);
     }
     console.error(REF_REMEDY);
+    if (findings.some(({ refs }) => refs.some((ref) => lineAnchors(ref).length > 0))) {
+        console.error(ANCHOR_REMEDY);
+    }
     writeGateReason(findings.map(({ path, line, refs }) => `${path}:${line} cites ${refs.join(', ')} — state the fact or drop the reference`));
 }
 /** The first line is the collector's classification key; keep it byte-stable. */

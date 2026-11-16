@@ -283,15 +283,17 @@ export async function captureRegressionEvidence(prepared, onPhase = () => { }) {
         signalGuard.dispose();
     }
 }
-export async function proveRegression(rawArgs, cwd = process.cwd()) {
+export async function captureRegressionComparison(rawArgs, cwd = process.cwd(), dependencySource) {
     let prepared;
     try {
         prepared = prepareRegressionRepository(rawArgs, cwd);
+        if (dependencySource !== undefined)
+            prepared.dependencySource = dependencySource;
     }
     catch (error) {
         const prefix = error instanceof RegressionUsageError ? 'usage' : 'setup';
         console.error(`🚫 prove-regression ${prefix}: ${error instanceof Error ? error.message : error}`);
-        return 1;
+        return { exitCode: 1 };
     }
     let captured;
     try {
@@ -299,18 +301,22 @@ export async function proveRegression(rawArgs, cwd = process.cwd()) {
     }
     catch (error) {
         if (error instanceof InterruptedError)
-            return error.status;
+            return { exitCode: error.status };
         const phase = error instanceof RegressionUsageError ? 'setup' : 'failed';
         console.error(`🚫 prove-regression ${phase}: ${error instanceof Error ? error.message : error}`);
-        return 1;
+        return { exitCode: 1 };
     }
-    const { red, green, status } = captured.evidence;
+    const { evidence, evidenceDir } = captured;
+    const { red, green, status } = evidence;
     console.log(`red: ${red.sha} → ${red.signal ?? red.exitCode}`);
     console.log(`green: ${green.sha} → ${green.signal ?? green.exitCode}`);
     if (red.reportError)
         console.warn(`⚠️  red Vitest report: ${red.reportError}`);
     if (green.reportError)
         console.warn(`⚠️  green Vitest report: ${green.reportError}`);
-    console.log(`evidence: ${captured.evidenceDir}`);
-    return status === 'captured' ? 0 : 1;
+    console.log(`evidence: ${evidenceDir}`);
+    return { exitCode: status === 'captured' ? 0 : 1, evidence, evidenceDir };
+}
+export async function proveRegression(rawArgs, cwd = process.cwd()) {
+    return (await captureRegressionComparison(rawArgs, cwd)).exitCode;
 }

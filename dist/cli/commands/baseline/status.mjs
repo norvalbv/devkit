@@ -1,16 +1,23 @@
 /** `devkit baseline-status` (sc-2245) — see `meta.help` below for the full contract. */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { compareFailures, renderComparison, writeStepSummary, } from '../../lib/baseline-status/compare.mjs';
 import { DEFAULT_MAX_RUNS, queryBaseline, queryRun, } from '../../lib/baseline-status/query.mjs';
-import { DEFAULT_ARTIFACT, DEFAULT_WORKFLOW, configuredSource, workflowSelector, } from '../../lib/baseline-status/source.mjs';
+import { attributeFailures, capped, unknownAttribution, } from '../../lib/baseline-status/attribution.mjs';
+import { DEFAULT_ARTIFACT, DEFAULT_WORKFLOW, configuredSource, parseSummary, workflowSelector, } from '../../lib/baseline-status/source.mjs';
+import { ghChecksPoller, summarise, } from '../../lib/ship/wait-ci/wait.mjs';
 export const meta = {
     name: 'baseline-status',
     agentFacing: true,
-    summary: 'Report which test files are failing on the default branch (and whether yours is).',
+    summary: "Report which test files are failing on the default branch (and whether yours is), or which of a PR's failures its base already had.",
     help: `devkit baseline-status — decompose a red default branch into per-file facts.
 
 Usage:
   devkit baseline-status [--file <path> [--test <name>]] [--json] [--ref <branch>]
-                         [--max-runs <n>] [--workflow <file>]
+                         [--max-runs <n>] [--workflow <file>] [--at <sha>]
+                         [--against <summary.json>]
   devkit baseline-status --run <id> [--file <path> [--test <name>]] [--json]
+  devkit baseline-status --pr <n> [--json]
 
   --file <path>      answer for one test file, plus the last run in which it passed
   --test <name>      with --file: answer for one test, named as the console prints it
@@ -20,6 +27,11 @@ Usage:
   --max-runs <n>     how many commits to walk back (default: ${DEFAULT_MAX_RUNS})
   --workflow <file>  the CI workflow to read (default: guard.config.json, else ${DEFAULT_WORKFLOW})
   --run <id>         answer for one CI run of any event or branch, pull_request included
+  --at <sha>         walk back from this local commit instead of the branch head (a PR's base)
+  --against <file>   split that run summary's failures into NEW (not failing at the base run) and
+                     inherited, by test name where both runs recorded names; narration only, and
+                     also appended to $GITHUB_STEP_SUMMARY when set
+  --pr <n>           which of PR <n>'s failing checks its base already had (see below)
 
 Reads the per-file summary artifact that \`devkit test-report-run\` uploads from a CI workflow.
 Configure both in guard.config.json — { "baselineStatus": { "workflow": "<file>", "artifact":
@@ -65,6 +77,12 @@ failure partway back reports "lookup-failed".
 combined with --ref, --max-runs or --workflow. A pull_request run tests a merge commit, reported as
 testedSha, so its failing files include any its base already had. \`--file\` does no walk-back
 here: lastPassedReason is "single-run".
+
+\`--pr <n>\` reads the PR's checks once, without waiting, and prints the line \`ship --wait-ci\`
+appends to a failed verdict: \`attribution=<inherited-only|new|unknown> inherited=<n> new=<m> …\`.
+Only inherited-only says none of the red is the PR's. No check registered yet, or any still pending,
+is \`attribution=unknown reason=<no-checks|checks-pending>\`; nothing failing is \`attribution=none\`.
+Exit 2 when gh could not list the PR's checks.
 Set DEVKIT_BASELINE_DEBUG=1 to surface gh's stderr.`,
 };
 /** A malformed invocation, reported as exit 1 rather than surfacing a stack trace. */
@@ -165,10 +183,20 @@ function lastPassedText(file) {
         `${file.runsWithoutArtifact} without an artifact)`);
 }
 /** Every option this command accepts, and which of them consume the argument after them. */
-const VALUED_FLAGS = new Set(['--file', '--test', '--ref', '--max-runs', '--workflow', '--run']);
+const VALUED_FLAGS = new Set([
+    '--file',
+    '--test',
+    '--ref',
+    '--max-runs',
+    '--workflow',
+    '--run',
+    '--at',
+    '--against',
+    '--pr',
+]);
 const KNOWN_FLAGS = new Set([...VALUED_FLAGS, '--json']);
 /** Options that pick the branch walk, which a named run replaces. */
-const WALK_FLAGS = ['--ref', '--max-runs', '--workflow'];
+const WALK_FLAGS = ['--ref', '--max-runs', '--workflow', '--at', '--against'];
 /** Flag > guard.config.json > default. A corrupt config is a usage error, not a stack trace. */
 function source(args, cwd) {
     let configured;
@@ -210,10 +238,76 @@ function assertOnlyKnownArgs(args) {
             i++; // its value is consumed, not itself an argument
     }
 }
+/** The `--against` summary, or null after saying why it cannot be read — the comparison cannot run. */
+function readPrSummary(cwd, path) {
+    try {
+        return parseSummary(readFileSync(resolve(cwd, path), 'utf8'), path);
+    }
+    catch (e) {
+        console.log(`❔ no readable run summary at ${path} — ${e instanceof Error ? e.message : e}`);
+        return null;
+    }
+}
+const names = (rows) => rows.map((row) => row.name);
+/** An empty or unfinished check set is unknown, never none: one read cannot wait out either. */
+function checksAnswer(cwd, pr, rows) {
+    const s = summarise(rows);
+    const seen = {
+        pr,
+        failing: names(s.failures),
+        pending: names(s.pending),
+        cancelled: names(s.cancelled),
+    };
+    if (rows.length === 0)
+        return { ...seen, ...unknownAttribution('no-checks') };
+    if (s.pending.length > 0) {
+        const pending = unknownAttribution('checks-pending');
+        return { ...seen, ...pending, line: `${pending.line} pending=${capped(seen.pending)}` };
+    }
+    if (s.failures.length === 0) {
+        const cancelled = seen.cancelled.length > 0 ? ` cancelled=${capped(seen.cancelled)}` : '';
+        const line = `attribution=none ci=${s.outcome}${cancelled}`;
+        return { ...seen, ci: s.outcome, token: 'none', inherited: 0, fresh: 0, line };
+    }
+    const found = attributeFailures({ cwd, pr, failures: s.failures });
+    return {
+        ...seen,
+        ci: s.outcome,
+        ...found,
+        line: `failing=${capped(seen.failing)} ${found.line}`,
+    };
+}
+/** `--pr`: one read of the PR's checks. Every other option asks about the default branch. */
+function prStatus(args, cwd, pr) {
+    if (!/^[1-9]\d*$/.test(pr))
+        throw new UsageError(`--pr needs a PR number (got "${pr}")`);
+    const other = args.find((arg) => VALUED_FLAGS.has(arg) && arg !== '--pr');
+    if (other)
+        throw new UsageError(`--pr cannot be combined with ${other}`);
+    source(args, cwd); // a corrupt guard.config.json is exit 1 before any gh call, not a stack trace
+    const read = ghChecksPoller({ pr, cwd })();
+    const answer = read.kind === 'rows'
+        ? checksAnswer(cwd, pr, read.rows)
+        : { pr, ...unknownAttribution(read.reason), detail: read.message };
+    if (args.includes('--json'))
+        console.log(JSON.stringify(answer, null, 2));
+    else
+        renderPr(answer);
+    return read.kind === 'rows' ? 0 : 2; // 2: gh could not list the checks, so nothing was read
+}
+function renderPr(answer) {
+    console.log(`pr=${answer.pr} ${answer.line}`);
+    if (answer.detail)
+        console.log(`   ${answer.detail}`);
+}
 export default function baselineStatus(args, cwd) {
     let answer;
+    let pr = null;
     try {
         assertOnlyKnownArgs(args);
+        const prNumber = flag(args, '--pr');
+        if (prNumber !== undefined)
+            return prStatus(args, cwd, prNumber);
         const file = flag(args, '--file');
         const test = flag(args, '--test');
         if (test && !file)
@@ -238,9 +332,19 @@ export default function baselineStatus(args, cwd) {
         if (!Number.isInteger(maxRuns) || maxRuns < 1) {
             throw new UsageError(`--max-runs must be a positive whole number (got ${maxRunsRaw})`);
         }
+        const against = flag(args, '--against');
+        if (against && file) {
+            throw new UsageError('--file and --against answer different questions; pass one');
+        }
+        if (against) {
+            pr = readPrSummary(cwd, against);
+            if (!pr)
+                return 2;
+        }
         answer = queryBaseline({
             cwd,
             ref: flag(args, '--ref'),
+            at: flag(args, '--at'),
             file,
             test,
             maxRuns,
@@ -252,6 +356,16 @@ export default function baselineStatus(args, cwd) {
             throw e;
         console.error(`🚫 ${e.message}.`);
         return 1;
+    }
+    if (pr && !answer.reason) {
+        const comparison = compareFailures(pr, answer);
+        const lines = renderComparison(comparison, answer);
+        if (args.includes('--json'))
+            console.log(JSON.stringify({ ...answer, comparison }, null, 2));
+        else
+            console.log(lines.join('\n'));
+        writeStepSummary(lines);
+        return 0;
     }
     return report(answer, args, false);
 }

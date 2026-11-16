@@ -44,7 +44,10 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
    For a failed `guard.config.json` `extraGates` command, ship re-runs that command at the commit the
    gate worktree was cut from. A line `ship: <label> also exits 1 at <sha> … Base run output: <path>`
    means the same command fails there too: read that file, and get the findings it lists fixed on
-   the base (or rebase onto a base that has them fixed) before chasing them in your change. No line
+   the base (or rebase onto a base that has them fixed) before chasing them in your change. The base
+   run links the untracked entries the gate worktree held before its gates ran, as they stand when it
+   reruns; an entry a gate added during the run is not linked, so a gate that reads an earlier gate's
+   output can fail there for that reason. No line
    is not evidence either way: the base run passed, ended some other way, ran out of its 120-second
    budget, or the gate is not a root-config `extraGates` entry. Start from your own change.
 4. Treat a bypass as an explicit operator decision. Never use `--no-verify`, silently disable a
@@ -102,6 +105,9 @@ same directory, kept for the newest 300 runs only (`DEVKIT_TELEMETRY_KEEP`), and
   - `pre-existing`: the defect is real but already on the base; this change did not introduce it.
   - `accepted`: the behaviour is real and deliberate, accepted as a known residual.
   A real defect waived as `false-positive` mislabels the reviewer's benchmark corpus.
+  A failing reviewer also prints `reviewed diff: guard-review transcript <ref>`: that transcript
+  holds the staged diff of the files the reviewer was given, and it outlives the ship's worktree. A
+  path missing from it may sit outside that reviewer's files rather than be unstaged.
   When a correctness or conventions finding names a concrete input and running that input against
   the reviewed code gives the correct result, waive it with the command and its output as the
   rationale. Do not add tests or edits only to change the diff and re-sample the judge: any real
@@ -129,11 +135,11 @@ same directory, kept for the newest 300 runs only (`DEVKIT_TELEMETRY_KEEP`), and
   sandbox` applies the same host sandbox as the judge's `codex exec` (Seatbelt on macOS, bubblewrap
   on Linux), with no model call, and runs the command in your login shell as the judge does. From the
   repo root, a workspace-write (investigating) judge's view is:
-  `r=$(pwd -P) s=$(cd "$(mktemp -d)" && pwd -P); cp AGENTS.md "$s"; (cd "$s" && CODEX_HOME=$(mktemp -d) codex sandbox -c 'default_permissions="devkit_judge"' -c "permissions.devkit_judge.filesystem={\":root\"=\"read\",\":tmpdir\"=\"write\",\":slash_tmp\"=\"write\",\"$s\"=\"write\",\"$r/.claude/.correctness-review.json\"=\"write\"}" -c 'permissions.devkit_judge.network.enabled=false' -- "$SHELL" -lc '<cmd>'); echo "exit $?"`.
+  `r=$(pwd -P) s=$(cd "$(mktemp -d)" && pwd -P); cp AGENTS.md "$s"; (cd "$s" && TMPDIR="$s" TMPPREFIX="$s/zsh" CODEX_HOME=$(mktemp -d) codex sandbox -c 'default_permissions="devkit_judge"' -c "permissions.devkit_judge.filesystem={\":root\"=\"read\",\"$s\"=\"write\",\"$r/.claude/.correctness-review.json\"=\"write\"}" -c 'permissions.devkit_judge.network.enabled=false' -- "$SHELL" -lc '<cmd>'); echo "exit $?"`.
   On macOS, add `--log-denials` after `sandbox` to name each denied operation; Linux has no such
-  flag. A read-only judge runs in the repo root itself: drop the `cd` and both `-c` overrides, and
+  flag. A read-only judge runs in the repo root itself: drop the `cd`, the `TMPDIR`/`TMPPREFIX` settings and both `-c` overrides, and
   pass `-c 'sandbox_mode="read-only"'`. Both modes read the whole disk and have no network.
-  Workspace-write can write only the scratch cwd, `/tmp`, `$TMPDIR` and one checklist state file
+  Workspace-write can write only the scratch cwd (also its temp dir) and one checklist state file
   (above, correctness's; another reviewer's is its own `.claude/.<name>-review.json`). Run the
   bare command, not a pipeline, since a pipe's exit status hides the denial. Cite the output in a
   waive rationale.
@@ -151,9 +157,15 @@ same directory, kept for the newest 300 runs only (`DEVKIT_TELEMETRY_KEEP`), and
 - **A `↻ … not converging` line** under a blocked ship's digest means the same reviewer has blocked
   three or more rounds on this branch with no pass between, and its latest blocking-finding count is
   no better than its best earlier round. It says the count is not falling, not which findings recur.
+  A `↻ review: <file> …` line is the cross-reviewer form: no single reviewer has that streak, but
+  every round since the last pass, whichever reviewer blocked it, cited that one file, and the summed
+  count is not falling. Treat the file as one class.
   Stop re-shipping blind: fix the remaining findings as a class, waive the rest with the
   `guard-review waive` line, the `--kind` that fits and a rationale, or ask the user for the reviewer
   skip the block note names. `--no-verify` is never the landing path.
+- **A `↑ devkit X → Y` line** means devkit was upgraded since this branch's last ship attempt, so a
+  rule may now block code that passed before. The block still stands; the compare URL lists what
+  changed between the two releases.
 - **Sentry gate** judges commit-message intent for newly introduced runtime error classes. Add the
   capture on the named surface, or surface a disputed verdict to the user before any bypass.
 - **UI evidence** (`ui-evidence`) runs on every commit, plain or shipped, and never blocks. It
@@ -280,7 +292,7 @@ authorization those require. Run it in the shell the ship runs in.
 `codex` dark — all four knobs, never a subset, plus any sentry pin:
 
 ```
-export GUARD_REVIEW_MODEL=haiku GUARD_REVIEW_ESCALATION_MODEL=opus \
+export GUARD_REVIEW_MODEL=sonnet GUARD_REVIEW_ESCALATION_MODEL=opus \
   GUARD_CORRECTNESS_MODEL=claude-haiku-5-5 GUARD_CORRECTNESS_CHUNK=off
 unset GUARD_SENTRY_MODEL FRINK_SENTRY_MODEL
 devkit ship --resume <branch>

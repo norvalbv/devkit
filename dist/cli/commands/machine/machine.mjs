@@ -10,7 +10,7 @@ import { expand, readMachineConfig, slotEnv, } from '../../lib/machine/config.mj
 import { runFlow } from '../../lib/machine/flow.mjs';
 import { acquireLease, claimStart, findLease, listLeases, machinesRoot, memoryPressure, PORT_BASE, PORTS_PER_SLOT, releaseLease, slotDir, updateLease, } from '../../lib/machine/lease.mjs';
 import { clearEvidence, evidenceDir } from '../../lib/machine/manifest.mjs';
-import { shellQuote } from '../../lib/ship/dist-integrity.mjs';
+import { shellQuote } from '../../../gate-engine/review/valve/shell-word.mjs';
 import { VIDEO_CAP } from '../../lib/ship/evidence/media.mjs';
 const READY_TIMEOUT_MS = 120_000;
 const BOX_READY_MS = 60_000;

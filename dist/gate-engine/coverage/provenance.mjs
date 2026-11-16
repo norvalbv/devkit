@@ -6,6 +6,9 @@ import { closeSync, existsSync, fstatSync, lstatSync, openSync, readFileSync, re
 import { join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { commitIndexEnv } from '../ratchets/commit-index.mjs';
+import { headTreeish } from '../ratchets/git-index.mjs';
+import { headHash } from '../review/evidence/staged-git.mjs';
+import { canonicalPath } from './dependencies.mjs';
 export const MANIFEST_NAME = 'coverage-manifest.json';
 /** A path that existed at HEAD but not in the working tree when the run started. */
 export const DELETED = 'deleted';
@@ -50,14 +53,22 @@ export function checkoutRoots(cwd, top) {
     const spelled = suffix && logical.endsWith(suffix) ? logical.slice(0, -suffix.length) : logical;
     return spelled === top || sub.startsWith('..') ? [top] : [top, spelled];
 }
+/** HEAD's sha, or git's empty tree on an unborn branch; throws when HEAD is unreadable. symbolic-ref
+ * follows HEAD into its branch, so a corrupt branch ref fails it too and never reads as unborn. */
+export function baseTreeish(top) {
+    const head = headHash(top);
+    if (head === null)
+        throw new Error('HEAD is unreadable');
+    return head.startsWith('unborn:') ? headTreeish(top) : head;
+}
 /** HEAD plus a blob id per path that differs from it, taken at run START; null when git cannot answer.
  * `--stdin-paths` applies `git add`'s clean filters, so ids compare directly with tree entries. */
 export function snapshotSource(cwd, args = []) {
     try {
         const top = git(cwd, ['rev-parse', '--show-toplevel']).trim();
-        const head = git(top, ['rev-parse', 'HEAD']).trim();
+        const head = baseTreeish(top);
         const changed = new Set([
-            ...nulList(git(top, ['diff', '--name-only', '--no-renames', '-z', 'HEAD'])),
+            ...nulList(git(top, ['diff', '--name-only', '--no-renames', '-z', head])),
             ...nulList(git(top, ['ls-files', '-o', '--exclude-standard', '-z'])),
         ]);
         const dirty = {};
@@ -290,7 +301,7 @@ export function checkProvenance(cwd, coverageDir, artifact, classify) {
         const top = git(cwd, ['rev-parse', '--show-toplevel']).trim();
         // The index as it stands when the gate runs, formatter output included: no exemption, no race.
         const now = git(top, ['write-tree']).trim();
-        const briefed = nulList(git(top, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', 'HEAD', now]));
+        const briefed = nulList(git(top, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', baseTreeish(top), now]));
         const committed = blobsIn(top, now, briefed);
         const atHead = blobsIn(top, manifest.head, briefed.filter((p) => !Object.hasOwn(manifest.dirty, p)));
         const inArtifact = measuredPaths(artifact.bytes, manifest.roots);
@@ -315,4 +326,34 @@ export function checkProvenance(cwd, coverageDir, artifact, classify) {
     catch {
         return { state: 'unknown', reason: 'git could not compare the briefed files' };
     }
+}
+/**
+ * Absolute paths of the staged files, or null when git cannot answer (e.g. outside a work tree).
+ *
+ * null is NOT an empty diff: only [] licenses the claim "none of them are staged".
+ */
+export function stagedFiles(cwd) {
+    try {
+        const top = canonicalPath(git(cwd, ['rev-parse', '--show-toplevel']).trim());
+        return nulList(git(cwd, ['diff', '--cached', '--name-only', '-z'])).map((p) => canonicalPath(join(top, p)));
+    }
+    catch {
+        return null;
+    }
+}
+/** The short HEAD sha, or null outside a work tree. Recorded so a stale marker dates itself. */
+export function headSha(cwd) {
+    try {
+        return git(cwd, ['rev-parse', '--short', 'HEAD']).trim();
+    }
+    catch {
+        return null;
+    }
+}
+/** Failed files that are also staged. null propagates: unknown stays unknown, never "none". */
+export function stagedIntersection(failedFiles, staged) {
+    if (staged === null)
+        return null;
+    const set = new Set(staged);
+    return failedFiles.map(canonicalPath).filter((f) => set.has(f));
 }

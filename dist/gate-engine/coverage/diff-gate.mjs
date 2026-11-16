@@ -6,11 +6,10 @@ import { z } from 'zod';
 import { resolveGuardConfig } from '../config.mjs';
 import { failLine } from '../deterministic/reason.mjs';
 import { displayPath, humanAge } from './failures.mjs';
-import { artifactLine, BYPASS_REMEDY, canonicalPath, classifier, emitProvenance, listPaths, OPT_OUT_REMEDY, recordReviewNotice, repoTop, reviewNotMeasuredAbsent, reviewNotMeasuredEmpty, } from './gate-shared.mjs';
+import { artifactLine, BYPASS_REMEDY, canonicalPath, changedRunHint, classifier, emitProvenance, listPaths, OPT_OUT_REMEDY, recordReviewNotice, repoTop, reviewNotMeasuredAbsent, reviewNotMeasuredEmpty, } from './gate-shared.mjs';
 import { addedLineCoverage, addedLinesOf, lineRanges } from './lines.mjs';
 import { COVERAGE_DIR, COVERAGE_FILE } from './produce.mjs';
-import { checkProvenance, git, keysByPath, readArtifact, } from './provenance.mjs';
-const RERUN_HINT = '   Measure them: `devkit coverage-run <test files that exercise them>` (seconds, not a full run).';
+import { baseTreeish, checkProvenance, git, keysByPath, readArtifact, } from './provenance.mjs';
 const REPO_KEYS = ['statements', 'functions', 'branches', 'lines'];
 // Only the fields lineHits reads; a wrong shape here is corrupt data, never a crash or a pass.
 // istanbul always writes both maps; an entry without them is corrupt, not a file with no statements.
@@ -91,21 +90,23 @@ export function addedLineVerdict(covered, total, unmeasured, min) {
         reason: unmeasured ? `${files} with added lines never measured; ${summary}` : summary,
     };
 }
-function failAbsent(changed, cwd, top) {
+function failAbsent(changed, cwd, top, head) {
     failLine(`🚫 Coverage gate FAILED — no coverage data (${COVERAGE_FILE} absent) for added lines in:`);
     for (const line of listPaths(changed, cwd, top))
         failLine(line);
-    console.error(RERUN_HINT);
+    for (const line of changedRunHint(head))
+        console.error(line);
     for (const line of BYPASS_REMEDY)
         console.error(line);
     for (const line of OPT_OUT_REMEDY)
         console.error(line);
     return 1;
 }
-function failUnreadable(file, why) {
+function failUnreadable(file, why, head) {
     failLine(`🚫 Coverage gate FAILED — ${COVERAGE_FILE} ${why}.`);
     console.error(artifactLine(file));
-    console.error(RERUN_HINT);
+    for (const line of changedRunHint(head))
+        console.error(line);
     for (const line of BYPASS_REMEDY)
         console.error(line);
     return 1;
@@ -118,11 +119,13 @@ export function runDiffCoverage(cwd, coverage, min, reviewMode) {
     const top = repoTop(cwd);
     const classify = diffClassifier(cwd, top);
     let added;
+    let head;
     try {
         added = addedProductionLines(top, (p) => classify(p, false) === 'production', [
             '--cached',
-            'HEAD',
+            baseTreeish(top),
         ]);
+        head = git(top, ['rev-parse', 'HEAD']).trim();
     }
     catch {
         failLine('🚫 Coverage gate FAILED — git could not read the staged diff, so the added lines are unknown.');
@@ -137,7 +140,7 @@ export function runDiffCoverage(cwd, coverage, min, reviewMode) {
     const changed = [...added.keys()].sort();
     const file = resolve(cwd, COVERAGE_FILE);
     if (!existsSync(file))
-        return reviewMode ? reviewNotMeasuredAbsent(cwd) : failAbsent(changed, cwd, top);
+        return reviewMode ? reviewNotMeasuredAbsent(cwd) : failAbsent(changed, cwd, top, head);
     let artifact;
     let cov;
     try {
@@ -145,11 +148,11 @@ export function runDiffCoverage(cwd, coverage, min, reviewMode) {
         cov = artifactSchema.parse(JSON.parse(artifact.bytes));
     }
     catch {
-        return failUnreadable(file, 'is present but not valid coverage data');
+        return failUnreadable(file, 'is present but not valid coverage data', head);
     }
     if (Object.keys(cov).length === 0) {
         const empty = 'measured no files';
-        return reviewMode ? reviewNotMeasuredEmpty(empty) : failUnreadable(file, empty);
+        return reviewMode ? reviewNotMeasuredEmpty(empty) : failUnreadable(file, empty, head);
     }
     const provenance = checkProvenance(cwd, resolve(cwd, COVERAGE_DIR), artifact, classify);
     emitProvenance(provenance);
@@ -162,7 +165,8 @@ export function runDiffCoverage(cwd, coverage, min, reviewMode) {
         failLine(`🚫 Coverage gate FAILED — artifact provenance unknown (${provenance.reason}).`);
         console.error(artifactLine(file));
         console.error('   Diff scope reads line numbers, so it needs a run whose tree is known.');
-        console.error(RERUN_HINT);
+        for (const line of changedRunHint(head))
+            console.error(line);
         for (const line of BYPASS_REMEDY)
             console.error(line);
         return 1;
@@ -217,7 +221,8 @@ export function runDiffCoverage(cwd, coverage, min, reviewMode) {
         failLine(`   Not measured — source files with added lines absent from ${COVERAGE_FILE}:`);
         for (const line of listPaths(notMeasured, cwd, top))
             failLine(line);
-        console.error('   Run a test that imports them, or exclude them from coverage if they hold no code.');
+        for (const line of changedRunHint(head))
+            console.error(line);
     }
     console.error(artifactLine(file));
     console.error('   Add tests for the uncovered lines, then `devkit coverage-run <test files>`.');

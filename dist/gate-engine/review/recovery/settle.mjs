@@ -22,17 +22,23 @@
  * mid-phase still names it unfinished and the re-run converges on it).
  */
 import { reportRetrievalDegraded, verdictToken } from '../contracts/checklist.mjs';
-import { parseAdvisories } from '../contracts/response.mjs';
+import { verdictAdvisories } from '../contracts/response.mjs';
 import { emitGateEvent } from '../../judge/gate-events.mjs';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mjs';
 import { savePasses } from '../cache.mjs';
-import { reportAdvisories, reportMcpDegraded, RETRIEVAL_REVIEWER, reviewBaseContext, } from '../evidence/base-context.mjs';
+import { reportAdvisories, reportMcpDegraded, reportVerdictTranscript, RETRIEVAL_REVIEWER, reviewBaseContext, } from '../evidence/base-context.mjs';
 import { coverageFields, partialEvidenceNote } from '../evidence/packet/coverage.mjs';
 import { archiveFailedDiff } from '../evidence/diff-archive.mjs';
 import { cachedLensFields, itemFields } from '../evidence/items.mjs';
 import { holdLensPart, taskLabel } from '../lens/split.mjs';
 import { writeProgress } from '../progress.mjs';
 export const retryableReason = (res) => res.retryable;
+/** A first-pass finding its escalation never answered, as an unconfirmed (non-blocking) advisory. */
+const firstPassAdvisory = (res) => res.firstPassReason === undefined
+    ? []
+    : [
+        `first pass (unconfirmed — its escalation never answered): ${res.firstPassReason || '(no reason given)'}`,
+    ];
 /**
  * Settle one cascade outcome: asset re-verification, timing, PASS checkpoint, fail archive,
  * progress, and telemetry-or-lens-hold. Extracted verbatim from runReviewGate's mapLimit `.then`
@@ -51,7 +57,9 @@ export function settleReviewOutcome(ctx, t, outcome, durationMs, retried = false
     // Only a PASS can be degraded: asset re-verification may have voided the verdict since.
     const degraded = res.status === 'pass' ? res.degraded : undefined;
     const mcpDegraded = res.status === 'pass' ? res.mcpDegraded : undefined;
-    const advisories = res.status === 'pass' ? parseAdvisories(res.transcript ?? '') : [];
+    const advisories = res.status === 'pass'
+        ? verdictAdvisories(res)
+        : [...verdictAdvisories(res), ...firstPassAdvisory(res)];
     // A retrieval-DEGRADED PASS describes the environment, not the diff: never cached, so a retry
     // re-attempts retrieval instead of replaying the outage.
     if (res.status === 'pass' && !degraded)
@@ -90,8 +98,9 @@ export function settleReviewOutcome(ctx, t, outcome, durationMs, retried = false
         holdLensPart(ctx.splitParts, t.splitOf, { res, secs, task: t, retried }, taskLabel(t));
         return res;
     }
-    const transcriptRef = res.transcript
-        ? saveTranscript(`review-${res.name}`, composeTranscript(t.diffText, res.transcript))
+    const archived = res.fullTranscript ?? res.transcript;
+    const transcriptRef = archived
+        ? saveTranscript(`review-${res.name}`, composeTranscript(t.diffText, archived))
         : null;
     // What the judge's packet actually covered (sc-2305) — on the verdict row, so a PASS over a
     // partial packet reaches the digest as unverified instead of reading like a whole-diff PASS.
@@ -130,10 +139,11 @@ export function settleReviewOutcome(ctx, t, outcome, durationMs, retried = false
         (res.status === 'pass' ? partialEvidenceNote(coverage) : '') +
         (res.status === 'pass' && transcriptRef ? ` · transcript ${transcriptRef}` : '');
     console.error(`guard-review: ${res.name} — ${verdictToken({ status: res.status, degraded, mcpDegraded })}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' && !degraded ? ' (checkpointed)' : ''}${tail}`);
+    reportVerdictTranscript(res.name, res.status, transcriptRef);
     // commit-guard never lens-splits (only correctness does), so the split branch above needs no
     // retrieval report; an MCP-degraded split reviewer is reported once at its merge (lens/split.mts).
     if (degraded)
-        reportRetrievalDegraded(res.name, degraded.cause);
+        reportRetrievalDegraded(res.name, degraded.cause, degraded.kind);
     if (mcpDegraded)
         reportMcpDegraded(res.name, mcpDegraded.cause);
     reportAdvisories(res.name, advisories, transcriptRef);

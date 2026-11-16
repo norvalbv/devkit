@@ -39,6 +39,8 @@ export function nativeProjection(provider, registration) {
             matcher: matcher || null,
             command: codexCommand(command),
         };
+    if (registration.cursorEvent === null)
+        return null;
     if (registration.cursorEvent)
         return {
             event: registration.cursorEvent,

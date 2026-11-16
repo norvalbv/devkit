@@ -2,6 +2,8 @@ import { emitGateEvent } from '../judge/gate-events.mjs';
 import { EVENT_BUDGET } from '../judge/odb-probe.mjs';
 import { runEnvelope } from '../judge/run-context.mjs';
 export const COMMENT_BUDGET_EVENT = 'comment_budget';
+/** Names the gate's blocking regime so dashboards can split events recorded under different rules. */
+export const COMMENT_POLICY = 'show-once-v1';
 /** odb-probe's EVENT_BUDGET is a payload bound with ~2KB left for the envelope under the 4KB
  * atomic append; the whole written line is bounded here directly, with a little slack for `\n`. */
 const LINE_BUDGET = EVENT_BUDGET * 2 - 128;
@@ -13,6 +15,7 @@ function build(status, inventory, findings, counts, keepFindings, keepTouched) {
     const event = {
         type: COMMENT_BUDGET_EVENT,
         gate: 'comments',
+        policy: COMMENT_POLICY,
         status,
         kept: counts.kept,
         refs: counts.refs,

@@ -19,6 +19,7 @@ export function withUiItem(body, currentBody, detail) {
     const item = ITEM.exec(currentBody)?.[0] ?? (detail ? renderUiItem(detail) : null);
     if (!item)
         return body;
-    const text = body.trimEnd();
-    return text ? `${text}\n\n${item}\n` : `${item}\n`;
+    // Appended after the body's own bytes, so everything already on the PR stays byte-identical.
+    const gap = !body || /\n\r?\n$/.test(body) ? '' : body.endsWith('\n') ? '\n' : '\n\n';
+    return `${body}${gap}${item}\n`;
 }

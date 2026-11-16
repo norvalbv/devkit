@@ -53,19 +53,15 @@ import { loadChangedSet } from './changed-files.mjs';
 import { buildVectors, canVerify, chunkColumns, dot, emptyIndexMessage, freshnessNotice, orderKey, partitionFresh, USABLE_CHUNK_WHERE, verifierForIndex, } from './chunk-index.mjs';
 import { classifyPair } from './classify.mjs';
 import { isExpired } from './decay.mjs';
-import { missingIndexMessage, refreshIndex } from './index-refresh.mjs';
+import { cleanLine, linkedWorktreeIndex, missingIndexMessage, refreshIndex, reportUnindexed, } from './index-refresh.mjs';
 const pairName = (p) => `${p.symbolA} <> ${p.symbolB}`; // a blocked pair, in the gate's reason
 // Hoisted per useTopLevelRegex — this runs once per index row in the normalize loop.
 const BACKSLASH_RE = /\\/g;
-// Package-relative ONLY for labels.json (engine-shipped bench fixtures). Every
-// CONSUMER path is resolved from cfg.cwd below, never from here.
+// Package-relative ONLY for labels.json (bench fixtures); CONSUMER paths resolve from cfg.cwd.
 const here = dirname(fileURLToPath(import.meta.url));
 const labelsPath = resolve(here, 'labels.json');
 // Resolve config against the consumer cwd (W-3). All thresholds + paths flow from here.
 const cfg = resolveGuardConfig(process.cwd());
-// Index path: SEARCH_CODE_DB env (fixtures/tests) wins; else config.indexPath
-// resolved to the consumer cwd. null => no index configured => matcher opt-out.
-const dbPath = process.env.SEARCH_CODE_DB ?? resolveFromCwd(cfg, 'indexPath');
 // Allowlist: CO_OCCURRENCE_ALLOWLIST env (fixtures/tests) wins; else config.allowlistPath.
 const allowlistPathRaw = process.env.CO_OCCURRENCE_ALLOWLIST ?? resolveFromCwd(cfg, 'allowlistPath');
 // Approval-hint CLI shown on a gate block (a human/agent pastes it to allowlist a dup).
@@ -76,9 +72,11 @@ const allowlistPathRaw = process.env.CO_OCCURRENCE_ALLOWLIST ?? resolveFromCwd(c
 const CO_SCRIPT = process.env.GUARD_ALLOWLIST_CLI || ALLOWLIST_CLI;
 const argv = process.argv.slice(2);
 const mode = argv[0] ?? 'scan';
+// SEARCH_CODE_DB (fixtures/tests) wins; else config.indexPath, or the primary checkout's in a linked
+// worktree without a usable one. baseline writes the index, so it never borrows. null => opt-out.
+const dbPath = process.env.SEARCH_CODE_DB ?? linkedWorktreeIndex(cfg, mode !== 'baseline');
 const flag = flagReader(argv);
-// Knob defaults come from the resolved config thresholds (consumer-tunable), with
-// per-run --flag overrides on top.
+// Knob defaults come from the resolved config thresholds, with per-run --flag overrides on top.
 const KNOBS = {
     nearCode: Number(flag('--near-code', cfg.thresholds.nearCode)),
     driftCode: Number(flag('--drift-code', cfg.thresholds.driftCode)),
@@ -93,8 +91,7 @@ const ONLY_NEW = argv.includes('--new');
 // 2 = could-not-run (no index / read error). The pre-commit hook blocks ONLY on
 // 1 and fails OPEN on 2, so an infra failure (or no index) never bricks a commit.
 const GATE = argv.includes('--gate');
-// scan --changed: restrict to pairs touching a staged file — the dups THIS commit
-// introduces, not pre-existing drift.
+// scan --changed: only pairs touching a staged file — the dups THIS commit introduces.
 const CHANGED = argv.includes('--changed');
 // reconcile --apply: actually write the pruned allowlist. Default is dry-run.
 const APPLY = argv.includes('--apply');
@@ -117,6 +114,7 @@ if (!existsSync(dbPath))
 // Judge the code being COMMITTED, not the last indexed state. Silently no-ops unless refreshing
 // is safe here — index-refresh.mts documents the two ways an unconditional refresh goes wrong.
 refreshIndex(dbPath, cfg);
+const unindexedScope = { ...cfg, includeTests: INCLUDE_TESTS, indexPath: dbPath };
 // allowlistPath resolves from DEFAULTS (a non-null string) so this never fires at
 // runtime, but resolveFromCwd's contract is string|null — guard it (fail-open, like
 // the index) so every downstream read/write sees a definite string.
@@ -261,8 +259,9 @@ function runScan() {
     // "nothing there" when it really means "the index disagrees with the disk".
     for (const l of freshnessNotice(dropped, { verified: verifier.enabled, blocking: false }))
         console.log(l);
+    const skipped = reportUnindexed(changedSet, rows, unindexedScope);
     if (ONLY_NEW && pairs.length === 0) {
-        console.log('No new duplication since the last baseline. ✓');
+        console.log(cleanLine(skipped));
         if (GATE)
             process.exit(0);
         return;

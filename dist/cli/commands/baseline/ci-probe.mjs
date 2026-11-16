@@ -10,7 +10,8 @@ import { join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { capped, compareSummaries, lostFiles } from '../../lib/baseline-status/attribution.mjs';
 import { GhUnavailable, commitCi, gh, isUsableRun, runView, runsForCommit, } from '../../lib/baseline-status/gh.mjs';
-import { loadSummary, resolveRef, workflowSelector } from '../../lib/baseline-status/query.mjs';
+import { resolveRef } from '../../lib/baseline-status/query.mjs';
+import { loadSummary, workflowSelector } from '../../lib/baseline-status/source.mjs';
 import { configuredSource } from '../../lib/baseline-status/source.mjs';
 /** The only branch namespace the pre-push hook lets a probe push through without the local suite. */
 export const PROBE_NAMESPACE = 'devkit-probe/';

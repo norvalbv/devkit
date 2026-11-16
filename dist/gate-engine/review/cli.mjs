@@ -29,13 +29,15 @@ import { clearCache, loadCache } from './cache.mjs';
 import { runRecordFeedback } from '../prior-art/feedback.mjs';
 import { checkReferenceCheckouts, resolveReferenceCheckouts, } from '../prior-art/reference-checkouts.mjs';
 import { runCompleteness } from './completeness.mjs';
+import { archiveBytes } from './evidence/diff-archive.mjs';
 import { gitCached, stagedFiles } from './evidence/staged-git.mjs';
 import { loadReviewerTargetsBlocks, reviewerTargetSalts } from './evidence/targets-block.mjs';
 import { planReviewWork, resolveChunkCap, resolveLensGroups } from './lens/split.mjs';
 import { cacheKey, resolveEscalationModel, resolveReviewModel } from './reviewers.mjs';
 import { selectRepositoryReviewers } from './scope/repository.mjs';
 import { runReviewGate } from './run-review.mjs';
-import { resolveReviewerIdentities, skippedReviewers } from './runtime.mjs';
+import { resolveReviewerIdentities } from './runtime.mjs';
+import { skippedReviewers } from './overrides.mjs';
 import { parseRecheckTarget } from './valve/recheck.mjs';
 import { runWaive } from './valve/waive.mjs';
 /**
@@ -93,6 +95,11 @@ function exactText(bytes) {
         return null;
     }
 }
+/** Archive a prior-art run's raw bytes under its receipt hashes; transcripts are pruned and framed. */
+function archivePriorArt(output, request) {
+    const statuses = [output, ...(request ? [request] : [])].map((bytes) => archiveBytes(bytes, 'evidence', '.gz').status);
+    return statuses.find((status) => status !== 'archived') ?? 'archived';
+}
 function sha256(bytes) {
     return createHash('sha256').update(bytes).digest('hex');
 }
@@ -122,7 +129,7 @@ function captureAgentRun(stdin, requestFile) {
         receipt.request_sha256 = sha256(request);
     if (requestFile !== undefined && input === null)
         receipt.request_status = request ? 'not_utf8' : 'unreadable';
-    return { receipt, input, output, exactOutput };
+    return { receipt, input, output, exactOutput, request };
 }
 // Spend flags keyed like execJudge's judge_exec usage, so the row prices identically. A malformed
 // or negative value OMITS the key: an emitted 0 reads downstream as a free agent.
@@ -166,13 +173,15 @@ function recordAgent(label, rest) {
     // A tty or closed pipe reads as empty — still emit the event. That the agent RAN is the fact the
     // dashboard needs most, and a run recorded without its transcript beats a run recorded nowhere.
     const stdin = readBytes(0) ?? Buffer.alloc(0);
-    const { receipt, input, output, exactOutput } = captureAgentRun(stdin, readFlag(rest, 'request-file'));
+    const { receipt, input, output, exactOutput, request } = captureAgentRun(stdin, readFlag(rest, 'request-file'));
     const duration = Number.parseInt(readFlag(rest, 'duration-ms') ?? '', 10);
     const disposition = readFlag(rest, 'disposition');
     const reason = readFlag(rest, 'reason');
     if (disposition !== undefined && !DISPOSITIONS.has(disposition))
         console.error(`guard-review: ignoring unknown --disposition "${disposition}" ` +
             `(expected ${[...DISPOSITIONS].join(' | ')})`);
+    if (label === 'prior-art')
+        receipt.evidence = archivePriorArt(stdin, request);
     const extra = { ...receipt };
     if (disposition !== undefined && DISPOSITIONS.has(disposition))
         extra.disposition = disposition;

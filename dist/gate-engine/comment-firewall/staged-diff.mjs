@@ -1,6 +1,8 @@
 /** The staged set, its renames, blob ids and hunks from one `git diff --cached` per parent. */
 import { execFileSync } from 'node:child_process';
+import path from 'node:path';
 import { commitIndexEnv } from '../ratchets/commit-index.mjs';
+import { gitPrefix } from '../ratchets/git-index.mjs';
 import { parsePatchHunks } from './patch.mjs';
 const MAX_DIFF_OUTPUT = 512 * 1024 * 1024;
 const CHUNK_START = /^(?=diff --git )/m;
@@ -43,7 +45,9 @@ export function parseStagedDiff(output) {
         { ...record, hunks: parsePatchHunks(chunks[index]) },
     ]));
 }
-/** Every ACMR path staged against `ref` (default HEAD), keyed by its CWD-relative new path. */
+/** Every ACMR path staged against `ref` (default HEAD) under the CWD, keyed by its CWD-relative new
+ * path. Pairing runs repo-wide (`--no-relative`) so a rename whose source lies outside the CWD still
+ * pairs; its `from` comes back CWD-relative (possibly `../`). */
 export function stagedDiff(cwd, ref) {
     const args = [
         'diff',
@@ -58,7 +62,7 @@ export function stagedDiff(cwd, ref) {
         '--submodule=short',
         '--find-renames',
         '--unified=4',
-        '--relative',
+        '--no-relative',
         '--diff-filter=ACMR',
     ];
     if (ref)
@@ -70,5 +74,15 @@ export function stagedDiff(cwd, ref) {
         maxBuffer: MAX_DIFF_OUTPUT,
         stdio: ['ignore', 'pipe', 'pipe'],
     });
-    return parseStagedDiff(output);
+    const prefix = gitPrefix(cwd);
+    const entries = new Map();
+    for (const [file, entry] of parseStagedDiff(output)) {
+        if (!file.startsWith(prefix))
+            continue;
+        entries.set(file.slice(prefix.length), {
+            ...entry,
+            from: path.posix.relative(prefix, entry.from),
+        });
+    }
+    return entries;
 }

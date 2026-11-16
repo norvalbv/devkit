@@ -222,6 +222,15 @@ export const HOOK_REGISTRATIONS = {
             matcher: 'Edit|Write|MultiEdit',
             command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/anti-slop-preflight.sh"',
         },
+        // Bash writes are found through the payload's duration_ms, which only Claude sends. The flag also
+        // keeps the command distinct: one command under two matchers of an event reads as a moved one.
+        {
+            registrationId: 'anti-slop:preflight-bash',
+            event: 'PostToolUse',
+            matcher: 'Bash',
+            command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/anti-slop-preflight.sh" --bash-writes',
+            providers: ['claude'],
+        },
     ],
     // comments: the edit-time preview of guard-comments, owned by that guard. Advisory only.
     comments: [
@@ -230,6 +239,17 @@ export const HOOK_REGISTRATIONS = {
             event: 'PostToolUse',
             matcher: 'Edit|Write|MultiEdit',
             command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/comment-budget-preflight.mjs"',
+        },
+    ],
+    // size: reports an edit that left a file over its line ceiling. No Cursor projection, because
+    // Cursor's afterFileEdit has no output field to carry the advisory.
+    size: [
+        {
+            registrationId: 'size:post-edit',
+            event: 'PostToolUse',
+            matcher: 'Edit|Write|MultiEdit',
+            command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/size-headroom-check.mjs"',
+            cursorEvent: null,
         },
     ],
     // fallow: devkit's staged-scope wrapper. Bound to the FALLOW component, not agentHooks — a repo

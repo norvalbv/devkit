@@ -62,9 +62,10 @@ ship_origin_default_branch() {
   [ -z "$target" ] || printf '%s\n' "${target#origin/}"
 }
 
-# ship_origin_ancestor_branch <repo> [head]
+# ship_origin_ancestor_branch <repo> [head] [for-each-ref filters...]
 # The NEAREST branch on origin that <head> sits on top of, as `<oid> <name>`. Echoes nothing — and
-# returns 1 — when no ref under refs/remotes/origin is an ancestor of it. `head` defaults to HEAD;
+# returns 1 — when no ref under refs/remotes/origin is an ancestor of it. Extra filters narrow the
+# candidates (ship_base_contains_branch_point passes --no-merged/--contains). `head` defaults to HEAD;
 # a caller that has already PINNED the commit it is reasoning about must pass that oid, because a
 # shared checkout's HEAD moves under it and the two answers would then describe different lines.
 #
@@ -113,7 +114,7 @@ ship_origin_ancestor_branch() {
       best=${ref#refs/remotes/origin/}
       best_oid=$oid
     fi
-  done < <(git -C "$repo" for-each-ref "--merged=$head" --format='%(objectname) %(refname)' refs/remotes/origin 2>/dev/null)
+  done < <(git -C "$repo" for-each-ref "--merged=$head" "${@:3}" --format='%(objectname) %(refname)' refs/remotes/origin 2>/dev/null)
   [ -n "$best" ] || return 1
   # A ref name cannot contain a space, so one space separates the two fields unambiguously.
   printf '%s %s\n' "$best_oid" "$best"
@@ -373,7 +374,7 @@ ship_origin_head_branch() {
 # this verdict describe a line the rest of the run never touched.
 ship_base_contains_branch_point() {
   local repo=$1 base_ref=$2 base_oid=$3 head=${4:-HEAD}
-  local nearest= cand= cand_oid= rc=0 behind= contained= extra=0 shown=
+  local nearest= fork= cand= cand_oid= rc=0 behind= contained= extra=0 shown=
 
   # Truncated history answers "not an ancestor" for genuine ancestors, which would refuse every ship
   # from a depth-limited CI clone — the one place no human is present to read a remedy.
@@ -381,29 +382,20 @@ ship_base_contains_branch_point() {
     return 0
   fi
 
-  # Tier 1 only. The default-branch fall-through carries no branch point, and refusing against a
-  # commit this work was never built on would print a fabricated fact — see ship_origin_ancestor_branch.
-  nearest=$(ship_origin_ancestor_branch "$repo" "$head") || nearest=
-  [ -n "$nearest" ] || return 0
-  cand_oid=${nearest%% *}
-  cand=${nearest#* }
-
-  # No name shortcut. `cand = base_ref` looks like proof the base is right, and is not: the candidate
-  # oid comes from the local tracking ref, the base oid from this run's fetch, and a force-push
-  # between them leaves the two NAMES equal while the pinned base no longer contains the branch point.
-  # Skipping the probe there would wave through the one case that needs it most. Every ship pays one
-  # extra spawn; a base that merely advanced answers 0 immediately.
-  #
-  # Against the PINNED base oid, never refs/remotes/origin/<base>: that tracking ref is a local cache
-  # this file's header already warns about, and it is simply absent under a narrow fetch refspec —
-  # where merge-base exits 128 and a naive test would read "unrelated" for every ship in the repo.
-  git -C "$repo" merge-base --is-ancestor "$cand_oid" "$base_oid" >/dev/null 2>&1 || rc=$?
+  # Every origin line HEAD sits on that branched at or after the fork point must be in the base. A
+  # line merged in from before it is content the PR carries, so distance never picks the verdict.
+  fork=$(git -C "$repo" merge-base "$base_oid" "$head" 2>/dev/null) || rc=$?
   case "$rc" in
-    0) return 0 ;;
-    1) ;;
+    0 | 1) ;;
     *) echo "note: base relatedness could not be verified (git merge-base exited $rc); continuing." >&2
        return 0 ;;
   esac
+  # Against the PINNED base oid, never the local tracking ref a force-push leaves stale. No fork
+  # point (unrelated histories, exit 1) drops --contains, so every line HEAD sits on is checked.
+  nearest=$(ship_origin_ancestor_branch "$repo" "$head" "--no-merged=$base_oid" ${fork:+"--contains=$fork"}) || nearest=
+  [ -n "$nearest" ] || return 0
+  cand_oid=${nearest%% *}
+  cand=${nearest#* }
 
   # Sharing NO ancestor is the strongest possible answer of "this base does not contain the branch
   # point", so it refuses like every other non-containment rather than being waved through.
@@ -457,6 +449,35 @@ ship_base_contains_branch_point() {
   return 1
 }
 
+# ship_base_inbound_note <repo> <base-oid> <head> <path>...
+# ADVISORY: commits on the briefed paths already pushed to another origin branch — a merged-in line,
+# a squashed parent's stale ref, or this work's own earlier push — so the wording stays conditional.
+ship_base_inbound_note() {
+  local repo=$1 base_oid=$2 head=$3 p all own inbound n ref first on=
+  shift 3
+  local sel=()
+  for p in "$@"; do sel+=(":(top,literal)$p"); done
+  [ "${#sel[@]}" -gt 0 ] || return 0
+  all=$(git -C "$repo" rev-list --no-merges --full-history "$head" "^$base_oid" -- "${sel[@]}" 2>/dev/null) || return 0
+  [ -n "$all" ] || return 0
+  own=$(git -C "$repo" rev-list --no-merges --full-history "$head" "^$base_oid" --not --remotes=origin -- "${sel[@]}" 2>/dev/null) || return 0
+  inbound=$all
+  [ -z "$own" ] || inbound=$(grep -vxF -f <(printf '%s\n' "$own") <<<"$all" || true)
+  [ -n "$inbound" ] || return 0
+  n=$(printf '%s\n' "$inbound" | wc -l | tr -d ' ')
+  first=${inbound%%$'\n'*}
+  while IFS= read -r ref; do
+    [ "$ref" != "refs/remotes/origin/HEAD" ] || continue
+    on=origin/${ref#refs/remotes/origin/}
+    break
+  done < <(git -C "$repo" for-each-ref --contains "$first" --format='%(refname)' refs/remotes/origin 2>/dev/null)
+  echo "note: $n commit(s) on the briefed paths are already on another origin branch${on:+ (first is on $on)};" >&2
+  echo "  any change of theirs the base lacks ships in this PR:" >&2
+  printf '%s\n' "$inbound" | head -n 5 | git -C "$repo" log --no-walk=unsorted --stdin --format='  %h %s' >&2 2>/dev/null || true
+  [ "$n" -le 5 ] || echo "  (+$((n - 5)) more)" >&2
+  return 0
+}
+
 # ship_suggest_base <owner/repo> [repo-path] [pinned-head]
 # One advisory line naming a base that DOES exist on origin. Never names the base that just failed:
 # repeating it is what turned a recoverable ship into a loop. Prints the honest "you must choose"
@@ -488,27 +509,56 @@ ship_suggest_base() {
   esac
 }
 
-# usage: ship_pin_origin_base <root> <base> <label> — print origin's <base> oid. The fetch writes no ref,
-# so a sibling fetch holding refs/remotes/origin/<base>.lock cannot fail it. Needs bounded_remote_git.
+# Bound remote git: the shared supervisor terminates the whole git/helper process group on expiry.
+bounded_remote_git() {
+  # .mts in source, built .mjs in an installed consumer (the gate-config-paths dual-ext idiom).
+  local dir supervisor out status
+  dir="$(dirname "${BASH_SOURCE[0]}")/review/process"
+  supervisor="$dir/gate-supervisor.mts"
+  [ -f "$supervisor" ] || supervisor="$dir/gate-supervisor.mjs"
+  # A silent 124 is a stall a fresh connection clears; output means git answered, so never re-run it.
+  for _ in 1 2; do
+    status=0
+    # -c: a detached auto-gc/maintenance inherits the supervisor's ownership token and is reaped as a
+    # leaked tree, turning a finished fetch into 124 (sc-3761). Remote git never needs maintenance.
+    out=$(node "$supervisor" "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git -c gc.auto=0 -c maintenance.auto=false "$@") || status=$?
+    [ "$status" -eq 124 ] && [ -z "$out" ] || break
+  done
+  [ -z "$out" ] || printf '%s\n' "$out"
+  return "$status"
+}
+
+# usage: ship_pin_origin_base_failed <message> <git-cmd> <status> <errfile>
+# Name a failed remote step with git's own reason, so a lock or timeout never reads as a missing branch.
+ship_pin_origin_base_failed() {
+  if [ "$3" -eq 124 ]; then
+    echo "$1 ($2 exit 124: no clean finish within the ${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}s bound) — machine load or network; re-run ship, or raise DEVKIT_REMOTE_TIMEOUT_SECONDS" >&2
+  else
+    echo "$1 ($2 exit $3)" >&2
+  fi
+  sed 's/^/  /' "$4" >&2
+}
+
+# usage: ship_pin_origin_base <root> <ref> <label> [absent-msg] — print origin's <ref> oid. The fetch
+# writes no ref, so a sibling fetch holding refs/remotes/origin/<ref>.lock cannot fail it.
 ship_pin_origin_base() {
-  local root=$1 base_ref=$2 label=$3 advert pinned="" attempt=0 status oid ref extra lines
+  local root=$1 base_ref=$2 label=$3 advert err pinned="" attempt=0 status oid ref extra lines
+  local absent=${4:-"--base: no branch origin/$2 (a PR base must be a remote branch — not a sha or a tag)"}
   local candidate_oid candidate_ref candidate_extra
   advert=$(mktemp "${TMPDIR:-/tmp}/ship-base-advertisement.XXXXXX") || return 1
+  err=$(mktemp "${TMPDIR:-/tmp}/ship-base-pin-err.XXXXXX") || { rm -f "$advert"; return 1; }
   # A force-update between ls-remote and fetch can make the advertised object unavailable; retry once.
   while [ "$attempt" -lt 2 ] && [ -z "$pinned" ]; do
     attempt=$((attempt + 1))
     status=0
-    bounded_remote_git -C "$root" ls-remote --exit-code --heads origin "refs/heads/$base_ref" > "$advert" 2>/dev/null || status=$?
+    bounded_remote_git -C "$root" ls-remote --exit-code --heads origin "refs/heads/$base_ref" > "$advert" 2>"$err" || status=$?
     case "$status" in
       0) ;;
-      2) rm -f "$advert"
-         echo "--base: no branch origin/$base_ref (a PR base must be a remote branch — not a sha or a tag)" >&2
+      2) rm -f "$advert" "$err"
+         echo "$absent" >&2
          return 1 ;;
-      124) rm -f "$advert"
-         echo "$label: could not verify origin/$base_ref (ls-remote exit 124: no clean finish within the ${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}s bound) — machine load or network; re-run ship, or raise DEVKIT_REMOTE_TIMEOUT_SECONDS" >&2
-         return 1 ;;
-      *) rm -f "$advert"
-         echo "$label: could not verify origin/$base_ref (ls-remote exit $status)" >&2
+      *) ship_pin_origin_base_failed "$label: could not verify origin/$base_ref" ls-remote "$status" "$err"
+         rm -f "$advert" "$err"
          return 1 ;;
     esac
     oid="" ref="" extra="" lines=0
@@ -517,18 +567,20 @@ ship_pin_origin_base() {
       oid=$candidate_oid ref=$candidate_ref extra=$candidate_extra
     done < "$advert"
     if [ "$lines" -ne 1 ] || [ "$ref" != "refs/heads/$base_ref" ] || [ -n "$extra" ]; then
-      rm -f "$advert"
+      rm -f "$advert" "$err"
       echo "$label: origin/$base_ref returned an invalid advertised identity; refusing to guess" >&2
       return 1
     fi
-    bounded_remote_git -C "$root" fetch -q --no-tags --no-write-fetch-head --refmap= origin "refs/heads/$base_ref" 2>/dev/null || {
-      rm -f "$advert"
-      echo "$label: could not fetch the advertised origin/$base_ref commit" >&2
+    status=0
+    bounded_remote_git -C "$root" fetch -q --no-tags --no-write-fetch-head --refmap= origin "refs/heads/$base_ref" 2>"$err" || status=$?
+    if [ "$status" -ne 0 ]; then
+      ship_pin_origin_base_failed "$label: could not fetch the advertised origin/$base_ref commit" fetch "$status" "$err"
+      rm -f "$advert" "$err"
       return 1
-    }
+    fi
     if git -C "$root" cat-file -e "$oid^{commit}" 2>/dev/null; then pinned=$oid; fi
   done
-  rm -f "$advert"
+  rm -f "$advert" "$err"
   [ -n "$pinned" ] || {
     echo "$label: origin/$base_ref moved incompatibly during both pin attempts; retry" >&2
     return 1

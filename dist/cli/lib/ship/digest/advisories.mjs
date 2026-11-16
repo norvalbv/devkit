@@ -6,9 +6,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { telemetrySink } from '../../../../gate-engine/judge/run-context.mjs';
 import { OUTPUT_HEADER, readTranscript } from '../../../../gate-engine/judge/transcript-store.mjs';
-import { issueLocations, parseAdvisories, } from '../../../../gate-engine/review/contracts/response.mjs';
+import { issueLocations, parseAdvisories } from '../../../../gate-engine/review/contracts/response.mjs';
 import { scanBackward } from './tail.mjs';
-import { attemptsOf, branchAttempts, HISTORY_CAP, parseTrendRow, readBranchHistory, trendNarration, } from './trend.mjs';
+import { attemptsOf, branchAttempts, HISTORY_CAP, parseTrendRow, readBranchHistory, renderVersionChange, trendNarration, } from './trend.mjs';
 /** How the gate joins one reviewer's advisories into a single sink row (base-context.mts). */
 const JOIN = ' | ';
 const ELLIPSIS = '…';
@@ -166,7 +166,7 @@ export function renderAdvisories(branch, attempts, all, root) {
 export function branchNarration(sink, key) {
     try {
         const rows = readBranchHistory(sink, key);
-        const lines = [trendNarration(rows, key)];
+        const lines = [trendNarration(rows, key), renderVersionChange(rows, key)];
         const keyed = branchAttempts(rows, key);
         if (keyed) {
             // One union, so a stub this run's cut row left folds into the advisory an earlier run raised.

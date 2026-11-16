@@ -25,7 +25,8 @@ is unset, treat all staged source files as in scope.
   exact-name lookups grep is faster and more reliable.
 - If the configured MCP search tool is unavailable, run `search-code search "<natural-language query>" --json`
   from the repo root. `search-code` is an externally installed engine, not a vendored project file.
-  If the executable or repository index is unavailable, or the command is denied, semantic
+  In HEADLESS COMMIT GATE mode, skip this shell fallback (it is not granted there) and record
+  `--retrieval unavailable --cause "codebase MCP not available to the judge"`. If the executable or repository index is unavailable, or the command is denied, semantic
   retrieval is unavailable: do not retry it, and record it at finalize (`--retrieval unavailable
   --cause "<why>"`) so the gate reports the PASS as DEGRADED. Grep never changes that status, but
   still Grep each added symbol's distinctive body tokens: a duplicate confirmed by reading both
@@ -58,22 +59,24 @@ is unset, treat all staged source files as in scope.
 # Provider projections install this skill under `.agents` (Codex), `.claude`, or `.cursor`.
 # The checklist is the only provider-projected script. Duplication and allowlist commands are the
 # installed devkit bins (`guard-dup`, `guard-clone`, and `guard-dup-allowlist`).
-COMMIT_GUARD_SKILL=""
+<!-- interactive-only -->
+SKILL_DIR=""
 for candidate in \
   .agents/skills/commit-guard \
   .claude/skills/commit-guard \
   .cursor/skills/commit-guard
 do
   if [ -f "$candidate/scripts/checklist.mjs" ]; then
-    COMMIT_GUARD_SKILL="$candidate"
+    SKILL_DIR="$candidate"
     break
   fi
 done
-if [ -z "$COMMIT_GUARD_SKILL" ]; then
+if [ -z "$SKILL_DIR" ]; then
   echo "commit-guard checklist unavailable: run devkit sync-skills" >&2
   exit 2
 fi
-SCRIPT="$COMMIT_GUARD_SKILL/scripts/checklist.mjs"
+SCRIPT="$SKILL_DIR/scripts/checklist.mjs"
+<!-- /interactive-only -->
 
 ## 2. Setup
 ```bash
@@ -108,28 +111,30 @@ For each staged file under `scanRoots`:
   then the existing symbol and its file:line, then `verbatim` or the concrete difference. Never
   restate one duplicate twice.
 
-## 3b. Token clones (sub-chunk + molecule dupes the semantic search misses)
+## 3b. Clones (sub-chunk, molecule and renamed-helper dupes the semantic search misses)
 In HEADLESS COMMIT GATE mode, the deterministic matcher and clone gates already ran before this
 reviewer; skip this section there. Interactive/pre-commit review runs it as an early surface.
 
 The embedding search above is symbol-level; it can't see a block duplicated *inside* a larger symbol,
-or repeated inline JSX. The jscpd-backed clone detector catches those (verbatim, boundary-free).
-- Run once: `guard-clone json > /tmp/clones.json`.
-- Focus on clones touching a STAGED file (a clone between two untouched files isn't introduced by this commit).
-- For each: `guard-dup-allowlist check-clone <fragmentHash>` — skip (exit 0) if allowlisted. Pre-existing clones are baseline-frozen, so only NEW clones surface.
-- Surface unapproved clones to root with fileA, fileB, lines — root asks the human to approve (intentional) or refactor.
-- If approved: `guard-dup-allowlist add-clone <fragmentHash> <fileA> <fileB> --description "<reason>" --lines <N> --range-a <startA-endA> --range-b <startB-endB>` (ranges from the detector output — findability metadata).
+or repeated inline JSX. The jscpd-backed clone detector catches those, plus whole functions copied
+under new names (same structure, names and literals ignored).
+- Run once: `guard-clone scan --changed --gate`. It lists only this commit's clones: touching a
+  staged file, absent from HEAD, and not allowlisted.
+- Surface each listed clone to root with fileA, fileB, lines — root asks the human to approve (intentional) or refactor.
+- If approved: paste the `guard-dup-allowlist add-clone …` command the scan printed for it (it carries the key, lines and ranges). The approval lasts until the duplicated code changes; add `--decay-days <N>` only for a temporary waiver.
 
 ## 4. Finalize
 ```bash
 node $SCRIPT finalize --retrieval ok
-# or, when no semantic search query could run:
+# or, when you decided not to run a query:
+node $SCRIPT finalize --retrieval skipped --cause "<why you chose not to search>"
+# or, when you tried and the search tool failed:
 node $SCRIPT finalize --retrieval unavailable --cause "<the search tool's exact error text>"
 ```
 A passing `finalize` removes the checklist file itself; when the environment needs it kept (gate verification, review evidence) it stays automatically. Never delete it by hand.
 `--retrieval` is how the gate learns whether the semantic check ran: a PASS finalized without it, or
-with `unavailable`, is reported as DEGRADED rather than as a clean PASS. Use `ok` only when your
-search queries actually returned results.
+with `skipped` or `unavailable`, is reported as DEGRADED rather than as a clean PASS. Searching is the
+default; `skipped` is still DEGRADED. Use `ok` only when your search queries actually returned results.
 `finalize` verifies every staged file was marked — it refuses (exits non-zero) an incomplete or failed checklist, so coverage can't be claimed without doing the work. Report the unapproved pairs/clones you surfaced (or state that none were found). No verbose summary.
 </workflow>
 

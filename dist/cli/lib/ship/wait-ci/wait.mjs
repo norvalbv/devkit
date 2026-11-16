@@ -105,6 +105,13 @@ export function verdictLine(result, pr) {
             return `${head} checks=${Object.values(result.counts).reduce((a, b) => a + b, 0)}`;
     }
 }
+/** The verdict, then on a timeout the quiet one-shot: re-shipping a pushed PR does not re-wait. */
+export function verdictLines(result, pr, repo) {
+    const lines = [verdictLine(result, pr)];
+    if (result.outcome === 'timed-out')
+        lines.push(`  checks so far: gh pr checks ${pr} --repo ${repo} --json ${CHECKS_JSON_FIELDS}`);
+    return lines;
+}
 const BUCKET_NAMES = new Set(CHECK_BUCKETS);
 /** Blank for non-Actions checks (CodeRabbit reports both), so presence is proven, not content. */
 const TEXT_FIELDS = ['name', 'state', 'link', 'workflow'];
@@ -243,17 +250,18 @@ export async function waitForChecks(options) {
         await sleep(Math.min(backoff, Math.max(intervalMs, deadline - now())));
     }
 }
-const defaultExec = (timeout) => (args, cwd) => execFileSync('gh', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout });
+export const defaultExec = (timeout = DEFAULT_EXEC_TIMEOUT_MS) => (args, cwd) => execFileSync('gh', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout });
 /** Build the poller `waitForChecks` drives. It never throws: every outcome is a PollResult. */
 export function ghChecksPoller(options) {
-    const exec = options.exec ?? defaultExec(options.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS);
-    const args = ['pr', 'checks', options.pr, '--repo', options.repo, '--json', CHECKS_JSON_FIELDS];
+    const exec = options.exec ?? defaultExec(options.execTimeoutMs);
+    const repo = options.repo ? ['--repo', options.repo] : [];
+    const args = ['pr', 'checks', options.pr, ...repo, '--json', CHECKS_JSON_FIELDS];
     if (options.required)
         args.push('--required');
     const read = (raw) => {
         const rows = parseChecksJson(raw);
         if (rows)
-            return { kind: 'rows', rows: withFailedSteps(rows, { ...options, exec }) };
+            return { kind: 'rows', rows: withFailedSteps(rows, { ...options, repo: options.repo ?? '{owner}/{repo}', exec }) };
         return {
             kind: 'unavailable',
             reason: 'gh-json-unparseable',
@@ -302,13 +310,13 @@ function unknownAttribution(reason) {
     };
 }
 /** Loaded lazily, so a broken import can never cost the verdict line of any outcome. */
-export async function attribute(pr, failures, pending) {
+export async function attribute(pr, failures, pending, cwd = process.cwd(), run) {
     // A red that ended the wait early leaves a run unfinished: no summary yet, and more red to come.
     if (pending.length > 0 || failures.some((f) => f.failedSteps))
         return unknownAttribution('run-in-progress');
     try {
-        const { attributeFailures } = await import('../../baseline-status/attribution.mjs');
-        return attributeFailures({ cwd: process.cwd(), pr, failures });
+        const attributeFailures = run ?? (await import('../../baseline-status/attribution.mjs')).attributeFailures;
+        return attributeFailures({ cwd, pr, failures });
     }
     catch {
         return unknownAttribution('attribution-error');
@@ -339,7 +347,8 @@ async function main(argv) {
     }).then((r) => ({ ...r, required, requiredContexts: narrowed?.contexts()?.length }));
     if (result.outcome === 'failed')
         result.attribution = await attribute(pr, result.failures, result.pending);
-    console.error(verdictLine(result, pr));
+    for (const line of verdictLines(result, pr, repo))
+        console.error(line);
     recordCiEvent(result, pr);
     // Without --strict the ship already succeeded and this process never speaks for it.
     return argv.includes('--strict') && result.outcome !== 'passed' ? 5 : 0;

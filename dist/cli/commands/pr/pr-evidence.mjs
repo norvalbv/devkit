@@ -51,8 +51,10 @@ export default async function prEvidence(args, start) {
                 `${headRefOid.slice(0, 12)}; check out the PR head first (gh pr checkout ${pr})`);
             return 1;
         }
-        const written = await publish({ cwd, repo, pr, head, recapture: true, keepIn: tmpdir() });
-        return written ? 0 : 1;
+        const published = await publish({ cwd, repo, pr, head, recapture: true, keepIn: tmpdir() });
+        if (!published)
+            console.error('devkit pr-evidence: guard.config.json has no evidence entry');
+        return published?.publish === 'written' ? 0 : 1;
     }
     catch (error) {
         console.error(`devkit pr-evidence: ${errorMessage(error)}; nothing was published`);

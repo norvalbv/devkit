@@ -1,6 +1,7 @@
 /** `devkit ci-verdict` — ship's --wait-ci verdict for a PR that is already open. */
 import { z } from 'zod';
-import { MIN_TIMEOUT_S, attribute, classifyChecksFailure, defaultExec, ghChecksPoller, parseTimeoutSeconds, verdictLine, waitForChecks, } from '../../lib/ship/wait-ci/wait.mjs';
+import { MIN_TIMEOUT_S, attribute, defaultExec, ghChecksPoller, parseTimeoutSeconds, verdictLine, waitForChecks, } from '../../lib/ship/wait-ci/wait.mjs';
+import { classifyChecksFailure } from '../../lib/ship/wait-ci/classify.mjs';
 const DEFAULT_TIMEOUT_S = 900;
 export const meta = {
     name: 'ci-verdict',
@@ -121,7 +122,7 @@ export default async function ciVerdict(args, cwd, deps = {}) {
         ...deps.wait,
     }).then((r) => ({ ...r, required }));
     if (result.outcome === 'failed')
-        result.attribution = await attribute(pr, result.failures, cwd, deps.attribute);
+        result.attribution = await attribute(pr, result.failures, result.pending, cwd, deps.attribute);
     console.log(verdictLine(result, pr));
     return result.outcome === 'unavailable' ? 2 : 0;
 }

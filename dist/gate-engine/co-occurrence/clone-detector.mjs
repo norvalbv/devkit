@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * clone-detector — token-level copy-paste / sub-chunk / molecule detector.
+ * clone-detector — copy-paste / sub-chunk / molecule / renamed-helper detector.
  *
  * Wraps jscpd (Rabin-Karp, boundary-free) to catch duplication the embedding
  * matcher (matcher.mjs) misses: blocks duplicated INSIDE a larger symbol
- * (sub-chunk) and repeated inline JSX ("molecules"). Verbatim by design —
+ * (sub-chunk), repeated inline JSX ("molecules") and, via --similarity, helpers renamed —
  * complements, doesn't replace, the semantic matcher.
  *
  * Shells the jscpd CLI (avoids ESM/CJS interop); parses its JSON report. Each
- * clone is keyed by a hash of its normalised duplicated fragment, NOT a line
+ * clone is keyed by a hash of its file pair and normalised fragment, NOT a line
  * range — so an allowlist approval survives unrelated edits and only re-surfaces
- * when the duplicated code itself changes.
+ * when the duplicated code itself changes. --changed blocks only clones absent from HEAD.
  *
  * ── Portability (W-3) ────────────────────────────────────────────────────────
  * Scan roots (--paths default), the allowlist, and the jscpd cwd all resolve
@@ -22,27 +22,29 @@
  * Usage:
  *   guard-clone scan [--min-tokens 50] [--paths "src/renderer src/main"]
  *   guard-clone json   # machine-readable clones
+ *   guard-clone reconcile [--apply]   # drop clone approvals the scan no longer produces
  *   guard-clone scan --changed --gate
  *       # commit gate: clones touching a staged file (--changed, set via
  *       # MATCHER_CHANGED_FILES or git), not covered by a live allowlist clone.
- *       # exit 1 = new clone → block · 0 = clean · 2 = could-not-run → fail-open.
+ *       # exit 1 = new or lapsed-approval clone, or jscpd ignore marker → block · 0 = clean · 2 = could-not-run → fail-open.
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, matchesGlob, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
 import { exitGate, failLine } from '../deterministic/reason.mjs';
-import { ALLOWLIST_CLI, loadAllowlist } from './allowlist-io.mjs';
+import { ALLOWLIST_CLI, loadAllowlist, saveAllowlist } from './allowlist-io.mjs';
 import { flagReader } from './argv.mjs';
 import { loadChangedSet } from './changed-files.mjs';
-import { isExpired } from './decay.mjs';
-import { JSCPD_OWN_ROOT, resolveJscpdBin } from './jscpd-bin.mjs';
+import { DEFAULT_DECAY_DAYS, isExpired } from './decay.mjs';
+import { JSCPD_OWN_ROOT, jscpdVersionMismatch, resolveJscpdBin } from './jscpd-bin.mjs';
 // Resolve config against the consumer cwd (W-3). Scan roots, allowlist, jscpd cwd all key off it.
 const cfg = resolveGuardConfig(process.cwd());
 const repoRoot = cfg.cwd;
+const repoRootReal = realpathSync(repoRoot);
 // Allowlist: CO_OCCURRENCE_ALLOWLIST env (fixtures/tests) wins; else config.allowlistPath.
 const allowlistPath = process.env.CO_OCCURRENCE_ALLOWLIST ?? resolveFromCwd(cfg, 'allowlistPath');
 // Approval-hint CLI on a gate block — default = the engine's own guard-dup-allowlist bin,
@@ -54,6 +56,7 @@ const DEFAULTS = {
     // Token-clone floor + scan roots seed from the resolved config (consumer-tunable);
     // CLI --flags override per run.
     minTokens: cfg.thresholds.minTokens,
+    similarity: cfg.thresholds.similarity,
     // cloneRoots, not scanRoots: verbatim-clone scope is often deliberately narrower than the
     // matcher's. Unset, it resolves back to scanRoots (see config.mts).
     paths: cfg.cloneRoots,
@@ -80,18 +83,34 @@ const JSCPD_BIN = resolveJscpdBin({
  * near-dup fragments fragment into many overlapping entries). Pass
  * `includeSameFile: true` to also return intra-file clones.
  */
-export function detectClones({ minTokens = DEFAULTS.minTokens, paths = DEFAULTS.paths, includeSameFile = false, } = {}) {
+export function detectClones({ minTokens = DEFAULTS.minTokens, similarity = DEFAULTS.similarity, paths = DEFAULTS.paths, includeSameFile = false, baseRef = null, } = {}) {
+    // jscpd only warns on a ratio outside (0, 1] and skips the similarity pass.
+    if (!(similarity > 0 && similarity <= 1)) {
+        throw new Error(`thresholds.similarity must be in (0, 1], got ${similarity}`);
+    }
     const out = mkdtempSync(join(tmpdir(), 'jscpd-'));
     // finally guarantees the temp report dir is removed on every path — jscpd
     // failure, malformed report, or a throw inside the parse/map.
     try {
         try {
+            const mismatch = jscpdVersionMismatch(JSCPD_BIN);
+            if (mismatch)
+                throw new Error(mismatch);
             execFileSync(JSCPD_BIN, [
                 ...paths,
                 '--min-tokens',
                 String(minTokens),
+                // 3, not jscpd's 5: a copied helper is often 3-4 lines. One run serves both kinds, since
+                // splitting them let the ast pass claim a name-only copy as exact and drop it.
+                '--min-lines',
+                '3',
+                `--similarity=${similarity}`,
+                '-a',
+                ...(baseRef ? ['--baseline-from-ref', baseRef] : []),
+                // weak drops comment tokens, so a comment pasted into a copy cannot split the clone
+                // into two sub-floor halves and hide it, nor pad a sub-floor copy over the floor.
                 '--mode',
-                'mild',
+                'weak',
                 '--reporters',
                 'json',
                 '--output',
@@ -104,9 +123,11 @@ export function detectClones({ minTokens = DEFAULTS.minTokens, paths = DEFAULTS.
             ], { cwd: repoRoot, stdio: ['ignore', 'ignore', 'pipe'] });
         }
         catch (e) {
-            // jscpd exits non-zero only with --threshold (we set none), so a throw
-            // here is a real failure — usually the binary is missing.
-            throw new Error(`jscpd failed (${e instanceof Error ? e.message : String(e)}). Ensure the 'jscpd' dependency is installed (e.g. bun add -d jscpd) or set JSCPD_BIN to its path.`);
+            // jscpd exits non-zero only with --threshold (we set none), so a throw here is a real
+            // failure: a missing or wrong-version binary, or a base ref it could not check out.
+            const stderr = e instanceof Error && 'stderr' in e ? String(e.stderr).trim() : '';
+            const why = stderr.split('\n')[0] || (e instanceof Error ? e.message : String(e));
+            throw new Error(`jscpd could not run: ${why}`);
         }
         const reportPath = join(out, 'jscpd-report.json');
         if (!existsSync(reportPath))
@@ -115,8 +136,11 @@ export function detectClones({ minTokens = DEFAULTS.minTokens, paths = DEFAULTS.
         return (report.duplicates ?? [])
             .filter((d) => CODE_EXT.test(d.firstFile.name) && CODE_EXT.test(d.secondFile.name))
             .filter((d) => includeSameFile || d.firstFile.name !== d.secondFile.name)
+            .filter((d) => !baseRef || d.isNew)
             .map((d) => ({
-            fragmentHash: hashFragment(d.fragment ?? ''),
+            fragmentHash: cloneKey(relPath(d.firstFile.name), relPath(d.secondFile.name), d.fragment),
+            kind: d.kind,
+            similarity: d.similarity,
             lines: d.lines,
             tokens: d.tokens,
             fileA: relPath(d.firstFile.name),
@@ -149,8 +173,13 @@ export function relPath(f) {
     // absolute. Strip against the CONSUMER cwd (repoRoot = cfg.cwd), not the package dir — and only
     // as a PREFIX, so a repo path that happens to recur mid-string is left alone.
     const path = f.replace(BACKSLASH_RE, '/');
-    const root = repoRoot.replace(BACKSLASH_RE, '/');
-    return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
+    // jscpd -a reports realpaths (macOS /tmp → /private/tmp), so strip either spelling of the root.
+    for (const r of [repoRoot, repoRootReal]) {
+        const root = r.replace(BACKSLASH_RE, '/');
+        if (path.startsWith(`${root}/`))
+            return path.slice(root.length + 1);
+    }
+    return path;
 }
 /**
  * Import/re-export declarations are excluded from clone detection AT THE TOKENIZER, via jscpd's
@@ -187,79 +216,235 @@ export function hashFragment(fragment) {
     const normalised = fragment.replace(WHITESPACE_RE, ' ').trim();
     return createHash('sha256').update(normalised).digest('hex').slice(0, 16);
 }
-/** Fragment hashes of clones already approved AND still live (non-expired) in the
- * allowlist — the gate surfaces only clones not in this set. The CloneAllowlistEntry shape,
- * the corruption-refusing loader (fail-open exit 2 on a corrupt-but-present file, so an
- * approved clone never re-surfaces as novel and false-blocks), and the atomic writer all
- * live in ./allowlist-io.mts, shared with the matcher + the guard-dup-allowlist CLI. */
-function liveAllowlistedHashes() {
+/** Allowlist key: the file pair plus the fragment, so approving one copy never approves a third. */
+function cloneKey(fileA, fileB, fragment = '') {
+    return hashFragment(`${[fileA, fileB].sort().join(' ')} ${fragment}`);
+}
+/** HEAD when it exists; null on an unborn branch or outside git (every clone is then new). */
+function bornHead() {
+    try {
+        execFileSync('git', ['rev-parse', '--verify', '-q', 'HEAD'], {
+            cwd: repoRoot,
+            stdio: 'ignore',
+        });
+        return 'HEAD';
+    }
+    catch {
+        return null;
+    }
+}
+/** Live approved hashes (any live entry covers) plus the newest expired entry per uncovered hash.
+ * A corrupt allowlist makes loadAllowlist exit 2 (fail-open) rather than re-surface every clone. */
+function allowlistIndex() {
+    const expired = new Map();
     if (allowlistPath == null)
-        return new Set();
+        return { live: new Set(), expired };
     const { clones } = loadAllowlist(allowlistPath, 'clone-detector');
-    return new Set(clones.filter((c) => !isExpired(c)).map((c) => c.fragmentHash));
+    const live = new Set(clones.filter((c) => !isExpired(c)).map((c) => c.fragmentHash));
+    for (const c of clones) {
+        if (live.has(c.fragmentHash))
+            continue;
+        const prev = expired.get(c.fragmentHash);
+        if (!prev || c.date > prev.date)
+            expired.set(c.fragmentHash, c);
+    }
+    return { live, expired };
+}
+// Built at runtime: a literal would self-flag this file and, beside an end marker, open a region.
+const IGNORE_MARKER = ['jscpd', 'ignore-start'].join(':');
+/** Every file under a clone root (a file root is itself); a missing root, which jscpd 5 skips, is empty. */
+function rootFiles(root) {
+    const dir = resolve(repoRoot, root);
+    if (!existsSync(dir))
+        return [];
+    if (!statSync(dir).isDirectory())
+        return [relPath(dir)];
+    return readdirSync(dir, { recursive: true, withFileTypes: true })
+        .filter((d) => d.isFile())
+        .map((d) => relPath(join(d.parentPath, d.name)));
+}
+function isUnderRoot(file, root) {
+    const [f, r] = [resolve(repoRoot, file), resolve(repoRoot, root)];
+    return f === r || f.startsWith(`${r}${sep}`);
+}
+/**
+ * Ignore markers in the files jscpd scans, or only the existing `changed` files under its roots, so
+ * an unreadable dir elsewhere cannot blind the gate. jscpd matches raw text: string markers count.
+ */
+function findIgnoreMarkers(paths, changed) {
+    const files = changed
+        ? [...changed].filter((f) => paths.some((root) => isUnderRoot(f, root)) && existsSync(resolve(repoRoot, f)))
+        : paths.flatMap(rootFiles);
+    return [...new Set(files)]
+        .filter((f) => CODE_EXT.test(f) && !DEFAULTS.ignore.some((glob) => matchesGlob(f, glob)))
+        .flatMap((file) => readFileSync(resolve(repoRoot, file), 'utf8')
+        .split('\n')
+        .flatMap((text, i) => (text.includes(IGNORE_MARKER) ? [{ file, line: i + 1 }] : [])));
 }
 const loc = (c, side) => {
     const v = c[side];
     return typeof v === 'number' ? v : v.line;
 };
+const cloneRow = (c) => `  ${String(c.lines).padStart(3)}L  ${c.fragmentHash}  ${c.fileA}:${loc(c, 'startA')} <> ${c.fileB}:${loc(c, 'startB')}${c.kind === 'similar' ? `  (similar ${c.similarity})` : ''}`;
+const filePairKey = (a, b) => [a, b].sort().join('\0');
+/** Provenance of a lapsed approval, so a re-approval re-judges the original reason. */
+function lapsedNote(c, e) {
+    const lifetime = e.decayDays === undefined
+        ? `no lifetime recorded (${DEFAULT_DECAY_DAYS}-day default)`
+        : `${e.decayDays}-day lifetime`;
+    const moved = e.fileA && e.fileB && filePairKey(e.fileA, e.fileB) !== filePairKey(c.fileA, c.fileB);
+    const where = moved ? ` — approved for ${e.fileA} <> ${e.fileB}` : '';
+    return `approved ${e.date}, ${lifetime}${where}: "${e.description || 'no reason recorded'}"`;
+}
 // ── CLI ───────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
 const mode = argv[0] ?? 'scan';
 const flag = flagReader(argv);
+// Flags that would narrow the scan below the gate's scope, so reconcile would read every
+// out-of-scope approval as dead and delete it.
+export const RECONCILE_REFUSED_FLAGS = [
+    '--paths',
+    '--min-tokens',
+    '--include-same-file',
+    '--changed',
+    '--gate',
+];
+function refuseReconcile(msg) {
+    console.error(`guard-clone reconcile: ${msg} Nothing removed.`);
+    process.exit(1);
+}
+// Clone half of `guard-dup reconcile`: drop approvals the gate's own full scan no longer produces.
+// Reason: flat refuse → scan → partition → report → dry-run-vs-apply steps; a dev-only burn-down command covered end-to-end by spawned tests, which CRAP's coverage estimate cannot see
+// fallow-ignore-next-line complexity
+function runCloneReconcile() {
+    const refused = argv.filter((a) => RECONCILE_REFUSED_FLAGS.includes(a));
+    if (refused.length > 0)
+        refuseReconcile(`${refused.join(' ')} not allowed — it scans the gate's scope.`);
+    if (allowlistPath == null)
+        refuseReconcile('no allowlist path configured (allowlistPath).');
+    let scanned;
+    try {
+        scanned = detectClones();
+    }
+    catch (e) {
+        refuseReconcile(e instanceof Error ? e.message : String(e));
+    }
+    // Loaded after the scan so an add-clone landing mid-scan is not lost; a corrupt file exits 2.
+    const { pairs, clones } = loadAllowlist(allowlistPath, 'clone-detector');
+    if (scanned.length === 0 && clones.length > 0) {
+        refuseReconcile(`scan returned no clones; refusing to drop ${clones.length} entries. If all are resolved, retire them with ${CO_SCRIPT} remove-clone.`);
+    }
+    const live = new Set(scanned.map((c) => c.fragmentHash));
+    const kept = clones.filter((c) => live.has(c.fragmentHash));
+    const dropped = clones.filter((c) => !live.has(c.fragmentHash));
+    console.log(`Reconcile: ${clones.length} clone(s) → keep ${kept.length}, drop ${dropped.length} (no longer produced by the scan).`);
+    for (const c of dropped) {
+        const age = `${Math.floor((Date.now() - Date.parse(c.date)) / 86_400_000)}d`;
+        console.log(`  drop  ${c.fragmentHash}  ${age}  (${c.fileA ?? '?'} / ${c.fileB ?? '?'})  ${c.description ?? ''}`);
+    }
+    if (!argv.includes('--apply')) {
+        console.log('\nDry run — no write. Re-run with --apply (on a clean tree) to prune.');
+    }
+    else if (dropped.length === 0) {
+        console.log('Nothing to reconcile — allowlist unchanged.');
+    }
+    else {
+        saveAllowlist(allowlistPath, { pairs, clones: kept });
+        console.log(`Wrote ${kept.length} clone(s) → ${allowlistPath}`);
+    }
+}
 // Run-as-main guard, in the form every other gate module uses: realpath BOTH sides. A raw
 // `argv[1] === fileURLToPath(import.meta.url)` compares the BIN SHIM path (node_modules/.bin or a
 // global install's bin dir, both symlinks) against the real module path, so it is false whenever
 // the gate is invoked by its published name — `guard-clone scan --gate` printed nothing and exited
 // 0, a silently dead gate. Only `node <real path>` (how guard-deterministic spawns it) worked.
-if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+const isMain = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+if (isMain && mode === 'reconcile') {
+    runCloneReconcile();
+    process.exit(0);
+}
+if (isMain) {
     const minTokens = Number(flag('--min-tokens', DEFAULTS.minTokens));
     const pathsArg = flag('--paths', null);
     const paths = pathsArg ? pathsArg.split(/\s+/) : DEFAULTS.paths;
     const includeSameFile = argv.includes('--include-same-file');
     const gate = argv.includes('--gate');
     const changed = argv.includes('--changed');
+    // --changed: this commit's clones — touching a staged file and absent from HEAD. Staged set
+    // from the hook's staged list / git.
+    const staged = changed ? loadChangedSet(repoRoot) : null;
+    if (staged && ![...staged].some((f) => CODE_EXT.test(f) && paths.some((root) => isUnderRoot(f, root)))) {
+        console.log('clone gate: no staged code under the clone roots ✓');
+        exitGate(0, ['clone gate: no staged code under the clone roots']);
+    }
     let clones;
+    let markers = [];
     try {
-        clones = detectClones({ minTokens, paths, includeSameFile });
+        clones = detectClones({ minTokens, paths, includeSameFile, baseRef: staged && bornHead() });
+        if (gate)
+            markers = findIgnoreMarkers(paths, staged);
     }
     catch (e) {
-        // jscpd missing / errored = "could not run". The gate fails OPEN (exit 2) so
-        // an infra failure never bricks a commit; non-gate callers surface the error.
+        // jscpd missing / errored, or an unreadable file in the marker scan = "could not run". The
+        // gate fails OPEN (exit 2) so an infra failure never bricks a commit; others surface it.
         failLine(e instanceof Error ? e.message : String(e));
         process.exit(gate ? 2 : 1);
     }
-    // --changed: keep only clones touching a staged file — this commit's clones,
-    // not pre-existing ones. Staged set from the hook's staged list / git.
-    if (changed) {
-        const staged = loadChangedSet(repoRoot);
+    if (staged)
         clones = clones.filter((c) => staged.has(c.fileA) || staged.has(c.fileB));
-    }
     if (gate) {
-        // Block on NEW clones (fragmentHash not covered by a live allowlist entry).
-        const allowed = liveAllowlistedHashes();
-        const novel = clones.filter((c) => !allowed.has(c.fragmentHash));
-        const rows = novel.map((c) => `  ${String(c.lines).padStart(3)}L  ${c.fragmentHash}  ${c.fileA}:${loc(c, 'startA')} <> ${c.fileB}:${loc(c, 'startB')}`);
+        // Block on clones with no live allowlist entry: NEW (never approved) or LAPSED (approval expired).
+        const { live, expired } = allowlistIndex();
+        const blocking = clones.filter((c) => !live.has(c.fragmentHash));
+        const novel = blocking.filter((c) => !expired.has(c.fragmentHash));
+        const lapsed = blocking.flatMap((clone) => {
+            const entry = expired.get(clone.fragmentHash);
+            return entry ? [{ clone, entry }] : [];
+        });
+        const markerRows = markers.map((m) => `  marker  ${m.file}:${m.line}`);
+        const rows = [...novel.map(cloneRow), ...markerRows];
         for (const row of rows)
             console.log(row);
-        if (novel.length > 0) {
-            console.log(`\nclone gate: ${novel.length} new clone(s) — block.`);
+        if (lapsed.length > 0) {
+            console.log('Lapsed allowlist approvals (expired — re-judge each reason, do not rubber-stamp):');
+            for (const { clone, entry } of lapsed) {
+                console.log(cloneRow(clone));
+                console.log(`        ${lapsedNote(clone, entry)}`);
+            }
+        }
+        const summary = [
+            novel.length || markers.length ? `${novel.length} new clone(s)` : '',
+            lapsed.length ? `${lapsed.length} clone(s) under a lapsed approval` : '',
+            markers.length ? `${markers.length} jscpd ignore marker(s)` : '',
+        ]
+            .filter(Boolean)
+            .join(', ');
+        const toApprove = [...novel, ...lapsed.map((l) => l.clone)];
+        console.log(summary ? `\nclone gate: ${summary} — block.` : 'clone gate: no new clones ✓');
+        if (markers.length > 0) {
+            console.log('jscpd ignore markers are not a clone suppression (honoured even inside strings): remove them and re-run.\n' +
+                'The gate then prints add-clone for any clone they hid (--decay-days for a long-lived approval).');
+        }
+        if (toApprove.length > 0) {
             // Ready-to-paste approval, pre-filled with lines + ranges (fill in <why>), so an
             // approved entry keeps its metadata instead of the empty fields you get by hand.
             // Capped to APPROVE_CAP (mirrors matcher.mjs) — every clone is listed in the rows
             // above; the full command set stays out of the token stream and re-prints on re-run.
             const APPROVE_CAP = 6;
             console.log('To approve an intentional clone (fill in the reason):');
-            for (const c of novel.slice(0, APPROVE_CAP)) {
+            for (const c of toApprove.slice(0, APPROVE_CAP)) {
                 console.log(`  ${CO_SCRIPT} add-clone "${c.fragmentHash}" "${c.fileA}" "${c.fileB}" --lines ${c.lines} --range-a ${loc(c, 'startA')}-${loc(c, 'endA')} --range-b ${loc(c, 'startB')}-${loc(c, 'endB')} --description "<why>"`);
             }
-            if (novel.length > APPROVE_CAP) {
-                console.log(`  (+${novel.length - APPROVE_CAP} more — re-run after addressing these)`);
+            if (toApprove.length > APPROVE_CAP) {
+                console.log(`  (+${toApprove.length - APPROVE_CAP} more — re-run after addressing these)`);
             }
+            if (lapsed.length > 0) {
+                console.log('Re-approve a lapsed entry only if its reason above still holds; otherwise remove the duplication.');
+            }
+            console.log('An approval lasts until the duplicated code changes; append --decay-days N for a temporary waiver.');
         }
-        else {
-            console.log('clone gate: no new clones ✓');
-        }
-        exitGate(novel.length > 0 ? 1 : 0, [`clone gate: ${novel.length} new clone(s)`, ...rows]);
+        const lapsedRows = lapsed.map((l) => `${cloneRow(l.clone)}  [lapsed, approved ${l.entry.date}]`);
+        exitGate(summary ? 1 : 0, [`clone gate: ${summary}`, ...rows, ...lapsedRows]);
     }
     if (mode === 'json') {
         process.stdout.write(JSON.stringify(clones, null, 2));

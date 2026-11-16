@@ -16,15 +16,18 @@
 # contradicting it.
 
 # ship_patch_base <root> <base>
-# The commit this checkout forked from, or the base itself when that cannot be improved on.
+# The commit this checkout forked from. The default arm sets BASE=HEAD, so there it IS BASE.
 #
-# Echoing BASE unchanged is the load-bearing default, not a fallback nobody hits: the ship default arm
-# sets BASE=$(git rev-parse HEAD), so the merge base IS BASE and the entire mechanism below stays
-# switched off, byte-for-byte. An unrelated-histories or shallow-graft failure lands in the same place.
+# Only genuinely unrelated histories (exit 1 in a full clone) fall back to BASE. A shallow graft or a
+# git error returns 1 instead: a BASE anchor there would stage base-only work as a silent revert.
 ship_patch_base() {
-  local root=$1 base=$2 fork
-  fork=$(git -C "$root" merge-base "$base" HEAD 2>/dev/null) || fork=
-  printf '%s\n' "${fork:-$base}"
+  local root=$1 base=$2 fork rc=0 shallow
+  # Read BEFORE merge-base: a concurrent unshallow in between would otherwise unlock the fallback.
+  shallow=$(git -C "$root" rev-parse --is-shallow-repository 2>/dev/null) || shallow=
+  fork=$(git -C "$root" merge-base "$base" HEAD 2>/dev/null) || rc=$?
+  [ "$rc" -eq 0 ] && { printf '%s\n' "$fork"; return 0; }
+  [ "$rc" -eq 1 ] && [ "$shallow" = false ] || return 1
+  printf '%s\n' "$base"
 }
 
 # _ship_whole_add <path>
@@ -400,9 +403,11 @@ ship_apply_text_arm() {
     "${GIT_PATHS[@]}" ${WHOLE_EXCLUDES[@]+"${WHOLE_EXCLUDES[@]}"} > "$patch" || return 2
   [ -s "$patch" ] || return 0
   if [ "$mode" = --index ]; then
-    GIT_INDEX_FILE=$target git -C "$root" apply --cached --3way "$patch" 2> "$err" && return 0
+    GIT_INDEX_FILE=$target git -C "$root" apply --cached --3way "$patch" 2> "$err" &&
+      { _ship_union_guard "$root" "$base" "$patch_base" "$base_ref" "$mode" "$target"; return; }
   else
-    git -C "$target" apply --index --3way "$patch" 2> "$err" && return 0
+    git -C "$target" apply --index --3way "$patch" 2> "$err" &&
+      { _ship_union_guard "$root" "$base" "$patch_base" "$base_ref" "$mode" "$target"; return; }
   fi
 
   # (a) Same-region overlap. UNMERGED index entries are the unambiguous, locale-independent
@@ -442,6 +447,7 @@ ship_apply_text_arm() {
     vanished+=("$p")
   done < <(git -C "$root" diff --name-only -z --no-renames --diff-filter=DT \
     "$patch_base" "$base" -- "${GIT_PATHS[@]}" ${WHOLE_EXCLUDES[@]+"${WHOLE_EXCLUDES[@]}"} 2>/dev/null || true)
+  ship_take_gate_owned_baseline "$root" "$base" "$base_ref" "$mode" "$target" && return 0
 
   # Nothing this function can name: the trial stays silent and lets staging take the authoritative
   # verdict. Staging keeps its historical behaviour — git's own stderr, then the abort.
@@ -487,6 +493,42 @@ ship_apply_text_arm() {
     echo "  (shallow clone: three-way merge data may be missing — \`git fetch --unshallow\` can turn some of these into clean merges)" >&2
   fi
   echo "  Merge or rebase origin/$base_ref into this checkout, then retry the same command." >&2
+  return 1
+}
+
+# _ship_union_guard <root> <base> <patch_base> <base_ref> <mode> <target>
+# Checks a `merge=union` path both sides changed with decision-union/cli, failing closed (0 or 1).
+# The checker refuses with exit 3, so any other failure, such as node unable to load it, is named.
+_ship_union_guard() {
+  local root=$1 base=$2 patch_base=$3 base_ref=$4 mode=$5 target=$6 p attr val rec cli io rc=0
+  local both=() pairs=() ctx=(git -C "$target")
+  [ "$mode" = --index ] && ctx=(env "GIT_INDEX_FILE=$target" git -C "$root")
+  # Via a file, not process substitution, so a git failure is seen rather than read as "no paths".
+  io=$(mktemp "${TMPDIR:-/tmp}/ship-union.XXXXXX") || return 1
+  if "${ctx[@]}" diff --cached --name-only -z --diff-filter=M "$base" > "$io" 2>/dev/null; then
+    while IFS= read -r -d '' p; do
+      git -C "$root" diff --quiet "$patch_base" "$base" -- ":(top,literal)$p" 2>/dev/null || both+=("$p")
+    done < "$io"
+  else rc=2; fi
+  if [ "$rc" -eq 0 ] && [ "${#both[@]}" -gt 0 ]; then
+    if printf '%s\0' "${both[@]}" | "${ctx[@]}" check-attr -z --stdin merge > "$io" 2>/dev/null; then
+      while IFS= read -r -d '' p && IFS= read -r -d '' attr && IFS= read -r -d '' val; do
+        [ "$val" = union ] || continue
+        rec=$("${ctx[@]}" ls-files -s -z -- ":(top,literal)$p" | tr -d '\0')
+        rec=${rec#* }
+        pairs+=("$p" "${rec%% *}")
+      done < "$io"
+    else rc=2; fi
+  fi
+  rm -f "$io"
+  if [ "$rc" -eq 0 ] && [ "${#pairs[@]}" -gt 0 ]; then
+    cli="$SCRIPT_DIR/decision-union/cli.mts"
+    [ -f "$cli" ] || cli="$SCRIPT_DIR/decision-union/cli.mjs"
+    printf '%s\0' "${pairs[@]}" |
+      node "$cli" --root "$root" --base "$base" --patch-base "$patch_base" --base-ref "$base_ref" || rc=$?
+  fi
+  [ "$rc" -eq 0 ] && return 0
+  [ "$rc" -eq 3 ] || echo "  ship refuses rather than commit a union merge it could not verify." >&2
   return 1
 }
 

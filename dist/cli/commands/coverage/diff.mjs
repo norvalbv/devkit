@@ -1,12 +1,16 @@
 /** `devkit coverage-diff` — coverage of the lines a change ADDED, not of the files it touched.
  * Advisory, except under `coverage.scope: "diff"`, where it also prints that gate's verdict. */
 import { existsSync, lstatSync, readFileSync, readlinkSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { extname, join, resolve } from 'node:path';
 import { resolveGuardConfig } from '../../../gate-engine/config.mjs';
 import { addedLineVerdict, addedProductionLines, diffClassifier, resolveScope, } from '../../../gate-engine/coverage/diff-gate.mjs';
+import { TEST_PATH } from '../../../gate-engine/coverage/gate-shared.mjs';
+import { readClearMarker } from '../../../gate-engine/coverage/clear-marker/store.mjs';
+import { formatClearMarker } from '../../../gate-engine/coverage/failures.mjs';
 import { addedLineCoverage, lineRanges, } from '../../../gate-engine/coverage/lines.mjs';
 import { COVERAGE_DIR, COVERAGE_FILE } from '../../../gate-engine/coverage/produce.mjs';
 import { blobsIn, boundManifest, checkoutRoots, DELETED, git, keysByPath, readArtifact, } from '../../../gate-engine/coverage/provenance.mjs';
+import { changedRunHint } from '../../../gate-engine/coverage/gate-shared.mjs';
 import { computePercentages } from '../../../gate-engine/coverage/run.mjs';
 import { gitRunner, line, ok } from '../../lib/ship/base-drift/git-run.mjs';
 import { resolveBase } from '../../lib/ship/base-drift/resolve-base.mjs';
@@ -36,6 +40,9 @@ guard-coverage enforces this same measure at commit time when guard.config.json 
 gate's verdict on these lines — unmeasured files, a stale artifact and the threshold, as the gate
 judges them — and exits 1 when the gate would block. \`devkit ship ... --dry-gates\` is the check
 exact to the paths a ship stages.
+
+Shell scripts (which JS coverage cannot instrument) are listed apart with their added-line counts,
+outside the total and --min.
 
 Use this when a brief asks for coverage of "the new diff": whole-file percentages on a large
 existing file mostly measure code the change never touched.
@@ -92,8 +99,27 @@ function mergeBaseOf(run, base) {
 const nulList = (out) => out.split('\0').filter(Boolean);
 /** Every line of an untracked file is added. */
 function allLines(top, path) {
-    const count = readFileSync(join(top, path), 'utf8').split('\n').length;
+    const text = readFileSync(join(top, path), 'utf8');
+    const count = text ? text.split('\n').length - (text.endsWith('\n') ? 1 : 0) : 0;
     return new Set(Array.from({ length: count }, (_, i) => i + 1));
+}
+const SHELL_EXT = /\.(?:sh|bash|zsh)$/;
+const SHELL_SHEBANG = /^#!.*\b(?:ba|z|da)?sh\b/;
+/** A non-test shell script, which JS coverage cannot instrument: a shell extension, or an
+ * extensionless file (a git hook, a bin/ script) whose shebang names a shell. */
+function isShellScript(top, path) {
+    if (TEST_PATH.test(path))
+        return false;
+    if (SHELL_EXT.test(path))
+        return true;
+    if (extname(path) !== '')
+        return false;
+    try {
+        return SHELL_SHEBANG.test(readFileSync(join(top, path), 'utf8').split('\n', 1)[0] ?? '');
+    }
+    catch {
+        return false; // a submodule directory or an unreadable path
+    }
 }
 /** Paths whose bytes differ from what the coverage run measured, a deleted path included, so the
  * run's line numbers may not match the diff's. */
@@ -157,8 +183,10 @@ function unmeasuredMin(min, total, unmeasured, empty) {
     console.error(`--min ${min}% ${how} (${unmeasured} unmeasured files listed above).`);
     return false;
 }
-function listCapped(paths) {
-    const lines = paths.slice(0, MAX_LISTED).map((p) => `     ${p}`);
+function listCapped(paths, added) {
+    const lines = paths
+        .slice(0, MAX_LISTED)
+        .map((p) => `     ${p}${added ? ` (+${added.get(p)?.size ?? 0})` : ''}`);
     if (paths.length > MAX_LISTED)
         lines.push(`     …and ${paths.length - MAX_LISTED} more`);
     return lines;
@@ -180,6 +208,10 @@ export default function coverageDiff(args, cwd) {
     catch {
         const why = existsSync(file) ? 'unreadable or malformed' : 'absent';
         console.error(`🚫 ${COVERAGE_FILE} is ${why}. Produce it with \`devkit coverage-run\`, then re-run.`);
+        const marker = why === 'absent' ? readClearMarker(resolve(cwd, COVERAGE_DIR)) : null;
+        if (marker)
+            for (const line of formatClearMarker(marker, cwd))
+                console.error(line);
         return 1;
     }
     const probe = gitRunner(cwd);
@@ -212,6 +244,16 @@ export default function coverageDiff(args, cwd) {
     const untracked = nulList(run(['ls-files', '-z', '--others', '--exclude-standard']).stdout).filter(reported);
     for (const path of untracked)
         added.set(path, allLines(top, path));
+    const isShell = (p) => isShellScript(top, p);
+    const shellAdded = addedProductionLines(top, isShell, [mb.sha]);
+    const untrackedShell = nulList(run(['ls-files', '-z', '--others', '--exclude-standard']).stdout).filter(isShell);
+    for (const path of untrackedShell)
+        shellAdded.set(path, allLines(top, path));
+    for (const [path, lines] of shellAdded)
+        if (!lines.size)
+            shellAdded.delete(path);
+    const shell = [...shellAdded.keys()].sort();
+    const shellLines = [...shellAdded.values()].reduce((n, l) => n + l.size, 0);
     const rows = [];
     const notMeasured = [];
     for (const [path, lines] of added) {
@@ -237,13 +279,22 @@ export default function coverageDiff(args, cwd) {
         const missing = r.uncovered.length ? `   uncovered: ${lineRanges(r.uncovered)}` : '';
         console.log(`  ${`${r.covered}/${r.total}`.padStart(9)}  ${pct(r.covered, r.total).padStart(6)}  ${r.path}${missing}`);
     }
-    if (total === 0)
+    if (total === 0 && notMeasured.length + shell.length === 0)
         console.log('  no executable added lines in measured files.');
+    else if (total === 0)
+        console.log('  no measured added lines — see the unmeasured files below.');
     else
         console.log(`Total: ${covered}/${total} added executable lines covered (${pct(covered, total)}).`);
     if (notMeasured.length) {
         console.log(`Not measured — changed source files absent from ${COVERAGE_FILE}:`);
-        for (const l of listCapped(notMeasured.sort()))
+        for (const l of listCapped(notMeasured.sort(), added))
+            console.log(l);
+        for (const l of changedRunHint(mb.sha))
+            console.log(l);
+    }
+    if (shell.length) {
+        console.log(`Not measurable — ${shellLines} added lines in ${shell.length} shell files, which JS coverage cannot instrument:`);
+        for (const l of listCapped(shell, shellAdded))
             console.log(l);
     }
     if (!bound) {
@@ -266,6 +317,9 @@ export default function coverageDiff(args, cwd) {
     const belowMin = opts.min !== undefined && total > 0 && (covered / total) * 100 < opts.min;
     if (belowMin) {
         console.error(`🚫 Added-line coverage ${pct(covered, total)} is below --min ${opts.min}%.`);
+    }
+    if (opts.min !== undefined && total === 0 && notMeasured.length === 0 && shell.length) {
+        console.error(`--min ${opts.min} not applied: no measured added lines (${shell.length} unmeasured files listed above).`);
     }
     const unmeasuredFails = opts.min !== undefined &&
         notMeasured.length > 0 &&

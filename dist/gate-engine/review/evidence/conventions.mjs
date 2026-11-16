@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { normalizeLineEndings, VERDICT_LINE_RE } from '../contracts/response.mjs';
+import { normalizeLineEndings, VERDICT_DRESSING, VERDICT_LINE_RE } from '../contracts/response.mjs';
 const CONVENTION_VIOLATION_START_RE = /^[\s>*#-]*\**VIOLATION\**\s*:\s*(.*)$/i;
 const CONVENTION_OFFENDING_START_RE = /^[\s>*#-]*\**OFFENDING\**\s*:\s*(.*)$/i;
-const CONVENTION_CLOSER_RE = /^[\s>*#-]*\**(VERDICT|NO_VIOLATIONS)\b/i;
+const CONVENTION_CLOSER_RE = new RegExp(String.raw `^${VERDICT_DRESSING}\**(VERDICT|NO_VIOLATIONS)\b`, 'iu');
 const CODE_FENCE_RE = /^\s*```/;
 const CITATION_SEPARATOR_RE = /(?:^|\s)[—–-]\s/g;
 const TERMINAL_LINE_RE = /:(\d+)(?:[-–]\d+)?\s*$/;

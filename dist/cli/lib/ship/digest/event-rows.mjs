@@ -1,6 +1,8 @@
 // One module-scope classifier per gate event type, so summarise() only dispatches and attributes.
 import { blockingFindings, judgeFinding } from './blocking.mjs';
-import { count, oneLine, textOf } from './fields.mjs';
+import { baseDriftDetail, earlierDiffDetail, partialPacket, partialPacketDetail } from './cache-detail.mjs';
+import { oneLine, textOf } from './fields.mjs';
+import { SKIP_CONTROLS } from './skip-controls.mjs';
 /** The parallel judge's gate name — a `gate_result` row, not a fleet `review_result`. */
 export const COMPLETENESS = 'completeness';
 /** Never the bare word "transient": it reads as "a retry clears it", and a usage lock wore it. */
@@ -8,9 +10,13 @@ const UNCLASSIFIED = 'judge failed, cause unclassified — read the guard-judge 
 /** Causes whose judge_exec ledger row holds the words that explain them; a response-contract
  *  inconclusive is a judge that answered, so an earlier failed spawn's words would mislead. */
 const OUTAGE_CAUSES = new Set(['outage', 'rate-limited', 'transient', 'unauthenticated', 'absent']);
-const PATHS_SHOWN = 3;
 /** Sorts one event into its bucket. A switch, not a keyed lookup: a sink row's `type` is untrusted. */
 export function classify(e, b) {
+    const skip = bypassRow(e);
+    if (skip) {
+        b.bypassed.push(skip);
+        return;
+    }
     switch (e.type) {
         case 'review_result':
             return reviewResult(e, b);
@@ -92,7 +98,7 @@ function advisoryRow(e) {
         gate: e.gate ?? 'unknown',
         state: e.status === 'could_not_run' ? 'could-not-run' : 'finding',
         blocking: false,
-        detail: oneLine(e.detail),
+        detail: textOf(e.detail), // whole: groupAdvisories reads it, then cuts it to one line
         advisory: true,
     };
 }
@@ -125,44 +131,26 @@ const unverifiedRow = (gate, detail) => ({
 });
 /** A cache_hit's gate label; completeness's intent key reports under the judge's own gate name. */
 const cacheGate = (e) => e.judge === `review:${COMPLETENESS}` ? COMPLETENESS : (e.judge ?? 'unknown');
-/** A PASS reused across an earlier diff, or ''. `=== false`: an absent field covers it. */
-const earlierDiffDetail = (e) => e.diff_matches === false
-    ? 'cached PASS judged an earlier diff — this diff was not re-judged'
-    : '';
-/** A sink row's judged base, short — JSON.stringify never invokes a row-supplied toString, so a
- * malformed value (`{"toString":1}`) degrades to "an earlier base" instead of throwing. */
-const shortJudgedBase = (sha) => /^"([0-9a-f]{7,64})"$/.exec(JSON.stringify(sha ?? null))?.[1].slice(0, 12) ?? 'an earlier base';
-/** A PASS judged on an earlier base whose reviewed paths moved, or ''. An absent base_state
- * (non-review emitters) or 'moved-clear' stays a ✓. */
-function baseDriftDetail(e) {
-    if (e.base_state === 'unknown')
-        return 'cached PASS whose judged base is unknown — not re-judged against this base';
-    if (e.base_state === 'moved-overlap')
-        return `cached PASS judged against ${shortJudgedBase(e.judged_base_sha)} — reviewed paths changed on the base since; not re-judged`;
-    return '';
-}
-function partialPacket(e) {
-    return count(e.evidence_omitted_files) > 0 || count(e.evidence_truncated_files) > 0;
-}
-/** ` — <label>: a, b, c, …` over an untrusted path list, or '' when it holds no usable path. */
-function namedPaths(label, list, total) {
-    const paths = (Array.isArray(list) ? list : []).map(textOf).filter(Boolean);
-    const more = paths.length > PATHS_SHOWN || total > PATHS_SHOWN ? ', …' : '';
-    return paths.length
-        ? ` — ${label}: ${paths
-            .slice(0, PATHS_SHOWN)
-            .map((p) => oneLine(p))
-            .join(', ')}${more}`
-        : '';
-}
-function partialPacketDetail(e) {
-    const omitted = count(e.evidence_omitted_files);
-    const truncated = count(e.evidence_truncated_files);
-    const lensName = textOf(e.evidence_lens);
-    const lens = lensName ? ` (${oneLine(lensName)} lens)` : '';
-    const total = count(e.evidence_file_count) ? `/${count(e.evidence_file_count)}` : '';
-    const named = namedPaths('not shown', e.evidence_omitted_paths, omitted) +
-        namedPaths('truncated', e.evidence_truncated_paths, truncated);
-    const cached = e.type === 'cache_hit' ? 'cached ' : '';
-    return `${cached}PASS over an incomplete packet${lens}: ${omitted}${total} file(s) omitted, ${truncated} truncated${named}`;
+/** No-LLM mode skips the whole fleet, and either the env flag or the repo's config can set it. */
+const NO_LLM = 'GUARD_DECISION_NO_LLM or noLlm config';
+/** An env-authorized skip, or a PASS a bypass flag produced: it verified nothing and never blocks. */
+function bypassRow(e) {
+    const skip = e.type === 'review_skipped';
+    const reason = textOf(e.reason);
+    const flag = skip
+        ? reason === 'no_llm'
+            ? NO_LLM
+            : SKIP_CONTROLS.get(reason)
+        : e.type === 'gate_result' && e.status === 'pass' && textOf(e.bypass);
+    if (!flag)
+        return undefined;
+    const reviewer = textOf(e.reviewer);
+    const gate = skip ? (reviewer ? `review:${reviewer}` : 'review') : (e.gate ?? 'unknown');
+    return {
+        gate,
+        state: 'could-not-run',
+        blocking: false,
+        detail: `bypassed via ${flag} — verified nothing`,
+        skipped: true,
+    };
 }

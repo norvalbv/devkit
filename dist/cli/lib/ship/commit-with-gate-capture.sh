@@ -66,6 +66,19 @@ _ship_dry_gates_command() {
   printf '%s\n' "$cmd"
 }
 
+# Usage:  ship_decision_smell_advisory <worktree> <root>   (narration; call as an OR-list)
+# Prints the decisions gate's regex smells before the chain; commit_with_gate_capture repeats them last.
+ship_decision_smell_advisory() {
+  SHIP_DECISION_ADVISORY=""
+  grep -qs 'guard-decisions' "$(gate_worktree_pre_commit "$1" "$2")" "$1/.husky/pre-commit" || return 0
+  local mod out
+  mod="$(dirname "${BASH_SOURCE[0]}")/preflight/decision-smells.mts"
+  [ -f "$mod" ] || mod="$(dirname "${BASH_SOURCE[0]}")/preflight/decision-smells.mjs"
+  out=$(cd "$1" && node "$mod" "$2" 2>/dev/null) || out=""
+  SHIP_DECISION_ADVISORY=$out
+  [ -z "$out" ] || printf '%s\n' "$out" >&2
+}
+
 # Usage:  commit_with_gate_capture <worktree> <root> <branch> <title> <body>
 commit_with_gate_capture() {
   local wt="$1" root="$2" br="$3" title="$4" body="$5"
@@ -77,7 +90,9 @@ commit_with_gate_capture() {
   local log="$root/.devkit/last-ship-gates-$branch_safe.log"
   local progress="$root/.devkit/review-progress-$branch_safe.json"
   . "$(dirname "${BASH_SOURCE[0]}")/run-gates-with-capture.sh"
-  . "$(dirname "${BASH_SOURCE[0]}")/telemetry.sh"
+  # Synchronous, never `&`: the digest reads back to ship_attempt, and a ship's stdout is the PR URL.
+  local ship_event; ship_event="$(dirname "${BASH_SOURCE[0]}")/ship-intent-event.mts"
+  [ -f "$ship_event" ] || ship_event="$(dirname "${BASH_SOURCE[0]}")/ship-intent-event.mjs"
   . "$(dirname "${BASH_SOURCE[0]}")/prepare-gate-worktree.sh"
   # Both callers already source this, but the object probe below is this function's own evidence —
   # don't inherit it by luck of call order.
@@ -88,7 +103,7 @@ commit_with_gate_capture() {
   # deterministic/decisions/review events (emitted from the node gates via gate-events.mts) and the
   # ship_attempt/ship_result lines below all carry the same ship_id and correlate. Off-ship the env
   # is unset and nothing is emitted. A downstream reader (the usage tracker's collector) tail-ingests
-  # it; every write is `>> … || true` so telemetry can never fail the ship.
+  # it; every write ends `|| true` so telemetry can never fail the ship.
   export DEVKIT_GATE_EVENTS="${DEVKIT_GATE_EVENTS:-$HOME/.devkit/telemetry/gate-events.jsonl}"
   export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${br//\//-}-$$-$(date +%s)")}"
   mkdir -p "$(dirname "$DEVKIT_GATE_EVENTS")" 2>/dev/null || true
@@ -134,20 +149,22 @@ commit_with_gate_capture() {
 
   # Start the attempt before hook resolution so a fail-closed setup error still has a terminal
   # ship_result row instead of disappearing from telemetry.
-  # resumed/body_bytes: the shell-safe fields of the retry-cost story (bare JSON bool/number — no
-  # escaping needed). The body ITSELF rides the node-side ship_intent event, which can JSON-escape
-  # arbitrary bytes; a printf %s of the body here could tear the line on a quote.
-  local dur_start resumed_json body_bytes
+  # The PR body itself rides the node-side ship_intent event; this row carries only its byte count.
+  local dur_start start_utc resumed_json body_bytes queued_arg="" attempt_split=""
   dur_start=$(date +%s)
+  start_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   resumed_json=false; [ "${DEVKIT_SHIP_RESUMED:-0}" = "1" ] && resumed_json=true
   body_bytes=$(printf '%s' "$body" | wc -c | tr -d ' ')
+  # Set by `devkit ship` after its queue slot is granted; absent when this shell runs on its own.
+  case "${DEVKIT_SHIP_QUEUED_S:-x}${DEVKIT_SHIP_GRANTED_AT:-x}" in
+    *[!0-9]*) ;;
+    *)
+      queued_arg="queued_s=$((10#$DEVKIT_SHIP_QUEUED_S))"
+      attempt_split="queued $((10#$DEVKIT_SHIP_QUEUED_S))s · setup $((dur_start - 10#$DEVKIT_SHIP_GRANTED_AT))s · " ;;
+  esac
   if [ "$ship_dry_gates" -eq 0 ]; then
-    printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s"%s,"mode":"%s","resumed":%s,"body_bytes":%d,"log_path":"%s","ts":"%s"}\n' \
-      "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
-      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$(devkit_parent_session_json)" \
-      "$(devkit_json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$resumed_json" "$body_bytes" \
-      "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
+    node "$ship_event" attempt "mode=${DEVKIT_SHIP_MODE:-ship}" "resumed=$resumed_json" \
+      "body_bytes=$body_bytes" "log_path=$ship_log" "root=$root" ${queued_arg:+"$queued_arg"} >/dev/null 2>&1 || true
   fi
 
   mkdir -p "$(dirname "$log")" 2>/dev/null || true
@@ -172,6 +189,12 @@ commit_with_gate_capture() {
     hook_setup_failed=1
     rc=1
   fi
+
+  # The worktree's untracked inputs before any gate or hook dir writes there; base attribution
+  # links exactly these. Narration plumbing: silent, and absent (never empty) when it fails.
+  local snap
+  { snap=$(git -C "$wt" rev-parse --path-format=absolute --git-path devkit-pre-gate-untracked) &&
+    rm -f "$snap" && git -C "$wt" ls-files --others --directory -z > "$snap.tmp" && mv -f "$snap.tmp" "$snap"; } 2>/dev/null || true
 
   local ship_hook_rel="" ship_hook_marker source_hook source_name
   ship_hook_marker="devkit-ship-hook-start:$ship_id_safe"
@@ -328,9 +351,8 @@ SHIP_HOOK_WRAPPER
   fi
 
   # Ship result telemetry — the outcome + a coarse blocked_gate tag derived from the captured log
-  # (the per-gate/per-reviewer events carry the precise cause). Chain order is deterministic →
-  # decisions → review, and each hook step is `|| exit`, so exactly one gate blocks; grep in that
-  # order attributes it.
+  # (the per-gate/per-reviewer events carry the precise cause). Chain order is cheap gates (one
+  # flush line) → decisions → review, and each AI step is `|| exit`; grep in that order attributes it.
   local blocked_json timed_out shell_gate reaped_json=false
   [ "${RUN_GATES_REAPED:-0}" != 1 ] || reaped_json=true
   if [ -n "$blocked_override" ]; then blocked_json=$blocked_override; timed_out=false
@@ -349,12 +371,14 @@ SHIP_HOOK_WRAPPER
   # is the one that dies, so a grep would blame it for a failure it did not cause.
   elif [ "$staged_missing" -eq 1 ]; then blocked_json='"staged_objects_missing"'; timed_out=false
   # sc-2753: guard-comments aggregates in the deterministic stage; alone, it keeps its own name.
-  elif grep -qE '✗ deterministic gates failed: guard-comments(\([^)]*\))?$' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
+  elif grep -qE '✗ deterministic gates failed: guard-comments(\([^)]*\))?$' "$log" 2>/dev/null &&
+    ! grep -qE '✗ commit blocked before the AI gates:.* (fallow|[a-z]+-overlay)( |$)' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
   elif grep -q '✗ deterministic gates failed' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
   # A hook-shell gate (fallow, the eslint overlay) keeps its own token, as comments does.
   # Whole lines only (a finding may quote one); LC_ALL=C because BSD sed aborts on invalid UTF-8.
   elif shell_gate=$(LC_ALL=C sed -n 's/^✗ staged gate blocked: \([a-z-]*\) (its report is above)$/\1/p' "$log" 2>/dev/null | tail -n 1) &&
     [ -n "$shell_gate" ]; then blocked_json="\"$shell_gate\""; timed_out=false
+  elif grep -q '✗ commit blocked before the AI gates' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
   elif grep -qE 'decision smells:|^ *guard-decisions: (judge unavailable|unexpected exit)' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
   elif grep -q 'guard-comments: .* need a decision' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
   # Completeness and the fail-closed judge lines block the review family too (its gate_result family).
@@ -364,12 +388,12 @@ SHIP_HOOK_WRAPPER
   fi
   # The caller names this token as its terminal cause, but only where it exits on this status.
   SHIP_BLOCKED_GATE=${blocked_json//\"/}
+  local gates_s end_utc
+  gates_s=$(( $(date +%s) - dur_start ))
+  end_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   if [ "$ship_dry_gates" -eq 0 ]; then
-    printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s"%s,"exit_code":%d,"timed_out":%s,"reaped":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
-      "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
-      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$(devkit_parent_session_json)" "$rc" "$timed_out" "$reaped_json" "$blocked_json" \
-      "$(( $(date +%s) - dur_start ))" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
+    node "$ship_event" result "exit_code=$rc" "timed_out=$timed_out" "reaped=$reaped_json" "root=$root" "blocked_gate=${blocked_json//\"/}" \
+      "duration_s=$gates_s" "log_path=$ship_log" >/dev/null 2>&1 || true
   fi
   # The merge verdict reads each PR commit's bypass record by the sha this passing run produced.
   if [ "$rc" -eq 0 ] && [ "$ship_dry_gates" -eq 0 ]; then
@@ -480,6 +504,13 @@ SHIP_HOOK_WRAPPER
     esac
   fi
 
+  # One timing line per attempt, every outcome, above the digest so a tail read still ends there.
+  local attempt_outcome="${blocked_json//\"/}"
+  [ "$attempt_outcome" != null ] || attempt_outcome=pass
+  printf 'attempt %s %s: %sgates %ss · %s → %s · outcome=%s · log %s\n' \
+    "$DEVKIT_SHIP_ID" "$br" "$attempt_split" "$gates_s" "$start_utc" "$end_utc" "$attempt_outcome" "$ship_log" \
+    | tee -a "$log" "$ship_log" >&2 2>/dev/null || true
+
   # sc-2488. ONE call site, below every terminal arm above, so a tail-based read — the read the
   # `--resume` line invites — sees the gates that found something but did NOT stop this run. The
   # parallel completeness judge is the case that motivated it: the fleet blocks first, the hook
@@ -512,6 +543,30 @@ SHIP_HOOK_WRAPPER
   # Name the per-attempt archive: $log is the per-branch file the next attempt overwrites.
   if [ "$rc" -ne 0 ] && [ "$ship_dry_gates" -eq 0 ] && [ -s "$ship_log" ]; then
     echo "ship: this attempt's gate log is kept at $ship_log (ship id ${DEVKIT_SHIP_ID:-}); $log is overwritten by the next attempt." >&2 || true
+  fi
+
+  # A failed config extraGates command is re-run at the cut commit: one line when it fails there too.
+  # Narration under the digest's rules above: after $rc, errexit-suppressed, silent when unsure.
+  if [ "$blocked_json" = '"deterministic"' ]; then
+    local base_tool base_text=""
+    base_tool="$(dirname "${BASH_SOURCE[0]}")/digest/base-attribution.mts"
+    [ -f "$base_tool" ] || base_tool="${base_tool%.mts}.mjs"
+    if [ -f "$base_tool" ]; then
+      base_text="$(node "$base_tool" "$wt" "${ship_log%.log}" 2>/dev/null)" || base_text=""
+    fi
+    [ -z "$base_text" ] || printf '%s\n' "$base_text" | tee -a "$log" "$ship_log" >&2 2>/dev/null || true
+  fi
+
+  # A failed config extraGates command is re-run at the cut commit: one line when it fails there too.
+  # Narration under the digest's rules above: after $rc, errexit-suppressed, silent when unsure.
+  if [ "$blocked_json" = '"deterministic"' ]; then
+    local base_tool base_text=""
+    base_tool="$(dirname "${BASH_SOURCE[0]}")/digest/base-attribution.mts"
+    [ -f "$base_tool" ] || base_tool="${base_tool%.mts}.mjs"
+    if [ -f "$base_tool" ]; then
+      base_text="$(node "$base_tool" "$wt" "${ship_log%.log}" 2>/dev/null)" || base_text=""
+    fi
+    [ -z "$base_text" ] || printf '%s\n' "$base_text" | tee -a "$log" "$ship_log" >&2 2>/dev/null || true
   fi
 
   # sc-2299. The path brief again, next to the verdict. The resume banner already printed it in FULL,
@@ -558,9 +613,15 @@ SHIP_HOOK_WRAPPER
       fi
       # Last line on purpose: the preflight printed this at the top, and a blocked ship is read by tailing.
       [ -z "${SHIP_JUDGE_REMEDY:-}" ] ||
-        echo "ship: the judge preflight found a dark judge — every uncached reviewer will fail closed on the retry. To ship inside this window, $SHIP_JUDGE_REMEDY."
+        echo "ship: the judge preflight found a dark judge — every uncached reviewer will fail closed on the retry. $SHIP_JUDGE_REMEDY"
     } >&2 || true
     ;;
+  esac
+  # The smell advisory again, last, when the decisions gate never ran; a timeout or signal keeps its own guidance last.
+  case "$rc" in
+    124|129|130|131|137|143) ;;
+    *) { [ -z "${SHIP_DECISION_ADVISORY:-}" ] || grep -qE 'decision-gate: |decision smells' "$log" 2>/dev/null ||
+      printf '%s\n' "$SHIP_DECISION_ADVISORY"; } >&2 || true ;;
   esac
   unset DEVKIT_SHIP_DRY_GATES_CMD
   return "$rc"

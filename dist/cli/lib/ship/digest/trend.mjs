@@ -1,11 +1,13 @@
-/** sc-2165: names a reviewer whose blocks on this branch are not converging. Narration only — no exit,
+/** Names a reviewer or file whose blocks on this branch are not converging. Narration only — no exit,
  * never fed to a reviewer; why it exists: decision ship-gates-converge-not-restart. */
 import { z } from 'zod';
+import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mjs';
+import { issueLocations } from '../../../../gate-engine/review/contracts/response.mjs';
 import { scanBackward } from './tail.mjs';
 /** Below this many consecutive blocks a re-ship is ordinary iteration, not a loop. */
 const MIN_STREAK = 3;
 /** How far back one branch is walked; also bounds the backward read. */
-const HISTORY_CAP = 20;
+export const HISTORY_CAP = 20;
 /** Counts shown before the series is elided at its old end. */
 const SHOWN = 8;
 // Untrusted JSONL: a wrong-typed field degrades to absent instead of discarding the whole row.
@@ -25,8 +27,15 @@ const trendRowSchema = z.object({
     judge: text,
     repo: text,
     branch: text,
+    gate: text,
+    detail: text,
+    transcript_ref: text,
+    ts: text,
+    devkit_version: text,
     exit_code: z.number().optional().catch(undefined),
     items: z.array(z.unknown()).optional().catch(undefined),
+    // 'files' = each item's lens is a repo path (commit-guard); 'items' = a lens is a bug class.
+    item_artifact: text,
 });
 /** The I/O boundary: one sink line in, a row carrying a ship_id or nothing. */
 export function parseTrendRow(line) {
@@ -38,11 +47,34 @@ export function parseTrendRow(line) {
         return undefined;
     }
 }
-/** Rows a ship writes outside its own attempt; inside a killed open attempt they would read as foreign. */
-const PRE_MARKER = new Set(['ship_intent', 'judge_preflight', 'ship_end', 'ship_evidence']);
+/** Rows that are no round's: a ship's rows outside its own attempt and this module's own
+ * trend_suppressed event. Inside an open attempt they would read as foreign. */
+const PRE_MARKER = new Set([
+    'ship_intent',
+    'judge_preflight',
+    'ship_end',
+    'ship_evidence',
+    'trend_suppressed',
+]);
+/** Records why the history is ambiguous, for a caller that asked, and bails like before. */
+function bail(why, reason, shipId) {
+    if (why)
+        why.ambiguity = { reason, shipId };
+    return null;
+}
+const isKeyed = (row, key) => row.ship_id === key.shipId && row.repo === key.repo && row.branch === key.branch;
+/** Index of the last `type` row this ship wrote on its branch, or -1. */
+function lastKeyed(rows, type, key) {
+    for (let i = rows.length - 1; i >= 0; i--) {
+        if (rows[i].type === type && isKeyed(rows[i], key))
+            return i;
+    }
+    return -1;
+}
+const isReviewFail = (row) => row.type === 'review_result' && row.status === 'fail' && !!row.reviewer;
 /** This branch's rows → its attempts in order, or null when two overlap (completion order is then not
  * round order). Markers open attempts: an inherited DEVKIT_SHIP_ID can span several. */
-function attemptsOf(rows, key) {
+export function attemptsOf(rows, key, why) {
     const done = [];
     let current;
     const displaced = new Set();
@@ -51,11 +83,11 @@ function attemptsOf(rows, key) {
             continue;
         // A displaced attempt that writes again was not killed: it overlapped, so rounds are out of order.
         if (displaced.has(row.ship_id))
-            return null;
+            return bail(why, 'displaced_write', row.ship_id);
         if (row.type === 'ship_attempt') {
             // Same id while open: an inherited id cannot tell a kill from an overlap. A new id: the open one died.
             if (current?.shipId === row.ship_id)
-                return null;
+                return bail(why, 'same_id_marker', row.ship_id);
             if (current)
                 displaced.add(current.shipId);
             current = { shipId: row.ship_id, rows: [] };
@@ -65,7 +97,7 @@ function attemptsOf(rows, key) {
             continue;
         }
         else if (row.ship_id !== current.shipId) {
-            return null;
+            return bail(why, 'foreign_row', row.ship_id);
         }
         else if (row.type === 'ship_result') {
             current.result = row;
@@ -122,12 +154,19 @@ export function issuesUnder(row, lens) {
     }
     return counts.length === 1 ? counts[0] : null;
 }
-/** This branch's finished attempts up to the current one, or null when the ship cannot be keyed. */
-function branchAttempts(rows, key) {
+/** Rows through this ship's last result: later rows did not exist when its live digest ran, so a
+ * replay must not let them silence it. Null when the ship cannot be keyed or has no result. */
+function asOfResult(rows, key) {
     // Never key on an empty repo or branch: that would blend every unkeyed ship on the machine.
     if (!key.shipId || !key.repo || !key.branch)
         return null;
-    const all = attemptsOf(rows, key);
+    const end = lastKeyed(rows, 'ship_result', key);
+    return end < 0 ? null : rows.slice(0, end + 1);
+}
+/** This branch's finished attempts up to the current one, or null when the ship cannot be keyed. */
+export function branchAttempts(rows, key) {
+    const window = asOfResult(rows, key);
+    const all = window && attemptsOf(window, key);
     if (!all)
         return null;
     const current = all.filter((a) => a.shipId === key.shipId).pop();
@@ -156,24 +195,122 @@ function stalled(counts) {
     const earlier = counts.slice(0, -1).filter((n) => n !== null);
     return latest !== null && earlier.length > 0 && latest >= Math.min(...earlier);
 }
+const LEADING_DOT_SLASH_RE = /^\.\//;
+/** Files a verdict row's blocking findings cite; null when its vector is absent, spilled or
+ * unparseable. A 'files' lens is the path itself; otherwise each issue's first `file:line`. */
+function filesOf(row) {
+    if (!row.items)
+        return null;
+    const files = [];
+    for (const raw of row.items) {
+        const item = lensSchema.safeParse(raw);
+        if (!item.success)
+            return null;
+        if (!isBlocking(item.data))
+            continue;
+        const cited = row.item_artifact === 'files'
+            ? [item.data.lens]
+            : (item.data.issues ?? []).map((issue) => issueLocations(issue)[0]?.file);
+        for (const file of cited)
+            if (file)
+                files.push(file.replace(LEADING_DOT_SLASH_RE, ''));
+    }
+    return files;
+}
+/** Every reviewer's fail verdict on the attempt, and whether any reviewer reached a verdict at all. */
+function verdictsOf(a) {
+    const names = new Set(a.rows.filter((r) => r.type === 'review_result').map((r) => r.reviewer));
+    const fails = [...names].flatMap((name) => {
+        const verdict = name ? verdictOf(a, name) : undefined;
+        return verdict !== 'cached' && verdict?.status === 'fail' ? [verdict] : [];
+    });
+    const reviewed = a.rows.some((r) => (r.type === 'cache_hit' && r.judge?.startsWith('review:')) ||
+        (r.type === 'review_result' && r.status === 'pass'));
+    return { fails, reviewed };
+}
+/** The trailing run of review-blocked rounds, any reviewer, that all block on one file. Same stops
+ * as streakOf; a round whose files are unknown ends the run rather than bridging it. */
+function handoffOf(mine) {
+    const rounds = [];
+    let shared;
+    for (let i = mine.length - 1; i >= 0 && rounds.length < HISTORY_CAP; i--) {
+        if (mine[i].result?.exit_code === 0)
+            break;
+        const { fails, reviewed } = verdictsOf(mine[i]);
+        if (!fails.length) {
+            if (reviewed)
+                break;
+            continue;
+        }
+        const files = fails.map(filesOf);
+        if (files.includes(null))
+            break;
+        const cited = files.flatMap((f) => f ?? []);
+        // Exact repo paths only: a bare `index.ts` cannot say which directory's file recurred.
+        const next = (shared ?? cited).filter((f) => cited.includes(f));
+        if (!next.length)
+            break;
+        shared = next;
+        rounds.unshift(fails);
+    }
+    const counts = rounds.map((fails) => fails.reduce((sum, row) => {
+        const n = countOf(row);
+        return sum === null || n === null ? null : sum + n;
+    }, 0));
+    if (!shared || rounds.length < MIN_STREAK || !stalled(counts))
+        return undefined;
+    const reviewers = [...new Set(rounds.flat().map((r) => r.reviewer ?? ''))];
+    return {
+        reviewer: 'review',
+        counts,
+        file: shared.reduce((a, b) => (b.length > a.length ? b : a)),
+        reviewers,
+    };
+}
 /** Pure: sink rows → the streaks worth naming for the reviewers that blocked THIS ship. */
 export function summariseTrend(rows, key) {
     const keyed = branchAttempts(rows, key);
     if (!keyed)
         return [];
-    const blocking = new Set(keyed.current.rows
-        .filter((r) => r.type === 'review_result' && r.status === 'fail' && r.reviewer)
-        .map((r) => r.reviewer ?? ''));
+    const blocking = new Set(keyed.current.rows.filter(isReviewFail).map((r) => r.reviewer ?? ''));
     const lines = [];
+    let ownStreak = false;
     for (const reviewer of blocking) {
         const streak = streakOf(keyed.mine, reviewer);
         if (streak.length < MIN_STREAK)
             continue;
+        ownStreak = true;
         const counts = streak.map(countOf);
         if (stalled(counts))
             lines.push({ reviewer, counts });
     }
-    return lines;
+    // A reviewer with its own streak already judged convergence; the cross-reviewer line never overrides it.
+    const handoff = blocking.size && !ownStreak ? handoffOf(keyed.mine) : undefined;
+    return handoff ? [...lines, handoff] : lines;
+}
+/** The ambiguity that silenced this ship's trend, when its own current attempt blocked on review. */
+export function trendSuppression(rows, key) {
+    const window = asOfResult(rows, key);
+    const why = {};
+    if (!window || attemptsOf(window, key, why))
+        return undefined;
+    const start = lastKeyed(window, 'ship_attempt', key);
+    const blocked = start >= 0 && window.slice(start).some((r) => isKeyed(r, key) && isReviewFail(r));
+    return blocked ? why.ambiguity : undefined;
+}
+/** The digest's trend text. A live ship whose line an ambiguity hid also records why, unprinted. */
+export function trendNarration(rows, key) {
+    // Only the ship itself: a replay of a past id must not write rows stamped with the replayer's run.
+    const live = process.env.DEVKIT_SHIP_ID === key.shipId;
+    const suppressed = live ? trendSuppression(rows, key) : undefined;
+    if (suppressed) {
+        emitGateEvent({
+            type: 'trend_suppressed',
+            reason: suppressed.reason,
+            offending_ship_id: suppressed.shipId,
+        });
+    }
+    return renderTrend(summariseTrend(rows, key));
 }
 /** The newest HISTORY_CAP attempts of this ship's branch, read backward. Never throws. */
 export function readBranchHistory(sink, key) {
@@ -181,16 +318,54 @@ export function readBranchHistory(sink, key) {
         return [];
     return scanBackward(sink, parseTrendRow, (kept) => (branchAttempts(kept, key)?.mine.length ?? 0) > HISTORY_CAP);
 }
+const REMEDY = '     The blocking-finding count is not falling: fix and test the whole class, cut or narrow the change if the failing code is not an acceptance criterion, or use the waive / skip remedies printed above.';
+const RELEASE_VERSION = /^\d+\.\d+\.\d+$/;
+const COMPARE_URL = 'https://github.com/norvalbv/devkit/compare';
+/** The newest row at or before `end` that matches, walking backward. ES2022 has no findLast. */
+function lastBefore(rows, end, match) {
+    for (let i = end; i >= 0; i--)
+        if (match(rows[i]))
+            return i;
+    return -1;
+}
+/** Pure: one line when THIS blocked attempt runs a newer devkit release than the branch's previous
+ * attempt (killed ones included), else ''. Factual only: it never says the upgrade caused the block. */
+export function renderVersionChange(rows, key) {
+    if (!key.shipId || !key.repo || !key.branch)
+        return '';
+    const mine = rows.filter((r) => r.repo === key.repo && r.branch === key.branch);
+    const isAttempt = (r) => r.type === 'ship_attempt';
+    const at = lastBefore(mine, mine.length - 1, (r) => isAttempt(r) && r.ship_id === key.shipId);
+    const result = lastBefore(mine, mine.length - 1, (r) => r.type === 'ship_result' && r.ship_id === key.shipId);
+    const prior = lastBefore(mine, at - 1, (r) => isAttempt(r) && r.ship_id !== key.shipId);
+    // A result row before `at` belongs to an earlier attempt that reused this ship id.
+    if (at < 0 || prior < 0 || result < at || !mine[result].exit_code)
+        return '';
+    const from = mine[prior].devkit_version ?? '';
+    const to = mine[at].devkit_version ?? '';
+    if (!RELEASE_VERSION.test(from) || !RELEASE_VERSION.test(to))
+        return '';
+    if (to.localeCompare(from, 'en', { numeric: true }) <= 0)
+        return '';
+    return `   ↑ devkit ${from} → ${to} since this branch's last ship attempt — gate rules may differ: ${COMPARE_URL}/v${from}...v${to}`;
+}
+/** The digest's branch-history lines (stalled reviewers, then a devkit upgrade), or ''. */
+export function renderBranchHistory(sink, key) {
+    const rows = readBranchHistory(sink, key);
+    return [trendNarration(rows, key), renderVersionChange(rows, key)]
+        .filter(Boolean)
+        .join('\n');
+}
 /** Pure: streaks → at most two lines per reviewer, or '' for silence. */
 export function renderTrend(lines) {
     return lines
-        .map(({ reviewer, counts }) => {
+        .map(({ reviewer, counts, file, reviewers }) => {
         const shown = counts.slice(-SHOWN).map((n) => (n === null ? '?' : `${n}`));
         const series = `${counts.length > SHOWN ? '… → ' : ''}${shown.join(' → ')}`;
-        return [
-            `   ↻ ${reviewer}: ${counts.length} blocking rounds on this branch with no pass between — ${series} findings, not converging`,
-            '     The blocking-finding count is not falling: fix and test the whole class, or use the waive / skip remedies printed above.',
-        ].join('\n');
+        const headline = file
+            ? `   ↻ ${reviewer}: ${file} drew blocking findings in ${counts.length} rounds running across reviewers (${reviewers?.join(', ')}) — ${series} blocking findings per round, not converging`
+            : `   ↻ ${reviewer}: ${counts.length} blocking rounds on this branch with no pass between — ${series} findings, not converging`;
+        return [headline, REMEDY].join('\n');
     })
         .join('\n');
 }

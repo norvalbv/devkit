@@ -105,7 +105,8 @@ function scrubRoots(value, checkoutRoot, dependencySource) {
     }
     return scrubbed;
 }
-function boundedText(value, limit, checkoutRoot, dependencySource) {
+/** `value` on one line: ANSI stripped, checkout roots scrubbed, clipped to `limit` characters. */
+export function boundedText(value, limit, checkoutRoot, dependencySource) {
     const normalized = scrubRoots(value, checkoutRoot, dependencySource).replace(/\s+/g, ' ').trim();
     return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized;
 }

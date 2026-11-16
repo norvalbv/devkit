@@ -1,60 +1,76 @@
 {
   "schemaVersion": 2,
   "kind": "hooks",
-  "devkitRef": "v0.74.0",
+  "devkitRef": "v0.75.0",
   "files": {
     "adhd-prompt-anchor.mjs": "002e1ee4dd7f10ccef97babb57b7cf0e01c76433a18b4c8be4aa04ab89288504",
     "adhd-session-start.mjs": "b5257348cb11fe85742178f43bbde30a94d7b58cb8f67281e060c875bbe8bc80",
-    "anti-slop-preflight.sh": "41ec0dc86d120ffba7064181503a2d28996bcb219e5b52315772cb38070006f0",
-    "base-drift-brief.mjs": "876c7bb066ecf687c521e836dffcc6559e26eaf9370babbeefd64dc057186c9f",
-    "base-drift-lib.mjs": "246f868d84a282227030040f5a73074cf1cc1a74cbd92066e5e0c323a2cde1aa",
+    "anti-slop-preflight.sh": "678467f96ad11dd5d9e9aed76e53222ba2f06dbe506e53764369f423274c3e94",
+    "base-drift-brief.mjs": "a298701baf5c23698248139ffacf1c94c276acbebbe9409f79082d0a1e7d0f1b",
+    "base-drift-lib.mjs": "714eff280f4525df7ef43e0497a72a840bcadd5cb5b6a63f73517c154f78cc19",
     "base-drift-session.mjs": "0032670929fb8b1702eea27e4971b1300f6cc41e3d1664be37c5ae2b7040eb02",
-    "comment-budget-preflight.mjs": "4b7fa88d977cf887f81ee45f4e2a91c19c184dfd906c372716c31bbcc8521ce5",
-    "decision-edit-guard.mjs": "2d2d76fa96e00ffbb2486a28d997b229207f5581bad89565b9b5d1761331ecab",
-    "decision-scope-brief.mjs": "1f4e85c51f885e5f1f2d164f6ff9cec5547307cda10614e7c257e23df8545ae4",
-    "prior-art-gate.mjs": "e0c67538ed9eb4e07704df6583f5c2f8089533d58b5239c8f58f1bfc89093e36"
+    "comment-budget-preflight.mjs": "c3b73144ff3b0b43dca075898146f145cbfa888a67ac39533672d20e589267e1",
+    "decision-edit-guard.mjs": "02227d7a2c837475559f0df2426517635c51685c32eed9c59c7541e927eae780",
+    "decision-scope-brief.mjs": "a87d83b1d1e6be9cbf6401b416ef6cb70ca14684c0e276ae2a11f6b28acc7ef0",
+    "edit-targets-lib.mjs": "1e94821ab479d51ac5790674741035c23d1d6d99e1b1ab69bb1c27475b404f8d",
+    "fanout-brief.mjs": "e790016244091761112f5b56e93f0a2ba47cfaf688f2707c874d754394556aa9",
+    "placement-brief.mjs": "2775b4bdd692754a1d4eff59b5db0545b5d22ff83d803c4d8936ec1b86de953d",
+    "prior-art-gate.mjs": "e4dac4e6c1734e7e7429fc634bca9be1a545da2612f7f1d054d2b0f54b99d59b",
+    "size-headroom-check.mjs": "b2a5e031698c158f312da1157aa9940a5399779c907900aae05bf0fe9582cc69"
   },
   "providers": {
     "claude": {
       "files": {
         "adhd-prompt-anchor.mjs": "002e1ee4dd7f10ccef97babb57b7cf0e01c76433a18b4c8be4aa04ab89288504",
         "adhd-session-start.mjs": "b5257348cb11fe85742178f43bbde30a94d7b58cb8f67281e060c875bbe8bc80",
-        "anti-slop-preflight.sh": "41ec0dc86d120ffba7064181503a2d28996bcb219e5b52315772cb38070006f0",
-        "base-drift-brief.mjs": "876c7bb066ecf687c521e836dffcc6559e26eaf9370babbeefd64dc057186c9f",
-        "base-drift-lib.mjs": "246f868d84a282227030040f5a73074cf1cc1a74cbd92066e5e0c323a2cde1aa",
+        "anti-slop-preflight.sh": "678467f96ad11dd5d9e9aed76e53222ba2f06dbe506e53764369f423274c3e94",
+        "base-drift-brief.mjs": "a298701baf5c23698248139ffacf1c94c276acbebbe9409f79082d0a1e7d0f1b",
+        "base-drift-lib.mjs": "714eff280f4525df7ef43e0497a72a840bcadd5cb5b6a63f73517c154f78cc19",
         "base-drift-session.mjs": "0032670929fb8b1702eea27e4971b1300f6cc41e3d1664be37c5ae2b7040eb02",
-        "comment-budget-preflight.mjs": "4b7fa88d977cf887f81ee45f4e2a91c19c184dfd906c372716c31bbcc8521ce5",
-        "decision-edit-guard.mjs": "2d2d76fa96e00ffbb2486a28d997b229207f5581bad89565b9b5d1761331ecab",
-        "decision-scope-brief.mjs": "1f4e85c51f885e5f1f2d164f6ff9cec5547307cda10614e7c257e23df8545ae4",
-        "prior-art-gate.mjs": "e0c67538ed9eb4e07704df6583f5c2f8089533d58b5239c8f58f1bfc89093e36"
+        "comment-budget-preflight.mjs": "c3b73144ff3b0b43dca075898146f145cbfa888a67ac39533672d20e589267e1",
+        "decision-edit-guard.mjs": "02227d7a2c837475559f0df2426517635c51685c32eed9c59c7541e927eae780",
+        "decision-scope-brief.mjs": "a87d83b1d1e6be9cbf6401b416ef6cb70ca14684c0e276ae2a11f6b28acc7ef0",
+        "edit-targets-lib.mjs": "1e94821ab479d51ac5790674741035c23d1d6d99e1b1ab69bb1c27475b404f8d",
+        "fanout-brief.mjs": "e790016244091761112f5b56e93f0a2ba47cfaf688f2707c874d754394556aa9",
+        "placement-brief.mjs": "2775b4bdd692754a1d4eff59b5db0545b5d22ff83d803c4d8936ec1b86de953d",
+        "prior-art-gate.mjs": "e4dac4e6c1734e7e7429fc634bca9be1a545da2612f7f1d054d2b0f54b99d59b",
+        "size-headroom-check.mjs": "b2a5e031698c158f312da1157aa9940a5399779c907900aae05bf0fe9582cc69"
       }
     },
     "codex": {
       "files": {
         "adhd-prompt-anchor.mjs": "002e1ee4dd7f10ccef97babb57b7cf0e01c76433a18b4c8be4aa04ab89288504",
         "adhd-session-start.mjs": "b5257348cb11fe85742178f43bbde30a94d7b58cb8f67281e060c875bbe8bc80",
-        "anti-slop-preflight.sh": "41ec0dc86d120ffba7064181503a2d28996bcb219e5b52315772cb38070006f0",
-        "base-drift-brief.mjs": "876c7bb066ecf687c521e836dffcc6559e26eaf9370babbeefd64dc057186c9f",
-        "base-drift-lib.mjs": "246f868d84a282227030040f5a73074cf1cc1a74cbd92066e5e0c323a2cde1aa",
+        "anti-slop-preflight.sh": "678467f96ad11dd5d9e9aed76e53222ba2f06dbe506e53764369f423274c3e94",
+        "base-drift-brief.mjs": "a298701baf5c23698248139ffacf1c94c276acbebbe9409f79082d0a1e7d0f1b",
+        "base-drift-lib.mjs": "714eff280f4525df7ef43e0497a72a840bcadd5cb5b6a63f73517c154f78cc19",
         "base-drift-session.mjs": "0032670929fb8b1702eea27e4971b1300f6cc41e3d1664be37c5ae2b7040eb02",
-        "comment-budget-preflight.mjs": "4b7fa88d977cf887f81ee45f4e2a91c19c184dfd906c372716c31bbcc8521ce5",
-        "decision-edit-guard.mjs": "2d2d76fa96e00ffbb2486a28d997b229207f5581bad89565b9b5d1761331ecab",
-        "decision-scope-brief.mjs": "1f4e85c51f885e5f1f2d164f6ff9cec5547307cda10614e7c257e23df8545ae4",
-        "prior-art-gate.mjs": "e0c67538ed9eb4e07704df6583f5c2f8089533d58b5239c8f58f1bfc89093e36"
+        "comment-budget-preflight.mjs": "c3b73144ff3b0b43dca075898146f145cbfa888a67ac39533672d20e589267e1",
+        "decision-edit-guard.mjs": "02227d7a2c837475559f0df2426517635c51685c32eed9c59c7541e927eae780",
+        "decision-scope-brief.mjs": "a87d83b1d1e6be9cbf6401b416ef6cb70ca14684c0e276ae2a11f6b28acc7ef0",
+        "edit-targets-lib.mjs": "1e94821ab479d51ac5790674741035c23d1d6d99e1b1ab69bb1c27475b404f8d",
+        "fanout-brief.mjs": "e790016244091761112f5b56e93f0a2ba47cfaf688f2707c874d754394556aa9",
+        "placement-brief.mjs": "2775b4bdd692754a1d4eff59b5db0545b5d22ff83d803c4d8936ec1b86de953d",
+        "prior-art-gate.mjs": "e4dac4e6c1734e7e7429fc634bca9be1a545da2612f7f1d054d2b0f54b99d59b",
+        "size-headroom-check.mjs": "b2a5e031698c158f312da1157aa9940a5399779c907900aae05bf0fe9582cc69"
       }
     },
     "cursor": {
       "files": {
         "adhd-prompt-anchor.mjs": "002e1ee4dd7f10ccef97babb57b7cf0e01c76433a18b4c8be4aa04ab89288504",
         "adhd-session-start.mjs": "b5257348cb11fe85742178f43bbde30a94d7b58cb8f67281e060c875bbe8bc80",
-        "anti-slop-preflight.sh": "41ec0dc86d120ffba7064181503a2d28996bcb219e5b52315772cb38070006f0",
-        "base-drift-brief.mjs": "876c7bb066ecf687c521e836dffcc6559e26eaf9370babbeefd64dc057186c9f",
-        "base-drift-lib.mjs": "246f868d84a282227030040f5a73074cf1cc1a74cbd92066e5e0c323a2cde1aa",
+        "anti-slop-preflight.sh": "678467f96ad11dd5d9e9aed76e53222ba2f06dbe506e53764369f423274c3e94",
+        "base-drift-brief.mjs": "a298701baf5c23698248139ffacf1c94c276acbebbe9409f79082d0a1e7d0f1b",
+        "base-drift-lib.mjs": "714eff280f4525df7ef43e0497a72a840bcadd5cb5b6a63f73517c154f78cc19",
         "base-drift-session.mjs": "0032670929fb8b1702eea27e4971b1300f6cc41e3d1664be37c5ae2b7040eb02",
-        "comment-budget-preflight.mjs": "4b7fa88d977cf887f81ee45f4e2a91c19c184dfd906c372716c31bbcc8521ce5",
-        "decision-edit-guard.mjs": "2d2d76fa96e00ffbb2486a28d997b229207f5581bad89565b9b5d1761331ecab",
-        "decision-scope-brief.mjs": "1f4e85c51f885e5f1f2d164f6ff9cec5547307cda10614e7c257e23df8545ae4",
-        "prior-art-gate.mjs": "e0c67538ed9eb4e07704df6583f5c2f8089533d58b5239c8f58f1bfc89093e36"
+        "comment-budget-preflight.mjs": "c3b73144ff3b0b43dca075898146f145cbfa888a67ac39533672d20e589267e1",
+        "decision-edit-guard.mjs": "02227d7a2c837475559f0df2426517635c51685c32eed9c59c7541e927eae780",
+        "decision-scope-brief.mjs": "a87d83b1d1e6be9cbf6401b416ef6cb70ca14684c0e276ae2a11f6b28acc7ef0",
+        "edit-targets-lib.mjs": "1e94821ab479d51ac5790674741035c23d1d6d99e1b1ab69bb1c27475b404f8d",
+        "fanout-brief.mjs": "e790016244091761112f5b56e93f0a2ba47cfaf688f2707c874d754394556aa9",
+        "placement-brief.mjs": "2775b4bdd692754a1d4eff59b5db0545b5d22ff83d803c4d8936ec1b86de953d",
+        "prior-art-gate.mjs": "e4dac4e6c1734e7e7429fc634bca9be1a545da2612f7f1d054d2b0f54b99d59b",
+        "size-headroom-check.mjs": "b2a5e031698c158f312da1157aa9940a5399779c907900aae05bf0fe9582cc69"
       }
     }
   }

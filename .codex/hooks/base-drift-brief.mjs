@@ -18,9 +18,20 @@
  * sc-2297's base moved twice, the second move being the one that produced the 88-file divergence.
  */
 import { claimed, commitClaim, emit, fetchReport, projectRoot, readInput } from './base-drift-lib.mjs';
+import { patchTargets } from './edit-targets-lib.mjs';
 
-const MUTATING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
+const MUTATING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'apply_patch']);
+// Claude and Cursor send `file_path`; the wider set costs nothing and covers a provider that does not.
 const PATH_KEYS = ['file_path', 'path', 'target_file', 'target_path'];
+
+/** The tool input as an object: Cursor documents some tools' `tool_input` as a JSON params string. */
+function toolInputOf(input) {
+  try {
+    return JSON.parse(input?.tool_input);
+  } catch {
+    return input?.tool_input;
+  }
+}
 
 /**
  * The first path-like field carrying real content, decoded from the harness payload.
@@ -45,7 +56,7 @@ function filePathsOf(input) {
     }
     for (const nested of Object.values(value)) walk(nested);
   };
-  walk(input?.tool_input);
+  walk(toolInputOf(input));
   return [...found];
 }
 
@@ -55,7 +66,7 @@ export function main() {
     if (!MUTATING_TOOLS.has(input?.tool_name)) return;
     // ALL of them: one MultiEdit can touch several files, and warning about only the first would
     // leave the rest of the same call silently unchecked.
-    const files = filePathsOf(input);
+    const files = [...filePathsOf(input), ...patchTargets(input)];
     if (files.length === 0) return;
     // cachedOk: the pre-edit path takes the shared TTL window, so a burst of edits costs at most one
     // fetch per window per clone rather than one per edit.

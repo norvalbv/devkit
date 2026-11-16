@@ -1,14 +1,15 @@
 // Wording for a cached or partial-packet PASS: what the reused verdict did not re-judge.
+import { STICKY_RULING } from '../../../../gate-engine/review/evidence/base-context.mjs';
 import { count, oneLine, textOf } from './fields.mjs';
 /** A sink row's judged base, short — JSON.stringify never invokes a row-supplied toString, so a
  * malformed value (`{"toString":1}`) degrades to "an earlier base" instead of throwing. */
 const shortJudgedBase = (sha) => /^"([0-9a-f]{7,64})"$/.exec(JSON.stringify(sha ?? null))?.[1].slice(0, 12) ?? 'an earlier base';
-/** A PASS reused across a reshaped diff, or ''. `=== false`: an absent field covers it. */
+/** A PASS reused across a reshaped diff (sc-3175), or ''. `=== false`: an absent field covers it. */
 export const earlierDiffDetail = (e) => e.diff_matches === false
-    ? 'cached PASS judged an earlier diff — this diff was not re-judged'
+    ? `cached PASS judged an earlier diff — this diff was not re-judged (${STICKY_RULING})`
     : '';
-/** A PASS judged on an earlier base whose reviewed paths moved, or ''. An absent base_state
- * (non-review emitters) or 'moved-clear' stays a ✓. */
+/** A PASS judged on an earlier base whose reviewed paths moved (sc-3468), or ''. An absent
+ * base_state (non-review emitters) or 'moved-clear' stays a ✓ — base-drift-surfaced-at-read-time (b). */
 export function baseDriftDetail(e) {
     if (e.base_state === 'unknown')
         return 'cached PASS whose judged base is unknown — not re-judged against this base';

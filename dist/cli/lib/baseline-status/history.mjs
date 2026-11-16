@@ -12,6 +12,13 @@ function git(cwd, args) {
     const result = gitRunner(cwd)(args);
     return ok(result) ? line(result).trim() : null;
 }
+/** `at` as a full commit sha; a revspec this checkout cannot resolve is a history fact, not a guess. */
+function anchor(cwd, at) {
+    const sha = git(cwd, ['rev-parse', '--verify', '--quiet', `${at}^{commit}`]);
+    if (sha)
+        return sha;
+    throw new GhUnavailable('history-unavailable', `--at ${at} is not a commit in this checkout`);
+}
 /** Runs newest-first across the head's first-parent history, looked up one commit at a time. */
 export class BranchWalk {
     head;
@@ -23,7 +30,7 @@ export class BranchWalk {
     looked = 0;
     constructor(opts) {
         this.opts = opts;
-        this.head = branchHead({ cwd: opts.cwd, ref: opts.ref });
+        this.head = opts.at ? anchor(opts.cwd, opts.at) : branchHead({ cwd: opts.cwd, ref: opts.ref });
         const list = git(opts.cwd, [
             'rev-list',
             '--first-parent',

@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { loadScopedTargets, matchScope } from '../../decisions/check-alignment.mjs';
+import { rescopeCommand } from '../../decisions/scope/scope-miss.mjs';
 import { emitGateEvent } from '../../judge/gate-events.mjs';
 import { readTranscript } from '../../judge/transcript-store.mjs';
 import { issueLocations, LOCATION_RE } from '../contracts/response.mjs';
@@ -115,13 +116,16 @@ export function normalizeCitedPath(cited, cwd, exists) {
     const posix = rel.split(path.sep).join('/');
     return exists(path.join(cwd, posix)) ? posix : null;
 }
-/** Every (slug, path) pair where a blocking issue cites a known Target on an out-of-Scope path. */
+/** Every (slug, path) pair where a blocking issue cites a known Target on an out-of-Scope path.
+ *  An issue citing several Targets is skipped: its paths cannot be bound to their own Target. */
 export function scopeDriftFindings(items, targets, cwd, exists) {
     const bySlug = new Map(targets.map((t) => [t.slug, t.scopeGlobs]));
     const seen = new Set();
     const drifts = [];
     for (const issue of items.filter(isBlockingItem).flatMap((i) => i.issues ?? [])) {
         const slugs = [...issue.matchAll(TARGET_CITE_RE)].map((m) => m[1]);
+        if (new Set(slugs).size > 1)
+            continue;
         for (const slug of slugs) {
             const globs = bySlug.get(slug);
             if (!globs)
@@ -143,7 +147,7 @@ export function renderScopeDriftHints(reviewer, drifts) {
         .map(({ slug, path: p, globs }) => {
         const scope = globs.join(',');
         return (`  ↳ Target ${slug} was enforced outside its Scope (${scope}) on ${p}. If it governs this file: ` +
-            `guard-decisions rescope ${slug} --scope "${scope},${p}" --reason "enforced on ${p} by ${reviewer}"; ` +
+            `${rescopeCommand(slug, globs, [p], `enforced on ${p} by ${reviewer}`)}; ` +
             'if not, the finding applies a ruling outside its Scope.');
     })
         .join('\n');
