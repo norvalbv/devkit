@@ -272,7 +272,9 @@ waiting ship prints its position once, then runs its own pre-worktree refusals w
 exits there, unrecorded and dequeued, instead of failing on them after the wait. A slot frees
 itself when its ship (and that ship's whole process group) is gone. There is no way to skip it;
 \`devkit ship --queue\` names the running ship with the \`ps\` that inspects it if it looks stuck.
-Every blocked attempt records its invocation — retry with \`devkit ship --resume <branch>\` instead
+Every attempt prints one
+\`attempt <id> <branch>: queued Ns · setup Ns · gates Ns …\` line above its gate digest, also kept in
+~/.devkit/telemetry/logs/<id>.log. Every blocked attempt records its invocation — retry with \`devkit ship --resume <branch>\` instead
 of re-typing the command.`,
 };
 
@@ -421,6 +423,7 @@ async function queueThenRun(
   const branch = args.find((arg) => !arg.startsWith('--')) ?? '(unknown)';
   // Not awaited yet: entering publishes this ship's ticket synchronously, so the pass below cannot
   // cost it its place, and a ship arriving during the pass still sees it as ahead.
+  const enqueuedAt = Date.now();
   const entering = dependencies.enterQueue({ env, repo: repoRoot(cwd), branch, mode: queueMode });
   const ahead = dependencies.queueAhead();
   if (ahead) {
@@ -445,11 +448,17 @@ async function queueThenRun(
     console.error('  Fix the cause above and re-run; the queue cannot be skipped.');
     return 1;
   }
+  const grantedAt = Date.now();
+  // The shell prints these on its `attempt …` line, so a queue wait never reads as gate time.
+  const timing = {
+    DEVKIT_SHIP_QUEUED_S: String(Math.round((grantedAt - enqueuedAt) / 1000)),
+    DEVKIT_SHIP_GRANTED_AT: String(Math.floor(grantedAt / 1000)),
+  };
   try {
     return await dependencies.runManagedScript(`${mode}.sh`, args, {
       command: 'devkit ship',
       cwd,
-      env: { ...env, ...queued.env },
+      env: { ...env, ...queued.env, ...timing },
     });
   } finally {
     queued.handle?.release();
