@@ -27,7 +27,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig, resolveTreeExtensions } from '../../../gate-engine/config.mts';
 import { STRUCTURE_BASELINE_DIR } from '../../../gate-engine/ratchets/baseline-paths.mts';
-import { walkTree } from '../../../gate-engine/structure/walk.mts';
+import { walkTree } from '../../../gate-engine/structure/tree/walk.mts';
 import { persistStructureBaseline } from './structure-baseline-storage.mts';
 
 // ─── Regexes (verbatim from frink's generate-eslint-baseline.mjs) ───────────────

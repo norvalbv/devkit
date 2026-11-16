@@ -75,7 +75,7 @@ vendored files were byte-identical.
 | `gate-engine/eval/render.mts`                         | aligns a multi-line Boolean expression                      |
 | `gate-engine/review/baseline-gate.mts`                | removes one space before a `for` loop's closing parenthesis |
 | `gate-engine/review/run-review.mts`                   | compacts two typed `.catch(...)` callbacks                  |
-| `gate-engine/structure/walk.mts`                      | aligns a nested Boolean expression                          |
+| `gate-engine/structure/tree/walk.mts`                      | aligns a nested Boolean expression                          |
 
 Six files changed only in whitespace/layout; the expanded `eval-bench` call also gained Oxfmt's
 permitted trailing comma. Identifiers, strings, operators, imports, comments, and control flow were

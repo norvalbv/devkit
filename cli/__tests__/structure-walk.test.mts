@@ -1,5 +1,5 @@
 /**
- * Generic config-driven structure walker (gate-engine/structure/walk.mjs) — the engine that lets
+ * Generic config-driven structure walker (gate-engine/structure/tree/walk.mjs) — the engine that lets
  * devkit govern ANY repo's folder structure from a declared `grammar`, not just frink's six electron
  * trees. Covers: flat component-lib, domain-gated lib subfolders, root-domain-gated engines, the
  * empty-registry-grandfathers + frozen-dir + capture-every-file invariants, and the config-driven
@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { walkTree } from '../../gate-engine/structure/walk.mts';
+import { walkTree } from '../../gate-engine/structure/tree/walk.mts';
 import { generateImportWallBaseline } from '../lib/generate/generate-import-wall-baseline.mts';
 import { generateStructureBaselines } from '../lib/generate/generate-structure-baseline.mts';
 import { structFixtures } from './_helpers.mts';

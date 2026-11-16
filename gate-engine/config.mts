@@ -163,7 +163,7 @@ export const DEFAULTS = Object.freeze({
   // generates the eslint rule + drives the baseline walk from this SAME spec (no drift). Empty by
   // default → structure-lint is opt-in / no-op. `trees[]` = { name, root, sourceExtensions?, grammar
   // (or preset), libDomains?, frozenDirs?, ignoredDirs?, entryAllowlist? }; `walls[]` = import walls.
-  // See gate-engine/structure/walk.mjs + docs/design/structure/01-generalize-engine.md.
+  // See gate-engine/structure/tree/walk.mjs + docs/design/structure/01-generalize-engine.md.
   structure: Object.freeze({ trees: [], walls: [] }),
   // Append-only decision-log directory (the decisions CLI + smell gate target).
   decisionsDir: 'docs/decisions',

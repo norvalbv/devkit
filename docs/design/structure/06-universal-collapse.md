@@ -33,7 +33,7 @@ guard.config.json  "structure": { trees:[...], walls:[] }   ← the ONE per-repo
 
 ## Grammar vocabulary additions (to express react-app + electron as data)
 
-`gate-engine/structure/grammar.mjs` `tokenRegex` + `STRUCTURE_TOKENS`:
+`gate-engine/structure/tree/grammar.mjs` `tokenRegex` + `STRUCTURE_TOKENS`:
 - `{use_hook}` — `^use(-[a-z][a-z0-9-]*|[A-Z][a-zA-Z0-9]*)\.<ext>$` (use-foo.ts / useFoo.ts).
 - `{md}` — `\.md$` (colocated docs in component folders).
 - (existing `{pascal}`/`{camel}`/`{test}`/`{css}`/`{kebab}`/`{kebab_dir}`/`{pascal_dir}` cover the rest.)

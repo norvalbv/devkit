@@ -17,7 +17,7 @@ import {
   projectStructurePlugin,
 } from 'eslint-plugin-project-structure';
 import { resolveGuardConfig, resolveTreeExtensions } from '../config.mts';
-import { compileToEslint, type TreeSpec } from './compile.mts';
+import { compileToEslint, type TreeSpec } from './tree/compile.mts';
 import { makeBaselineLoaders } from './load-baseline.mts';
 
 /**

@@ -1541,7 +1541,7 @@
     {
       "fingerprint": "28491c870782a6cae4858ec2ca760d3daedb106ae3d10a01aef3de4bf802b136",
       "ruleId": "anti-slop/no-known-value-widening",
-      "file": "gate-engine/structure/compile.mts",
+      "file": "gate-engine/structure/tree/compile.mts",
       "diagnostic": "The explicit open dictionary type on return value of `buildRegexParameters` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "params",
       "count": 1

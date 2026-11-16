@@ -1,14 +1,14 @@
 /**
- * compileToEslint (gate-engine/structure/compile.mjs) + the NO-DRIFT guarantee. The eslint rule's
+ * compileToEslint (gate-engine/structure/tree/compile.mjs) + the NO-DRIFT guarantee. The eslint rule's
  * regexParameters and the walker's predicates both derive from `tokenRegex` — this suite pins that
  * they classify the same filenames identically, and that a tree's grammar compiles to the expected
  * createFolderStructure shape (structureRoot, the closed-registry alternation, recurse rules,
  * __tests__/ignoredDirs ignore globs, baseline pass-through).
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { compileToEslint } from '../../gate-engine/structure/compile.mts';
+import { compileToEslint } from '../../gate-engine/structure/tree/compile.mts';
 import { buildStructureConfigs } from '../../gate-engine/structure/eslint-config.mts';
-import { tokenPredicate, tokenRegex } from '../../gate-engine/structure/grammar.mts';
+import { tokenPredicate, tokenRegex } from '../../gate-engine/structure/tree/grammar.mts';
 import { structFixtures } from './_helpers.mts';
 
 const { tmpRepo, write, cleanup } = structFixtures('scompile-');
