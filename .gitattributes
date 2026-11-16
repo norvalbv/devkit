@@ -1,3 +1,7 @@
 # The whitespace gate (git diff --check) would flag syntax, not mistakes, in these.
 *.patch -whitespace
 dist/** -whitespace
+# Decision notes are append-only, so two branches noting one axis merge as both lines.
+docs/decisions/*.md merge=union
+# INDEX.md is a table: a unioned same-row edit would keep both rows silently.
+docs/decisions/INDEX.md merge
