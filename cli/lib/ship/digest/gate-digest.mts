@@ -10,10 +10,10 @@
  * reader consumes, so the two can never disagree.
  */
 import { STICKY_RULING } from '../../../../gate-engine/review/evidence/base-context.mts';
+import { branchNarration } from './advisories.mts';
 import { blockingFindings, judgeFinding } from './blocking.mts';
 import { count, oneLine, textOf } from './fields.mts';
 import { scanBackward } from './tail.mts';
-import { readBranchHistory, renderTrend, summariseTrend } from './trend.mts';
 import { waivedRows } from './waived.mts';
 
 /**
@@ -492,7 +492,7 @@ if (/[/\\]gate-digest\.m[jt]s$/.test(process.argv[1] ?? '') && process.argv[2] =
   const key = { shipId, repo, branch };
   const text = [
     render(summarise(readShipEvents(sink, shipId), shipId), logPath),
-    renderTrend(summariseTrend(readBranchHistory(sink, key), key)),
+    branchNarration(sink, key),
   ]
     .filter(Boolean)
     .join('\n');
