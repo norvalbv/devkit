@@ -232,6 +232,15 @@ function assertScoredRow(row) {
     throw new BenchAbort(2, 'scored execution requires a labeled corpus row; probes are forbidden');
 }
 
+/** An inconclusive part the provider caused: its structured cause decides, its wording only without one. */
+export function isOutagePart(part) {
+  if (part.res.status !== 'inconclusive') return false;
+  const cause = part.res.inconclusiveCause;
+  return cause === undefined
+    ? subcause(part.res.reason ?? '') === 'outage'
+    : OUTAGE_CAUSES.has(cause);
+}
+
 /** Existing labeled-row API; execution remains shared with exploratory reviews. */
 export async function runRow(row, options = {}) {
   assertScoredRow(row);
@@ -244,12 +253,7 @@ export async function runRow(row, options = {}) {
       firstVerdict: null,
       okFirst: false,
       okFinal: false,
-      subcause: measured.parts.some(
-        (part) =>
-          part.res.status === 'inconclusive' && OUTAGE_CAUSES.has(part.res.inconclusiveCause),
-      )
-        ? 'outage'
-        : 'engine-error',
+      subcause: measured.parts.some(isOutagePart) ? 'outage' : 'engine-error',
     });
   return { ...result, execution: execution.execution };
 }
