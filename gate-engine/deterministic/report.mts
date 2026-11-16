@@ -1,7 +1,13 @@
 /** The end-of-run reports of guard-deterministic: gates that opted out, and gates that failed. */
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { GUARD_PREFIX_RE } from './command-gates.mts';
-import { appendReviewNotice, type GateFailure, reasonDetail, reasonReport } from './reason.mts';
+import {
+  appendReviewNotice,
+  fixLine,
+  type GateFailure,
+  reasonDetail,
+  reasonReport,
+} from './reason.mts';
 import { printRecheckFooter } from './recheck.mts';
 
 /** The blocked_gate token the ship script publishes for this whole chain. */
@@ -57,7 +63,7 @@ export function reportFailures(
   }
   console.error(`✗ deterministic gates failed:${fails.map((f) => ` ${f.label}`).join('')}`);
   for (const line of reasonReport(fails)) console.error(line);
-  console.error('   Fix every failure above together, then commit once.');
+  console.error(fixLine(failed));
   console.error('   On commit or ship, decision and reviewer gates run only after these pass.');
   printRecheckFooter(rechecks);
   if (fails.some((f) => f.label.startsWith('structure-lint'))) {

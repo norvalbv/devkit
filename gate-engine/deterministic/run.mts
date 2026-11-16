@@ -50,7 +50,13 @@ import { emitGateBypass, finishGateTiming } from '../judge/gate-events.mts';
 import { markGateRun } from '../judge/run-context.mts';
 import { reportOlderOverlayRunner } from '../overlay-mode.mts';
 import { describeCachedPrefix, prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
-import { type GateFailure, gateEnv, readGateReason, withReasonFiles } from './reason.mts';
+import {
+  crashGuarded,
+  type GateFailure,
+  gateEnv,
+  readGateReason,
+  withReasonFiles,
+} from './reason.mts';
 import {
   bypassedSuffixes,
   commandGate,
@@ -246,10 +252,9 @@ function registryGate(g: (typeof DETERMINISTIC)[number], cwd: string, reviewMode
   return {
     id: g.id,
     label: `guard-${g.id}`,
-    argv,
     failOpen2:
       !('failOpen2' in g) || (g.failOpen2 === 'review' ? reviewMode : g.failOpen2 !== false),
-    rcLabels: 'rcLabels' in g ? g.rcLabels : undefined,
+    ...crashGuarded(argv, 'rcLabels' in g ? g.rcLabels : undefined),
     ...registryRecheck(g, argv, cwd),
   };
 }
