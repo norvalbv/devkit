@@ -156,7 +156,7 @@ describe('runDeterministic with a {staged} extraGate', () => {
     writeFileSync(join(root, 'shared/y.ts'), 'export const y = 1;\n');
     git(root, 'add', 'shared');
     const gate = commandGate('s', root, 'guard-structure --x {staged}');
-    expect(gate.argv?.slice(2)).toEqual(['--x', 'shared/y.ts']);
+    expect(gate.argv?.slice(4)).toEqual(['--x', 'shared/y.ts']);
     expect(gate).toMatchObject({ failOpen2: true, recheck: undefined });
   });
 

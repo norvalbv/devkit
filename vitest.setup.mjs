@@ -131,6 +131,8 @@ export const TEST_ONLY_ADDITIONS = [
   // The launching agent's session; inherited, it is stamped as every telemetry row's parent_session_id.
   'CLAUDE_CODE_SESSION_ID',
   'CODEX_THREAD_ID',
+  // related-tests runs this suite as a gate: inherited, a spawned CLI's throw exits 70, not 1.
+  'DEVKIT_GATE_REASON_FILE',
 ];
 
 // One-run gate bypasses (BYPASS_FLAGS in cli/lib/ship/merge-verdict/bypasses.mts), in both

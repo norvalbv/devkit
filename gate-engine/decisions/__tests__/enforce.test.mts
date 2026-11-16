@@ -165,6 +165,8 @@ describe('decision-checks gate', () => {
     expect(opts).toMatchObject({ cwd: root, stdio: ['ignore', 'inherit', 'inherit'] });
     expect(opts.shell).toBeUndefined();
     expect(opts.timeout).toBe(120_000);
+    // Unset, not '': an empty reason path still marks a gate, and a devkit CLI it runs would exit 70.
+    expect(opts.env).not.toHaveProperty('DEVKIT_GATE_REASON_FILE');
   });
 
   it('blocks on a failing Check and prints the slug, command, ruling and remedy', async () => {
@@ -221,13 +223,13 @@ describe('decision-checks gate', () => {
     expect(text).toContain('do not weaken the check');
   });
 
-  it('exits 2, not 1, when the gate itself throws before any Check ran', () => {
+  it('exits 70 (crashed), not 1, when the gate itself throws before any Check ran', () => {
     const root = repo();
     write(root, { 'guard.config.json': '{ not json' });
     const cli = join(import.meta.dirname, '..', 'ruling-checks', 'enforce.mts');
     const r = spawnSync(process.execPath, [cli, 'gate'], { cwd: root, encoding: 'utf8' });
-    expect(r.stderr).toContain('decision-checks:');
-    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('is not valid JSON');
+    expect(r.status).toBe(70);
   });
 
   it('runs a Check whose argv names a staged file, and says the commit edits it', async () => {
