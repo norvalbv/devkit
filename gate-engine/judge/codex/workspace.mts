@@ -3,7 +3,6 @@
 import {
   closeSync,
   constants,
-  copyFileSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -35,10 +34,6 @@ export interface CodexSandboxOpts {
   codexWritableFile?: string;
 }
 
-// Codex loads project docs from its cwd up to the git root. In the checkout it found only the
-// root's; copying them keeps the confined judge's instructions identical.
-const PROJECT_DOCS = ['AGENTS.md', 'AGENTS.override.md'];
-
 /** Create the workspace when this argv routes to a workspace-write codex judge; a no-op otherwise. */
 export function prepareCodexSandbox(
   args: string[],
@@ -50,14 +45,11 @@ export function prepareCodexSandbox(
   const stateFile = codexWritableFile ? writableStateFile(repoRoot, codexWritableFile) : undefined;
   // Real path: macOS's tmpdir sits under the /var symlink, and codex refuses symlinked roots.
   const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'devkit-judge-')));
-  const cleanup = () => removeScratch(scratch);
-  try {
-    for (const doc of PROJECT_DOCS) copyProjectDoc(join(repoRoot, doc), join(scratch, doc));
-  } catch (error) {
-    cleanup();
-    throw error;
-  }
-  return { codexReadOnly, workspace: { scratch, repoRoot, stateFile }, cleanup };
+  return {
+    codexReadOnly,
+    workspace: { scratch, repoRoot, stateFile },
+    cleanup: () => removeScratch(scratch),
+  };
 }
 
 // No-follow: a prior judge may have planted a link here, and the gate must not create its target.
@@ -81,14 +73,5 @@ function removeScratch(scratch: string): void {
     rmSync(scratch, { recursive: true, force: true, maxRetries: 3 });
   } catch {
     // A killed judge's grandchild may still hold a file; the OS reaps its temp dir.
-  }
-}
-
-/** Copy one project doc; an absent doc (including one removed mid-copy) is the common case. */
-function copyProjectDoc(from: string, to: string): void {
-  try {
-    copyFileSync(from, to);
-  } catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
   }
 }
