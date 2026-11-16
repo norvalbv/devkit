@@ -5,7 +5,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { ESLint } from 'eslint'; // devkit's OWN eslint, used only for its stylish formatter
 import { z } from 'zod';
-import { headSha } from '../coverage/failures.mts';
+import { headSha } from '../coverage/provenance.mts';
 import { eslintNodeFlags, linkedIsolatedStore } from './eslint-node-flags.mts';
 import {
   clean,
