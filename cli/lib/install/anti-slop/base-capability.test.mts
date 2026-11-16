@@ -1183,7 +1183,7 @@ describe('managed capability locking', () => {
     mkdirSync(oxcLock, { recursive: true });
     writeFileSync(join(oxcLock, 'holder'), `${process.pid}:held-by-test`);
 
-    expect(() => collectAntiSlopGroups(cwd, [])).toThrow(/timed out acquiring manifest lock/u);
+    expect(() => collectAntiSlopGroups(cwd, [])).toThrow(/holds the manifest lock: .*oxc\.lock/u);
   });
 });
 
