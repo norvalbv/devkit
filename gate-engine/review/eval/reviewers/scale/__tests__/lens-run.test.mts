@@ -96,7 +96,7 @@ describe('banked terminal capture', () => {
       items: [],
     });
   });
-  it('banks the located ADVISORY lines of a PASS transcript in full and none from a FAIL', async () => {
+  it('banks the located ADVISORY lines of a PASS or FAIL transcript in full', async () => {
     const dir = privateOutput();
     const reviewer = REVIEWERS.find((r) => r.name === 'correctness-reviewer')!;
     const selection = { reviewer, files: ['src/a.ts', 'src/b.ts'] };
@@ -128,9 +128,8 @@ describe('banked terminal capture', () => {
     );
     expect(long.length).toBeGreaterThan(200);
     expect(rows[0].advisories).toEqual([{ lens: tasks[0].group[0], text: long }]);
-    expect(rows.slice(1).every((r) => r.status === 'fail' && r.advisories?.length === 0)).toBe(
-      true,
-    );
+    expect(rows.slice(1).map((r) => r.status)).toContain('fail');
+    expect(rows.every((r) => r.advisories?.[0]?.text === long)).toBe(true);
   });
   it('round trips exact claims and scope, with a stable full parent roster across resume and distinct fresh namespaces', async () => {
     const dir = privateOutput();
