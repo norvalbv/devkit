@@ -115,9 +115,13 @@ devkit command.
   description. `--body-file` is the file's exact bytes under the same rules.
 - **A `--pr` re-ship changes the existing PR description only with explicit `--body` or
   `--body-file`.** Omitting both preserves it; piped stdin remains commit-only. Use `--body ""` to
-  clear the description deliberately. That text is also the new commit's message, and completeness
-  judges it against that commit's diff alone. So on a follow-up (no `--base`) describe only the new
-  commit, or pipe a commit-scoped body on stdin to keep the whole-PR description.
+  clear the description deliberately. A body flag with no content change is refused, exit 1, "the
+  PR body was NOT updated"; to change only the description run
+  `devkit pr-body <branch> --body-file <file>`. A `--resume` whose commit is already pushed still
+  publishes its recorded body ("published the recorded PR body"). That text is also the new commit's
+  message, and completeness judges it against that commit's diff alone. So on a follow-up (no
+  `--base`) describe only the new commit, or pipe a commit-scoped body on stdin to keep the whole-PR
+  description.
 - **Ship owns the PR body's `<!-- devkit:evidence:begin -->` … `end` block.** When
   `guard.config.json` has an `evidence` entry and the diff adds or changes tests, ship runs them on
   red (PR base plus only the PR's test files) and green (PR head) after the PR opens and writes the
