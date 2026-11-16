@@ -12,7 +12,13 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { deriveForeignRoot, rebaseCoverageMap, writeFallowCopy } from '../fallow-copy.mts';
+import {
+  deriveForeignRoot,
+  type FallowCopy,
+  rebaseCoverageMap,
+  writeFallowCopy,
+} from '../fallow-copy.mts';
+import { publishManifest, stageManifest } from '../provenance.mts';
 import { computePercentages } from '../run.mts';
 import { entry } from './_provenance-fixtures.mts';
 
@@ -51,10 +57,19 @@ const map = (branchHits: number) =>
   });
 
 /** The text of a written copy, which is removed with the fixtures. */
-function readCopy(out: string | null): string {
+function readCopy(out: FallowCopy | null): string {
   if (out === null) throw new Error('no copy was written');
-  dirs.push(out);
-  return readFileSync(out, 'utf8');
+  dirs.push(out.path);
+  return readFileSync(out.path, 'utf8');
+}
+
+/** Bind a `devkit coverage-run` manifest recording `args` to the report in `coverageDir`. */
+function bindManifest(coverageDir: string, args: string[]) {
+  const snapshot = { roots: [], head: '', dirty: {}, args };
+  const runDir = join(coverageDir, '.runs');
+  mkdirSync(runDir, { recursive: true });
+  const report = join(coverageDir, 'coverage-final.json');
+  publishManifest(stageManifest(runDir, report, snapshot, 'run-1'), coverageDir);
 }
 
 describe('writeFallowCopy', () => {
@@ -134,7 +149,7 @@ describe('writeFallowCopy', () => {
     const [a, b] = [writeFallowCopy(top, top), writeFallowCopy(top, top)];
     readCopy(a);
     readCopy(b);
-    expect(a).not.toBe(b);
+    expect(a?.path).not.toBe(b?.path);
   });
 
   it.each([
@@ -264,5 +279,43 @@ describe('rebaseCoverageMap', () => {
     expect(computePercentages(rebaseCoverageMap(map, '/dev/c', '/wt'))).toEqual(
       computePercentages(map),
     );
+  });
+});
+
+describe('writeFallowCopy — a scoped coverage-run', () => {
+  // Loaded-but-unrun files read as measured 0%; `{}` makes fallow estimate them instead.
+  it('hands fallow an empty map, even where it would read the artifact unaided', () => {
+    const { top } = seed(map(4));
+    bindManifest(join(top, 'coverage'), ['src/a.test.ts']);
+
+    const copy = writeFallowCopy(top, top);
+
+    expect(copy?.scopedArgs).toEqual(['src/a.test.ts']);
+    expect(readCopy(copy)).toBe('{}');
+  });
+
+  it("checks the package's own artifact when the repo root has none", () => {
+    const { top, pkg } = seed();
+    mkdirSync(join(pkg, 'coverage'));
+    writeFileSync(join(pkg, 'coverage/coverage-final.json'), map(4));
+    expect(writeFallowCopy(top, pkg)).toBeNull();
+
+    bindManifest(join(pkg, 'coverage'), ['-t', 'one test']);
+
+    expect(readCopy(writeFallowCopy(top, pkg))).toBe('{}');
+  });
+
+  it('keeps the measured map for a full run', () => {
+    const { top } = seed(map(4));
+    bindManifest(join(top, 'coverage'), ['--reporter=dot']);
+    expect(writeFallowCopy(top, top)).toBeNull();
+  });
+
+  it('keeps the measured map when the manifest describes other bytes', () => {
+    const { top, report } = seed(map(4));
+    bindManifest(join(top, 'coverage'), ['src/a.test.ts']);
+    writeFileSync(report, map(-1));
+
+    expect(JSON.parse(readCopy(writeFallowCopy(top, top)))).toEqual(JSON.parse(map(0)));
   });
 });

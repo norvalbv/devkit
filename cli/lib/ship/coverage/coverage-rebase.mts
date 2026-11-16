@@ -9,14 +9,11 @@ import {
   coverageMapSchema,
   deriveForeignRoot,
   rebaseCoverageMap,
+  scopedRunArgs,
   trackedPaths,
 } from '../../../../gate-engine/coverage/fallow-copy.mts';
 import { REPORT_NAME } from '../../../../gate-engine/coverage/produce.mts';
-import {
-  boundManifest,
-  isScopedRun,
-  readArtifact,
-} from '../../../../gate-engine/coverage/provenance.mts';
+import { readArtifact } from '../../../../gate-engine/coverage/provenance.mts';
 
 /** What fallow was handed: the root a rekeyed copy came from, or the args of a scoped run. */
 export type FallowCoverage = { root: string } | { scopedArgs: string[] };
@@ -31,8 +28,8 @@ export function rebaseWorktreeCoverage(
   const report = join(source, REPORT_NAME);
   if (!existsSync(report)) return null;
   const artifact = readArtifact(report);
-  const scopedArgs = boundManifest(source, artifact)?.args ?? [];
-  if (isScopedRun(scopedArgs)) {
+  const scopedArgs = scopedRunArgs(source, artifact);
+  if (scopedArgs) {
     writeFileSync(outFile, '{}', { flag: 'wx' });
     return { scopedArgs };
   }
