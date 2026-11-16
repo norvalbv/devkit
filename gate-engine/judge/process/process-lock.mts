@@ -11,10 +11,11 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { processOwnerIsProvablyGone, processStartIdentity } from './identity.mts';
+import { isProcessId, processOwnerIsProvablyGone, processStartIdentity } from './identity.mts';
 
 const WAIT_MS = 5_000;
 const RETRY_MS = 10;
+const LEGACY_HOLDER = 'holder'; // the `pid:uuid` stamp file an older devkit's mkdir lock wrote
 const REAP_EVERY_MS = 250; // a liveness check can fork `ps`, so a contended wait does not run one per retry
 
 type IsGone = (owner: { pid: number; processStart: string }) => boolean;
@@ -72,7 +73,13 @@ function readHolder(dir: string): Holder | undefined {
   try {
     const [nonce] = readdirSync(dir);
     if (!nonce) return undefined;
-    const [pid, identity] = readFileSync(join(dir, nonce), 'utf8').split('\n');
+    const text = readFileSync(join(dir, nonce), 'utf8');
+    // A legacy stamp carries no start identity, so only a dead pid can ever prove it gone.
+    if (nonce === LEGACY_HOLDER) {
+      const legacyPid = Number(text.split(':')[0]);
+      return isProcessId(legacyPid) ? { nonce, pid: legacyPid, identity: 'legacy' } : undefined;
+    }
+    const [pid, identity] = text.split('\n');
     return Number.isSafeInteger(Number(pid)) && identity
       ? { nonce, pid: Number(pid), identity }
       : undefined;
@@ -160,6 +167,26 @@ export function acquireProcessLock(
   return attempt.nonce;
 }
 
+/** acquireProcessLock with timer retries, so an awaiting caller keeps the event loop free. */
+async function acquireProcessLockAsync(
+  dir: string,
+  { label, waitMs = WAIT_MS, isGone = processOwnerIsProvablyGone, owner }: LockOptions,
+): Promise<string> {
+  const attempt = {
+    nonce: randomUUID(),
+    owner: owner ?? { pid: process.pid, identity: ownIdentity() },
+  };
+  const deadline = Date.now() + waitMs;
+  let reapedAt = Number.NEGATIVE_INFINITY;
+  for (let step = poll(dir, attempt, isGone, reapedAt); step !== 'taken';) {
+    reapedAt = step;
+    if (Date.now() > deadline) throw heldError(dir, label);
+    await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+    step = poll(dir, attempt, isGone, reapedAt);
+  }
+  return attempt.nonce;
+}
+
 /** Release only the acquisition `nonce` names; a lock re-taken by anyone else is untouched. */
 export const releaseProcessLock = removeHolder;
 
@@ -176,6 +203,20 @@ export function withProcessLock<T>(dir: string, fn: () => T, options: LockOption
     return result;
   } finally {
     held.delete(dir);
+    releaseProcessLock(dir, nonce);
+  }
+}
+
+/** withProcessLock for an awaiting critical section. */
+export async function withProcessLockAsync<T>(
+  dir: string,
+  fn: () => Promise<T>,
+  options: LockOptions,
+): Promise<T> {
+  const nonce = await acquireProcessLockAsync(dir, options);
+  try {
+    return await fn();
+  } finally {
     releaseProcessLock(dir, nonce);
   }
 }
