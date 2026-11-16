@@ -51,6 +51,8 @@ import {
   baselineOrExplain,
   capabilityReady,
   count,
+  refuseLegacyIdentity,
+  rekeyIdentity,
 } from './anti-slop-adopt.mts';
 import {
   clearPendingAntiSlopBaselineActivation,
@@ -85,6 +87,7 @@ Usage:
   devkit anti-slop check --base <git-ref>         Full check + baseline monotonicity for CI
   devkit anti-slop inspect [--json]              Inspect baseline debt without linting
   devkit anti-slop prune [paths...]              Remove fixed debt; never add findings
+  devkit anti-slop rekey                         Move line-identity debt to span identity (once)
 
 Configure per-rule off/warn/error and scoped overrides in the repository Oxlint config. Paths default
 to the repository root. Check and inspect never write. Create refuses an existing baseline unless
@@ -130,6 +133,7 @@ export function createAntiSlopBaseline(
         console.error('anti-slop: replacing unreadable whole-repository baseline explicitly');
       }
     }
+    if (existing && refuseLegacyIdentity(existing)) return 2;
     const groups = collectAntiSlopGroups(cwd, args);
     let repositoryGroups: FindingGroup[] | undefined;
     const allGroups = () =>
@@ -236,8 +240,9 @@ function check(
   envelope: GitBaselineEnvelope | null = null,
   baseRef?: string,
 ): number {
-  const baseline = baselineOrExplain(cwd);
+  const baseline = baselineOrExplain(cwd, false);
   if (!baseline) return 2;
+  if (refuseLegacyIdentity(baseline)) return 1;
   const scope = resolveAntiSlopScope(cwd, args);
   const selected: AntiSlopBaseline = {
     ...baseline,
@@ -323,7 +328,7 @@ function check(
 }
 
 function inspect(cwd: string, json: boolean): number {
-  const baseline = baselineOrExplain(cwd);
+  const baseline = baselineOrExplain(cwd, false);
   if (!baseline) return 2;
   if (json) {
     console.log(JSON.stringify(baseline, null, 2));
@@ -442,27 +447,17 @@ export default function run(args: string[], cwd: string): number {
   }
   if (operation === 'create')
     return createAntiSlopBaseline(cwd, paths, force, confirmBaselineRemovals);
-  if (operation === 'adopt-activation') {
-    if (paths.length > 0 || force) {
-      console.error('anti-slop adopt-activation accepts no flags or paths');
-      return 2;
-    }
-    return adoptActivation(cwd);
+  const pathless = ['adopt-activation', 'adopt-renames', 'adopt-relocations', 'rekey'];
+  if (pathless.includes(operation ?? '') && paths.length > 0) {
+    console.error(`anti-slop ${operation} accepts no flags or paths`);
+    return 2;
   }
-  if (operation === 'adopt-renames') {
-    if (paths.length > 0) {
-      console.error('anti-slop adopt-renames accepts no flags or paths');
-      return 2;
-    }
+  if (operation === 'adopt-activation') return adoptActivation(cwd);
+  if (operation === 'adopt-renames')
     return adoptRenames(cwd, overlay, baseRef ?? 'HEAD', baseRef !== undefined);
-  }
-  if (operation === 'adopt-relocations') {
-    if (paths.length > 0) {
-      console.error('anti-slop adopt-relocations accepts no flags or paths');
-      return 2;
-    }
+  if (operation === 'adopt-relocations')
     return adoptRelocations(cwd, overlay, baseRef ?? 'HEAD', baseRef !== undefined);
-  }
+  if (operation === 'rekey') return rekeyIdentity(cwd);
   if (operation === 'check' && staged) {
     return withStagedAntiSlopSnapshot(
       cwd,
@@ -490,7 +485,7 @@ export default function run(args: string[], cwd: string): number {
   }
   if (operation === 'prune') return prune(cwd, paths);
   console.error(
-    'devkit anti-slop: expected create, adopt-activation, adopt-renames, adopt-relocations, check, inspect, or prune',
+    'devkit anti-slop: expected create, adopt-activation, adopt-renames, adopt-relocations, check, inspect, prune, or rekey',
   );
   return 2;
 }

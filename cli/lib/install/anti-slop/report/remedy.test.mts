@@ -367,7 +367,7 @@ describe('anti-slop check FAIL output (wiring)', () => {
     expect(stderr).toContain(ACCEPT_VIA_OVERRIDE);
   });
 
-  it('carries debt on a line edited elsewhere through the staged gate, but not a second offence', () => {
+  it('keeps debt baselined when another token on its line is edited, but not a second offence', () => {
     const cwd = repository(false);
     const debtLine = (tail: string) =>
       `export function widen(value: object${tail} {\n  return 1;\n}\n`;
@@ -380,7 +380,7 @@ describe('anti-slop check FAIL output (wiring)', () => {
     writeFileSync(join(cwd, 'src', 'widen.ts'), debtLine('): 1'));
     git(cwd, ['add', '-A']);
     expect(antiSlop(['check', '--staged'], cwd)).toBe(0);
-    expect(out.join('\n')).toMatch(/PASS — .*1 carried from edited lines/u);
+    expect(out.join('\n')).toMatch(/PASS — 1 current finding/u);
 
     writeFileSync(join(cwd, 'src', 'widen.ts'), debtLine(', other: object): 1'));
     git(cwd, ['add', '-A']);
