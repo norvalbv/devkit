@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CLAUDE_RESULT_ARGS } from '../claude-result.mts';
 import {
   NO_EXECUTION_RULE,
   codexExecArgs,
@@ -129,7 +130,7 @@ describe('judgeCliFor', () => {
     const cli = judgeCliFor(args);
     expect(cli.bin).toBe('claude');
     expect(cli.codex).toBe(false);
-    expect(cli.argv).toEqual(['--output-format', 'json', ...args]);
+    expect(cli.argv).toEqual([...CLAUDE_RESULT_ARGS, ...args]);
   });
 
   // The claude family's CLAUDE.md memory is disabled at spawn (judge-exec), pinned in judge-exec-telemetry.
