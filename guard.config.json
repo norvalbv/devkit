@@ -16,10 +16,11 @@
   },
   "//gateTimeoutMs": "Per-gate deadline for guard-deterministic (default 30 min). Raised here because related-tests has legitimately run for about 32 minutes on a loaded machine before reporting a real failure.",
   "gateTimeoutMs": 3000000,
-  "//comments": "devkit is open source: a comment citing a private Shortcut ticket, an autonomous report id or a decision record means nothing to an outside reader, so guard-comments blocks changed comments that do.",
+  "//comments": "devkit is open source: a comment citing a private Shortcut ticket, an autonomous report id or a decision record means nothing to an outside reader, and a file:line anchor rots on the next edit, so guard-comments blocks changed comments that cite either.",
   "comments": {
     "forbiddenRefs": ["\\bsc-\\d+\\b", "\\breport-[0-9a-f]{6,}\\b"],
-    "forbidDecisionRefs": true
+    "forbidDecisionRefs": true,
+    "forbidLineAnchors": true
   },
   "//evidence": "devkit ship runs a PR's added or changed test files on red (the PR base plus those files) and green (the PR head) after the PR opens, and writes the outcome into the PR body.",
   "evidence": {
