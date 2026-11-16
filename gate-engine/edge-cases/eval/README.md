@@ -3,8 +3,9 @@
 Ground-truth corpus of historical **`/edge-cases`** runs (sc-1118, epic 1117 Track A). The
 `/edge-cases` prompt is a diff-scoped adversarial review the owner runs at the end of substantive
 sessions; it reliably surfaces real bugs. sc-1119 benchmarks prompt/channel variants of an
-automated edge-cases judge against this corpus; sc-1120 ships the judge. **No judge or bench lives
-here** — this directory is the dataset plus the tooling that produced it.
+automated edge-cases judge against this corpus (the bench lives here too — see "sc-1119 bench"
+below; its rules are frozen in `PREREGISTRATION.md`); sc-1120 ships the judge (the judge itself
+does NOT live here).
 
 **Methodology:** this corpus went through a full research-backed methodology audit
 (`docs/benchmarks/benchmark-methodology.md` — verdict, blockers, and the 20-item house checklist).
@@ -180,6 +181,113 @@ per-section budgets so no evidence class is silently truncated away.
   headline numbers (labelled "consistent with self-preference", not proof).
 - After the first run, **hand-audit exactly the findings where variants disagree with the label**
   (disagreement-triaged audit) — cheapest way to turn ranking-deciding points into gold.
+
+## sc-1119 bench
+
+The benchmark harness consuming this corpus under the contract above. **`PREREGISTRATION.md` is
+the rule book** — denominators, match rule, decision rule, seeds, K, gates and amendments are
+frozen there before any judged run; this section only orients.
+
+- `counts.mts` — denominator source of truth (derived, test-pinned; never hand-counted).
+- `guards-generate.mts` — synthetic precision-guard rows (pure-prose docs-only commits at pinned
+  shas → gitignored `guards-synthetic.jsonl`; regenerable).
+- `prompts.mts` — frozen arms (shape F/P × length S/L), channel wrappers (U / G-user / G-sys ×2
+  realizations), shared JSON footer, blinded judge-input projection, prompt shas.
+- `noise-audit.mts` — the REQUIRED label-noise floor (stratified blind n=60, two-axis relabel,
+  opus via `claude -p`; gemini cross-family leg opt-in via `--with-gemini`; frozen bundles, AC1
+  gate, owner-adjudicated ε posteriors).
+- `bench.mts` — K=3 grid runner (12 configs), pre-registered scoring via `lib/match.mts
+  matchFindings`, nested label-perturbation bootstrap, `--ceiling` calibration (sets the ship
+  target T = max(0.6·C, 0.35)), `--analyze` (paired Δs + audit queue), `--baseline`/`--fail`
+  (flip-table regression gate with comparability hashes).
+- `results.baseline.json` — committed results (IDs + numbers only; enforced by the
+  results-privacy test).
+
+Run order: `--ceiling` → `noise-audit --sample/--run/--report` → owner adjudication →
+`noise-audit --epsilon` → `--all` → `--analyze` → owner queue → `--baseline`.
+
+### Results — LOCKED VERDICT (run 2026-07-14→16, sonnet/haiku, K=3, 12 configs × 135 rows)
+
+**No config ships.** Every one of the 12 pre-registered configs fails at least one gate; the
+verdict is robust under the full disputed-label bracket (below). sc-1120 does **not** ship a judge
+on this corpus/prompt set as-is.
+
+| # | config (model·shape·channel·real) | macro recall | receipts /7 | guard fire /26 | flags |
+|---|---|---|---|---|---|
+| best-recall | son·PS·G-user·r1 | **0.315** | 5 | 18 (69%) | GUARD-DQ |
+| only guard-passer | son·FL·G-user·r1 | 0.214 | 2 | **5 (19%)** | soft-receipts |
+| best haiku | hai·FS·G-sys·r1 | 0.179 | 0 | 15 (58%) | GUARD-DQ + soft |
+
+Target **T = 0.35** (= max(0.6·C, 0.35); ceiling **C = 0.512** — the matcher+segmentation+phrasing
+cap on ANY judge, measured judge-free). Gates: macro recall ≥ T · nested-CI lower ≥ T−0.15 ·
+guard fire-rate ≤ 20% of the 26-row diff-shaped guard stratum · ≥4/7 receipts.
+
+Findings:
+- **Nobody clears the recall bar.** Highest is 0.315 (< 0.35), and its CI lower bound is 0.16.
+- **A hard trade-off, not a tuning gap.** The prompt that finds the most (procedural-short, 0.315)
+  hallucinates on **69%** of pure-documentation diffs; the only prompt that stays under the 20%
+  hallucination gate (findings-analytic-long, 19%) finds just 0.214. No config is on the right side
+  of both — E2/E3 (shape × length) buys recall only by trading away precision.
+- **Configs are statistically indistinguishable in recall.** Every paired Δ vs the best config has a
+  bootstrap CI spanning 0, Wilcoxon p ≥ 0.05, McNemar non-significant (discordant pairs ≤ 7) —
+  exactly the n=19 power ceiling the pre-registration declared. We can disqualify, not rank.
+- **Provenance (E1) — the ticket's headline question — is a NULL.** Owner-voice vs gate-user vs
+  gate-system framing (2 paraphrases each, paired per-case): sonnet macro recall 0.220 / 0.226 /
+  0.242, all deltas ≤ 2.2pp, Wilcoxon p 0.46–0.65; finding volume, hallucination rate and pushback
+  all overlap. Whether the judge believes a human or an automated gate asked makes no measurable
+  difference to finding quality for this wrapper set. → sc-1120 picks the delivery channel on
+  engineering grounds, not sycophancy grounds.
+- **Label-noise floor:** blind opus relabel + owner adjudication put the decision-stratum label
+  error at **1/38 (~2.6%)**, Beta(2,38) — folded into every CI via the nested bootstrap. The raw
+  AC1 gate "failed" purely because the blind protocol hides the session context that justifies
+  resolved-safe findings (documented; not a labels problem).
+- **Sensitivity bracket (settles the checkpoint-2 audit queue):** the guard gate is
+  label-independent (synthetic docs guards), and only son·FL·G-user·r1 passes it. Even declaring
+  **all 22** never-recalled gold findings label errors lifts its recall only 0.118 → 0.164 — still
+  under half of T, with 2/7 receipts. No adjudication of the 22-item / 60-extra audit queue
+  rescues any config. Verdict is robust, not provisional.
+
+Why this is the useful answer: the ceiling C = 0.512 says half the distance to "perfect" is
+matcher/segmentation friction, not judge intelligence — so the next move for edge-cases autonomy is
+matcher + prompt work (and the sc-1131 known-bug slice for real recall power), NOT shipping a gate
+that finds a quarter of the issues while crying wolf on two-thirds of docs commits. Full per-config
+numbers, CIs, provenance table, κ/AC1 and seeds: `results.baseline.json` +
+`raw/bench/analysis.json`.
+
+Summary-tier (session-summary rows, descriptive-only, feeds no gate) was **not run** — it is
+purely a modality sanity check and the no-ship verdict does not depend on it; skipped to conserve
+subscription quota (a pre-declared ponytail cut).
+
+**Corpus errata found by the checkpoint-2 audit (DEFERRED to the next corpus regen — NOT applied
+here, so the committed baseline stays in sync with the corpus it scored, and the merged frink
+corpus is untouched for a verdict-irrelevant delta the sensitivity bracket already covers):**
+- `cc-frink-20260616-60a58840#4` — `wasLiveBug: unknown → true`, tier `test-added-green →
+  f2p-in-session`: the frozen bundle shows the concurrency-guard test failing at 11:32:46 then
+  passing at 11:35:03 (a real f2p receipt the original label missed as a same-turn green).
+- `cc-devkit-20260703-f8944646#10` — `verdict: worth-surfacing → noise`: the finding is a
+  test-scope triage note (a not-worth-testing boundary), not an edge-case assertion (both triage
+  passes + owner agree). Fold both via `raw/audit-overlay.jsonl` + `finalize` on the next corpus
+  cut (tracked as an sc-1118 follow-up).
+
+### Research notes (sc-1119 Phase 0 — provenance/channel design inputs)
+
+- **Instruction hierarchy / channel authority:** models are trained to weight system > user >
+  tool text (2404.13208); in agentic settings tool-delivered instructions carry the lowest trust
+  and frontier models resolve multi-source conflicts poorly (~40%, ManyIH 2604.09443). This is
+  why the provenance experiment exists: gate-delivered findings may be argued with where
+  user-attributed asks are not.
+- **Authority/sycophancy mechanics:** models respond in a GRADED way to perceived authority,
+  unprompted and mechanistically localized (2607.00415); but simple user opinion statements
+  induce sycophancy where expertise framing does NOT (2508.02087), and stated confidence
+  modulates it (2410.14746); baseline preference-driven sycophancy: 2310.13548. Design
+  consequences (all in `prompts.mts`): wrappers carry attribution ONLY — zero opinions about the
+  code, zero confidence claims, matched mood/length; the first-person shift inherent to
+  owner-voice framing is BUNDLED with the attribution construct (2508.02087 shows person itself
+  matters) and results are scoped to the wrapper set, not the construct.
+- **LLM-as-judge pitfalls** (style/position/self-preference biases): covered by the house
+  methodology (`docs/benchmarks/benchmark-methodology.md` items 9–12) — the bench's scorer is a
+  DETERMINISTIC matcher, so judge-side bias enters only through the corpus labels (addressed by
+  the blinding, uniform output footer, and the noise audit's cross-family relabel).
 
 ## Known biases (accepted, documented)
 
