@@ -19,6 +19,7 @@ import { type CodexMcpServerDef, codexMcpArgs } from './mcp.mts';
 import { codexPermissionArgs } from './permissions.mts';
 import { parseModelSpec } from './model-spec.mts';
 import type { CodexWorkspace } from './workspace.mts';
+import { toolGateArgs } from './tool-gate.mts';
 
 // ── the `codex exec --json` event contract ──────────────────────────────────────────────────────
 // One ThreadEvent per stdout line (codex-rs/exec/src/exec_events.rs). Only the fields devkit reads
@@ -50,6 +51,7 @@ interface CodexErrorPayload {
 
 interface CodexEvent {
   type?: string;
+  thread_id?: string;
   item?: CodexEventItem;
   usage?: CodexUsagePayload;
   error?: CodexErrorPayload;
@@ -283,7 +285,7 @@ export function judgeCliFor(
   const mcp = codexMcpArgs(mcpServers, parts.allowedTools, confined ? confinedEnv(confined) : {});
   return {
     bin: codexBin(),
-    argv: codexExecArgs(parts, mcp.argv, workspace),
+    argv: codexExecArgs(parts, [...mcp.argv, ...toolGateArgs(parts, confined)], workspace),
     codex: true,
     extraEnv: mcp.extraEnv,
     mcpInjected: mcp.injected,
