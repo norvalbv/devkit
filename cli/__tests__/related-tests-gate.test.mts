@@ -162,6 +162,7 @@ describe('runRelatedTests', () => {
       [
         'run',
         '--reporter=dot',
+        '--silent=passed-only',
         '--reporter=json',
         expect.stringMatching(/^--outputFile\.json=.+results\.json$/),
         `--reporter=${UNHANDLED_REPORTER}`,
@@ -177,7 +178,7 @@ describe('runRelatedTests', () => {
     const exec = fakeExec(0);
     const list = vi.fn(async () => [join('/repo', REACH)]);
     await runRelatedTests('/repo', { staged: [REACH], list, exec });
-    expect(withoutReport(exec.mock.calls[0][1])).toEqual(['run', '--reporter=dot', join('/repo', REACH)]);
+    expect(withoutReport(exec.mock.calls[0][1])).toEqual(['run', '--reporter=dot', '--silent=passed-only', join('/repo', REACH)]);
   });
 
   it('adds the forced test once, however many ship scripts are staged and when itself staged', async () => {
@@ -185,7 +186,7 @@ describe('runRelatedTests', () => {
     const exec = fakeExec(0);
     const staged = ['cli/lib/ship/reship.sh', SCRUB, 'cli/lib/ship/b.sh'];
     await runRelatedTests('/repo', { staged, list: vi.fn(async () => [join('/repo', SCRUB)]), exec });
-    expect(withoutReport(exec.mock.calls[0][1])).toEqual(['run', '--reporter=dot', join('/repo', SCRUB), join('/repo', REACH)]);
+    expect(withoutReport(exec.mock.calls[0][1])).toEqual(['run', '--reporter=dot', '--silent=passed-only', join('/repo', SCRUB), join('/repo', REACH)]);
   });
 
   it('runs the forced test when the setup file is staged alone', async () => {
@@ -194,7 +195,7 @@ describe('runRelatedTests', () => {
     const list = vi.fn(async () => []);
     expect(await runRelatedTests('/repo', { staged: ['vitest.setup.mjs'], list, exec })).toBe(1);
     expect(list).not.toHaveBeenCalled();
-    expect(withoutReport(exec.mock.calls[0][1])).toEqual(['run', '--reporter=dot', join('/repo', SCRUB), join('/repo', REACH)]);
+    expect(withoutReport(exec.mock.calls[0][1])).toEqual(['run', '--reporter=dot', '--silent=passed-only', join('/repo', SCRUB), join('/repo', REACH)]);
     expect(log).toHaveBeenCalledWith('related-tests: 2 test file(s) for 0 staged path(s), 1 forced');
   });
 
@@ -584,6 +585,6 @@ describe('runRelatedTests failure reason', () => {
     vi.stubEnv('TMPDIR', join(tmpdir(), 'related-tests-missing', 'nope'));
     const exec = fakeExec(0);
     expect(await runRelatedTests('/repo', { staged: ['cli/a.mts'], list, exec })).toBe(0);
-    expect(exec.mock.calls[0][1]).toEqual(['run', '--reporter=dot', '/repo/cli/a.test.mts', join('/repo', REACH)]);
+    expect(exec.mock.calls[0][1]).toEqual(['run', '--reporter=dot', '--silent=passed-only', '/repo/cli/a.test.mts', join('/repo', REACH)]);
   });
 });
