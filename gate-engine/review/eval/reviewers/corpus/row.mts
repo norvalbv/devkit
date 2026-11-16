@@ -6,6 +6,7 @@ import { resolveGuardConfig } from '../../../../config.mts';
 import { BenchAbort, materializeFixture } from '../../../../decisions/eval/bench.mts';
 import { REMEDY_CAUSES } from '../../../../judge/outage/wording.mts';
 import { execJudgeAsync } from '../../../../judge/run-judge.mts';
+import { restoreRows } from '../../../cascade/escalation.mts';
 import { mergeLensCaptures } from '../../../lens/split.mts';
 import { parseReviewVerdict, selectReviewers } from '../../../reviewers.mts';
 import { runCascade } from '../../../run-review.mts';
@@ -97,7 +98,11 @@ export function scoreRow(row, capture, cas) {
     const snap = (esc && !esc.synthetic ? esc.snapshot : null) ?? first?.snapshot ?? null;
     // Domain reviewers write items[].name; commit-guard writes one files[].path entry per file.
     const listed = snap?.items ?? snap?.files;
-    const items = Array.isArray(listed) ? listed : [];
+    const items = Array.isArray(listed) ? [...listed] : [];
+    // The escalation snapshot predates the cascade's restore: a row it left pending keeps the first pass's.
+    const firstListed = first?.snapshot?.items ?? first?.snapshot?.files ?? [];
+    const firstFails = firstListed.filter((i) => i.status === 'fail');
+    if (snap !== first?.snapshot) restoreRows(items, firstFails);
     const failedItems = items.filter((i) => i.status === 'fail').map((i) => i.name ?? i.path);
     if (row.expectSymbols)
       symbols = symbolsNamed(

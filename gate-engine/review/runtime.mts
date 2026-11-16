@@ -203,6 +203,8 @@ export interface ReviewOutcome {
    * the artifact holds a FAILED item, which is a candidate violation rather than a judge-side miss. */
   refusedCalls?: number;
   transcript?: string;
+  /** Both passes of an escalated run, each labelled with its model; archived instead of `transcript`. */
+  fullTranscript?: string;
   /** Contract-validated waiver lenses of a FAIL — the only findings the override valve may
    * block or waive (a fabricated pair beside a grounded one must not demand its own waiver). */
   blockingLenses?: string[];
