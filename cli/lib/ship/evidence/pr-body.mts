@@ -1,5 +1,5 @@
 // The PR-body boundary: one bounded gh read and write each. GitHub has no compare-and-set on a body,
-// so the upsert re-reads after writing and refuses once the PR head is no longer the evidence head.
+// so an edit re-reads after writing and, given a head, refuses once the PR head has moved past it.
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
 import { carryEvidenceBlock } from './block.mts';
@@ -68,14 +68,16 @@ function rewriteBody(
   return 'contended';
 }
 
-/** Apply `edit` while the PR head is still `head`; a lost concurrent write is retried, bounded. */
+/** Apply `edit` to the PR body while its head is still `head` (null: any head); retried, bounded. */
 export function publishBody(
   repo: string,
   pr: string,
-  head: string,
+  head: string | null,
   edit: (body: string) => string,
 ): PublishResult {
-  return rewriteBody(repo, pr, (pull) => (pull.headRefOid === head ? edit(pull.body) : null));
+  return rewriteBody(repo, pr, (pull) =>
+    head === null || pull.headRefOid === head ? edit(pull.body) : null,
+  );
 }
 
 /** Replace the caller-authored text and keep the PR's evidence block; a failed read writes nothing. */
