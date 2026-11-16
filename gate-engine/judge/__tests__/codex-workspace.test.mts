@@ -20,7 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { codexPermissionArgs } from '../codex/permissions.mts';
-import { codexExecArgs, judgeCliFor, NO_TEST_RUNS } from '../codex/result.mts';
+import { codexExecArgs, judgeCliFor, NO_EXECUTION_RULE, NO_TEST_RUNS } from '../codex/result.mts';
 import { prepareCodexSandbox } from '../codex/workspace.mts';
 import { execJudge, execJudgeAsync, type JudgeOutage } from '../run-judge.mts';
 
@@ -102,7 +102,7 @@ describe('codex judge argv — workspace confinement', () => {
     expect(cli.argv[cli.argv.length - 1]).toMatch(/^The repository under review is \/work\/repo\./);
     expect(cli.argv[cli.argv.length - 1]).toContain(`read-only to you except ${stateFile}.`);
     expect(cli.argv[cli.argv.length - 1]).toContain(NO_TEST_RUNS);
-    expect(cli.argv[cli.argv.length - 1].endsWith('P')).toBe(true);
+    expect(cli.argv[cli.argv.length - 1].endsWith(`P\n\n${NO_EXECUTION_RULE}`)).toBe(true);
     expect(cli.extraEnv).toEqual({
       DEVKIT_JUDGE_REPO_ROOT: '/work/repo',
       TMPDIR: '/tmp/scratch',
