@@ -625,10 +625,10 @@ function strictShip(flags: string[], rows: string, env: Record<string, string> =
   return ship(['feat/strict', 't', ...flags, 'note.txt'], argvLog(), rows, env).r;
 }
 
-/** A --pr re-push of feat/pr; `edit` false leaves a.ts unchanged, so only a --body can publish. */
-function strictReship(argv: string[], env: Record<string, string>, edit = true) {
+/** A --pr re-push of feat/pr with an edited a.ts. */
+function strictReship(argv: string[], env: Record<string, string>) {
   const { dir, env: repoEnv, ghBody } = bodyUpdateRepo();
-  if (edit) writeFileSync(join(dir, 'a.ts'), 'v2\n');
+  writeFileSync(join(dir, 'a.ts'), 'v2\n');
   const r = spawnSync('/bin/bash', [reshipScript, 'feat/pr', 'add v2', '--pr', ...argv], {
     cwd: dir,
     input: 'body\n',
@@ -703,13 +703,29 @@ describe('--wait-ci-strict', () => {
     expect(r.stderr).toContain('ci-outcome=failed pr=7');
   });
 
-  it('finishes a body-only update before exiting 5, rather than aborting mid-arm', () => {
-    // reship runs under `set -e`: a wait that exited would skip the body receipt and the URL echo.
-    const argv = ['--body', 'fresh body', ...STRICT, '--', 'a.ts'];
-    const { r, ghBody } = strictReship(argv, { GH_CHECKS_JSON: RED }, false);
+  it('finishes a recovered body-only update before exiting 5, rather than aborting mid-arm', () => {
+    // A lost push response leaves the body recorded with no commit delta; the resume's body-only arm
+    // runs under `set -e`, so a wait that exited would skip the body receipt and the URL echo.
+    const { dir, env, ghBody } = bodyUpdateRepo();
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+    const run = (argv: string[], extra: Record<string, string>) =>
+      spawnSync('/bin/bash', [reshipScript, ...argv], {
+        cwd: dir,
+        input: 'body\n',
+        encoding: 'utf8',
+        env: { ...process.env, ...env, ...FAST, ...extra },
+      });
+    const lost = run(['feat/pr', 'add v2', '--pr', '--body', 'fresh body', '--', 'a.ts'], {
+      FAIL_AFTER_PUSH: '1',
+    });
+    expect(lost.status).not.toBe(0);
+    expect(existsSync(ghBody)).toBe(false);
+
+    const r = run(['--resume', 'feat/pr', ...STRICT], { GH_CHECKS_JSON: RED });
     expect(r.status, r.stderr).toBe(5);
     expect(readFileSync(ghBody, 'utf8')).toBe('fresh body');
     expect(r.stdout).toContain('https://github.com/acme/app/pull/7');
+    expect(r.stderr).toContain('ci-outcome=failed pr=7');
   });
 
   it('exits 5 for a SHIP_DRY_RUN re-push, as a new ship does, since no verdict was formed', () => {
