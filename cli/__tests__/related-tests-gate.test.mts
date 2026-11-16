@@ -1,5 +1,13 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
@@ -15,10 +23,8 @@ import {
 
 const GATE = join(import.meta.dirname, '..', 'lib', 'husky', 'gate-policy', 'related-tests.mts');
 
-function fakeExec(status: number | null) {
-  return vi.fn((_cmd: string, _args: string[], _opts: { cwd: string; stdio: 'inherit' }) => ({
-    status,
-  }));
+function fakeExec(code: number, interrupted = false) {
+  return vi.fn(async (_bin: string, _args: string[], _cwd: string) => ({ code, interrupted }));
 }
 
 const REACH = 'cli/__tests__/test-graph-reach.test.mts';
@@ -107,8 +113,9 @@ describe('runRelatedTests', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const list = vi.fn(async () => ['/repo/a.test.mts']);
     const exec = fakeExec(0);
-    expect(await runRelatedTests('/repo', { staged: [], list, exec })).toBe(0);
-    expect(await runRelatedTests('/repo', { staged: ['package.json'], list, exec })).toBe(0);
+    const none = { code: 0, interrupted: false };
+    expect(await runRelatedTests('/repo', { staged: [], list, exec })).toEqual(none);
+    expect(await runRelatedTests('/repo', { staged: ['package.json'], list, exec })).toEqual(none);
     expect(list).not.toHaveBeenCalled();
     expect(exec).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith('related-tests: none selected');
@@ -118,7 +125,9 @@ describe('runRelatedTests', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exec = fakeExec(0);
     const list = vi.fn(async () => []);
-    expect(await runRelatedTests('/repo', { staged: ['guard.config.json'], list, exec })).toBe(0);
+    expect(
+      (await runRelatedTests('/repo', { staged: ['guard.config.json'], list, exec })).code,
+    ).toBe(0);
     expect(list).toHaveBeenCalledWith('/repo', ['guard.config.json']);
     expect(exec).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith('related-tests: no test relates to the 1 staged path(s)');
@@ -130,7 +139,7 @@ describe('runRelatedTests', () => {
     const list = vi.fn(async () => {
       throw new Error('Transform failed');
     });
-    expect(await runRelatedTests('/repo', { staged: ['cli/a.mts'], list, exec })).toBe(1);
+    expect((await runRelatedTests('/repo', { staged: ['cli/a.mts'], list, exec })).code).toBe(1);
     expect(exec).not.toHaveBeenCalled();
     expect(err).toHaveBeenCalledWith(
       '✗ related-tests could not list related tests: Transform failed',
@@ -141,11 +150,11 @@ describe('runRelatedTests', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const exec = fakeExec(1);
     const list = vi.fn(async () => ['/repo/cli/a.test.mts']);
-    expect(await runRelatedTests('/repo', { staged: ['cli/a.mts'], list, exec })).toBe(1);
+    expect((await runRelatedTests('/repo', { staged: ['cli/a.mts'], list, exec })).code).toBe(1);
     expect(exec).toHaveBeenCalledWith(
       join('/repo', 'node_modules', '.bin', 'vitest'),
       ['run', '--reporter=dot', '/repo/cli/a.test.mts', join('/repo', REACH)],
-      { cwd: '/repo', stdio: 'inherit' },
+      '/repo',
     );
   });
 
@@ -161,26 +170,56 @@ describe('runRelatedTests', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const exec = fakeExec(0);
     const staged = ['cli/lib/ship/reship.sh', SCRUB, 'cli/lib/ship/b.sh'];
-    await runRelatedTests('/repo', { staged, list: vi.fn(async () => [join('/repo', SCRUB)]), exec });
-    expect(exec.mock.calls[0][1]).toEqual(['run', '--reporter=dot', join('/repo', SCRUB), join('/repo', REACH)]);
+    await runRelatedTests('/repo', {
+      staged,
+      list: vi.fn(async () => [join('/repo', SCRUB)]),
+      exec,
+    });
+    expect(exec.mock.calls[0][1]).toEqual([
+      'run',
+      '--reporter=dot',
+      join('/repo', SCRUB),
+      join('/repo', REACH),
+    ]);
   });
 
   it('runs the forced test when the setup file is staged alone', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exec = fakeExec(1);
     const list = vi.fn(async () => []);
-    expect(await runRelatedTests('/repo', { staged: ['vitest.setup.mjs'], list, exec })).toBe(1);
+    expect(
+      (await runRelatedTests('/repo', { staged: ['vitest.setup.mjs'], list, exec })).code,
+    ).toBe(1);
     expect(list).not.toHaveBeenCalled();
-    expect(exec.mock.calls[0][1]).toEqual(['run', '--reporter=dot', join('/repo', SCRUB), join('/repo', REACH)]);
-    expect(log).toHaveBeenCalledWith('related-tests: 2 test file(s) for 0 staged path(s), 1 forced');
+    expect(exec.mock.calls[0][1]).toEqual([
+      'run',
+      '--reporter=dot',
+      join('/repo', SCRUB),
+      join('/repo', REACH),
+    ]);
+    expect(log).toHaveBeenCalledWith(
+      'related-tests: 2 test file(s) for 0 staged path(s), 1 forced',
+    );
   });
 
-  it('blocks when vitest is killed or cannot spawn', async () => {
+  it('passes an interrupted run through, so the entrypoint can skip the unmapped note', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const list = vi.fn(async () => ['/repo/cli/a.test.mts']);
-    expect(
-      await runRelatedTests('/repo', { staged: ['cli/a.mts'], list, exec: fakeExec(null) }),
-    ).toBe(1);
+    const exec = fakeExec(143, true);
+    expect(await runRelatedTests('/repo', { staged: ['cli/a.mts'], list, exec })).toEqual({
+      code: 143,
+      interrupted: true,
+    });
+  });
+
+  it('blocks an interrupted run even when vitest exits 0', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const list = vi.fn(async () => ['/repo/cli/a.test.mts']);
+    const exec = fakeExec(0, true);
+    expect(await runRelatedTests('/repo', { staged: ['cli/a.mts'], list, exec })).toEqual({
+      code: 1,
+      interrupted: true,
+    });
   });
 });
 
@@ -340,7 +379,11 @@ function graphRepo(): string {
 }
 
 function runGate(root: string, ...staged: string[]) {
-  return spawnSync(process.execPath, [GATE, ...staged], { cwd: root, encoding: 'utf8', timeout: 90_000 });
+  return spawnSync(process.execPath, [GATE, ...staged], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 90_000,
+  });
 }
 
 describe('listRelated', () => {
