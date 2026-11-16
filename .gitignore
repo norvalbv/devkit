@@ -24,11 +24,9 @@ node_modules
 .devkit/*.generation
 # vitest blob reports: gate.yml shards write them and the test-report job merges them
 .vitest/
-# Codex projections of devkit's own agents/skills, written by external codex tooling. Deliberately
-# NOT tracked, unlike .claude/ and .cursor/: those are emitted by devkit's own sync-agents/
-# sync-skills and drift-checked by `devkit doctor` against a manifest, whereas nothing here can
-# regenerate or verify these — committing them would guarantee silent staleness the moment an agent
-# or skill changes. Track them once `codex` is a real AGENT_TARGETS entry and devkit emits them.
+# Codex agent-surface projections, per-checkout copies that devkit init/upgrade and sync-skills/
+# sync-agents write for the `codex` agentTarget. Deliberately untracked, so committed projection
+# parity (cli/lib/install/agent-assets/projection-parity.mts) skips them.
 .agents/
 .codex/
 # decision-log embedding cache (query); rebuildable via `guard-decisions reindex`. docs/decisions/ IS committed.
