@@ -5,6 +5,7 @@
 
 SNAPSHOT_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$SNAPSHOT_LIB_DIR/../link-gate-configs.sh"
+. "$SNAPSHOT_LIB_DIR/tree-materialization.sh"
 
 _review_snapshot_clear_git_env() {
   local name
@@ -124,180 +125,9 @@ _review_snapshot_write_projection_paths() {
   done < "$candidate_manifest"
 }
 
-_review_snapshot_entry_type() {
-  local path=$1
-  [ -L "$path" ] && { printf 'symlink\n'; return 0; }
-  [ -f "$path" ] && { printf 'file\n'; return 0; }
-  [ -d "$path" ] && { printf 'directory\n'; return 0; }
-  [ ! -e "$path" ] && { printf 'missing\n'; return 0; }
-  return 1
-}
-
-_review_snapshot_entry_mode() {
-  local path=$1 type=$2 permissions
-  [ "$type" = symlink ] && { printf '120000\n'; return 0; }
-  permissions=$(stat -f '%Lp' -- "$path" 2>/dev/null) || \
-    permissions=$(stat -c '%a' -- "$path" 2>/dev/null) || return 1
-  case "$permissions" in
-    '' | *[!0-7]*) return 1 ;;
-  esac
-  if (( (8#$permissions & 0111) != 0 )); then
-    printf '100755\n'
-  else
-    printf '100644\n'
-  fi
-}
-
-_review_snapshot_readlink() {
-  local value
-  IFS= read -r -d '' value < <(readlink -n "$1" && printf '\0') || return 1
-  printf '%s\0' "$value"
-}
-
-_review_snapshot_hash_entry() {
-  local git_root=$1 path=$2 type=$3 target oid
-  if [ "$type" = symlink ]; then
-    IFS= read -r -d '' target < <(_review_snapshot_readlink "$git_root/$path") || return 1
-    oid=$(printf '%s' "$target" | \
-      git -C "$git_root" hash-object -w --no-filters --stdin) || return 1
-  else
-    oid=$(git -C "$git_root" hash-object -w --no-filters -- "$path") || return 1
-  fi
-  case "$oid" in
-    '' | *[!0-9a-f]*) return 1 ;;
-  esac
-  printf '%s\n' "$oid"
-}
-
-_review_snapshot_write_candidate_records() {
-  local git_root=$1 alternate_index=$2 excludes=$3 destination=$4 path
-  local pipeline_status=()
-  GIT_INDEX_FILE="$alternate_index" \
-    git -C "$git_root" ls-files --stage -z > "$destination" || return 1
-  GIT_INDEX_FILE="$alternate_index" \
-    git -C "$git_root" -c core.excludesFile="$excludes" \
-    ls-files --others --exclude-standard -z |
-    while IFS= read -r -d '' path; do
-      printf '?\t%s\0' "$path"
-    done >> "$destination"
-  pipeline_status=("${PIPESTATUS[@]}")
-  [ "${pipeline_status[0]}" -eq 0 ] && [ "${pipeline_status[1]}" -eq 0 ]
-}
-
-_review_snapshot_stage_raw_files() {
-  local git_root=$1 target_head=$2 alternate_index=$3 projection_manifest=$4 excludes=$5
-  local candidate_manifest=$6 entry_manifest=$7 record metadata path indexed_mode indexed_oid
-  local full type_before type_after mode_before mode_after oid
-  local entry_index file_offset hash_index file_count
-  local reset_paths=()
-  local entry_paths=() entry_types=() entry_modes=() entry_oids=()
-  local file_paths=() file_indexes=()
-  while IFS= read -r -d '' path; do
-    reset_paths+=("$path")
-  done < "$projection_manifest"
-
-  _review_snapshot_write_candidate_records \
-    "$git_root" "$alternate_index" "$excludes" "$candidate_manifest" || return 1
-  : > "$entry_manifest" || return 1
-  while IFS= read -r -d '' record; do
-    case "$record" in
-      *$'\t'*) ;;
-      *) return 1 ;;
-    esac
-    metadata=${record%%$'\t'*}
-    path=${record#*$'\t'}
-    [ -n "$path" ] || return 1
-    indexed_mode=
-    indexed_oid=
-    if [ "$metadata" != '?' ]; then
-      indexed_mode=${metadata%% *}
-      metadata=${metadata#* }
-      indexed_oid=${metadata%% *}
-      [ "${metadata#* }" = 0 ] || return 1
-    fi
-    full=$git_root/$path
-    type_before=$(_review_snapshot_entry_type "$full") || {
-      printf 'devkit review: unsupported filesystem entry: %q\n' "$path" >&2
-      return 1
-    }
-    case "$type_before" in
-      missing) continue ;;
-      directory)
-        if [ "$indexed_mode" = 160000 ]; then
-          printf '160000 %s\t%s\0' "$indexed_oid" "$path" >> "$entry_manifest" || return 1
-        fi
-        continue
-        ;;
-      file | symlink) ;;
-      *) return 1 ;;
-    esac
-    mode_before=$(_review_snapshot_entry_mode "$full" "$type_before") || return 1
-    entry_index=${#entry_paths[@]}
-    entry_paths[$entry_index]=$path
-    entry_types[$entry_index]=$type_before
-    entry_modes[$entry_index]=$mode_before
-    if [ "$type_before" = file ]; then
-      file_paths[${#file_paths[@]}]=$path
-      file_indexes[${#file_indexes[@]}]=$entry_index
-    else
-      entry_oids[$entry_index]=$(
-        _review_snapshot_hash_entry "$git_root" "$path" "$type_before"
-      ) || return 1
-    fi
-  done < "$candidate_manifest"
-
-  # `hash-object` accepts literal path arguments, so bounded batches preserve newline-bearing paths
-  # without paying one Git process per ordinary file. Symlinks use stdin above because Git follows
-  # them when hashing a named path.
-  : > "$candidate_manifest" || return 1
-  file_count=${#file_paths[@]}
-  file_offset=0
-  while [ "$file_offset" -lt "$file_count" ]; do
-    git -C "$git_root" hash-object -w --no-filters -- \
-      "${file_paths[@]:$file_offset:256}" >> "$candidate_manifest" || return 1
-    file_offset=$((file_offset + 256))
-  done
-  hash_index=0
-  while IFS= read -r oid; do
-    case "$oid" in
-      '' | *[!0-9a-f]*) return 1 ;;
-    esac
-    [ "$hash_index" -lt "$file_count" ] || return 1
-    entry_oids[${file_indexes[$hash_index]}]=$oid
-    hash_index=$((hash_index + 1))
-  done < "$candidate_manifest"
-  [ "$hash_index" -eq "$file_count" ] || return 1
-
-  entry_index=0
-  while [ "$entry_index" -lt "${#entry_paths[@]}" ]; do
-    path=${entry_paths[$entry_index]}
-    type_before=${entry_types[$entry_index]}
-    mode_before=${entry_modes[$entry_index]}
-    oid=${entry_oids[$entry_index]}
-    full=$git_root/$path
-    type_after=$(_review_snapshot_entry_type "$full") || return 1
-    mode_after=$(_review_snapshot_entry_mode "$full" "$type_after") || return 1
-    if [ "$type_before" != "$type_after" ] || [ "$mode_before" != "$mode_after" ]; then
-      printf 'devkit review: filesystem entry changed during snapshot capture: %q\n' "$path" >&2
-      return 1
-    fi
-    printf '%s %s\t%s\0' "$mode_before" "$oid" "$path" >> "$entry_manifest" || return 1
-    entry_index=$((entry_index + 1))
-  done
-
-  GIT_INDEX_FILE="$alternate_index" git -C "$git_root" read-tree --empty || return 1
-  GIT_INDEX_FILE="$alternate_index" \
-    git -C "$git_root" update-index -z --index-info < "$entry_manifest" || return 1
-  GIT_INDEX_FILE="$alternate_index" GIT_LITERAL_PATHSPECS=1 \
-    git -C "$git_root" reset -q "$target_head" -- "${reset_paths[@]}"
-}
-
-_review_snapshot_stage_canonical_files() {
-  local git_root=$1 target_head=$2 alternate_index=$3 projection_manifest=$4 excludes=$5
-  local candidate_manifest=$6 gitlink_manifest=$7 record metadata path mode oid stage
-  local reset_paths=()
-  while IFS= read -r -d '' path; do reset_paths+=("$path"); done < "$projection_manifest"
-
+_review_snapshot_stage_worktree() {
+  local git_root=$1 alternate_index=$2 excludes=$3 candidate_manifest=$4 gitlink_manifest=$5
+  local record metadata path mode oid stage
   # `git add` normally replaces an indexed gitlink with the submodule checkout's current HEAD.
   # Review deliberately excludes unstaged nested-repository state, so preserve the captured index
   # OID while the gitlink still exists as a directory. A removed gitlink or a file/symlink replacing
@@ -328,6 +158,12 @@ _review_snapshot_stage_canonical_files() {
     GIT_INDEX_FILE="$alternate_index" \
       git -C "$git_root" update-index -z --index-info < "$gitlink_manifest" || return 1
   fi
+}
+
+_review_snapshot_reset_projections() {
+  local git_root=$1 target_head=$2 alternate_index=$3 projection_manifest=$4 path
+  local reset_paths=()
+  while IFS= read -r -d '' path; do reset_paths+=("$path"); done < "$projection_manifest"
   GIT_INDEX_FILE="$alternate_index" GIT_LITERAL_PATHSPECS=1 \
     git -C "$git_root" reset -q "$target_head" -- "${reset_paths[@]}"
 }
@@ -341,7 +177,8 @@ review_snapshot_capture_trees() (
   local alternate_index='' capture_excludes='' candidate_manifest='' projection_manifest=''
   local entry_manifest=''
   local candidate='' real_index index_hash_before index_hash_after copied_hash staged_index_tree
-  local pass current_staged_tree current_raw_tree current_excludes current_candidates current_projections
+  local pass worktree_tree current_staged_tree current_raw_tree current_excludes current_candidates
+  local current_projections
   local first_staged_tree='' first_raw_tree='' first_excludes='' first_candidates=''
   local first_projections=''
   _review_snapshot_clear_git_env
@@ -422,20 +259,24 @@ review_snapshot_capture_trees() (
     current_excludes=$(git hash-object --no-filters "$capture_excludes") || fail_review_snapshot
     current_candidates=$(git hash-object --no-filters "$candidate_manifest") || fail_review_snapshot
     current_projections=$(git hash-object --no-filters "$projection_manifest") || fail_review_snapshot
-    if ! _review_snapshot_stage_raw_files \
-      "$git_root" "$target_head" "$alternate_index" "$projection_manifest" \
-      "$capture_excludes" "$candidate_manifest" "$entry_manifest"; then
+    _review_snapshot_stage_worktree "$git_root" "$alternate_index" "$capture_excludes" \
+      "$candidate_manifest" "$entry_manifest" || fail_review_snapshot
+    worktree_tree=$(GIT_INDEX_FILE="$alternate_index" git -C "$git_root" write-tree) ||
       fail_review_snapshot
-    fi
-    current_raw_tree=$(GIT_INDEX_FILE="$alternate_index" git -C "$git_root" write-tree) || fail_review_snapshot
-    rm -f "$alternate_index" "$alternate_index.lock" || fail_review_snapshot
-    GIT_INDEX_FILE="$alternate_index" git -C "$git_root" \
-      read-tree "$staged_index_tree" || fail_review_snapshot
-    _review_snapshot_stage_canonical_files \
-      "$git_root" "$target_head" "$alternate_index" "$projection_manifest" \
-      "$capture_excludes" "$candidate_manifest" "$entry_manifest" || fail_review_snapshot
+    _review_snapshot_reset_projections "$git_root" "$target_head" "$alternate_index" \
+      "$projection_manifest" || fail_review_snapshot
     current_staged_tree=$(GIT_INDEX_FILE="$alternate_index" \
       git -C "$git_root" write-tree) || fail_review_snapshot
+    # The raw tree shares this pass's entry set and modes; only regular-file bytes skip filters.
+    rm -f "$alternate_index" "$alternate_index.lock" || fail_review_snapshot
+    GIT_INDEX_FILE="$alternate_index" git -C "$git_root" read-tree "$worktree_tree" ||
+      fail_review_snapshot
+    _review_rehash_regular_entries "$git_root" "$alternate_index" "$entry_manifest" ||
+      fail_review_snapshot
+    _review_snapshot_reset_projections "$git_root" "$target_head" "$alternate_index" \
+      "$projection_manifest" || fail_review_snapshot
+    current_raw_tree=$(GIT_INDEX_FILE="$alternate_index" git -C "$git_root" write-tree) ||
+      fail_review_snapshot
 
     if [ "$pass" -eq 1 ]; then
       first_staged_tree=$current_staged_tree
