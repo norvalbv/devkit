@@ -14,6 +14,7 @@ import {
   ANTI_SLOP_MANIFEST_REL,
   ANTI_SLOP_PLUGIN_API_VERSION,
   ANTI_SLOP_RULE_IDS,
+  ANTI_SLOP_RULE_NAMES,
   ANTI_SLOP_UPSTREAM,
   antiSlopBaselineMigrationId,
   parseAntiSlopManifestEnvelope,
@@ -59,6 +60,12 @@ function sameUpstream(pkg: string): boolean {
   return existsSync(built) && readFileSync(built).equals(readFileSync(source));
 }
 
+/** A release-built index lacks any rule added since that release, even once its module is tracked. */
+function builtIndexRegistersEveryRule(built: string): boolean {
+  const index = readFileSync(join(built, 'index.js'), 'utf8');
+  return ANTI_SLOP_RULE_NAMES.every((name) => index.includes(`"${name}":`));
+}
+
 export function antiSlopPluginSource(pkg: string = packageDir()) {
   const root = join(pkg, 'anti-slop', 'src');
   if (existsSync(join(root, 'index.mjs'))) return { root, entry: './plugin/index.mjs' };
@@ -69,7 +76,8 @@ export function antiSlopPluginSource(pkg: string = packageDir()) {
   if (
     existsSync(join(built, 'index.js')) &&
     moduleFiles(built, '.js').join('\0') === moduleFiles(root, '.ts').join('\0') &&
-    sameUpstream(pkg)
+    sameUpstream(pkg) &&
+    builtIndexRegistersEveryRule(built)
   ) {
     return { root: built, entry: './plugin/index.js' };
   }
