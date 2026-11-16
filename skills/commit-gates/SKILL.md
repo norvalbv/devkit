@@ -16,7 +16,8 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
    fix that adds a NEW file rides along as a trailing path: `--resume <branch> -- <new-path>`;
    committed-branch mode freezes membership, refuses a resume whose fix committed a path outside it,
    and prints the fresh full `--from-branch` invocation to run instead); a plain commit re-runs the
-   identical commit command. Ship checkpoints successful
+   identical commit command. A ship "refused before queueing" recorded nothing: re-run the full
+   command, adding any new path to it. Ship checkpoints successful
    stages and `--resume` replays the
    recorded invocation byte-identically, so restarting with different flags or a re-typed body
    usually wastes work and can discard useful evidence.
