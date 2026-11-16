@@ -17,6 +17,7 @@ import {
   readBranchHistory,
   type ShipKey,
   type TrendRow,
+  renderVersionChange,
   trendNarration,
 } from './trend.mts';
 
@@ -193,7 +194,7 @@ export function renderAdvisories(
 export function branchNarration(sink: string, key: ShipKey): string {
   try {
     const rows = readBranchHistory(sink, key);
-    const lines = [trendNarration(rows, key)];
+    const lines = [trendNarration(rows, key), renderVersionChange(rows, key)];
     const keyed = branchAttempts(rows, key);
     if (keyed) {
       // One union, so a stub this run's cut row left folds into the advisory an earlier run raised.
