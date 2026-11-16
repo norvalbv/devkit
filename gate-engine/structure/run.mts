@@ -27,6 +27,7 @@ import { z } from 'zod';
 import { resolveGuardConfig } from '../config.mts';
 import { gitPrefix, nameStatusRecords, splitNul } from '../ratchets/git-index.mts';
 import { lintAttributed } from './attribution.mts';
+import { deletionProbes, runDeletionProbes } from './deletion-probe.mts';
 import { noGrammarResult, preflightStructure, withStructureLinter } from './preflight.mts';
 import { runPresetAttributed, runPresetLint } from './preset-lint.mts';
 import {
@@ -68,6 +69,7 @@ interface StagedPlan {
   targets: string[];
   probeScopes: StagedScope[];
   deferred: string[];
+  stagedPolicy: boolean;
 }
 
 // ESLint throws "No files matching the pattern" for an absent tree and "…are ignored" when every file
@@ -147,6 +149,7 @@ export function planStagedStructureLint(
     targets: unique(targets),
     probeScopes: [...probeScopes.values()],
     deferred: unique(deferred),
+    stagedPolicy,
   };
 }
 
@@ -160,7 +163,8 @@ function untrackedPaths(cwd: string): string[] {
   return gitPaths(cwd, ['ls-files', '--full-name', '--others', '--exclude-standard', '-z']);
 }
 
-function destructivePaths(cwd: string): string[] {
+// `paths` holds both sides of a rename; `removed` only what the commit takes away.
+function destructivePaths(cwd: string) {
   const records = nameStatusRecords(
     execFileSync('git', ['diff', '--cached', '--name-status', '-z', '--diff-filter=DR'], {
       cwd,
@@ -168,7 +172,10 @@ function destructivePaths(cwd: string): string[] {
       encoding: 'buffer',
     }).toString(),
   );
-  return records.flatMap((record) => [record.from ?? '', record.path]).filter(Boolean);
+  return {
+    paths: records.flatMap((record) => [record.from ?? '', record.path]).filter(Boolean),
+    removed: records.map((record) => record.from ?? record.path).filter(Boolean),
+  };
 }
 
 function toCwdPaths(paths: string[], prefix: string): string[] {
@@ -303,7 +310,9 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
     const changed = toCwdPaths(gitPaths(cwd, [...STAGED_NAMES, '--diff-filter=ACMR']), prefix);
     // Name-status preserves both sides of a rename, unlike name-only. Either side can remove a
     // required sibling, so either must probe its containing structure root.
-    const destructive = toCwdPaths(destructivePaths(cwd), prefix);
+    const staged = destructivePaths(cwd);
+    const destructive = toCwdPaths(staged.paths, prefix);
+    const removed = toCwdPaths(staged.removed, prefix);
     // Untracked sources also change the tree observed by a topology parser, so they carry the
     // same deferral rule as tracked working-tree edits.
     const unstaged = unique(
@@ -323,13 +332,24 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
     // A policy edit can invalidate any file under a root, not just the probed one, so it re-lints each
     // stable root whole; every staged target then lies inside one of those roots.
     const wholeRoots = stagesPolicy(changed, destructive, routingInputs);
-    const probes = plan.probeScopes.map((scope) =>
-      probeScope(cwd, scope, wholeRoots, unstableSources),
-    );
+    // A grammar deletion probes a synthetic path in each removed folder (deletion-probe.mts); a real
+    // file still probes the preset leg and a staged policy edit.
+    const probes = plan.probeScopes
+      .filter((scope) => scope.leg === 'preset' || wholeRoots)
+      .map((scope) => probeScope(cwd, scope, wholeRoots, unstableSources));
+    const deletions = plan.probeScopes.flatMap((scope) => {
+      const inScope = removed.filter((file) => pathInScope(file, scope));
+      if (scope.leg !== 'grammar' || !inScope.length) return [];
+      return [{ scope, synthetic: deletionProbes(cwd, scope.root, inScope) }];
+    });
     const probeTargets = probes
       .map((probe) => probe.target)
       .filter((target): target is string => target !== null);
-    const unprobedRoots = probes.filter((probe) => probe.target === null).map((p) => p.scope.root);
+    const unprobedRoots = unique([
+      ...probes.filter((probe) => probe.target === null).map((p) => p.scope.root),
+      ...deletions.filter((probe) => probe.synthetic === null).map((p) => p.scope.root),
+    ]);
+    const syntheticProbes = deletions.flatMap((probe) => probe.synthetic ?? []);
     // Deferred input was inspected by nothing, so it is could-not-run — never folded into a clean 0.
     const results: StructureGateResult[] = [];
     if (plan.deferred.length) {
@@ -360,6 +380,8 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
     const stable = !destructive.length && !wholeRoots;
     results.push(...(await runPresetAttributed(cwd, presetFiles, added, stable)));
     results.push(...(await lintAttributed(cwd, grammarFiles, added, stable, runGrammarLint)));
+    if (syntheticProbes.length)
+      results.push(await runDeletionProbes(cwd, syntheticProbes, removed));
     return withStructureConfigGaps(cwd, combineStructureResults(results));
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
