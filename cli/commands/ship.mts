@@ -181,10 +181,12 @@ Usage:
                       wait. Exit 5 means the PR is open (or SHIP_DRY_RUN committed) and CI is not
                       known green: do NOT --resume. For \`devkit ship … --wait-ci --wait-ci-strict &&
                       <merge>\`. NOT replayed by --resume.
-  --wait-ci-timeout <s>  Bound for --wait-ci, 60..7200, default 900. The floor exists because below
+  --wait-ci-timeout <s>  Bound for --wait-ci, 60..7200, default 3600. The floor exists because below
                       it a "this repo has no checks" verdict is unreachable and would surface as a
                       timeout instead. A terminal result is confirmed over ~30s before it is
                       reported, so a workflow_run-chained job that registers late cannot be missed.
+                      On timed-out, the next line names the gh one-shot that reads the checks so far.
+                      A backgrounded ship needs a tool timeout covering the gates plus this bound.
   --dry-gates         Rehearse the exact ship base + selected source staging in an ephemeral worktree.
                       Runs the formatter, configured deterministic/structure/extra gates, and the
                       deterministic comment budget gate; skips the decision judge,

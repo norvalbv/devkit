@@ -174,6 +174,14 @@ export function verdictLine(result: WaitCiResult, pr: string): string {
   }
 }
 
+/** The verdict, then on a timeout the quiet one-shot: re-shipping a pushed PR does not re-wait. */
+export function verdictLines(result: WaitCiResult, pr: string, repo: string): string[] {
+  const lines = [verdictLine(result, pr)];
+  if (result.outcome === 'timed-out')
+    lines.push(`  checks so far: gh pr checks ${pr} --repo ${repo} --json ${CHECKS_JSON_FIELDS}`);
+  return lines;
+}
+
 /** The shape gh emits, every field optional so a malformed entry is REJECTED, not dereferenced. */
 interface CheckRowCandidate {
   bucket?: unknown;
@@ -478,7 +486,7 @@ async function main(argv: string[]): Promise<number> {
   }).then((r) => ({ ...r, required, requiredContexts: narrowed?.contexts()?.length }));
   if (result.outcome === 'failed')
     result.attribution = await attribute(pr, result.failures, result.pending);
-  console.error(verdictLine(result, pr));
+  for (const line of verdictLines(result, pr, repo)) console.error(line);
   recordCiEvent(result, pr);
   // Without --strict the ship already succeeded and this process never speaks for it.
   return argv.includes('--strict') && result.outcome !== 'passed' ? 5 : 0;
