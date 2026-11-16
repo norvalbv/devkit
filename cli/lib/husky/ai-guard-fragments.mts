@@ -6,7 +6,7 @@ echo "🧭 Decision-log gate..."
 ddrc=0
 __dk_no_git_env "$__dk_package_bin_dir/guard-decisions" detect --gate || ddrc=$?
 if [ "$ddrc" -eq 1 ]; then
-    echo "   Record the decision target, or bypass a non-decision: GUARD_NO_LOG=1 git commit ..."
+    echo "   A confirmed non-decision only, with the user's OK: GUARD_NO_LOG=1 git commit ..."
     __dk_block_ai guard-decisions
 elif [ "$ddrc" -eq 3 ]; then
     echo "   guard-decisions: judge unavailable or gate could not run — strict ship mode failed closed."
