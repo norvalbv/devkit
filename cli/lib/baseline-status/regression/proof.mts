@@ -2,8 +2,8 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { constants } from 'node:os';
 import { join } from 'node:path';
-import { writeFileAtomic } from '../atomic-write.mts';
-import { superviseGateCommand } from '../ship/review/process/gate-supervisor.mts';
+import { writeFileAtomic } from '../../atomic-write.mts';
+import { superviseGateCommand } from '../../ship/review/process/gate-supervisor.mts';
 import {
   concludeRegression,
   parseVitestRegressionReport,
@@ -15,7 +15,7 @@ import {
   type RegressionOperandEvidence,
   type RegressionTestCounts,
   type RegressionTestOutcomes,
-} from './regression-evidence.mts';
+} from './evidence.mts';
 import {
   createRegressionClone,
   linkRegressionDependencies,
@@ -27,11 +27,11 @@ import {
   regressionTempBase,
   RegressionUsageError,
   snapshotRegressionCaller,
-} from './regression-repository.mts';
+} from './repository.mts';
 import {
   regressionCaptureSignals,
   superviseWindowsRegressionHelper,
-} from './regression-windows-supervisor.mts';
+} from './windows-supervisor.mts';
 
 interface ManagedResult {
   exitCode: number | null;
@@ -113,7 +113,7 @@ const MAX_SUPERVISION_MS = 2_147_483_647;
 
 function helperPath(): string {
   const extension = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
-  return join(import.meta.dirname, `regression-exec${extension}`);
+  return join(import.meta.dirname, `exec${extension}`);
 }
 
 interface CommandResultCandidate {

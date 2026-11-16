@@ -1,4 +1,4 @@
-import { proveRegression } from '../../lib/baseline-status/regression-proof.mts';
+import { proveRegression } from '../../lib/baseline-status/regression/proof.mts';
 
 export const meta = {
   name: 'prove-regression',

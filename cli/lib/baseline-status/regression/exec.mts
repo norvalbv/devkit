@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { closeSync, openSync, writeFileSync, writeSync } from 'node:fs';
 import { constants } from 'node:os';
-import { gitEnvironment } from '../ship/review/shared/common.mts';
+import { gitEnvironment } from '../../ship/review/shared/common.mts';
 
 interface CommandResult {
   exitCode: number | null;

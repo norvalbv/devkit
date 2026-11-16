@@ -3,7 +3,7 @@
 import {
   type RegressionEvidence,
   SKIPPED_ON_GREEN,
-} from '../../baseline-status/regression-evidence.mts';
+} from '../../baseline-status/regression/evidence.mts';
 
 export const EVIDENCE_STATUSES = ['captured', 'inconclusive', 'not-run'] as const;
 export type EvidenceStatus = (typeof EVIDENCE_STATUSES)[number];

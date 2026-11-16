@@ -19,7 +19,7 @@ import {
 } from '../../../gate-engine/coverage/unhandled-reporter.mts';
 import { resolveVitest, runVitest } from '../../../gate-engine/coverage/vitest-cli.mts';
 import { writeFileAtomic } from '../atomic-write.mts';
-import { boundedText } from './regression-evidence.mts';
+import { boundedText } from './regression/evidence.mts';
 
 /**
  * Every run writes into its OWN directory under here and nothing is ever published to a shared path.

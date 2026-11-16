@@ -7,13 +7,13 @@ import {
   sha256,
   type RegressionEvidence,
   type RegressionOperandEvidence,
-} from './regression-evidence.mts';
-import { captureRegressionComparison } from './regression-proof.mts';
+} from './regression/evidence.mts';
+import { captureRegressionComparison } from './regression/proof.mts';
 import {
   linkRegressionDependencies,
   prepareRegressionRepository,
   regressionTempBase,
-} from './regression-repository.mts';
+} from './regression/repository.mts';
 
 const VALUE_OPTIONS = ['baseline', 'candidate', 'control', 'vitest-report'] as const;
 

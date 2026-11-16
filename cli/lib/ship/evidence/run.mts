@@ -10,15 +10,15 @@ import { parseArgs } from 'node:util';
 import { resolveGuardConfig } from '../../../../gate-engine/config.mts';
 import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mts';
 import { clip } from '../../../../gate-engine/judge/odb-probe.mts';
-import type { RegressionEvidence } from '../../baseline-status/regression-evidence.mts';
+import type { RegressionEvidence } from '../../baseline-status/regression/evidence.mts';
 import {
   type CapturedRegression,
   captureRegressionEvidence,
-} from '../../baseline-status/regression-proof.mts';
+} from '../../baseline-status/regression/proof.mts';
 import {
   type PreparedRegressionRepository,
   prepareRegressionRepository,
-} from '../../baseline-status/regression-repository.mts';
+} from '../../baseline-status/regression/repository.mts';
 import { git } from '../../../../gate-engine/decisions/git-io.mts';
 import {
   instruction,
