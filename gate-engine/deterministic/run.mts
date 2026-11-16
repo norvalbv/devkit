@@ -54,7 +54,7 @@ import { type GateFailure, gateEnv, readGateReason, withReasonFiles } from './re
 import {
   bypassedSuffixes,
   commandGate,
-  configExtraGates,
+  extraGatesFor,
   GUARD_PREFIX_RE,
   reportCachedBypasses,
   type ExtraGate,
@@ -161,13 +161,13 @@ export function prefixCacheScope(scope?: string, effectiveIds?: string[]): strin
   const structureBase = structureBypassed()
     ? `${coverageBase ?? 'devkit-guards'}:structure-bypassed`
     : coverageBase;
-  // Same hazard once more, for the self-host `--extra` gates. Sorted and joined so two runs that
+  // Same hazard once more, for devkit's own command gates. Sorted and joined so two runs that
   // bypass the same set share a key regardless of the order the flags were exported in.
   const extraBypassed = bypassedSuffixes();
   const extraBase = extraBypassed.length
     ? `${structureBase ?? 'devkit-guards'}:${extraBypassed.join('+')}-bypassed`
     : structureBase;
-  // The self-host release-only dist extra judges the tree against the PR base and exempts only a
+  // devkit's release-only-dist command gate judges the tree against the PR base and exempts only a
   // release branch, so a tree's PASS under one base or branch must not authorize another.
   const prBase = process.env.DEVKIT_SHIP_PR_BASE_SHA;
   const prScope = prBase
@@ -355,7 +355,7 @@ function finishRun(
  */
 export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts = {}) {
   const startedAt = Date.now();
-  const extra = [...(opts.extra ?? []), ...configExtraGates(cwd)];
+  const extra = extraGatesFor(opts.extra ?? [], cwd);
   const selection = resolveSelection(cwd, opts.only);
   if (!selection || reportOlderOverlayRunner(cwd))
     return finishGateTiming('deterministic', startedAt, 1, 'none');

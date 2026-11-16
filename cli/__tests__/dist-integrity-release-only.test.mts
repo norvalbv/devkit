@@ -21,7 +21,7 @@ import {
   releaseVersion,
 } from '../lib/ship/preflight/release-only-dist.mts';
 import { shellQuote } from '../lib/ship/dist-integrity.mts';
-import { SELF_HOST_EXTRAS } from '../lib/husky/self-host.mts';
+import { configExtraGates } from '../../gate-engine/deterministic/command-gates.mts';
 import { scopedTargets } from '../../gate-engine/decisions/scoped-targets.mts';
 import { loadReviewerTargetsBlocks } from '../../gate-engine/review/evidence/targets-block.mts';
 import {
@@ -592,8 +592,8 @@ describe('--ship-staged: the self-host hook runs CI’s check from the ship work
     });
   }
 
-  it('is wired into the self-host hook', () => {
-    expect(SELF_HOST_EXTRAS).toContainEqual({
+  it("is one of devkit's own command gates", () => {
+    expect(configExtraGates(fileURLToPath(new URL('../..', import.meta.url)))).toContainEqual({
       label: 'release-only-dist',
       cmd: 'node cli/lib/ship/dist-integrity.mts --ship-staged',
     });

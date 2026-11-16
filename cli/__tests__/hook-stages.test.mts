@@ -12,7 +12,6 @@ import {
 import { buildGuardBlock, buildOverlayHook, hookStages } from '../lib/husky/husky-block.mts';
 import {
   buildSelfHostBlock,
-  SELF_HOST_EXTRAS,
   SELF_HOST_STRUCTURE_CMD,
   selfHostSelection,
 } from '../lib/husky/self-host.mts';
@@ -48,7 +47,6 @@ describe('hookStages reads the order the generated hooks run', () => {
     const sel = {
       ...selfHostSelection(),
       structureCmd: SELF_HOST_STRUCTURE_CMD,
-      extras: SELF_HOST_EXTRAS,
     };
     const stages = hookStages(buildSelfHostBlock(sel, '', process.cwd()));
     expect(stages.slice(-2)).toEqual(['fallow-advisory', 'self-host-skill-projection-advisory']);
