@@ -27,6 +27,7 @@ const trendRowSchema = z.object({
   judge: text,
   repo: text,
   branch: text,
+  devkit_version: text,
   exit_code: z.number().optional().catch(undefined),
   items: z.array(z.unknown()).optional().catch(undefined),
 });
@@ -196,6 +197,45 @@ export function readBranchHistory(sink: string, key: ShipKey): TrendRow[] {
     parseTrendRow,
     (kept) => (branchAttempts(kept, key)?.mine.length ?? 0) > HISTORY_CAP,
   );
+}
+
+const RELEASE_VERSION = /^\d+\.\d+\.\d+$/;
+const COMPARE_URL = 'https://github.com/norvalbv/devkit/compare';
+
+/** The newest row at or before `end` that matches, walking backward. ES2022 has no findLast. */
+function lastBefore(rows: TrendRow[], end: number, match: (row: TrendRow) => boolean): number {
+  for (let i = end; i >= 0; i--) if (match(rows[i])) return i;
+  return -1;
+}
+
+/** Pure: one line when THIS blocked attempt runs a newer devkit release than the branch's previous
+ * attempt (killed ones included), else ''. Factual only: it never says the upgrade caused the block. */
+export function renderVersionChange(rows: TrendRow[], key: ShipKey): string {
+  if (!key.shipId || !key.repo || !key.branch) return '';
+  const mine = rows.filter((r) => r.repo === key.repo && r.branch === key.branch);
+  const isAttempt = (r: TrendRow) => r.type === 'ship_attempt';
+  const at = lastBefore(mine, mine.length - 1, (r) => isAttempt(r) && r.ship_id === key.shipId);
+  const result = lastBefore(
+    mine,
+    mine.length - 1,
+    (r) => r.type === 'ship_result' && r.ship_id === key.shipId,
+  );
+  const prior = lastBefore(mine, at - 1, (r) => isAttempt(r) && r.ship_id !== key.shipId);
+  // A result row before `at` belongs to an earlier attempt that reused this ship id.
+  if (at < 0 || prior < 0 || result < at || !mine[result].exit_code) return '';
+  const from = mine[prior].devkit_version ?? '';
+  const to = mine[at].devkit_version ?? '';
+  if (!RELEASE_VERSION.test(from) || !RELEASE_VERSION.test(to)) return '';
+  if (to.localeCompare(from, 'en', { numeric: true }) <= 0) return '';
+  return `   ↑ devkit ${from} → ${to} since this branch's last ship attempt — gate rules may differ: ${COMPARE_URL}/v${from}...v${to}`;
+}
+
+/** The digest's branch-history lines (stalled reviewers, then a devkit upgrade), or ''. */
+export function renderBranchHistory(sink: string, key: ShipKey): string {
+  const rows = readBranchHistory(sink, key);
+  return [renderTrend(summariseTrend(rows, key)), renderVersionChange(rows, key)]
+    .filter(Boolean)
+    .join('\n');
 }
 
 /** Pure: streaks → at most two lines per reviewer, or '' for silence. */
