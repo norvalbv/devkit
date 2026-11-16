@@ -208,7 +208,7 @@ export function renamesFrom(records: readonly NameStatusRecord[]): Renames {
   return renames;
 }
 
-function mergeInProgress(root: string): boolean {
+export function mergeInProgress(root: string): boolean {
   return (
     spawnSync('git', ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'], {
       cwd: root,
