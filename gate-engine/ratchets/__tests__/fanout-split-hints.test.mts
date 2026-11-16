@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Grammar } from '../../structure/compile.mts';
+import type { Grammar } from '../../structure/tree/compile.mts';
 import { fanoutSplitHints } from '../folder-fanout.mts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
