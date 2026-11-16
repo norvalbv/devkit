@@ -192,6 +192,40 @@ describe('runCompleteness — Targets the commit changes', () => {
     expect(prompt).toContain('The ignored-log ruling.');
   });
 
+  it('a changed Target ranked in the semantic top six frees its slot for a governing one', async () => {
+    const dir = consumerRepo({ backend: true });
+    repo = dir;
+    const slugs = ['a-retry-policy', ...'bcdefgh'.split('').map((c) => `${c}-axis`)];
+    const ruling = (slug: string): string =>
+      slug === slugs[0] ? 'Retry policy: retry policy first.' : `Retry policy for ${slug}.`;
+    for (const slug of slugs)
+      write(`docs/decisions/${slug}.md`, axis(slug, target(ruling(slug), 'other/**')));
+    git('add', 'docs/decisions');
+    git(
+      '-c',
+      'user.email=t@t',
+      '-c',
+      'user.name=t',
+      'commit',
+      '-qm',
+      'axes',
+      '--',
+      'docs/decisions',
+    );
+    write(
+      'docs/decisions/a-retry-policy.md',
+      axis(
+        slugs[0],
+        `${target(ruling(slugs[0]), 'other/**')}\n${target('A new claim.', 'other/**')}`,
+      ),
+    );
+    git('add', 'docs/decisions/a-retry-policy.md');
+    const prompt = await judgedPrompt(dir);
+    const semantic = [...prompt.matchAll(/### ([\w-]+) · scope: `other\/\*\*` _\(semantic\)_/g)];
+    expect(semantic.map((m) => m[1])).toEqual(slugs.slice(1, 7));
+    expect(prompt).toContain('NOT AUTHORITY: a-retry-policy');
+  });
+
   it('keeps a note-only append under the authority block with no NOT AUTHORITY note', async () => {
     const prompt = await judgedPrompt(fixture(`${target('The old ruling.')}- 2026-10-02 — note\n`));
     expect(prompt).toContain('### kept');
