@@ -8,7 +8,8 @@ state; they do not vendor detector scripts.
 Devkit provides these installed commands:
 
 - `guard-dup` — semantic, symbol-level matching against the configured search-code index.
-- `guard-clone` — token-level clone detection through devkit's `jscpd` dependency.
+- `guard-clone` — clone detection through devkit's pinned `jscpd` dependency: verbatim token clones
+  plus whole functions copied under new names. Its gate blocks only clones absent from HEAD.
 - `guard-dup-allowlist` — CRUD for the shared allowlist used by both detectors.
 
 A consumer repository provides:
@@ -40,7 +41,8 @@ allowlist entries. `--gate` uses the same exit-code contract for both detectors:
   `GUARD_DETERMINISTIC_STRICT=1` makes that opt-out fatal.
 
 The detectors complement each other. Semantic matching catches renamed or paraphrased symbols;
-clone detection catches copied sub-chunks and inline JSX that do not align to symbol boundaries.
+clone detection catches copied sub-chunks and inline JSX that do not align to symbol boundaries,
+and small helpers whose body was copied under a new name.
 
 ## Reviewing a finding
 
@@ -50,8 +52,8 @@ create a worse dependency boundary.
 
 When approval is justified, use the pre-filled command printed by the blocking detector. It carries
 the stable key and findability metadata; do not reconstruct it by hand. Semantic approvals use an
-order-independent symbol/file key. Clone approvals use `fragmentHash`, so unrelated line movement
-does not invalidate them.
+order-independent symbol/file key. Clone approvals use `fragmentHash` (the file pair plus the
+fragment), so unrelated line movement does not invalidate them and a third copy is not covered.
 
 Useful read-only checks:
 
