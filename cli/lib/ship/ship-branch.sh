@@ -301,34 +301,13 @@ PREFLIGHT_SELF=   # set when the branch's holder is THIS worktree; changes the c
 # SHIP_RESOLVE_ONLY promises no side effects, so it must not reclaim anything.
 [ -n "${SHIP_RESOLVE_ONLY:-}" ] || ship_reclaim_orphan_worktrees "$PWD" "$BR" || exit 1
 
-# A non-dry retry may legitimately find the branch created by its previous attempt: the supervised
-# commit can land, then return 124 while reaping a leaked descendant. Defer that collision until the
-# base, body and scoped snapshot are known so we can distinguish the exact preserved commit from an
-# unrelated local branch. Dry runs deliberately keep their worktree for inspection and never publish,
-# so they retain the strict new-branch precondition.
-LOCAL_BRANCH_EXISTS=
-REMOTE_HOLDS_PRESERVED=
-if git show-ref --verify -q "refs/heads/$BR"; then
-  if [ -n "${SHIP_DRY_RUN:-}" ] || [ "$DRY_GATES" -eq 1 ]; then
-    echo "branch already exists: $BR" >&2; exit 1
-  fi
-  LOCAL_BRANCH_EXISTS=1
-fi
-SELF_DEFER=
-if [ -n "$LOCAL_BRANCH_EXISTS" ] && [ "$FROM_BRANCH" -eq 1 ] && [ "$RESUME" -eq 0 ] && [ -n "$PREFLIGHT_SELF" ]; then
-  # The rename remedy is already printed; run the ancestry and hook-dir checks so one attempt names all.
-  SELF_DEFER=1; LOCAL_BRANCH_EXISTS=
-elif [ -n "$LOCAL_BRANCH_EXISTS" ] && [ "$FROM_BRANCH" -eq 1 ] && [ "$RESUME" -eq 0 ]; then
-  echo "branch already exists: $BR" >&2
-  echo "  a fresh --from-branch invocation cannot adopt a prior receipt; use devkit ship --resume '$BR' to replay its recorded v3 branch source, or choose a new branch name" >&2
-  exit 1
-fi
 if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ] && ! command -v gh >/dev/null 2>&1; then
   echo "gh not installed (needed to open the PR)" >&2; exit 1
 fi
 # Also reject an existing REMOTE branch — otherwise `push -u` fast-forwards onto it,
 # silently appending this commit to someone else's branch/PR. (Skipped under dry-run:
 # no push happens, and it avoids a network round-trip.)
+REMOTE_HOLDS_PRESERVED=
 if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; then
   set +e
   # Fully-qualified, NOT a bare `$BR`: a bare pattern tail-matches on path segments, so shipping `x`
@@ -344,8 +323,8 @@ if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; then
        PR_CLOSED=; ! read_pr_state || [ "$PR_SEEN_STATE" = OPEN ] || PR_CLOSED=1
        # A preserved commit already on origin (lost push response, manual push) is adopted; the
        # receipt checks below still decide whether it may be published.
-       if [ -z "$PR_CLOSED" ] && [ -n "$LOCAL_BRANCH_EXISTS" ] &&
-         [ "${remote_line%%[[:space:]]*}" = "$(git rev-parse -q --verify "refs/heads/$BR")" ]; then
+       if [ -z "$PR_CLOSED" ] &&
+         [ "${remote_line%%[[:space:]]*}" = "$(git rev-parse -q --verify "refs/heads/$BR" 2>/dev/null)" ]; then
          REMOTE_HOLDS_PRESERVED=1
        else
          echo "remote branch already exists: origin/$BR" >&2
@@ -396,6 +375,32 @@ REPO=$(git remote get-url origin | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git
 # (no worktree, no stdin read, no push). Lets the regression test that guards the
 # fork-repo-resolution bug run hermetically. Never set in normal use.
 [ -n "${SHIP_RESOLVE_ONLY:-}" ] && { printf 'BASE_REF=%s\nREPO=%s\n' "$BASE_REF" "$REPO"; exit 0; }
+
+# A stopped ship can strand its branch with no worktree to carry a record; drop it when the base
+# contains it, unless the orphan preflight already ruled on it or this is a dry run.
+[ -n "${SHIP_DRY_RUN:-}" ] || [ "$DRY_GATES" -eq 1 ] || [ -n "$PREFLIGHT_HINT" ] ||
+  ship_reclaim_empty_branch "$PWD" "$BR" "$BASE_REF"
+# A non-dry retry may legitimately find the branch created by its previous attempt: the supervised
+# commit can land, then return 124 while reaping a leaked descendant. Defer that collision until the
+# base, body and scoped snapshot are known so we can distinguish the exact preserved commit from an
+# unrelated local branch. Dry runs deliberately keep their worktree for inspection and never publish,
+# so they retain the strict new-branch precondition.
+LOCAL_BRANCH_EXISTS=
+if git show-ref --verify -q "refs/heads/$BR"; then
+  if [ -n "${SHIP_DRY_RUN:-}" ] || [ "$DRY_GATES" -eq 1 ]; then
+    echo "branch already exists: $BR" >&2; exit 1
+  fi
+  LOCAL_BRANCH_EXISTS=1
+fi
+SELF_DEFER=
+if [ -n "$LOCAL_BRANCH_EXISTS" ] && [ "$FROM_BRANCH" -eq 1 ] && [ "$RESUME" -eq 0 ] && [ -n "$PREFLIGHT_SELF" ]; then
+  # The rename remedy is already printed; run the ancestry and hook-dir checks so one attempt names all.
+  SELF_DEFER=1; LOCAL_BRANCH_EXISTS=
+elif [ -n "$LOCAL_BRANCH_EXISTS" ] && [ "$FROM_BRANCH" -eq 1 ] && [ "$RESUME" -eq 0 ]; then
+  echo "branch already exists: $BR" >&2
+  echo "  a fresh --from-branch invocation cannot adopt a prior receipt; use devkit ship --resume '$BR' to replay its recorded v3 branch source, or choose a new branch name" >&2
+  exit 1
+fi
 
 # The CALLER's worktree HEAD, pinned BEFORE the first thing that reasons about it: in a shared
 # parallel-agent checkout $ROOT can be switched or reset mid-run, and both the base hint below and
@@ -967,12 +972,12 @@ cleanup() {
   # EVERY exit, incl. DRY and the fail-closed preflight exits — otherwise a failed dry-run leaks a
   # devkit-ship-* worktree + branch (they then show as "checked out in a linked worktree" and block
   # deletion). An absent branch (worktree add failed) is treated the same. Keying on the commit —
-  # not on SHIP_DRY_RUN — is what the sibling reship.sh already does. Worktree first: a branch
-  # checked out in a worktree can't be deleted.
+  # not on SHIP_DRY_RUN — is what the sibling reship.sh already does. Branch FIRST (a CAS ref delete
+  # works while checked out): a kill between the two then leaves a recorded, reclaimable worktree.
   local tip; tip=$(git rev-parse -q --verify "$BR" 2>/dev/null || true)
   if [ -z "$tip" ] || [ "$tip" = "$BASE" ]; then
+    [ -n "$tip" ] && [ -n "$BRANCH_CREATED" ] && git update-ref -d "refs/heads/$BR" "$BASE" 2>/dev/null || true
     git worktree remove --force "$WT" 2>/dev/null || true
-    [ -n "$tip" ] && [ -n "$BRANCH_CREATED" ] && git branch -D "$BR" 2>/dev/null || true
     return
   fi
   # A commit DID land beyond BASE.
@@ -1041,13 +1046,8 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   RECOVERY_LINE=$(git rev-list --parents -n 1 "$RECOVERY_COMMIT" 2>/dev/null || true)
   RECOVERY_PARENTS=()
   read -r -a RECOVERY_PARENTS <<< "$RECOVERY_LINE"
-  # sc-2273: name the simplest shape FIRST. A branch whose tip the base already contains carries
-  # nothing to resume, and both arms below describe that state as a topology puzzle — the parent-count
-  # arm as "its tip is not a single commit" (the root-commit case, which short-circuits before the
-  # merge-base arm is ever reached), the diverges arm as three speculative causes. Neither says the
-  # one fact that decides it. This REFUSES exactly as they did; it is the wording that changes, so the
-  # two shapes ship-branch-resume.test.mts pins as unresumable ($BASE == the tip, and a base that has
-  # already absorbed the commit) are still refused — they are both instances of this very state.
+  # Name the simplest shape first. ship_reclaim_empty_branch already dropped this state unless a
+  # guard kept it (upstream, reflog, a holder), so what reaches here is refused with that one fact.
   if [ -n "$RECOVERY_COMMIT" ] && git merge-base --is-ancestor "$RECOVERY_COMMIT" "$BASE" 2>/dev/null; then
     RECOVERY_REASON="it carries no commit of its own over $BASE_REF (${BASE:0:7}) — ${RECOVERY_COMMIT:0:7} is already contained in that base"
   # $BASE is re-resolved every invocation, so on a retry it has usually MOVED. Demand the PR's merge-base
