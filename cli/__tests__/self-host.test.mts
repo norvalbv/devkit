@@ -158,7 +158,8 @@ function runFallowFragment(
   }
   // The review arm calls a helper the surrounding block would normally define; stub it to a no-op
   // so the fragment under test is the only thing being exercised.
-  const script = `${DK_NO_GIT_ENV_HELPER}\n__dk_review_baseline_gate() { return 0; }\n${fragment}`;
+  // `exec 2>&1` mirrors ship's log, one combined stream, so stdout is what the reader sees there.
+  const script = `exec 2>&1\n${DK_NO_GIT_ENV_HELPER}\n__dk_review_baseline_gate() { return 0; }\n${fragment}`;
   return (extra: Record<string, string>, json = '{"verdict":"pass"}') => {
     writeFileSync(sink, '');
     writeFileSync(log, '');
@@ -558,6 +559,23 @@ describe('buildSelfHostHook', () => {
       expect(result.events[0]).toMatchObject({ gate: 'fallow-advisory', status: 'could_not_run' });
       expect(result.events[0].detail).toContain('could not capture the staged diff');
     }
+  });
+
+  it("puts the emitter's list of introduced findings in the log, above fallow's unmarked report", () => {
+    const findings = [
+      { path: 'src/old.ts', name: 'old', line: 1, introduced: false },
+      { path: 'src/old.ts', name: 'fresh', line: 5, introduced: true },
+    ];
+    const json = JSON.stringify({
+      verdict: 'fail',
+      attribution: { complexity_introduced: 1 },
+      complexity: { findings },
+    });
+    const { stdout } = runFallowFragment(buildSelfHostHook(HOOK_SEL, '', ROOT))({}, json);
+    expect(stdout).toContain('introduced by this diff');
+    expect(stdout.indexOf('  src/old.ts:5 fresh')).toBeGreaterThan(-1);
+    expect(stdout.indexOf('  src/old.ts:5 fresh')).toBeLessThan(stdout.indexOf('fallow report'));
+    expect(stdout).not.toContain('src/old.ts:1 old');
   });
 
   // A ship worktree's refreshed managed assets are unstaged or untracked; a base ref alone made
