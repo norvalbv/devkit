@@ -63,6 +63,11 @@ export const SELF_HOST_EXTRAS: Array<{ label: string; cmd: string }> = [
     cmd: 'node cli/lib/husky/format-identity/formatter-identity.mts --gate',
   },
   { label: 'decisions-integrity', cmd: 'node gate-engine/decisions/cli.mts integrity --staged' },
+  // Provider-skill drift the staged change caused, before the judges; the trailing advisory keeps the rest.
+  {
+    label: 'skill-projection',
+    cmd: 'node cli/lib/husky/skill-projection-integrity.mts --root . --gate',
+  },
   // CI's release-only dist check, run by the ship worktree's own copy so a stale caller can't skip it.
   { label: 'release-only-dist', cmd: 'node cli/lib/ship/dist-integrity.mts --ship-staged' },
   { label: 'benchmarks', cmd: 'bun run benchmarks:check -- --mode staged' },
