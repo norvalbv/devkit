@@ -6,6 +6,9 @@
  * This file is synced into each selected agent surface rather than importing the installed package,
  * so it also works in package-less overlay repositories. It deliberately protects only native
  * file-mutation tools; shell/MCP/OS writes are outside the v1 boundary.
+ *
+ * Codex edits arrive as apply_patch, whose targets come from edit-targets-lib.mjs. Codex has been
+ * reported not to enforce some apply_patch denials: https://github.com/openai/codex/issues/27833
  */
 
 import { spawnSync } from "node:child_process";
@@ -13,8 +16,11 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
+// Loaded lazily so a missing lib never costs the Claude/Cursor denial.
+const { patchTargets = () => [] } = await import("./edit-targets-lib.mjs").catch(() => ({}));
+
 const DEFAULT_DECISIONS_DIR = "docs/decisions";
-const MUTATING_TOOLS = new Set(["Edit", "Write", "MultiEdit", "Delete"]);
+const MUTATING_TOOLS = new Set(["Edit", "Write", "MultiEdit", "Delete", "apply_patch"]);
 // Claude and Cursor send `file_path`. The other keys stay, because a missed key lets an edit
 // through silently, while an extra key costs nothing.
 const PATH_KEYS = new Set(["file_path", "path", "target_file", "target_path"]);
@@ -89,12 +95,18 @@ function revParse(dir, ...args) {
   return run.status === 0 ? run.stdout.split("\n") : [];
 }
 
+/** Claude names the project root; Codex runs the hook from the session cwd, maybe a subdirectory. */
+function projectRoot() {
+  if (process.env.CLAUDE_PROJECT_DIR) return process.env.CLAUDE_PROJECT_DIR;
+  return revParse(process.cwd(), "--show-toplevel")[0] || process.cwd();
+}
+
 /**
  * The checkout to guard. The payload cwd follows the agent into a linked worktree while
  * CLAUDE_PROJECT_DIR stays put; a cwd in the same checkout or an unrelated repository keeps the root.
  */
 function workspaceRoot(input) {
-  const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const root = projectRoot();
   if (!input?.cwd?.trim?.()) return root;
   const at = ["--path-format=absolute", "--show-toplevel", "--git-common-dir"];
   const [cdup, top, common] = revParse(input.cwd, "--show-cdup", ...at);
@@ -106,8 +118,7 @@ function workspaceRoot(input) {
 
 /** The worktree the agent works in and the project root: an edit may reach either decision log. */
 function guardedRoots(input) {
-  const project = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-  return [...new Set([workspaceRoot(input), project])];
+  return [...new Set([workspaceRoot(input), projectRoot()])];
 }
 
 /** The decision log under `root` that one of `paths` would change, or null. */
@@ -126,7 +137,7 @@ export function decide(input, roots = guardedRoots(input), env = process.env) {
   try {
     const toolName = input?.tool_name;
     if (!MUTATING_TOOLS.has(toolName)) return null;
-    const paths = collectPaths(toolInputOf(input));
+    const paths = [...collectPaths(toolInputOf(input)), ...patchTargets(input)];
     const log = [roots].flat().map((root) => blockedLog(root, paths, env)).find(Boolean);
     if (!log) return null;
     return (

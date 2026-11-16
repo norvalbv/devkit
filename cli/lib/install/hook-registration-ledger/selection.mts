@@ -21,6 +21,8 @@ export const COMMENT_PREFLIGHT_HOOK = 'comment-budget-preflight.mjs';
 export const FANOUT_BRIEF_HOOK = 'fanout-brief.mjs';
 /** The pre-write structure-grammar advisory; owned by the placement group (fanout guard or structure). */
 export const PLACEMENT_BRIEF_HOOK = 'placement-brief.mjs';
+/** Codex apply_patch → edited paths; imported by edit hooks of five components, never wired alone. */
+export const EDIT_TARGETS_LIB = 'edit-targets-lib.mjs';
 
 export function bundledHookNames(): string[] {
   return readdirSync(join(packageDir(), 'agents-hooks'), {
@@ -77,10 +79,12 @@ export function hookScriptsFor({
     COMMENT_PREFLIGHT_HOOK,
     FANOUT_BRIEF_HOOK,
     PLACEMENT_BRIEF_HOOK,
+    EDIT_TARGETS_LIB,
     ...decisionsOwned,
     ...adhdOwned,
     ...baseDriftOwned,
   ]);
+  const editHooks = agentHooks || decisions || baseDrift || antiSlop || comments;
   return all.filter(
     (name) =>
       (agentHooks && !independentlyOwned.has(name)) ||
@@ -92,7 +96,8 @@ export function hookScriptsFor({
       (antiSlop && name === ANTI_SLOP_PREFLIGHT_HOOK) ||
       (comments && name === COMMENT_PREFLIGHT_HOOK) ||
       (fanout && name === FANOUT_BRIEF_HOOK) ||
-      (placement && name === PLACEMENT_BRIEF_HOOK),
+      (placement && name === PLACEMENT_BRIEF_HOOK) ||
+      (editHooks && name === EDIT_TARGETS_LIB),
   );
 }
 
