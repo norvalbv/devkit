@@ -43,6 +43,7 @@ export function reportFailures(
   fails: readonly GateFailure[],
   failed: readonly FailedGate[],
   rechecks: string[],
+  notRun: readonly string[] = [],
 ): void {
   // A gate that never reached a verdict (`(unexpected:rc)`, `(could-not-run)`) is not a `fail`.
   // `family` lets a reader join this per-gate chain to the family-level blocked_gate.
@@ -57,7 +58,7 @@ export function reportFailures(
   }
   console.error(`✗ deterministic gates failed:${fails.map((f) => ` ${f.label}`).join('')}`);
   for (const line of reasonReport(fails)) console.error(line);
-  printFailureFooter(rechecks);
+  printFailureFooter(rechecks, notRun);
   if (fails.some((f) => f.label.startsWith('structure-lint'))) {
     console.error('   guard-structure blocks only violations your change adds, or all when');
     console.error('   it edits structure policy or deletes/renames. Fix those.');

@@ -462,7 +462,10 @@ was signalled, so re-run. A gate that is legitimately that slow needs a higher `
 may still be running after the signal.
 On a commit or ship, the staged fallow audit and overlay eslint/biome steps still run after a failure
 here, then `✗ commit blocked before the AI gates: <names>` stops the commit with every cheap finding
-above it. The decision and reviewer gates run only after all of them pass, one finding at a time, by design.
+above it. A slow `extraGates` entry declared `{ "cmd": …, "afterGreen": true }` runs last and only when
+every other gate passed, so a red run lists it under `NOT run (an earlier gate failed)` and it runs on the
+next attempt. `devkit review` runs it regardless. The decision and reviewer gates run only after all of
+them pass, one finding at a time, by design.
 
 ## `✗ staged gate blocked: <gate>`
 
