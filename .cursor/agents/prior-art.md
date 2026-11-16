@@ -129,7 +129,9 @@ Each gets an id; every id appears in the response with a status, even when NOT_A
   include peers connecting to the same class of external system.
 - **Q6 — Cost symmetry.** What does the failure actually cost (frequency × severity), and what new
   failure surface would each candidate fix add? A repeat-patch history on one axis is itself
-  evidence the frame is wrong.
+  evidence the frame is wrong. When evidence cites an earlier PR, branch or commit that attempted
+  the same problem, read its description: quote any sentence recording review rounds, rewrites or
+  lines spent on a sub-feature as an evidence item, and state that cost in this finding.
 - **Q7 — Upstream choice.** Is this problem downstream of an earlier, unexamined decision — an
   architecture choice that, revisited, makes the problem vanish? When a seam was named, always run
   one search, even when the problem is already solved, and quote it in this finding:
