@@ -78,9 +78,10 @@ describe('a completeness PASS with findings', () => {
       ]),
     );
     expect(lines.some((l) => l.includes('a context line'))).toBe(false);
-    expect(advisoryRows()).toEqual([
-      expect.objectContaining({ gate: 'review:completeness', status: 'finding' }),
-    ]);
+    expect(advisoryRows()).toHaveLength(3);
+    expect(advisoryRows()).toEqual(
+      Array(3).fill(expect.objectContaining({ gate: 'review:completeness', status: 'finding' })),
+    );
     expect(render(summarise(events(), SHIP))).toContain(
       '⚠ review:completeness — advisory, did NOT block this run',
     );
@@ -101,7 +102,7 @@ describe('a completeness PASS with findings', () => {
         `guard-review: completeness — advisory (non-blocking): ${BODY_GAP}`,
       ]),
     );
-    expect(advisoryRows()).toHaveLength(2);
+    expect(advisoryRows()).toHaveLength(6); // three live, three replayed
   });
 
   it('stays at one line with the ref, and emits nothing advisory, when it found nothing', async () => {
