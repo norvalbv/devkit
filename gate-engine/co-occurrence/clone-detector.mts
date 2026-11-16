@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * clone-detector — token-level copy-paste / sub-chunk / molecule detector.
+ * clone-detector — copy-paste / sub-chunk / molecule / renamed-helper detector.
  *
  * Wraps jscpd (Rabin-Karp, boundary-free) to catch duplication the embedding
  * matcher (matcher.mjs) misses: blocks duplicated INSIDE a larger symbol
- * (sub-chunk) and repeated inline JSX ("molecules"). Verbatim by design —
+ * (sub-chunk), repeated inline JSX ("molecules") and, via --similarity, helpers renamed —
  * complements, doesn't replace, the semantic matcher.
  *
  * Shells the jscpd CLI (avoids ESM/CJS interop); parses its JSON report. Each
- * clone is keyed by a hash of its normalised duplicated fragment, NOT a line
+ * clone is keyed by a hash of its file pair and normalised fragment, NOT a line
  * range — so an allowlist approval survives unrelated edits and only re-surfaces
- * when the duplicated code itself changes.
+ * when the duplicated code itself changes. --changed blocks only clones absent from HEAD.
  *
  * ── Portability (W-3) ────────────────────────────────────────────────────────
  * Scan roots (--paths default), the allowlist, and the jscpd cwd all resolve
@@ -49,11 +49,12 @@ import { ALLOWLIST_CLI, type CloneAllowlistEntry, loadAllowlist, saveAllowlist }
 import { flagReader } from './argv.mts';
 import { loadChangedSet } from './changed-files.mts';
 import { DEFAULT_DECAY_DAYS, isExpired } from './decay.mts';
-import { JSCPD_OWN_ROOT, resolveJscpdBin } from './jscpd-bin.mts';
+import { JSCPD_OWN_ROOT, jscpdVersionMismatch, resolveJscpdBin } from './jscpd-bin.mts';
 
 // Resolve config against the consumer cwd (W-3). Scan roots, allowlist, jscpd cwd all key off it.
 const cfg = resolveGuardConfig(process.cwd());
 const repoRoot = cfg.cwd;
+const repoRootReal = realpathSync(repoRoot);
 // Allowlist: CO_OCCURRENCE_ALLOWLIST env (fixtures/tests) wins; else config.allowlistPath.
 const allowlistPath = process.env.CO_OCCURRENCE_ALLOWLIST ?? resolveFromCwd(cfg, 'allowlistPath');
 // Approval-hint CLI on a gate block — default = the engine's own guard-dup-allowlist bin,
@@ -66,6 +67,7 @@ const DEFAULTS = {
   // Token-clone floor + scan roots seed from the resolved config (consumer-tunable);
   // CLI --flags override per run.
   minTokens: cfg.thresholds.minTokens,
+  similarity: cfg.thresholds.similarity,
   // cloneRoots, not scanRoots: verbatim-clone scope is often deliberately narrower than the
   // matcher's. Unset, it resolves back to scanRoots (see config.mts).
   paths: cfg.cloneRoots,
@@ -94,6 +96,9 @@ type CloneLineLoc = number | { line: number };
 /** A normalised clone pair (cross-file by default; same-file when requested). */
 export interface Clone {
   fragmentHash: string;
+  /** jscpd's kind: `exact` token clone, or `similar` (same-structure functions, `similarity` score). */
+  kind: string;
+  similarity?: number;
   lines: number;
   tokens: number;
   fileA: string;
@@ -115,6 +120,9 @@ interface JscpdFileEntry {
 }
 interface JscpdDuplicate {
   fragment?: string;
+  kind: string;
+  similarity?: number;
+  isNew?: boolean;
   lines: number;
   tokens: number;
   firstFile: JscpdFileEntry;
@@ -126,8 +134,11 @@ interface JscpdReport {
 
 interface DetectClonesOptions {
   minTokens?: number;
+  similarity?: number;
   paths?: string[];
   includeSameFile?: boolean;
+  /** Keep only clones absent from this git ref (jscpd's `--baseline-from-ref`). */
+  baseRef?: string | null;
 }
 
 /**
@@ -139,20 +150,35 @@ interface DetectClonesOptions {
  */
 export function detectClones({
   minTokens = DEFAULTS.minTokens,
+  similarity = DEFAULTS.similarity,
   paths = DEFAULTS.paths,
   includeSameFile = false,
+  baseRef = null,
 }: DetectClonesOptions = {}): Clone[] {
+  // jscpd only warns on a ratio outside (0, 1] and skips the similarity pass.
+  if (!(similarity > 0 && similarity <= 1)) {
+    throw new Error(`thresholds.similarity must be in (0, 1], got ${similarity}`);
+  }
   const out = mkdtempSync(join(tmpdir(), 'jscpd-'));
   // finally guarantees the temp report dir is removed on every path — jscpd
   // failure, malformed report, or a throw inside the parse/map.
   try {
     try {
+      const mismatch = jscpdVersionMismatch(JSCPD_BIN);
+      if (mismatch) throw new Error(mismatch);
       execFileSync(
         JSCPD_BIN,
         [
           ...paths,
           '--min-tokens',
           String(minTokens),
+          // 3, not jscpd's 5: a copied helper is often 3-4 lines. One run serves both kinds, since
+          // splitting them let the ast pass claim a name-only copy as exact and drop it.
+          '--min-lines',
+          '3',
+          `--similarity=${similarity}`,
+          '-a',
+          ...(baseRef ? ['--baseline-from-ref', baseRef] : []),
           // weak drops comment tokens, so a comment pasted into a copy cannot split the clone
           // into two sub-floor halves and hide it, nor pad a sub-floor copy over the floor.
           '--mode',
@@ -170,11 +196,11 @@ export function detectClones({
         { cwd: repoRoot, stdio: ['ignore', 'ignore', 'pipe'] },
       );
     } catch (e: unknown) {
-      // jscpd exits non-zero only with --threshold (we set none), so a throw
-      // here is a real failure — usually the binary is missing.
-      throw new Error(
-        `jscpd failed (${e instanceof Error ? e.message : String(e)}). Ensure the 'jscpd' dependency is installed (e.g. bun add -d jscpd) or set JSCPD_BIN to its path.`,
-      );
+      // jscpd exits non-zero only with --threshold (we set none), so a throw here is a real
+      // failure: a missing or wrong-version binary, or a base ref it could not check out.
+      const stderr = e instanceof Error && 'stderr' in e ? String(e.stderr).trim() : '';
+      const why = stderr.split('\n')[0] || (e instanceof Error ? e.message : String(e));
+      throw new Error(`jscpd could not run: ${why}`);
     }
 
     const reportPath = join(out, 'jscpd-report.json');
@@ -184,8 +210,11 @@ export function detectClones({
     return (report.duplicates ?? [])
       .filter((d) => CODE_EXT.test(d.firstFile.name) && CODE_EXT.test(d.secondFile.name))
       .filter((d) => includeSameFile || d.firstFile.name !== d.secondFile.name)
+      .filter((d) => !baseRef || d.isNew)
       .map((d) => ({
-        fragmentHash: hashFragment(d.fragment ?? ''),
+        fragmentHash: cloneKey(relPath(d.firstFile.name), relPath(d.secondFile.name), d.fragment),
+        kind: d.kind,
+        similarity: d.similarity,
         lines: d.lines,
         tokens: d.tokens,
         fileA: relPath(d.firstFile.name),
@@ -218,8 +247,12 @@ export function relPath(f: string): string {
   // absolute. Strip against the CONSUMER cwd (repoRoot = cfg.cwd), not the package dir — and only
   // as a PREFIX, so a repo path that happens to recur mid-string is left alone.
   const path = f.replace(BACKSLASH_RE, '/');
-  const root = repoRoot.replace(BACKSLASH_RE, '/');
-  return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
+  // jscpd -a reports realpaths (macOS /tmp → /private/tmp), so strip either spelling of the root.
+  for (const r of [repoRoot, repoRootReal]) {
+    const root = r.replace(BACKSLASH_RE, '/');
+    if (path.startsWith(`${root}/`)) return path.slice(root.length + 1);
+  }
+  return path;
 }
 
 /**
@@ -257,6 +290,24 @@ export const IMPORT_IGNORE_PATTERNS = [
 export function hashFragment(fragment: string): string {
   const normalised = fragment.replace(WHITESPACE_RE, ' ').trim();
   return createHash('sha256').update(normalised).digest('hex').slice(0, 16);
+}
+
+/** Allowlist key: the file pair plus the fragment, so approving one copy never approves a third. */
+function cloneKey(fileA: string, fileB: string, fragment = ''): string {
+  return hashFragment(`${[fileA, fileB].sort().join(' ')} ${fragment}`);
+}
+
+/** HEAD when it exists; null on an unborn branch or outside git (every clone is then new). */
+function bornHead(): string | null {
+  try {
+    execFileSync('git', ['rev-parse', '--verify', '-q', 'HEAD'], {
+      cwd: repoRoot,
+      stdio: 'ignore',
+    });
+    return 'HEAD';
+  } catch {
+    return null;
+  }
 }
 
 interface AllowlistIndex {
@@ -329,7 +380,7 @@ const loc = (c: Clone, side: CloneLocSide): number => {
 };
 
 const cloneRow = (c: Clone): string =>
-  `  ${String(c.lines).padStart(3)}L  ${c.fragmentHash}  ${c.fileA}:${loc(c, 'startA')} <> ${c.fileB}:${loc(c, 'startB')}`;
+  `  ${String(c.lines).padStart(3)}L  ${c.fragmentHash}  ${c.fileA}:${loc(c, 'startA')} <> ${c.fileB}:${loc(c, 'startB')}${c.kind === 'similar' ? `  (similar ${c.similarity})` : ''}`;
 
 const filePairKey = (a: string, b: string): string => [a, b].sort().join('\0');
 
@@ -427,13 +478,18 @@ if (isMain) {
   const gate = argv.includes('--gate');
   const changed = argv.includes('--changed');
 
-  // --changed: keep only clones touching a staged file — this commit's clones,
-  // not pre-existing ones. Staged set from the hook's staged list / git.
+  // --changed: this commit's clones — touching a staged file and absent from HEAD. Staged set
+  // from the hook's staged list / git.
   const staged = changed ? loadChangedSet(repoRoot) : null;
+  if (staged && ![...staged].some((f) => CODE_EXT.test(f) && paths.some((root) => isUnderRoot(f, root)))) {
+    console.log('clone gate: no staged code under the clone roots ✓');
+    exitGate(0, ['clone gate: no staged code under the clone roots']);
+  }
+
   let clones: Clone[];
   let markers: IgnoreMarker[] = [];
   try {
-    clones = detectClones({ minTokens, paths, includeSameFile });
+    clones = detectClones({ minTokens, paths, includeSameFile, baseRef: staged && bornHead() });
     if (gate) markers = findIgnoreMarkers(paths, staged);
   } catch (e: unknown) {
     // jscpd missing / errored, or an unreadable file in the marker scan = "could not run". The
