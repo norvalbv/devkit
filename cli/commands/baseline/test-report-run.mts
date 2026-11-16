@@ -54,7 +54,9 @@ one job downloads them all and runs \`devkit test-report-run --mergeReports\`. C
 shard's blob arrived: vitest merges a partial set without complaint, and that would publish a green.
 
 The console summary and the GitHub PR annotations are preserved — the json reporter is added
-alongside them, never in place of them. Vitest-only; \`devkit baseline-status\` is not.`,
+alongside them, never in place of them. On GitHub Actions a red run also appends its failing tests,
+each with the first line of its error, to the step summary shown on the run page.
+Vitest-only; \`devkit baseline-status\` is not.`,
 };
 
 export default async function testReportRun(args: string[], cwd: string) {
