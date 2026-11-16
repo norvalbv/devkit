@@ -9,7 +9,8 @@ import { pathToFileURL } from 'node:url';
 import { type CoverageConfig, coverageBypassed, resolveGuardConfig } from '../config.mts';
 import { failLine } from '../deterministic/reason.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
-import { humanAge, readClearMarker, formatClearMarker } from './failures.mts';
+import { readClearMarker } from './clear-marker/store.mts';
+import { humanAge, formatClearMarker } from './failures.mts';
 import {
   artifactLine,
   BYPASS_REMEDY,
