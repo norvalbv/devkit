@@ -458,6 +458,7 @@ describe('correctness-reviewer (domain all)', () => {
       'packages/ui/node_modules/package/index.js',
       'packages/ui/dist/index.mjs',
       'coverage/coverage-final.json',
+      'e2e/fixtures/anti-slop/all-rules.ts',
     ];
     const selected = selectReviewers(
       [...authored, ...excluded, 'dist/gate-engine/review/reviewers.mjs', 'bun.lock'],
