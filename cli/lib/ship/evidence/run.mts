@@ -2,14 +2,18 @@
 
 // Ship's PR-body steps, run by publish-evidence.sh. `budget` sizes the bound, `publish` writes the
 // red/green block, `publish-media` the QA capture, `notes` advisories, `body` cleans caller text, adds the UI task item.
-import { readFileSync, realpathSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { resolveGuardConfig } from '../../../../gate-engine/config.mts';
 import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mts';
 import { clip } from '../../../../gate-engine/judge/odb-probe.mts';
 import type { RegressionEvidence } from '../../baseline-status/regression-evidence.mts';
-import { captureRegressionEvidence } from '../../baseline-status/regression-proof.mts';
+import {
+  type CapturedRegression,
+  captureRegressionEvidence,
+} from '../../baseline-status/regression-proof.mts';
 import {
   type PreparedRegressionRepository,
   prepareRegressionRepository,
@@ -46,6 +50,8 @@ interface Produced {
   evidence: RegressionEvidence | null;
   /** Changed test files; null when the change was never classified. */
   tests: number | null;
+  /** The capture's red/green logs; set only when a capture ran. */
+  evidenceDir?: string;
 }
 
 /** What one completed publish run did, for its `ship_evidence` row. A null outcome produced none. */
@@ -104,7 +110,7 @@ export function phaseTimes(marks: readonly PhaseMark[], now: number): string {
 async function captureWithin(
   prepared: PreparedRegressionRepository,
   seconds: number,
-): Promise<{ evidence: RegressionEvidence; timing: string }> {
+): Promise<{ captured: CapturedRegression; timing: string }> {
   // Monotonic, like the timer itself, so a wall-clock step cannot skew a phase or make it negative.
   const marks: PhaseMark[] = [{ name: 'setup', at: performance.now() }];
   let stalled: string | null = null;
@@ -113,10 +119,10 @@ async function captureWithin(
     process.kill(process.pid, 'SIGTERM');
   }, seconds * 1000);
   try {
-    const { evidence } = await captureRegressionEvidence(prepared, (name) =>
+    const captured = await captureRegressionEvidence(prepared, (name) =>
       marks.push({ name, at: performance.now() }),
     );
-    return { evidence, timing: phaseTimes(marks, performance.now()) };
+    return { captured, timing: phaseTimes(marks, performance.now()) };
   } catch (error) {
     throw stalled ? new Error(`the tests did not finish within ${seconds}s (${stalled})`) : error;
   } finally {
@@ -158,9 +164,15 @@ async function produce(
       ['--red', red, '--green', head, '--vitest-report', REPORT, '--', ...argv],
       cwd,
     );
-    const { evidence, timing } = await captureWithin(prepared, config.timeoutSeconds);
+    const { captured, timing } = await captureWithin(prepared, config.timeoutSeconds);
+    const { evidence, evidenceDir } = captured;
     const outcome = outcomeFromRegression(evidence, head, base);
-    return { outcome: { ...outcome, detail: `${outcome.detail} (${timing})` }, evidence, tests };
+    return {
+      outcome: { ...outcome, detail: `${outcome.detail} (${timing})` },
+      evidence,
+      tests,
+      evidenceDir,
+    };
   } catch (error) {
     return { ...notProduced(errorMessage(error), head), tests };
   } finally {
@@ -184,15 +196,32 @@ async function shipVerdict(input: VerdictInput): Promise<PrintedVerdict | undefi
   }
 }
 
-interface PublishArgs {
+export interface PublishArgs {
   cwd: string;
   repo: string;
   pr: string;
   head: string;
-  failed: string | undefined;
+  failed?: string;
+  /** Where a non-captured run's logs are moved, out of a capture root its caller deletes. */
+  keepIn?: string;
+  /** Replace a same-head block that recorded inconclusive. */
+  recapture?: boolean;
 }
 
-async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<Published | null> {
+function keepEvidence(dir: string | undefined, keepIn: string | undefined, captured: boolean) {
+  if (!dir || !keepIn || captured) return;
+  try {
+    const kept = join(mkdtempSync(join(keepIn, 'devkit-evidence-kept-')), 'evidence');
+    renameSync(dir, kept);
+    console.error(`evidence: kept the red/green logs at ${kept}`);
+  } catch (error) {
+    console.error(`evidence: the red/green logs were not kept: ${errorMessage(error)}`);
+  }
+}
+
+/** Null when no block was written for lack of an evidence entry. */
+export async function publish(args: PublishArgs): Promise<Published | null> {
+  const { cwd, repo, pr, head, failed } = args;
   const nothing = { outcome: null, tests: null, verdict: null };
   const pull = readPull(repo, pr);
   if (pull.headRefOid !== head) {
@@ -200,8 +229,13 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<Pu
     return { ...nothing, publish: 'head-moved' };
   }
   const current = readEvidenceBlock(pull.body, head);
-  if (current?.stale === false) {
-    console.error('evidence: the PR body already records evidence for this head');
+  const redo = args.recapture === true && current?.stale === false && current.status === 'inconclusive';
+  if (current?.stale === false && !redo) {
+    const hint =
+      current.status === 'inconclusive' ? `; re-capture it with devkit pr-evidence ${pr}` : '';
+    console.error(
+      `evidence: the PR body already records ${current.status} evidence for this head${hint}`,
+    );
     const verdict = current.mergeVerdict?.verdict ?? null;
     return { ...nothing, outcome: current, verdict, publish: 'unchanged' };
   }
@@ -219,6 +253,10 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<Pu
     } catch (error) {
       produced = notProduced(errorMessage(error), head);
     }
+  }
+  if (redo && current) {
+    const detail = `${produced.outcome.detail} (recaptured; previously inconclusive: ${current.detail})`;
+    produced.outcome = { ...produced.outcome, detail };
   }
   const { title, baseRefOid } = pull;
   const verdict = await shipVerdict({
@@ -241,6 +279,7 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<Pu
     `evidence: ${status}${reason ? ` (${reason})` : ''}: ${detail} [PR body ${result}${edit}]`,
   );
   const { outcome, tests } = produced;
+  keepEvidence(produced.evidenceDir, args.keepIn, status === 'captured');
   return { outcome, tests, publish: result, verdict: verdict?.verdict?.verdict ?? null };
 }
 
@@ -287,6 +326,7 @@ async function main(argv: string[]): Promise<void> {
     source: { type: 'string' },
     mode: { type: 'string' },
     started: { type: 'string' },
+    'keep-in': { type: 'string' },
   } as const;
   const { values } = parseArgs({ args: rest, options, strict: true });
   if (command === 'body') {
@@ -328,6 +368,7 @@ async function main(argv: string[]): Promise<void> {
     pr: run.pr,
     head: run.head,
     failed: values.failed,
+    keepIn: values['keep-in'],
   });
   // Last, never in a finally: a run that throws exits 1 and its --failed fallback writes the row.
   if (published) recordEvidenceEvent(published, run);

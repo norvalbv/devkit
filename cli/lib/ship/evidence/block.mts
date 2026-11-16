@@ -134,6 +134,20 @@ function operandRow(name: string, tree: string, operand: RegressionOperandEviden
   return `| ${name} | ${tree} | ${exit} | ${cells} |`;
 }
 
+/** Green is expected clean, so any failure or unloaded file it has is what made a capture inconclusive. */
+function greenLists(green: RegressionOperandEvidence): string[] {
+  const { failures, fileErrors, testCounts } = green;
+  const failed = testCounts?.failed ?? failures.length;
+  return [
+    ...failureList(`Failed on green (${counted(failed, 'test')})`, failures, failed),
+    ...failureList(
+      `Did not load on green (${counted(fileErrors.length, 'file')})`,
+      fileErrors,
+      fileErrors.length,
+    ),
+  ];
+}
+
 function runLines(evidence: RegressionEvidence): string[] {
   const { argv } = evidence.command;
   const shown =
@@ -156,6 +170,7 @@ function runLines(evidence: RegressionEvidence): string[] {
       fileErrors,
       fileErrors.length,
     ),
+    ...greenLists(evidence.green),
     ...details('Test command', [fencedJson(shown)]),
   ];
 }

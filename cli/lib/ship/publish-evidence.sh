@@ -39,7 +39,7 @@ publish_evidence_block() {
 MEDIA_BUDGET_SECONDS=600
 
 publish_regression_evidence() {
-  local wt=$1 pr=$2 repo=$3 head=$4 run=$5 supervisor=$6 budget tmp status=0 started
+  local wt=$1 pr=$2 repo=$3 head=$4 run=$5 supervisor=$6 budget tmp status=0 started keep=${TMPDIR:-/tmp}
   started=$(date +%s)
   budget=$(node "$run" budget "$wt" </dev/null) || budget=0
   case "$budget" in '' | *[!0-9]* | 0) return 0 ;; esac
@@ -47,7 +47,7 @@ publish_regression_evidence() {
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/devkit-evidence.XXXXXX") || return 0
   TMPDIR=$tmp node "$supervisor" "$((budget + 60))" -- \
     node "$run" publish --cwd "$wt" --repo "$repo" --pr "$pr" --head "$head" \
-    --started "$started" </dev/null || status=$?
+    --keep-in "$keep" --started "$started" </dev/null || status=$?
   if [ "$status" -ne 0 ]; then
     TMPDIR=$tmp node "$supervisor" 60 -- node "$run" publish --cwd "$wt" --repo "$repo" --pr "$pr" \
       --head "$head" --started "$started" --failed "the evidence step stopped with exit $status" \
