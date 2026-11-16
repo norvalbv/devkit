@@ -6,18 +6,27 @@ import { join, relative } from 'node:path';
 import { ESLint } from 'eslint'; // devkit's OWN eslint, used only for its stylish formatter
 import { z } from 'zod';
 import { headSha } from '../coverage/failures.mts';
-import {
-  eslintNodeFlags,
-  LINKED_ISOLATED_STORE,
-  linkedIsolatedStore,
-} from './eslint-node-flags.mts';
+import { eslintNodeFlags, linkedIsolatedStore } from './eslint-node-flags.mts';
 import {
   clean,
+  combineStructureResults,
   couldNotRun,
   preExisting,
   type StructureGateResult,
   violations,
 } from './verdict.mts';
+
+// A linked isolated store cannot take --preserve-symlinks, so the plugin roots elsewhere: walls go
+// off (they ignore projectRoot), folder rules still judge this worktree via an absolute projectRoot.
+const ISOLATED_ARGS = [
+  '--rule',
+  '{"project-structure/independent-modules":"off"}',
+  '--report-unused-disable-directives-severity',
+  'off',
+];
+const WALLS_NOT_RUN = couldNotRun(
+  'import walls (independent-modules) did not run on a linked isolated install (pnpm, bun --linker isolated); folder rules judge this worktree only where eslint.config.mjs pins an absolute projectRoot',
+);
 
 const FAILED = 'guard-structure: local eslint failed';
 // The json formatter embeds each failing file's source; an overflow must not read as could-not-run.
@@ -57,9 +66,9 @@ function spawnPreset(
   if (!existsSync(eslintBin)) {
     return couldNotRun('electron structure lint needs the locally pinned eslint binary');
   }
-  if (linkedIsolatedStore(cwd)) return couldNotRun(LINKED_ISOLATED_STORE);
   // An empty root is clean, not ESLint's exit-2 "no files matching".
   const argv = [...eslintNodeFlags(cwd), eslintBin, '--no-error-on-unmatched-pattern'];
+  if (linkedIsolatedStore(cwd)) argv.push(...ISOLATED_ARGS);
   try {
     const stdout = execFileSync(process.execPath, [...argv, '--format', 'json', ...args], {
       cwd,
@@ -138,10 +147,19 @@ async function report(
   return violations(count, [text, trailer].filter(Boolean).join('\n'));
 }
 
-export async function runPresetLint(cwd: string, targets: string[]): Promise<StructureGateResult> {
+/** Names the import walls a linked isolated install could not check; never a clean pass. */
+function withWallsNote(cwd: string, results: StructureGateResult[]): StructureGateResult[] {
+  return linkedIsolatedStore(cwd) ? [...results, WALLS_NOT_RUN] : results;
+}
+
+async function lintTargets(cwd: string, targets: string[]): Promise<StructureGateResult> {
   const run = presetJson(cwd, ['--', ...targets]);
   if ('failed' in run) return run.failed;
   return report(cwd, keepMessages(run.results, all), FAILED);
+}
+
+export async function runPresetLint(cwd: string, targets: string[]): Promise<StructureGateResult> {
+  return combineStructureResults(withWallsNote(cwd, [await lintTargets(cwd, targets)]));
 }
 
 /** Same rule and message (counts masked), and the report's last line up to its end: an import
@@ -227,10 +245,19 @@ export async function runPresetAttributed(
   added: ReadonlySet<string>,
   stable: boolean,
 ): Promise<StructureGateResult[]> {
+  return withWallsNote(cwd, await lintAttributedFiles(cwd, files, added, stable));
+}
+
+async function lintAttributedFiles(
+  cwd: string,
+  files: string[],
+  added: ReadonlySet<string>,
+  stable: boolean,
+): Promise<StructureGateResult[]> {
   const fresh = files.filter((file) => added.has(file));
   const edited = files.filter((file) => !added.has(file));
   const out: StructureGateResult[] = [];
-  if (fresh.length) out.push(await runPresetLint(cwd, fresh));
+  if (fresh.length) out.push(await lintTargets(cwd, fresh));
   if (!edited.length) return out;
   const run = presetJson(cwd, ['--', ...edited]);
   if ('failed' in run) return [...out, run.failed];
