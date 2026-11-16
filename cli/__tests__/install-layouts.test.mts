@@ -33,7 +33,9 @@ afterEach(() => {
 afterAll(removeInstallLayouts);
 if (!INSTALL_LAYOUTS_ENABLED) console.info('install-layouts skipped: set DEVKIT_INSTALL_LAYOUTS=1');
 
-const ESLINT_CONFIG = `import {
+const ESLINT_CONFIG = `import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
   createFolderStructure,
   createIndependentModules,
   projectStructurePlugin,
@@ -41,6 +43,7 @@ const ESLINT_CONFIG = `import {
 
 const structure = createFolderStructure({
   structureRoot: 'src',
+  projectRoot: dirname(fileURLToPath(import.meta.url)),
   structure: {
     name: 'src',
     children: [
@@ -118,13 +121,15 @@ describe.skipIf(!INSTALL_LAYOUTS_ENABLED)('spawned eslint across real install la
           expect(result.status, output).toBe(1);
           expect(output).toContain('project-structure/folder-structure');
           expect(output).toContain('project-structure/independent-modules');
-        } else if (site === 'guard-structure preset') {
-          // An isolated store cannot take --preserve-symlinks, so the gate says it did not run.
-          expect(result.status, output).toBe(2);
-          expect(output).toContain('linked isolated install');
         } else {
-          // The overlay runs the repo's whole eslint config, so it lints on without the flag.
-          expect(result.status, output).toBe(0);
+          // No --preserve-symlinks on an isolated store: the absolute projectRoot still roots the
+          // folder rules here, while import walls (which ignore it) never report from this worktree.
+          expect(result.status, output).toBe(1);
+          expect(output).toContain('project-structure/folder-structure');
+          expect(output).not.toContain('project-structure/independent-modules');
+          if (site === 'guard-structure preset') {
+            expect(output).toContain('import walls (independent-modules) did not run');
+          }
         }
       });
     }

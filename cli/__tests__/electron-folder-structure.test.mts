@@ -38,6 +38,8 @@ const BLOCKED = [
   'src/renderer/lib/junk-drawer/probe.ts',
   'src/renderer/utils/frozen-add.ts',
   'src/main/lib/flat-file.ts',
+  'src/shared/Bad_Name.ts',
+  'src/preload/nested/probe.ts',
   'socket-server/src/lib/flat-file.ts',
   'vercel-serverless/lib/flat-file.ts',
 ];
@@ -45,6 +47,8 @@ const BLOCKED = [
 const ALLOWED = [
   'src/renderer/lib/tasks/registered.ts',
   'src/main/lib/queue/index.ts',
+  'src/shared/types.ts',
+  'src/preload/api.ts',
   'socket-server/src/lib/flows/registered.ts',
   'socket-server/src/api/routes/health.ts',
   'vercel-serverless/api/cron/sweep.ts',
