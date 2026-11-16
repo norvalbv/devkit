@@ -1,8 +1,8 @@
 // The digest keeps one advisory row per gate so advisories never crowd out findings. A gate holding
 // several must therefore name every location it cites up front, ahead of the one-line cut.
-import { issueLocations } from '../../../../gate-engine/review/contracts/response.mts';
-import { oneLine } from './fields.mts';
-import type { DigestRow } from './gate-digest.mts';
+import { issueLocations } from '../../../../../gate-engine/review/contracts/response.mts';
+import { oneLine } from '../fields.mts';
+import type { DigestRow } from '../gate-digest.mts';
 
 /** A cached lens part reports as `<reviewer> [<group>]`; its findings belong to the reviewer. */
 const LENS_SUFFIX = / \[[^\]]*\]$/;

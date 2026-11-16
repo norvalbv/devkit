@@ -23,10 +23,10 @@ const GLOBS = [
   'gate-engine/judge/run-context.mts',
 ];
 // The commit that motivated this check: a note on AXIS beside digest files its Scope never covered.
-const DIGEST = ['blocking.mts', 'gate-digest.mts', 'trend.mts'].map(
+const DIGEST = ['blocking.mts', 'gate-digest.mts', 'trend/trend.mts'].map(
   (f) => `cli/lib/ship/digest/${f}`,
 );
-const STAGED = [`${DIR}/${AXIS}.md`, ...DIGEST, 'cli/lib/ship/digest/trend.test.mts'];
+const STAGED = [`${DIR}/${AXIS}.md`, ...DIGEST, 'cli/lib/ship/digest/trend/trend.test.mts'];
 
 const record = (slug: string, scope: string, notes: string[] = []) =>
   `---\nslug: ${slug}\ncreated: 2026-07-01\n---\n\n# ${slug}\n\n` +
@@ -106,7 +106,7 @@ describe('scopeMiss', () => {
   });
 
   it('is silent when the Scope covers a test file the commit changes', () => {
-    expect(scopeMiss(change, ['cli/lib/ship/digest/*.test.mts'], matchScope)).toBeNull();
+    expect(scopeMiss(change, ['cli/lib/ship/digest/**/*.test.mts'], matchScope)).toBeNull();
   });
 });
 

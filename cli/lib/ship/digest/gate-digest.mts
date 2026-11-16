@@ -10,11 +10,11 @@
  * reader consumes, so the two can never disagree.
  */
 import { STICKY_RULING } from '../../../../gate-engine/review/evidence/base-context.mts';
-import { branchNarration } from './advisories.mts';
-import { groupAdvisories } from './advisory-rows.mts';
+import { branchNarration } from './advisory/advisories.mts';
+import { groupAdvisories } from './advisory/advisory-rows.mts';
 import { type Attributable, type Buckets, COMPLETENESS, classify } from './event-rows.mts';
 import { oneLine, textOf } from './fields.mts';
-import { withRecurrence } from './recurrence.mts';
+import { withRecurrence } from './trend/recurrence.mts';
 import { scanBackward } from './tail.mts';
 import { waivedRows } from './waived.mts';
 

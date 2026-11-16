@@ -4,10 +4,10 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { telemetrySink } from '../../../../gate-engine/judge/run-context.mts';
-import { OUTPUT_HEADER, readTranscript } from '../../../../gate-engine/judge/transcript-store.mts';
-import { issueLocations, parseAdvisories } from '../../../../gate-engine/review/contracts/response.mts';
-import { scanBackward } from './tail.mts';
+import { telemetrySink } from '../../../../../gate-engine/judge/run-context.mts';
+import { OUTPUT_HEADER, readTranscript } from '../../../../../gate-engine/judge/transcript-store.mts';
+import { issueLocations, parseAdvisories } from '../../../../../gate-engine/review/contracts/response.mts';
+import { scanBackward } from '../tail.mts';
 import {
   type Attempt,
   attemptsOf,
@@ -19,7 +19,7 @@ import {
   type TrendRow,
   renderVersionChange,
   trendNarration,
-} from './trend.mts';
+} from '../trend/trend.mts';
 
 /** How the gate joins one reviewer's advisories into a single sink row (base-context.mts). */
 const JOIN = ' | ';
@@ -28,7 +28,7 @@ const ELLIPSIS = '…';
 const ADVISORY_CHARS = 200;
 /** Below this many non-space characters a cited line (`});`) proves nothing about the code. */
 const MIN_CITED_CHARS = 8;
-const IDENTITY_SCRIPT = fileURLToPath(new URL('../repo-identity.sh', import.meta.url));
+const IDENTITY_SCRIPT = fileURLToPath(new URL('../../repo-identity.sh', import.meta.url));
 
 export interface Advisory {
   /** The sink's own identity: normalized text cut to ADVISORY_CHARS. */

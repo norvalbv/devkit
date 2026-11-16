@@ -114,7 +114,7 @@ describe('renderVersionChange — silence', () => {
   });
 });
 
-const CLI = join(import.meta.dirname, 'gate-digest.mts');
+const CLI = join(import.meta.dirname, '..', 'gate-digest.mts');
 function sinkWith(rows: TrendRow[]): string {
   const sink = join(mkdtempSync(join(tmpdir(), 'gate-version-')), 'gate-events.jsonl');
   writeFileSync(sink, rows.map((r) => JSON.stringify(r)).join('\n'));

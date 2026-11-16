@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { composeTranscript } from '../../../../gate-engine/judge/transcript-store.mts';
+import { composeTranscript } from '../../../../../gate-engine/judge/transcript-store.mts';
 import {
   branchNarration,
   citedLine,
@@ -12,7 +12,7 @@ import {
   renderAdvisories,
   unionAdvisories,
 } from './advisories.mts';
-import { attemptsOf, type TrendRow } from './trend.mts';
+import { attemptsOf, type TrendRow } from '../trend/trend.mts';
 
 const where = { repo: 'demo', branch: 'feat/x' };
 type Row = Omit<TrendRow, 'ship_id'> & { ship_id?: string };

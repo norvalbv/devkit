@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { DigestRow } from './gate-digest.mts';
+import type { DigestRow } from '../gate-digest.mts';
 import { annotateRecurrence, readRepoHistory, summariseRecurrence } from './recurrence.mts';
 
 const REPO = 'acme/app';
@@ -228,7 +228,7 @@ describe('annotateRecurrence', () => {
   });
 });
 
-const CLI = join(import.meta.dirname, 'gate-digest.mts');
+const CLI = join(import.meta.dirname, '..', 'gate-digest.mts');
 const digest = (rows: Row[], repo: string) =>
   execFileSync('node', [CLI, 'digest', sinkWith(rows), 'now'], {
     encoding: 'utf8',

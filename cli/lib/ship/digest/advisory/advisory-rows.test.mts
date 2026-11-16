@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DETAIL_CHARS } from './fields.mts';
-import { type GateEvent, render, summarise } from './gate-digest.mts';
+import { DETAIL_CHARS } from '../fields.mts';
+import { type GateEvent, render, summarise } from '../gate-digest.mts';
 
 const SHIP = 'ship-1';
 const GATE = 'review:correctness-reviewer';
