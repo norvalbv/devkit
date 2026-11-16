@@ -2,6 +2,7 @@
  * after the run fails closed, test drift warns, and unknown provenance never reads as fresh. */
 import {
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -9,16 +10,20 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { publishCoverage } from '../produce.mts';
 import {
   checkProvenance,
+  headSha,
   MANIFEST_NAME,
   readArtifact,
   readManifest,
   sha256,
   snapshotSource,
+  stagedFiles,
+  stagedIntersection,
   TOUCHED,
 } from '../provenance.mts';
 import { CLI, testSpawnSync } from '../../../cli/__tests__/_helpers.mts';
@@ -486,5 +491,50 @@ describe('edge cases — wiring through the real coverage-run CLI', () => {
     const { code, out } = gate(root);
     expect(code).toBe(1);
     expect(out).toContain('src/a.mts');
+  });
+});
+
+describe('the staged-diff claim', () => {
+  it('finds a failed file that is staged', () => {
+    const { root } = repo();
+    write(root, 'src/b.test.mts', 'x');
+    git(root, 'add', 'src/b.test.mts');
+
+    const staged = stagedFiles(root);
+    expect(stagedIntersection([join(root, 'src', 'b.test.mts')], staged)).toHaveLength(1);
+    expect(stagedIntersection([join(root, 'src', 'a.test.mts')], staged)).toEqual([]);
+  });
+
+  // Agents run in linked worktrees: the answer must come from this worktree's index and toplevel,
+  // never the main checkout's, or a sibling's staged files would be read as this agent's.
+  it('answers from the worktree it was run in, not the main checkout', () => {
+    const { root } = repo();
+    const tree = join(root, '..', `${basename(root)}-wt`);
+    git(root, 'worktree', 'add', '-q', '-b', 'side', tree);
+    try {
+      write(tree, 'src/mine.test.mts', 'x');
+      git(tree, 'add', 'src/mine.test.mts');
+      // Staged in the MAIN checkout only — it must not leak into the worktree's answer.
+      write(root, 'theirs.test.mts', 'x');
+      git(root, 'add', 'theirs.test.mts');
+
+      const staged = stagedFiles(tree);
+      expect(stagedIntersection([join(tree, 'src', 'mine.test.mts')], staged)).toHaveLength(1);
+      expect(stagedIntersection([join(root, 'theirs.test.mts')], staged)).toEqual([]);
+      expect(headSha(tree)).not.toBeNull();
+    } finally {
+      rmSync(tree, { recursive: true, force: true });
+    }
+  });
+
+  it('cannot be answered outside a git work tree, and says so with null', () => {
+    const root = mkdtempSync(join(tmpdir(), 'coverage-staged-'));
+    try {
+      expect(stagedFiles(root)).toBeNull();
+      expect(stagedIntersection(['/repo/a.test.ts'], null)).toBeNull();
+      expect(headSha(root)).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
