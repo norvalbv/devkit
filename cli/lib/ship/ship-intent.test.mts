@@ -547,8 +547,9 @@ describe('ship-intent write/delete/owns concurrency', () => {
     writeIntent(opts, ['p.txt']);
     const file = join(opts.root, relIntentPath('feat/x'));
     const generation = JSON.parse(readFileSync(file, 'utf8')).generation;
-    // A fresh lock dir is a live holder to the reaper (mtime-gated) — the delete must time out.
+    // A live holder (this test process) is never reaped, so the delete must time out.
     mkdirSync(`${file}.lock`);
+    writeFileSync(join(`${file}.lock`, 'held'), `${process.pid}\nnode:live`);
     try {
       expect(deleteIntent(opts.root, 'feat/x', generation)).toBe(1);
       expect(existsSync(file)).toBe(true);
