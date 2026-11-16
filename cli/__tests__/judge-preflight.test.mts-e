@@ -1,0 +1,811 @@
+/** The ship-time judge reachability report (sc-2538). The property that matters most is NEGATIVE:
+ *  this check may never change what a ship does — a dark provider is not a doomed ship. */
+<<<<<<< HEAD
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+=======
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+>>>>>>> refs/remotes/npr/134
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { testSpawnSync } from './_helpers.mts';
+import {
+  parseInitializeReply,
+  parseRateLimitsReply,
+  readCodexRateLimits,
+} from '../../gate-engine/judge/codex/rate-limits.mts';
+import {
+  claudeFamilyEnvLine,
+  familyOverrideRemedy,
+  judgeEnvUnsetLine,
+} from '../../gate-engine/judge/outage/family-override.mts';
+import {
+  judgeReachability,
+  type PreflightDeps,
+  remedyLine,
+  renderPreflight,
+  reviewGuardSelected,
+  selectedJudgeGuards,
+} from '../lib/ship/preflight/judge.mts';
+
+/** The payload `codex app-server` returned on this machine while the account was locked. */
+const LOCKED_REPLY = JSON.stringify({
+  id: 2,
+  result: {
+    rateLimits: {
+      limitId: 'codex',
+      primary: { usedPercent: 100, windowDurationMins: 10080, resetsAt: 1788786135 },
+      planType: 'pro',
+      rateLimitReachedType: 'rate_limit_reached',
+    },
+  },
+});
+
+// The clock when that payload was captured. plausibleReset drops a reset already in the past, so a
+// real-clock run silently lost `resetsAt` once 2026-09-07 passed; pin Date, keep the payload verbatim.
+const CAPTURED_AT = 1788786135000 - 4 * 24 * 60 * 60 * 1000;
+
+// This suite resolves REAL judge models, so a developer's exported knob would otherwise steer the
+// role rows and the model assertions below.
+const ENV_KEYS = [
+  'GUARD_REVIEW_MODEL',
+  'FRINK_REVIEW_MODEL',
+  'GUARD_REVIEW_ESCALATION_MODEL',
+  'GUARD_CORRECTNESS_MODEL',
+  'GUARD_CORRECTNESS_CHUNK',
+  'GUARD_SENTRY_MODEL',
+  'FRINK_SENTRY_MODEL',
+] as const;
+const savedEnv = new Map<string, string | undefined>();
+
+beforeEach(() => {
+  for (const k of ENV_KEYS) {
+    savedEnv.set(k, process.env[k]);
+    delete process.env[k];
+  }
+});
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(CAPTURED_AT);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  for (const k of ENV_KEYS) {
+    const v = savedEnv.get(k);
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+});
+
+function repo(guards: string[], review?: Record<string, string>): string {
+  const dir = mkdtempSync(join(tmpdir(), 'judge-preflight-'));
+  mkdirSync(join(dir, '.devkit'), { recursive: true });
+  writeFileSync(join(dir, '.devkit', 'config.json'), JSON.stringify({ components: { guards } }));
+  if (review) writeFileSync(join(dir, 'guard.config.json'), JSON.stringify({ review }));
+  return dir;
+}
+
+const deps = (over: Partial<PreflightDeps> = {}): PreflightDeps => ({
+  resolvable: () => true,
+  codexOut: () => false,
+  claudeOut: () => false,
+  rateLimits: async () => null,
+  ...over,
+});
+
+describe('parseRateLimitsReply', () => {
+  it('reads the locked payload this machine actually returned, seconds converted to ms', () => {
+    const snap = parseRateLimitsReply(LOCKED_REPLY);
+    expect(snap).toMatchObject({
+      reached: true,
+      reachedType: 'rate_limit_reached',
+      usedPercent: 100,
+      windowDurationMins: 10080,
+      planType: 'pro',
+    });
+    // The wire carries epoch SECONDS; every devkit consumer works in ms (JudgeOutage.resetsAt).
+    expect(snap?.resetsAt).toBe(1788786135 * 1000);
+  });
+
+  it('a healthy account reports reached:false rather than nothing at all', () => {
+    const snap = parseRateLimitsReply(
+      JSON.stringify({
+        id: 2,
+        result: { rateLimits: { primary: { usedPercent: 18, windowDurationMins: 10080 } } },
+      }),
+    );
+    expect(snap?.reached).toBe(false);
+    expect(snap?.usedPercent).toBe(18);
+  });
+
+  it('ignores every line that is not this reply — handshake, notifications, noise', () => {
+    for (const line of [
+      JSON.stringify({ id: 1, result: { userAgent: 'x' } }), // the initialize answer
+      JSON.stringify({ method: 'remoteControl/status/changed', params: {} }), // a notification
+      JSON.stringify({ id: 2, result: {} }), // right id, no payload this version understands
+      'not json at all',
+      '',
+    ])
+      expect(parseRateLimitsReply(line)).toBeNull();
+  });
+});
+
+describe('parseInitializeReply', () => {
+  it('reads the version after the client name, whatever the client is called', () => {
+    const reply = (userAgent: string) => JSON.stringify({ id: 1, result: { userAgent } });
+    expect(parseInitializeReply(reply('devkit/0.162.1 (Mac OS 26.5.1; arm64)'))).toBe('0.162.1');
+    expect(parseInitializeReply(reply('codex_cli_rs/1.0.0-beta.2'))).toBe('1.0.0-beta.2');
+  });
+
+  it('names no version for any line that is not a versioned handshake reply', () => {
+    for (const line of [
+      JSON.stringify({ id: 1, result: { userAgent: 'x' } }), // no version to read
+      JSON.stringify({ id: 1, result: {} }),
+      JSON.stringify({ id: 2, result: { userAgent: 'devkit/0.162.1' } }), // another reply's id
+      'null',
+      'not json at all',
+    ])
+      expect(parseInitializeReply(line)).toBeUndefined();
+  });
+});
+
+describe('reviewGuardSelected', () => {
+  it('is false when the reviewer gate is not selected — a judge-less repo stays untouched', () => {
+    expect(reviewGuardSelected(repo(['size', 'dup']))).toBe(false);
+  });
+
+  it('is false, not a throw, when there is no recorded selection to read', () => {
+    expect(reviewGuardSelected(mkdtempSync(join(tmpdir(), 'no-devkit-')))).toBe(false);
+  });
+
+  it('is true only when review is actually in the recorded guard set', () => {
+    expect(reviewGuardSelected(repo(['size', 'review']))).toBe(true);
+  });
+});
+
+describe('judgeReachability', () => {
+  const CLAUDE_FAMILY = { model: 'haiku', escalationModel: 'opus', correctnessModel: 'sonnet' };
+  const CODEX_FAMILY = {
+    model: 'gpt-5.6-terra',
+    escalationModel: 'gpt-5.6-sol',
+    correctnessModel: 'gpt-5.6-sol',
+  };
+
+  it('reports the three ROLES separately — a provider-level verdict hides a locked escalation', async () => {
+    const statuses = await judgeReachability(repo(['review'], CODEX_FAMILY), deps());
+    expect(statuses.map((s) => s.role)).toEqual(['review', 'escalation', 'correctness']);
+    expect(statuses.map((s) => s.model)).toEqual(['gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-sol']);
+  });
+
+  // sc-2689: the sentry judge was invisible here, so a codex sentry pin on a claude-bound install
+  // was reported by nothing. It earns a row only when SET — unset it is the review row restated.
+  it('a set GUARD_SENTRY_MODEL becomes its own role; unset it stays folded into review', async () => {
+    const dir = repo(['review'], CODEX_FAMILY);
+    expect((await judgeReachability(dir, deps())).map((s) => s.role)).toEqual([
+      'review',
+      'escalation',
+      'correctness',
+    ]);
+    process.env.GUARD_SENTRY_MODEL = 'haiku';
+    expect((await judgeReachability(dir, deps())).map((s) => s.role)).not.toContain('sentry');
+    const withSentry = await judgeReachability(dir, deps(), { review: true, sentry: true });
+    expect(withSentry.map((s) => s.role)).toEqual([
+      'review',
+      'escalation',
+      'correctness',
+      'sentry',
+    ]);
+    expect(withSentry.at(-1)).toMatchObject({ model: 'haiku', bin: 'claude' });
+  });
+
+  // A sentry-only install spawns exactly one judge. Gating on the review guard alone reported
+  // nothing at all for it, so a dark provider under a blocking sentry run went unannounced.
+  it('a sentry-only install reports its one judge, at the model that judge really resolves', async () => {
+    const dir = repo(['sentry'], CODEX_FAMILY);
+    expect(selectedJudgeGuards(dir)).toEqual({ review: false, sentry: true });
+    const statuses = await judgeReachability(dir, deps(), selectedJudgeGuards(dir));
+    expect(statuses.map((s) => [s.role, s.model])).toEqual([['sentry', 'gpt-5.6-terra']]);
+    process.env.GUARD_SENTRY_MODEL = 'haiku';
+    const pinned = await judgeReachability(dir, deps(), selectedJudgeGuards(dir));
+    expect(pinned.map((s) => [s.role, s.model, s.bin])).toEqual([['sentry', 'haiku', 'claude']]);
+  });
+
+  it('asks the rate-limit RPC ONCE even with three codex roles — one account, one answer', async () => {
+    let calls = 0;
+    await judgeReachability(
+      repo(['review'], CODEX_FAMILY),
+      deps({
+        rateLimits: async () => {
+          calls += 1;
+          return parseRateLimitsReply(LOCKED_REPLY);
+        },
+      }),
+    );
+    expect(calls).toBe(1);
+  });
+
+  it('names a locked account, with its reset, on every codex role', async () => {
+    const statuses = await judgeReachability(
+      repo(['review'], CODEX_FAMILY),
+      deps({ rateLimits: async () => parseRateLimitsReply(LOCKED_REPLY) }),
+    );
+    for (const s of statuses) {
+      expect(s.state).toBe('rate-limited');
+      expect(s.resetsAt).toBe(1788786135 * 1000);
+    }
+  });
+
+  // The hint must stop once the move is taken, or a resume loops on advice it already followed.
+  it('the family move clears once fully exported, and survives a partial export', async () => {
+    const dir = repo(['review'], CODEX_FAMILY);
+    const locked = deps({ rateLimits: async () => parseRateLimitsReply(LOCKED_REPLY) });
+    expect(remedyLine(await judgeReachability(dir, locked))).toContain(claudeFamilyEnvLine());
+    process.env.GUARD_REVIEW_MODEL = 'haiku';
+    expect(remedyLine(await judgeReachability(dir, locked))).toContain(claudeFamilyEnvLine());
+    process.env.GUARD_REVIEW_ESCALATION_MODEL = 'opus';
+    process.env.GUARD_CORRECTNESS_MODEL = 'sonnet';
+    expect(remedyLine(await judgeReachability(dir, locked))).toBe('');
+  });
+
+  it('never spends a rate-limit call on a claude family — there is no such query to make', async () => {
+    let calls = 0;
+    const statuses = await judgeReachability(
+      repo(['review'], CLAUDE_FAMILY),
+      deps({
+        rateLimits: async () => {
+          calls += 1;
+          return null;
+        },
+      }),
+    );
+    expect(calls).toBe(0);
+    // Binary + auth is the whole truth available for claude (anthropics/claude-code#40395 is open),
+    // so it reports reachable and claims nothing about headroom.
+    for (const s of statuses) expect(s.state).toBe('ok');
+  });
+
+  it('an unresolvable binary is absent, and a logged-out CLI is auth — not one fused label', async () => {
+    const absent = await judgeReachability(
+      repo(['review'], CODEX_FAMILY),
+      deps({ resolvable: () => false }),
+    );
+    expect(absent[0].state).toBe('absent');
+    const out = await judgeReachability(
+      repo(['review'], CODEX_FAMILY),
+      deps({ codexOut: () => true }),
+    );
+    expect(out[0].state).toBe('unauthenticated');
+  });
+
+  it('an RPC that says nothing this version understands is "unknown", never a false green', async () => {
+    const statuses = await judgeReachability(
+      repo(['review'], CODEX_FAMILY),
+      deps({ rateLimits: async () => null }),
+    );
+    for (const s of statuses) expect(s.state).toBe('unknown');
+  });
+});
+
+describe('renderPreflight', () => {
+  const now = 1788786135000 - 4 * 24 * 60 * 60 * 1000;
+  const locked = [
+    {
+      role: 'review' as const,
+      model: 'gpt-5.6-sol',
+      bin: 'codex',
+      state: 'rate-limited' as const,
+      resetsAt: 1788786135000,
+      usedPercent: 100,
+      windowMins: 10080,
+    },
+  ];
+
+  it('names the limit, the window and the wait — and never the word transient', () => {
+    const out = renderPreflight(locked, now).join('\n');
+    expect(out).toContain('USAGE LIMIT REACHED');
+    expect(out).toContain('100% of a 7d window used');
+    expect(out).toContain('resets in 4d');
+    expect(out).not.toContain('transient');
+  });
+
+  // sc-2534: a locked codex still resolves, so doctor --fix cannot bind — naming it is a dead end.
+  it('says re-running will not help, and names the override that will — never doctor --fix', () => {
+    const out = renderPreflight(locked, now).join('\n');
+    expect(out).toContain('re-running will not help');
+    expect(out).toContain('GUARD_CORRECTNESS_CHUNK=off');
+    expect(out).not.toContain('devkit doctor --fix');
+  });
+
+  it('a logged-out but installed codex is not offered doctor --fix either', () => {
+    const loggedOut = [
+      {
+        role: 'review' as const,
+        model: 'gpt-5.6-sol',
+        bin: 'codex',
+        state: 'unauthenticated' as const,
+      },
+    ];
+    const out = renderPreflight(loggedOut, now).join('\n');
+    expect(out).toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(out).not.toContain('devkit doctor --fix');
+  });
+
+  it('an absent codex keeps doctor --fix — the one state where the bind works', () => {
+    const absent = [
+      { role: 'review' as const, model: 'gpt-5.6-sol', bin: 'codex', state: 'absent' as const },
+    ];
+    const out = renderPreflight(absent, now).join('\n');
+    expect(out).toContain('devkit doctor --fix');
+    expect(out).toContain('GUARD_REVIEW_MODEL=haiku');
+  });
+
+  // sc-2689: the redirect is only honest when ONE family is dark. With both blocked there is
+  // nowhere to move, and printing a one-direction override would send the operator in a circle.
+  it('says no family move helps when BOTH judge CLIs are dark', () => {
+    const bothDark = [
+      ...locked,
+      {
+        role: 'correctness' as const,
+        model: 'sonnet',
+        bin: 'claude',
+        state: 'unauthenticated' as const,
+      },
+    ];
+    const out = renderPreflight(bothDark, now).join('\n');
+    expect(out).toContain('Both judge CLIs are dark');
+    expect(out).not.toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(out).not.toContain('move the judges to the claude family');
+  });
+
+  it('a claude-only outage offers the CODEX direction, never a move back to claude', () => {
+    const claudeDark = [
+      { role: 'review' as const, model: 'haiku', bin: 'claude', state: 'unauthenticated' as const },
+    ];
+    const out = renderPreflight(claudeDark, now).join('\n');
+    expect(out).toContain('the packaged codex family');
+    expect(out).not.toContain('GUARD_REVIEW_MODEL=haiku');
+  });
+
+  // Ship repeats this line at its tail, which is read when the head has scrolled away.
+  it('remedyLine names the claude move for a dark codex and the codex move for a dark claude', () => {
+    expect(remedyLine(locked)).toBe(
+      `To ship inside this window, ${familyOverrideRemedy('codex', true)}.`,
+    );
+    expect(remedyLine(locked)).toContain(claudeFamilyEnvLine());
+    const claudeDark = [
+      { role: 'review' as const, model: 'haiku', bin: 'claude', state: 'unauthenticated' as const },
+    ];
+    expect(remedyLine(claudeDark)).toContain(judgeEnvUnsetLine());
+  });
+
+  it('remedyLine still warns when both CLIs are dark or the bin is compound', () => {
+    const ok = { role: 'review' as const, model: 'haiku', bin: 'claude', state: 'ok' as const };
+    const claudeOut = { ...ok, role: 'correctness' as const, state: 'unauthenticated' as const };
+    expect(remedyLine([...locked, claudeOut])).toBe(
+      'Both judge CLIs are dark, so no family move helps — install or authenticate one of them.',
+    );
+    // A compound bin names no move, so it must not open with "To ship inside this window".
+    expect(remedyLine([{ ...locked[0], bin: 'codex+claude' }])).toBe(
+      `This${familyOverrideRemedy('codex+claude').slice(4)}.`,
+    );
+  });
+
+  it('remedyLine is empty when every judge is reachable or unverified, credit-backed included', () => {
+    const ok = { role: 'review' as const, model: 'haiku', bin: 'claude', state: 'ok' as const };
+    const onCredits = { ...locked[0], state: 'ok' as const, onCredits: true as const };
+    const unknown = { ...locked[0], state: 'unknown' as const };
+    expect(remedyLine([ok, onCredits, unknown])).toBe('');
+  });
+
+  it('the report closes on the very line ship repeats at its tail, so the two cannot drift', () => {
+    const ok = { role: 'review' as const, model: 'haiku', bin: 'claude', state: 'ok' as const };
+    const claudeOut = { ...ok, role: 'correctness' as const, state: 'unauthenticated' as const };
+    for (const statuses of [locked, [...locked, claudeOut]])
+      expect(renderPreflight(statuses, now).at(-1)).toBe(`   ${remedyLine(statuses)}`);
+  });
+
+  it('warns that the gates STILL RUN — it is a report, never a decision', () => {
+    expect(renderPreflight(locked, now).join('\n')).toContain('the gates below will still run');
+  });
+
+  it('a rehearsal that runs no judge says so, and points the consequence at the real ship', () => {
+    const out = renderPreflight(locked, now, true);
+    expect(out[0]).toContain('informational: this rehearsal runs no judge');
+    const text = out.join('\n');
+    expect(text).toContain(
+      'on the real ship every reviewer that is not already cached will fail closed',
+    );
+    expect(text).not.toContain('the gates below will still run');
+    expect(text).toContain('EXHAUSTED — USAGE LIMIT REACHED');
+  });
+
+  it('a healthy provider gets one quiet line per role and no warning at all', () => {
+    const out = renderPreflight(
+      [{ role: 'review' as const, model: 'haiku', bin: 'claude', state: 'ok' as const }],
+      now,
+    ).join('\n');
+    expect(out).toContain('reachable');
+    expect(out).not.toContain('⚠️');
+    expect(out).not.toContain('devkit doctor --fix');
+  });
+
+  it('reports "not verified" for unknown rather than inventing either verdict', () => {
+    const out = renderPreflight(
+      [{ role: 'review' as const, model: 'gpt-5.6-sol', bin: 'codex', state: 'unknown' as const }],
+      now,
+    ).join('\n');
+    expect(out).toContain('not verified');
+    // Unknown is not a finding: it must not drag in the remedy block.
+    expect(out).not.toContain('devkit doctor --fix');
+  });
+
+  // The skills tell an agent to act on these exact strings before a first attempt pays for reviewers.
+  it('every dark state prints the lines the shipping skills tell an agent to act on', () => {
+    const skill = (name: string) =>
+      readFileSync(
+        resolve(fileURLToPath(new URL('.', import.meta.url)), `../../skills/${name}/SKILL.md`),
+        'utf8',
+      );
+    const using = skill('using-devkit');
+    const gates = skill('commit-gates');
+    const failClosed = 'every reviewer that is not already cached will fail closed';
+    const window = 'To ship inside this window,';
+    const bothDark = 'Both judge CLIs are dark';
+    for (const doc of [using, gates]) {
+      expect(doc).toContain('guard-judge preflight');
+      expect(doc).toContain(failClosed);
+    }
+    expect(using).toContain(window);
+    expect(using).toContain(bothDark);
+
+    const dark = (state: 'unauthenticated' | 'absent') => [
+      { role: 'review' as const, model: 'gpt-5.6-sol', bin: 'codex', state },
+    ];
+    const claudeOut = { ...dark('unauthenticated')[0], model: 'sonnet', bin: 'claude' };
+    // The reported shape: one role refused by a free plan while the others stay reachable.
+    const freePlan = [
+      { role: 'review' as const, model: 'gpt-5.6-terra', bin: 'codex', state: 'ok' as const },
+      {
+        role: 'correctness' as const,
+        model: 'gpt-5.6-sol',
+        bin: 'codex',
+        state: 'unavailable' as const,
+        planType: 'free',
+        served: ['gpt-5.6-terra'],
+      },
+    ];
+    for (const statuses of [locked, dark('unauthenticated'), dark('absent'), freePlan]) {
+      for (const informational of [false, true]) {
+        const out = renderPreflight(statuses, now, informational).join('\n');
+        expect(out).toContain('guard-judge preflight');
+        expect(out).toContain(failClosed);
+        expect(out).toContain(window);
+      }
+    }
+    const both = renderPreflight([...locked, claudeOut], now).join('\n');
+    expect(both).toContain(failClosed);
+    expect(both).toContain(bothDark);
+  });
+});
+
+/** Shapes a real codex install can return that the captured happy-path payload never models —
+ *  including one that was a defect when written: an unbounded resetsAt, reported as fact. */
+describe('parseRateLimitsReply — payloads a real install can return', () => {
+  it('a JSON-RPC error is "unknown", not a crash — this is what an OLDER codex returns', () => {
+    // A codex predating account/rateLimits/read answers `error: Method not found`. That is the most
+    // likely real-world non-happy shape, and it must degrade to silence rather than a false verdict.
+    expect(
+      parseRateLimitsReply(
+        JSON.stringify({ id: 2, error: { code: -32601, message: 'Method not found' } }),
+      ),
+    ).toBeNull();
+  });
+
+  it('drops an implausible resetsAt instead of stating it — the unit-change trap', () => {
+    // If this field ever becomes milliseconds, the `* 1000` below it produces a year-billion instant
+    // that renders as "re-running will not help for another 104249970674d", stated as fact.
+    const snap = parseRateLimitsReply(
+      JSON.stringify({
+        id: 2,
+        result: {
+          rateLimits: {
+            rateLimitReachedType: 'rate_limit_reached',
+            primary: { resetsAt: Number.MAX_SAFE_INTEGER },
+          },
+        },
+      }),
+    );
+    // Still LOCKED — the lock is the load-bearing fact; only the unbelievable time is dropped.
+    expect(snap?.reached).toBe(true);
+    expect(snap?.resetsAt).toBeUndefined();
+  });
+
+  it('keeps a usedPercent of 0 — a falsy check here would silently hide a fresh window', () => {
+    const snap = parseRateLimitsReply(
+      JSON.stringify({ id: 2, result: { rateLimits: { primary: { usedPercent: 0 } } } }),
+    );
+    expect(snap?.usedPercent).toBe(0);
+  });
+
+  it('ignores a resetsAt of 0 rather than reporting a 1970 reset', () => {
+    const snap = parseRateLimitsReply(
+      JSON.stringify({ id: 2, result: { rateLimits: { primary: { resetsAt: 0 } } } }),
+    );
+    expect(snap?.resetsAt).toBeUndefined();
+  });
+
+  it('drops a field carrying the wrong TYPE instead of forwarding it', () => {
+    // The interface DECLARES these as numbers; the wire is not obliged to agree.
+    const snap = parseRateLimitsReply(
+      JSON.stringify({
+        id: 2,
+        result: { rateLimits: { primary: { usedPercent: 'lots', windowDurationMins: null } } },
+      }),
+    );
+    expect(snap?.usedPercent).toBeUndefined();
+    expect(snap?.windowDurationMins).toBeUndefined();
+  });
+});
+
+/** The spawn itself: handshake, line buffering across chunk boundaries, and every way the child
+ *  can fail to answer. A fake binary stands in for codex, via GUARD_CODEX_BIN. */
+describe('readCodexRateLimits — the spawn, not just the parser', () => {
+  /** Write an executable stand-in for `codex` and point GUARD_CODEX_BIN at it. */
+  function fakeCodex(body: string): string {
+    const dir = mkdtempSync(join(tmpdir(), 'fake-codex-'));
+    const bin = join(dir, 'codex');
+    writeFileSync(bin, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    chmodSync(bin, 0o755);
+    return bin;
+  }
+  const withFake = async (body: string, timeout = 5000) => {
+    const prior = process.env.GUARD_CODEX_BIN;
+    process.env.GUARD_CODEX_BIN = fakeCodex(body);
+    try {
+      return await readCodexRateLimits(timeout);
+    } finally {
+      if (prior === undefined) delete process.env.GUARD_CODEX_BIN;
+      else process.env.GUARD_CODEX_BIN = prior;
+    }
+  };
+
+  it('finds the reply among the handshake and notification traffic around it', async () => {
+    // The real server interleaves an initialize answer and remoteControl notifications; the reader
+    // must select by id rather than by position.
+    const snap = await withFake(
+      [
+        `echo '{"id":1,"result":{"userAgent":"x"}}'`,
+        `echo '{"method":"remoteControl/status/changed","params":{}}'`,
+        `echo '{"id":2,"result":{"rateLimits":{"rateLimitReachedType":"rate_limit_reached","primary":{"usedPercent":100,"resetsAt":0}}}}'`,
+        'sleep 5',
+      ].join('\n'),
+    );
+    expect(snap?.reached).toBe(true);
+  });
+
+  it('reports the CLI version from the handshake reply, and the account-level usage flag', async () => {
+    const snap = await withFake(
+      [
+        `echo '{"id":1,"result":{"userAgent":"devkit/0.162.1 (Mac OS 26.5.1; arm64) ghostty/1.3.1"}}'`,
+        `echo '{"id":2,"result":{"ordinaryUsageAllowed":false,"rateLimits":{"credits":{"hasCredits":true},"primary":{"usedPercent":10}}}}'`,
+        'sleep 5',
+      ].join('\n'),
+    );
+    expect(snap).toMatchObject({
+      cliVersion: '0.162.1',
+      ordinaryUsageAllowed: false,
+      creditsUsable: true,
+    });
+  });
+
+  it('reports no CLI version when the handshake names none', async () => {
+    const snap = await withFake(
+      [
+        `echo '{"id":1,"result":{"userAgent":"x"}}'`,
+        `echo '{"id":2,"result":{"ordinaryUsageAllowed":"yes","rateLimits":{"primary":{"usedPercent":10}}}}'`,
+        'sleep 5',
+      ].join('\n'),
+    );
+    expect(snap?.usedPercent).toBe(10);
+    expect(snap).not.toHaveProperty('cliVersion');
+    expect(snap).not.toHaveProperty('ordinaryUsageAllowed');
+    expect(snap).not.toHaveProperty('creditsUsable');
+  });
+
+  it('reassembles a reply split across chunk boundaries', async () => {
+    // A pipe read can land mid-line. Parsing per-chunk instead of per-line loses the whole answer.
+    const snap = await withFake(
+      [
+        `printf '{"id":2,"result":{"rateLimits":'`,
+        'sleep 0.2',
+        `printf '{"rateLimitReachedType":"rate_limit_reached"}}}\\n'`,
+        'sleep 5',
+      ].join('\n'),
+    );
+    expect(snap?.reached).toBe(true);
+  });
+
+  it('resolves null — never hangs — when the child answers nothing', async () => {
+    // The whole point of the preflight is speed; a silent daemon must not become a new stall.
+    const started = Date.now();
+    expect(await withFake('sleep 30', 700)).toBeNull();
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it('resolves null when the child exits before replying', async () => {
+    expect(await withFake('exit 1')).toBeNull();
+  });
+
+  it('resolves null when the binary does not exist at all', async () => {
+    const prior = process.env.GUARD_CODEX_BIN;
+    process.env.GUARD_CODEX_BIN = join(tmpdir(), 'definitely-not-a-codex-binary');
+    try {
+      expect(await readCodexRateLimits(2000)).toBeNull();
+    } finally {
+      if (prior === undefined) delete process.env.GUARD_CODEX_BIN;
+      else process.env.GUARD_CODEX_BIN = prior;
+    }
+  });
+
+  it('resolves null on a flood of non-answers rather than buffering without bound', async () => {
+    expect(await withFake(`yes '{"noise":true}' | head -c 2000000`, 5000)).toBeNull();
+  });
+});
+
+/** The worst outcome for a check whose justification is early truth: a report saying "reachable"
+ *  while the model that will block the ship is locked. Per-PROVIDER reporting produces exactly that. */
+describe('mixed-family configuration', () => {
+  const MIXED = {
+    model: 'haiku',
+    escalationModel: 'gpt-5.6-sol',
+    correctnessModel: 'sonnet',
+  };
+
+  it('names the locked codex escalation while the claude roles report reachable', async () => {
+    const statuses = await judgeReachability(
+      repo(['review'], MIXED),
+      deps({ rateLimits: async () => parseRateLimitsReply(LOCKED_REPLY) }),
+    );
+    expect(statuses.map((s) => `${s.role}:${s.state}`)).toEqual([
+      'review:ok',
+      'escalation:rate-limited',
+      'correctness:ok',
+    ]);
+  });
+
+  it('warns on a PARTIAL outage — one dark role is still a reviewer that cannot grade', async () => {
+    const statuses = await judgeReachability(
+      repo(['review'], MIXED),
+      deps({ rateLimits: async () => parseRateLimitsReply(LOCKED_REPLY) }),
+    );
+    const out = renderPreflight(statuses, 1788786135000 - 86_400_000).join('\n');
+    expect(out).toContain('USAGE LIMIT REACHED');
+    expect(out).toContain('will still run');
+    // The healthy roles are still reported, so the reader sees WHICH half works.
+    expect(out).toContain('haiku via claude — reachable');
+  });
+
+  it('checks codex auth only for the codex role, never for the claude ones', async () => {
+    // A logged-out codex must not make the haiku roles report logged-out, and vice versa.
+    const statuses = await judgeReachability(
+      repo(['review'], MIXED),
+      deps({ codexOut: () => true }),
+    );
+    expect(statuses.map((s) => s.state)).toEqual(['ok', 'unauthenticated', 'ok']);
+  });
+});
+
+/**
+ * Frink runs parallel agents against one working tree, so two ships can preflight at the same
+ * moment. Each spawns its own stdio app-server, and neither may see the other's answer.
+ */
+describe('concurrent preflights', () => {
+  it('keeps two simultaneous reports independent', async () => {
+    const [locked, healthy] = await Promise.all([
+      judgeReachability(
+        repo(['review'], {
+          model: 'gpt-5.6-sol',
+          escalationModel: 'gpt-5.6-sol',
+          correctnessModel: 'gpt-5.6-sol',
+        }),
+        deps({ rateLimits: async () => parseRateLimitsReply(LOCKED_REPLY) }),
+      ),
+      judgeReachability(
+        repo(['review'], {
+          model: 'gpt-5.6-sol',
+          escalationModel: 'gpt-5.6-sol',
+          correctnessModel: 'gpt-5.6-sol',
+        }),
+        deps({
+          rateLimits: async () =>
+            parseRateLimitsReply(
+              JSON.stringify({ id: 2, result: { rateLimits: { primary: { usedPercent: 12 } } } }),
+            ),
+        }),
+      ),
+    ]);
+    expect(locked.every((s) => s.state === 'rate-limited')).toBe(true);
+    expect(healthy.every((s) => s.state === 'ok')).toBe(true);
+    // No shared module state leaked the locked run's reset into the healthy one.
+    expect(healthy.every((s) => s.resetsAt === undefined)).toBe(true);
+  });
+});
+
+describe('ship_judge_preflight — the remedy reaches the shell, the report stays on stderr', () => {
+  const helper = resolve(
+    fileURLToPath(new URL('.', import.meta.url)),
+    '../lib/ship/prepare-gate-worktree.sh',
+  );
+
+  it('captures stdout into SHIP_JUDGE_REMEDY and never echoes it onto ship stdout', () => {
+    const bin = mkdtempSync(join(tmpdir(), 'judge-preflight-stub-'));
+    writeFileSync(join(bin, 'node'), '#!/bin/sh\necho REMEDY\necho REPORT >&2\n');
+    chmodSync(join(bin, 'node'), 0o755);
+    const script =
+      '. "$1"; SHIP_JUDGE_REMEDY=stale; ship_judge_preflight "$2"; printf "[%s]" "$SHIP_JUDGE_REMEDY" >&2';
+    const r = testSpawnSync('/bin/bash', ['-c', script, 'sh', helper, bin], {
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
+      encoding: 'utf8',
+    });
+    rmSync(bin, { recursive: true, force: true });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toContain('REPORT');
+    expect(r.stderr).toContain('[REMEDY]');
+  });
+
+  it('still reports and hands over the remedy when the telemetry sink cannot be written', () => {
+    const root = repo(['review']);
+    // A sink path under a regular file: every append fails.
+    const blocker = join(root, 'not-a-directory');
+    writeFileSync(blocker, '');
+    const script = '. "$1"; ship_judge_preflight "$2"; printf "[%s]" "$SHIP_JUDGE_REMEDY" >&2';
+    const r = testSpawnSync('/bin/bash', ['-c', script, 'sh', helper, root], {
+      env: {
+        ...process.env,
+        DEVKIT_GATE_EVENTS: join(blocker, 'gate-events.jsonl'),
+        DEVKIT_SHIP_ID: 'unwritable-sink',
+        GUARD_CODEX_BIN: join(root, 'no-codex'),
+      },
+      encoding: 'utf8',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('guard-judge preflight');
+    expect(r.stderr).toMatch(/\[[^\]]*GUARD_REVIEW_MODEL=[^\]]*\]/);
+  });
+
+  // The real preflight, both CLIs missing: the state whose stdout used to be empty.
+  it('hands the shell the both-dark warning when neither judge CLI resolves', () => {
+    const root = repo(['review'], {
+      model: 'gpt-5.6-terra',
+      escalationModel: 'gpt-5.6-sol',
+      correctnessModel: 'sonnet',
+    });
+    const bin = join(root, 'path-without-claude');
+    mkdirSync(bin);
+    for (const tool of ['dirname', 'git'])
+      symlinkSync(
+        testSpawnSync('/bin/sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).stdout.trim(),
+        join(bin, tool),
+      );
+    symlinkSync(process.execPath, join(bin, 'node'));
+    const script = '. "$1"; ship_judge_preflight "$2"; printf "[%s]" "$SHIP_JUDGE_REMEDY" >&2';
+    const r = testSpawnSync('/bin/bash', ['-c', script, 'sh', helper, root], {
+      env: {
+        ...process.env,
+        PATH: bin,
+        DEVKIT_GATE_EVENTS: join(root, 'gate-events.jsonl'),
+        GUARD_CODEX_BIN: join(root, 'no-codex'),
+      },
+      encoding: 'utf8',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toContain(
+      '[Both judge CLIs are dark, so no family move helps — install or authenticate one of them.]',
+    );
+  });
+});
