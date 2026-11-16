@@ -28,6 +28,7 @@ type LensPartRow = {
   chunk_files_sha: string | null;
   model?: string;
   retried?: true;
+  cached?: true;
 } & CoverageFields;
 
 /** The ONE merged review_result row; the item fields join from itemFields(). */
@@ -90,6 +91,7 @@ export function emitMergedLensResults(
       };
       if (p.res.model) row.model = p.res.model;
       if (p.retried) row.retried = true;
+      if (p.cached) row.cached = true;
       return row;
     });
     const event: MergedLensRow = {
