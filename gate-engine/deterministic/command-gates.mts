@@ -2,12 +2,14 @@
  * Repo-supplied command gates: the hook's `--structure` / `--extra` flags and guard.config.json
  * `extraGates`. guard-deterministic runs each one beside the built-in gates; non-zero blocks.
  */
+import type { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { CONFIG_FILENAME, envFlag, resolveGuardConfig } from '../config.mts';
+import { CONFIG_FILENAME, envFlag, envVar, resolveGuardConfig } from '../config.mts';
 import { emitGateBypass } from '../judge/gate-events.mts';
 import { gitPrefix, stagedSet } from '../ratchets/git-index.mts';
+import { gateEnv } from './reason.mts';
 import { recheckCommand } from './recheck.mts';
 import { DETERMINISTIC } from './registry.mts';
 
@@ -166,4 +168,73 @@ export function commandGate(label: string, cwd: string, cmd?: string): Gate {
   // The tokens that RUN, quoted. An expanded path list would go stale once the fix is staged.
   const recheck = usesStaged ? undefined : recheckCommand(argv, structure ? cwd : undefined);
   return { label, argv, failOpen2: structure, recheck };
+}
+
+/** What runArgv returns for a gate that produced no exit within its deadline. */
+export const TIMED_OUT = 'timed-out';
+// A hang detector, not a performance budget: a slow gate on a loaded machine is still legitimate.
+const DEFAULT_GATE_TIMEOUT_MS = 1_800_000;
+
+// Node throws on a fractional timeout, and that throw would read as a failure of every gate.
+const deadlineSchema = z.number().int().positive();
+
+/**
+ * The per-gate deadline in ms: GUARD_GATE_TIMEOUT_MS, then guard.config.json `gateTimeoutMs`, then
+ * the default. An unusable value falls through; configExtraGates reports an unreadable config.
+ */
+export function gateTimeoutMs(cwd: string): number {
+  let file: unknown;
+  try {
+    file = resolveGuardConfig(cwd).gateTimeoutMs;
+  } catch {
+    file = undefined;
+  }
+  return (
+    deadlineSchema.safeParse(Number(envVar('GATE_TIMEOUT_MS'))).data ??
+    deadlineSchema.safeParse(file).data ??
+    DEFAULT_GATE_TIMEOUT_MS
+  );
+}
+
+/** Why a timed-out gate blocked: printed under its label and carried in its telemetry detail. */
+export function timeoutReason(ms: number): string[] {
+  return [
+    `no exit within ${ms / 1000}s: its process was signalled, and work it started may still be running.`,
+    'This is not a code finding. Re-run; if the gate is legitimately this slow, raise',
+    `gateTimeoutMs in ${CONFIG_FILENAME} (commit it) or export GUARD_GATE_TIMEOUT_MS=<ms>.`,
+  ];
+}
+
+// What execFileSync throws: `status` when the child exited, `signal` when one ended it, `code` when
+// the spawn itself failed (ENOENT, EACCES, EAGAIN) or the deadline passed (ETIMEDOUT).
+const spawnErrorSchema = z.object({
+  status: z.number().optional().catch(undefined),
+  signal: z.string().optional().catch(undefined),
+  code: z.string().optional().catch(undefined),
+});
+
+/**
+ * Run one gate as a subprocess: its exit code (0 on success), TIMED_OUT at the deadline, or
+ * `killed:<SIG>` / `spawn-failed:<CODE>` when it never reached one. stdio is inherited; the gate's
+ * failure reason returns via `reasonFile`.
+ */
+export function runArgv(
+  cwd: string,
+  argv: string[],
+  exec: typeof execFileSync,
+  reasonFile: string,
+  timeoutMs: number,
+): number | string {
+  try {
+    const env = gateEnv(reasonFile);
+    exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit', env, timeout: timeoutMs });
+    return 0;
+  } catch (e: unknown) {
+    const { status, signal, code } = spawnErrorSchema.safeParse(e).data ?? {};
+    // Read before `status`: a child that exits 0 from its SIGTERM handler still timed out.
+    if (code === 'ETIMEDOUT') return TIMED_OUT;
+    if (status !== undefined) return status;
+    if (signal) return `killed:${signal}`;
+    return code ? `spawn-failed:${code}` : 1;
+  }
 }
