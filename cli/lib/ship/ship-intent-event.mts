@@ -11,7 +11,7 @@ import type { ShipIntent } from './ship-intent-codec.mts';
  * ship_id/repo/branch/source/version from the DEVKIT_SHIP_* env the ship script exports before
  * calling write. Best-effort by emitGateEvent's own contract.
  */
-export function emitShipIntentEvent(intent: ShipIntent, resumed: boolean): void {
+export function emitShipIntentEvent(intent: ShipIntent, resumed: boolean, root: string): void {
   const sourceMode = intent.sourceMode ?? 'explicit';
   const flagParts = [
     ...(intent.mode === 'reship' ? ['--pr'] : []),
@@ -37,6 +37,7 @@ export function emitShipIntentEvent(intent: ShipIntent, resumed: boolean): void 
         ];
   emitGateEvent({
     type: 'ship_intent',
+    root,
     mode: intent.mode,
     source_mode: sourceMode,
     command: redactSecrets(commandParts.map(shQuote).join(' ')),
