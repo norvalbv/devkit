@@ -451,33 +451,49 @@ export async function captureRegressionEvidence(
   }
 }
 
-export async function proveRegression(rawArgs: string[], cwd = process.cwd()): Promise<number> {
+export interface RegressionCaptureResult {
+  exitCode: number;
+  evidence?: RegressionEvidence;
+  evidenceDir?: string;
+}
+
+export async function captureRegressionComparison(
+  rawArgs: string[],
+  cwd = process.cwd(),
+  dependencySource?: string | null,
+): Promise<RegressionCaptureResult> {
   let prepared: PreparedRegressionRepository;
   try {
     prepared = prepareRegressionRepository(rawArgs, cwd);
+    if (dependencySource !== undefined) prepared.dependencySource = dependencySource;
   } catch (error) {
     const prefix = error instanceof RegressionUsageError ? 'usage' : 'setup';
     console.error(
       `🚫 prove-regression ${prefix}: ${error instanceof Error ? error.message : error}`,
     );
-    return 1;
+    return { exitCode: 1 };
   }
   let captured: CapturedRegression;
   try {
     captured = await captureRegressionEvidence(prepared);
   } catch (error) {
-    if (error instanceof InterruptedError) return error.status;
+    if (error instanceof InterruptedError) return { exitCode: error.status };
     const phase = error instanceof RegressionUsageError ? 'setup' : 'failed';
     console.error(
       `🚫 prove-regression ${phase}: ${error instanceof Error ? error.message : error}`,
     );
-    return 1;
+    return { exitCode: 1 };
   }
-  const { red, green, status } = captured.evidence;
+  const { evidence, evidenceDir } = captured;
+  const { red, green, status } = evidence;
   console.log(`red: ${red.sha} → ${red.signal ?? red.exitCode}`);
   console.log(`green: ${green.sha} → ${green.signal ?? green.exitCode}`);
   if (red.reportError) console.warn(`⚠️  red Vitest report: ${red.reportError}`);
   if (green.reportError) console.warn(`⚠️  green Vitest report: ${green.reportError}`);
-  console.log(`evidence: ${captured.evidenceDir}`);
-  return status === 'captured' ? 0 : 1;
+  console.log(`evidence: ${evidenceDir}`);
+  return { exitCode: status === 'captured' ? 0 : 1, evidence, evidenceDir };
+}
+
+export async function proveRegression(rawArgs: string[], cwd = process.cwd()): Promise<number> {
+  return (await captureRegressionComparison(rawArgs, cwd)).exitCode;
 }
