@@ -125,8 +125,9 @@ interface Change {
   testFiles: number;
   targets: string[];
   sources: string[];
-  /** Whether the change added or modified this line of a production file fallow names. */
-  isChanged: (file: string, line: number) => boolean;
+  /** Whether the change added or modified this line of a production file fallow names; null when
+   * git could not read the diff. */
+  isChanged: ((file: string, line: number) => boolean) | null;
 }
 
 /** The change's test files and the source to mutate, or the one line that says why not. */
@@ -159,18 +160,19 @@ function findChange(cwd: string, opts: Options): Change | Stop {
     );
   }
   const isProduction = (p: string) => classify(p, false) === 'production';
-  let added = new Map<string, Set<number>>();
+  const change = { testFiles: tests.length, targets: tests.map(fromHere), sources };
+  let added: Map<string, Set<number>>;
   try {
     added = addedProductionLines(top, isProduction, [mb.sha]);
   } catch {
-    // Without the diff no line counts as changed; the redundancy verdicts do not depend on it.
+    return { ...change, isChanged: null };
   }
   const newFiles = new Set(untracked.filter(isProduction));
   const isChanged = (file: string, lineNo: number): boolean => {
     const path = relative(top, join(here, file));
     return newFiles.has(path) || (added.get(path)?.has(lineNo) ?? false);
   };
-  return { testFiles: tests.length, targets: tests.map(fromHere), sources, isChanged };
+  return { ...change, isChanged };
 }
 
 interface Answer {
@@ -217,16 +219,13 @@ function askFallow(deps: Deps, cwd: string, change: Change, budget: string): Ans
   return { version, report };
 }
 
-function printReport({ version, report }: Answer, change: Change): void {
-  const { flagged, unjudged, judged } = redundancy(report);
-  const counts = report.summary?.counts;
-  const mutants = counts?.total ?? 0;
-  const done = mutants - (counts?.pending ?? 0);
-  const seconds = Math.round((report.elapsed_ms ?? 0) / 1000);
-  console.log(
-    `fallow ${version}: ${done} of ${mutants} planted bugs ran in ${seconds}s, ${judged} tests judged in ${change.testFiles} changed test file(s).`,
-  );
-  const { uncaught, planned, ran } = changedLines(report, change.isChanged);
+/** Prints the changed-line section and returns how many planted bugs it listed as not caught. */
+function printChangedLines(report: KillMatrixReport, isChanged: Change['isChanged']): number {
+  if (!isChanged) {
+    console.log('  changed lines  not judged: git could not read the diff.');
+    return 0;
+  }
+  const { uncaught, planned, ran } = changedLines(report, isChanged);
   for (const u of uncaught.slice(0, MAX_UNCAUGHT)) {
     console.log(`  not caught     ${u.file}:${u.line}  ${u.what}`);
   }
@@ -241,6 +240,19 @@ function printReport({ version, report }: Answer, change: Change): void {
       `                 ${planned - ran} did not run before the time budget, so those lines may be untested.`,
     );
   }
+  return uncaught.length;
+}
+
+function printReport({ version, report }: Answer, change: Change): void {
+  const { flagged, unjudged, judged } = redundancy(report);
+  const counts = report.summary?.counts;
+  const mutants = counts?.total ?? 0;
+  const done = mutants - (counts?.pending ?? 0);
+  const seconds = Math.round((report.elapsed_ms ?? 0) / 1000);
+  console.log(
+    `fallow ${version}: ${done} of ${mutants} planted bugs ran in ${seconds}s, ${judged} tests judged in ${change.testFiles} changed test file(s).`,
+  );
+  const uncaught = printChangedLines(report, change.isChanged);
   for (const t of flagged) {
     console.log(`  ${t.verdict.padEnd(13)}  ${t.testId}`);
   }
@@ -248,7 +260,7 @@ function printReport({ version, report }: Answer, change: Change): void {
   for (const u of unjudged) {
     console.log(`  not judged     ${u.target} (${u.tests} tests): ${u.reasons.join(', ')}`);
   }
-  if (flagged.length || uncaught.length) {
+  if (flagged.length || uncaught) {
     console.log('What each word means: devkit help test-redundancy');
   }
 }
