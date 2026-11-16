@@ -4,6 +4,7 @@ import path from 'node:path';
 import { writeFileAtomic } from './atomic-write.mts';
 import {
   type AddOptions,
+  assertNoLineAnchors,
   currentTarget,
   firstClause,
   hasTargetFields,
@@ -363,6 +364,7 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
     if (!prefix) throw new Error('newest draft note has an invalid date prefix');
     const noteText = selected.text.slice(prefix.length);
     const at = uniqueOffset(noteText, oldText, 'the newest draft note');
+    assertNoLineAnchors(noteText.slice(0, at) + newText + noteText.slice(at + oldText.length));
     const start = bodyOffset + selected.start + prefix.length + at;
     const replacement = foldLines(newText);
     writeFileAtomic(

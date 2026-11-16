@@ -5,6 +5,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { CONFIG_FILENAME, resolveGuardConfigJson } from '../config.mts';
 import { parseJsonObject } from '../config-json.mts';
+import { LINE_ANCHOR_RE } from '../markdown/referenced-paths.mts';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { gitIgnores, indexFile } from '../review/evidence/staged-git.mts';
 
@@ -18,6 +19,7 @@ const commentsSchema = z.looseObject({
     .object({
       forbiddenRefs: z.array(z.string()).optional(),
       forbidDecisionRefs: z.boolean().optional(),
+      forbidLineAnchors: z.boolean().optional(),
     })
     .optional(),
 });
@@ -78,5 +80,6 @@ export function loadCommentPolicy(cwd: string): CommentPolicy {
     ? decisionPattern(cwd, resolveGuardConfigJson(contents, cwd).decisionsDir)
     : null;
   if (decisions) refs.push(decisions);
+  if (comments.forbidLineAnchors) refs.push(LINE_ANCHOR_RE);
   return { refs };
 }
