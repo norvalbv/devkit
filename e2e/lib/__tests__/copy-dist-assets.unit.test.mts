@@ -193,6 +193,17 @@ describe('copy-dist-assets CLI', () => {
     expect(distStatus()).toBe(before);
   });
 
+  // Node resolves import.meta.url through the symlink; a resolve()-only argv[1] does not, so the
+  // script used to exit 0 without copying anything.
+  it('still dispatches when run through a symlink in a path with a space', () => {
+    const link = join(tmp(), 'with space', 'copy.mjs');
+    mkdirSync(join(link, '..'));
+    symlinkSync(SCRIPT, link);
+    const r = spawnSync(process.execPath, [link, '--outdir', tmp()], { encoding: 'utf8' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/unknown argument '--outdir'/);
+  });
+
   it('copies into --out and reports that dir', () => {
     const out = emitted();
     const r = run(['--out', out]);
