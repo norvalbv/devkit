@@ -176,9 +176,9 @@
     ],
     "walls": []
   },
-  "//maxLines": "Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only). 0 = off. Per-FUNCTION caps need a parser — not yet.",
+  "//maxLines": "Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only in .devkit/baselines/size-lines.json). 0 = off. Per-FUNCTION caps need a parser — not yet.",
   "maxLines": 500,
-  "//maxTestLines": "Loose raw line cap per test file; existing oversized tests are grandfathered shrink-only. 0 = off.",
+  "//maxTestLines": "Loose raw line cap per test file; existing oversized tests are grandfathered shrink-only in .devkit/baselines/size-lines.json. 0 = off.",
   "maxTestLines": 2000,
   "//maxLinesExtensions": "Extra extensions the raw-line cap also governs. The ship scripts are shell, and only guard-size can hold them shrink-only on every judge model.",
   "maxLinesExtensions": ["sh"],
