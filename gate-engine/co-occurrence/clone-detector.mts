@@ -26,7 +26,7 @@
  *   guard-clone scan --changed --gate
  *       # commit gate: clones touching a staged file (--changed, set via
  *       # MATCHER_CHANGED_FILES or git), not covered by a live allowlist clone.
- *       # exit 1 = new clone or jscpd ignore marker → block · 0 = clean · 2 = could-not-run → fail-open.
+ *       # exit 1 = new or lapsed-approval clone, or jscpd ignore marker → block · 0 = clean · 2 = could-not-run → fail-open.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -45,10 +45,10 @@ import { join, matchesGlob, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mts';
 import { exitGate, failLine } from '../deterministic/reason.mts';
-import { ALLOWLIST_CLI, loadAllowlist, saveAllowlist } from './allowlist-io.mts';
+import { ALLOWLIST_CLI, type CloneAllowlistEntry, loadAllowlist, saveAllowlist } from './allowlist-io.mts';
 import { flagReader } from './argv.mts';
 import { loadChangedSet } from './changed-files.mts';
-import { isExpired } from './decay.mts';
+import { DEFAULT_DECAY_DAYS, isExpired } from './decay.mts';
 import { JSCPD_OWN_ROOT, resolveJscpdBin } from './jscpd-bin.mts';
 
 // Resolve config against the consumer cwd (W-3). Scan roots, allowlist, jscpd cwd all key off it.
@@ -259,15 +259,24 @@ export function hashFragment(fragment: string): string {
   return createHash('sha256').update(normalised).digest('hex').slice(0, 16);
 }
 
-/** Fragment hashes of clones already approved AND still live (non-expired) in the
- * allowlist — the gate surfaces only clones not in this set. The CloneAllowlistEntry shape,
- * the corruption-refusing loader (fail-open exit 2 on a corrupt-but-present file, so an
- * approved clone never re-surfaces as novel and false-blocks), and the atomic writer all
- * live in ./allowlist-io.mts, shared with the matcher + the guard-dup-allowlist CLI. */
-function liveAllowlistedHashes(): Set<string> {
-  if (allowlistPath == null) return new Set<string>();
+interface AllowlistIndex {
+  live: Set<string>;
+  expired: Map<string, CloneAllowlistEntry>;
+}
+
+/** Live approved hashes (any live entry covers) plus the newest expired entry per uncovered hash.
+ * A corrupt allowlist makes loadAllowlist exit 2 (fail-open) rather than re-surface every clone. */
+function allowlistIndex(): AllowlistIndex {
+  const expired = new Map<string, CloneAllowlistEntry>();
+  if (allowlistPath == null) return { live: new Set<string>(), expired };
   const { clones } = loadAllowlist(allowlistPath, 'clone-detector');
-  return new Set(clones.filter((c) => !isExpired(c)).map((c) => c.fragmentHash));
+  const live = new Set(clones.filter((c) => !isExpired(c)).map((c) => c.fragmentHash));
+  for (const c of clones) {
+    if (live.has(c.fragmentHash)) continue;
+    const prev = expired.get(c.fragmentHash);
+    if (!prev || c.date > prev.date) expired.set(c.fragmentHash, c);
+  }
+  return { live, expired };
 }
 
 // Built at runtime: a literal would self-flag this file and, beside an end marker, open a region.
@@ -318,6 +327,23 @@ const loc = (c: Clone, side: CloneLocSide): number => {
   const v = c[side];
   return typeof v === 'number' ? v : v.line;
 };
+
+const cloneRow = (c: Clone): string =>
+  `  ${String(c.lines).padStart(3)}L  ${c.fragmentHash}  ${c.fileA}:${loc(c, 'startA')} <> ${c.fileB}:${loc(c, 'startB')}`;
+
+const filePairKey = (a: string, b: string): string => [a, b].sort().join('\0');
+
+/** Provenance of a lapsed approval, so a re-approval re-judges the original reason. */
+function lapsedNote(c: Clone, e: CloneAllowlistEntry): string {
+  const lifetime =
+    e.decayDays === undefined
+      ? `no lifetime recorded (${DEFAULT_DECAY_DAYS}-day default)`
+      : `${e.decayDays}-day lifetime`;
+  const moved =
+    e.fileA && e.fileB && filePairKey(e.fileA, e.fileB) !== filePairKey(c.fileA, c.fileB);
+  const where = moved ? ` — approved for ${e.fileA} <> ${e.fileB}` : '';
+  return `approved ${e.date}, ${lifetime}${where}: "${e.description || 'no reason recorded'}"`;
+}
 
 // ── CLI ───────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -419,43 +445,66 @@ if (isMain) {
   if (staged) clones = clones.filter((c) => staged.has(c.fileA) || staged.has(c.fileB));
 
   if (gate) {
-    // Block on NEW clones (fragmentHash not covered by a live allowlist entry) and on any
-    // ignore marker, which would otherwise hide a clone from this gate with no approval.
-    const allowed = liveAllowlistedHashes();
-    const novel = clones.filter((c) => !allowed.has(c.fragmentHash));
-    const rows = [
-      ...novel.map(
-        (c) =>
-          `  ${String(c.lines).padStart(3)}L  ${c.fragmentHash}  ${c.fileA}:${loc(c, 'startA')} <> ${c.fileB}:${loc(c, 'startB')}`,
-      ),
-      ...markers.map((m) => `  marker  ${m.file}:${m.line}`),
-    ];
-    const headline = `clone gate: ${novel.length} new clone(s), ${markers.length} jscpd ignore marker(s)`;
+    // Block on clones with no live allowlist entry: NEW (never approved) or LAPSED (approval expired).
+    const { live, expired } = allowlistIndex();
+    const blocking = clones.filter((c) => !live.has(c.fragmentHash));
+    const novel = blocking.filter((c) => !expired.has(c.fragmentHash));
+    const lapsed = blocking.flatMap((clone) => {
+      const entry = expired.get(clone.fragmentHash);
+      return entry ? [{ clone, entry }] : [];
+    });
+    const markerRows = markers.map((m) => `  marker  ${m.file}:${m.line}`);
+    const rows = [...novel.map(cloneRow), ...markerRows];
     for (const row of rows) console.log(row);
-    console.log(rows.length > 0 ? `\n${headline} — block.` : 'clone gate: no new clones ✓');
+    if (lapsed.length > 0) {
+      console.log(
+        'Lapsed allowlist approvals (expired — re-judge each reason, do not rubber-stamp):',
+      );
+      for (const { clone, entry } of lapsed) {
+        console.log(cloneRow(clone));
+        console.log(`        ${lapsedNote(clone, entry)}`);
+      }
+    }
+    const summary = [
+      novel.length || markers.length ? `${novel.length} new clone(s)` : '',
+      lapsed.length ? `${lapsed.length} clone(s) under a lapsed approval` : '',
+      markers.length ? `${markers.length} jscpd ignore marker(s)` : '',
+    ]
+      .filter(Boolean)
+      .join(', ');
+    const toApprove = [...novel, ...lapsed.map((l) => l.clone)];
+    console.log(summary ? `\nclone gate: ${summary} — block.` : 'clone gate: no new clones ✓');
     if (markers.length > 0) {
       console.log(
         'jscpd ignore markers are not a clone suppression (honoured even inside strings): remove them and re-run.\n' +
           'The gate then prints add-clone for any clone they hid (--decay-days for a long-lived approval).',
       );
     }
-    if (novel.length > 0) {
+    if (toApprove.length > 0) {
       // Ready-to-paste approval, pre-filled with lines + ranges (fill in <why>), so an
       // approved entry keeps its metadata instead of the empty fields you get by hand.
       // Capped to APPROVE_CAP (mirrors matcher.mjs) — every clone is listed in the rows
       // above; the full command set stays out of the token stream and re-prints on re-run.
       const APPROVE_CAP = 6;
       console.log('To approve an intentional clone (fill in the reason):');
-      for (const c of novel.slice(0, APPROVE_CAP)) {
+      for (const c of toApprove.slice(0, APPROVE_CAP)) {
         console.log(
           `  ${CO_SCRIPT} add-clone "${c.fragmentHash}" "${c.fileA}" "${c.fileB}" --lines ${c.lines} --range-a ${loc(c, 'startA')}-${loc(c, 'endA')} --range-b ${loc(c, 'startB')}-${loc(c, 'endB')} --description "<why>"`,
         );
       }
-      if (novel.length > APPROVE_CAP) {
-        console.log(`  (+${novel.length - APPROVE_CAP} more — re-run after addressing these)`);
+      if (toApprove.length > APPROVE_CAP) {
+        console.log(`  (+${toApprove.length - APPROVE_CAP} more — re-run after addressing these)`);
+      }
+      if (lapsed.length > 0) {
+        console.log(
+          'Re-approve a lapsed entry only if its reason above still holds; otherwise remove the duplication.',
+        );
       }
     }
-    exitGate(rows.length > 0 ? 1 : 0, [headline, ...rows]);
+    const lapsedRows = lapsed.map(
+      (l) => `${cloneRow(l.clone)}  [lapsed, approved ${l.entry.date}]`,
+    );
+    exitGate(summary ? 1 : 0, [`clone gate: ${summary}`, ...rows, ...lapsedRows]);
   }
 
   if (mode === 'json') {
