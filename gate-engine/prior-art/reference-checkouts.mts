@@ -4,9 +4,9 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { globSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, globSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { resolveGuardConfig } from '../config.mts';
+import { CONFIG_FILENAME, resolveGuardConfig } from '../config.mts';
 import { parsePriorArtResponse } from './response-contract.mts';
 
 export interface ReferenceCheckouts {
@@ -19,6 +19,11 @@ export interface ReferenceCheckouts {
 interface CheckoutCounts {
   declared: number;
   resolved: number;
+}
+
+interface WorktreeRoots {
+  own: Set<string>;
+  counterpart: string | null;
 }
 
 export interface CheckoutsCheck {
@@ -67,22 +72,37 @@ function matchDirs(pattern: string, base: string, own: Set<string>): string[] {
     .filter((dir): dir is string => dir !== null && !own.has(dir));
 }
 
-/**
- * Config directory first, then (linked worktree only) the same directory in the main worktree.
- * An unreadable guard.config.json throws: a 0 from a broken config is not an honest 0.
- */
-export function resolveReferenceCheckouts(cwd: string = process.cwd()): ReferenceCheckouts {
-  const declared = resolveGuardConfig(cwd).research.referenceCheckouts;
-  if (!declared.length) return { declared, resolved: [] };
+/** The repository's own roots, and cwd's same directory in the main worktree when cwd is linked. */
+function worktreeRoots(cwd: string): WorktreeRoots {
   const top = realDir(git(cwd, ['rev-parse', '--show-toplevel'])?.trim() ?? '');
   const main = top && mainWorktreeRoot(cwd);
   const here = realDir(cwd);
   const own = new Set([top, main].filter((root): root is string => Boolean(root)));
-  const retryBase =
+  const counterpart =
     top && main && here && main !== top ? path.join(main, path.relative(top, here)) : null;
+  return { own, counterpart };
+}
+
+/** cwd's roots when it lacks its git-ignored guard.config.json, so the main worktree's copy is read. */
+function borrowedRoots(cwd: string): WorktreeRoots | null {
+  if (existsSync(path.join(cwd, CONFIG_FILENAME))) return null;
+  return git(cwd, ['check-ignore', '-q', CONFIG_FILENAME]) === null ? null : worktreeRoots(cwd);
+}
+
+/**
+ * A linked worktree without its git-ignored guard.config.json reads the main worktree's, as
+ * projection links it. A broken config throws: its 0 would not be an honest 0.
+ */
+export function resolveReferenceCheckouts(cwd: string = process.cwd()): ReferenceCheckouts {
+  const borrowed = borrowedRoots(cwd);
+  const base = borrowed?.counterpart ?? cwd;
+  const declared = resolveGuardConfig(base).research.referenceCheckouts;
+  if (!declared.length) return { declared, resolved: [] };
+  const { own, counterpart } = borrowed ?? worktreeRoots(cwd);
+  const retryBase = base === cwd ? counterpart : null;
   const resolved = new Set<string>();
   for (const pattern of declared) {
-    const dirs = matchDirs(pattern, cwd, own);
+    const dirs = matchDirs(pattern, base, own);
     for (const dir of dirs.length || !retryBase ? dirs : matchDirs(pattern, retryBase, own))
       resolved.add(dir);
   }
