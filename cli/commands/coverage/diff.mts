@@ -9,6 +9,8 @@ import {
   diffClassifier,
   resolveScope,
 } from '../../../gate-engine/coverage/diff-gate.mts';
+import { readClearMarker } from '../../../gate-engine/coverage/clear-marker/store.mts';
+import { formatClearMarker } from '../../../gate-engine/coverage/failures.mts';
 import {
   addedLineCoverage,
   type LineCoverageEntry,
@@ -244,6 +246,8 @@ export default function coverageDiff(args: string[], cwd: string): number {
     console.error(
       `🚫 ${COVERAGE_FILE} is ${why}. Produce it with \`devkit coverage-run\`, then re-run.`,
     );
+    const marker = why === 'absent' ? readClearMarker(resolve(cwd, COVERAGE_DIR)) : null;
+    if (marker) for (const line of formatClearMarker(marker, cwd)) console.error(line);
     return 1;
   }
 
