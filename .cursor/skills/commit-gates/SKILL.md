@@ -121,8 +121,8 @@ same directory, kept for the newest 300 runs only (`DEVKIT_TELEMETRY_KEEP`), and
   prompt, model and cache key. Its PASS is cached, so the next `devkit ship --resume` skips that lens
   — but only when the same paths ship briefed are staged and the `GUARD_REVIEW_*` model env matches.
 - **Reproduce a codex judge's sandbox before trusting a "the sandbox denies X" claim.** `codex
-  sandbox` applies the same host sandbox as the judge's `codex exec` (Seatbelt on macOS, Landlock on
-  Linux), with no model call, and runs the command in your login shell as the judge does. From the
+  sandbox` applies the same host sandbox as the judge's `codex exec` (Seatbelt on macOS, bubblewrap
+  on Linux), with no model call, and runs the command in your login shell as the judge does. From the
   repo root, a workspace-write (investigating) judge's view is:
   `r=$(pwd -P) s=$(cd "$(mktemp -d)" && pwd -P); cp AGENTS.md "$s"; (cd "$s" && CODEX_HOME=$(mktemp -d) codex sandbox -c 'default_permissions="devkit_judge"' -c "permissions.devkit_judge.filesystem={\":root\"=\"read\",\":tmpdir\"=\"write\",\":slash_tmp\"=\"write\",\"$s\"=\"write\",\"$r/.claude/.correctness-review.json\"=\"write\"}" -c 'permissions.devkit_judge.network.enabled=false' -- "$SHELL" -lc '<cmd>'); echo "exit $?"`.
   On macOS, add `--log-denials` after `sandbox` to name each denied operation; Linux has no such
