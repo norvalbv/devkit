@@ -1,8 +1,17 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { GATE_REASON_ENV, readGateReason } from '../../gate-engine/deterministic/reason.mts';
 import {
   forcedTests,
   noteUnmapped,
@@ -117,7 +126,7 @@ describe('runRelatedTests', () => {
     expect(exec).toHaveBeenCalledWith(
       join('/repo', 'node_modules', '.bin', 'vitest'),
       ['related', '--run', '--reporter=dot', 'cli/a.mts', REACH],
-      { cwd: '/repo', stdio: 'inherit' },
+      expect.objectContaining({ cwd: '/repo', stdio: 'inherit' }),
     );
   });
 
@@ -297,5 +306,60 @@ describe('related-tests entrypoint', () => {
     const r = spawnSync(process.execPath, [GATE, ...staged], { cwd: repo, encoding: 'utf8' });
     expect(r.stdout).toContain(', 1 forced');
     expect(r.stdout).not.toContain('not run here');
+  });
+});
+
+// A vitest stand-in whose passing test calls failLine, as dist-integrity-release-only's tests do.
+function chattyExec(status: number | null, error?: Error) {
+  return vi.fn((_cmd: string, _args: string[], opts: { env: NodeJS.ProcessEnv }) => {
+    const inherited = opts.env[GATE_REASON_ENV];
+    if (inherited) appendFileSync(inherited, '✗ devkit ship: this ship rewrites tracked dist\n');
+    return { status, error };
+  });
+}
+
+// guard-deterministic names one reason file per gate; this is the file related-tests owns.
+function stubReasonFile(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'related-tests-reason-'));
+  dirs.push(dir);
+  vi.stubEnv(GATE_REASON_ENV, join(dir, 'reason.txt'));
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  return join(dir, 'reason.txt');
+}
+
+describe('runRelatedTests failure reason', () => {
+  it("records its own reason, never a passing test's output", () => {
+    const file = stubReasonFile();
+    expect(runRelatedTests('/repo', { staged: ['cli/a.mts'], exec: chattyExec(1) })).toBe(1);
+    expect(readGateReason(file)).toEqual([
+      'related-tests: vitest exited 1 — the failing tests are in its output above',
+    ]);
+  });
+
+  it('blanks only the reason channel, so vitest still gets PATH and the rest', () => {
+    stubReasonFile();
+    vi.stubEnv('RELATED_TESTS_PROBE', 'kept');
+    const exec = chattyExec(0);
+    runRelatedTests('/repo', { staged: ['cli/a.mts'], exec });
+    const { env } = exec.mock.calls[0][2];
+    expect(env[GATE_REASON_ENV]).toBe('');
+    expect(env.RELATED_TESTS_PROBE).toBe('kept');
+  });
+
+  // A vitest that never started printed no output, so the reason must not point the reader at it.
+  it('records why vitest could not start, without pointing at output it never printed', () => {
+    const file = stubReasonFile();
+    const exec = chattyExec(null, new Error('spawn ENOENT'));
+    expect(runRelatedTests('/repo', { staged: ['cli/a.mts'], exec })).toBe(1);
+    expect(readGateReason(file)).toEqual(['✗ related-tests could not run vitest: spawn ENOENT']);
+  });
+
+  it('records a killed vitest as killed, not as a test failure', () => {
+    const file = stubReasonFile();
+    expect(runRelatedTests('/repo', { staged: ['cli/a.mts'], exec: chattyExec(null) })).toBe(1);
+    expect(readGateReason(file)).toEqual([
+      'related-tests: vitest was killed before it finished — its partial output is above',
+    ]);
   });
 });

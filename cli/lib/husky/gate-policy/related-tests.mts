@@ -7,6 +7,11 @@ import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import {
+  failLine,
+  GATE_REASON_ENV,
+  writeGateReason,
+} from '../../../../gate-engine/deterministic/reason.mts';
 import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mts';
 
 // Runs with every selection: it fails when a module is left unreachable to `vitest related` itself.
@@ -105,7 +110,7 @@ export function noteUnmapped(root: string, paths: string[], grep: Grep = gitGrep
 type Exec = (
   cmd: string,
   args: string[],
-  opts: { cwd: string; stdio: 'inherit' },
+  opts: { cwd: string; stdio: 'inherit'; env: NodeJS.ProcessEnv },
 ) => { status: number | null; error?: Error };
 
 interface RunOpts {
@@ -133,8 +138,19 @@ export function runRelatedTests(root: string, opts: RunOpts): number {
     '--reporter=dot',
     ...new Set([...paths, ...forced, REACH_TEST]),
   ];
-  const result = (opts.exec ?? spawnSync)(vitest, args, { cwd: root, stdio: 'inherit' });
-  if (result.error) console.error(`✗ related-tests could not run vitest: ${result.error.message}`);
+  // vitest, its tests and their children must not write into this gate's failure reason.
+  const env = { ...process.env, [GATE_REASON_ENV]: '' };
+  const result = (opts.exec ?? spawnSync)(vitest, args, { cwd: root, stdio: 'inherit', env });
+  if (result.error) failLine(`✗ related-tests could not run vitest: ${result.error.message}`);
+  else if (result.status === null) {
+    writeGateReason([
+      'related-tests: vitest was killed before it finished — its partial output is above',
+    ]);
+  } else if (result.status !== 0) {
+    writeGateReason([
+      `related-tests: vitest exited ${result.status} — the failing tests are in its output above`,
+    ]);
+  }
   // A null status is a signal kill or a failed spawn: nothing passed, so block.
   return result.status ?? 1;
 }
