@@ -10,8 +10,8 @@ import {
   isCodexModel,
   judgeBinForModel,
   judgeProviderOfBin,
-  parseModelSpec,
 } from '../../../../gate-engine/judge/codex/result.mts';
+import { parseModelSpec } from '../../../../gate-engine/judge/codex/model-spec.mts';
 import { formatResetDelta } from '../../../../gate-engine/judge/outage/classify.mts';
 import { familyOverrideRemedy } from '../../../../gate-engine/judge/outage/family-override.mts';
 import { claudeLoggedOut, codexLoggedOut } from '../../doctor/judge/judge-auth.mts';
