@@ -260,6 +260,7 @@ function runGates(cwd: string, gates: Gate[], exec: typeof execFileSync): GateOu
       if (!gate.argv) return;
       const reasonFile = fileFor(i);
       const startedAt = Date.now();
+      console.log(`▶ deterministic: ${gate.label}`);
       const rc = runArgv(cwd, gate.argv, exec, reasonFile);
       const [nFailed, nSkipped] = [out.failed.length, out.skipped.length];
       // Not an exit code, so no rcLabel, opt-out or strict rule applies: it blocks as could-not-run.
