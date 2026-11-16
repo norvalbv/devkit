@@ -162,7 +162,6 @@ SHIP_INTENT="$SCRIPT_DIR/ship-intent.mts"; [ -f "$SHIP_INTENT" ] || SHIP_INTENT=
 SHIP_EVENT="$SCRIPT_DIR/ship-intent-event.mts"; [ -f "$SHIP_EVENT" ] || SHIP_EVENT="$SCRIPT_DIR/ship-intent-event.mjs"
 SHIP_END_CAUSE=   # the ship_end row's cause; set only right before the exit it explains
 SHIP_BLOCKED_GATE=   # commit_with_gate_capture's blocked_gate token for its last run
-DECISION_ADVISORY="$SCRIPT_DIR/preflight/decision-smells.mts"; [ -f "$DECISION_ADVISORY" ] || DECISION_ADVISORY="$SCRIPT_DIR/preflight/decision-smells.mjs"
 . "$SCRIPT_DIR/resume-extras-notice.sh"
 . "$SCRIPT_DIR/prepare-gate-worktree.sh"
 # Project before the intent read and write: a legacy linked .devkit resolves the record in the home.
@@ -1490,6 +1489,7 @@ else
     export DEVKIT_RUN_MODE=ship    # never inherit a caller's review allowlist into a real ship
     unset DEVKIT_SHIP_DRY_GATES DEVKIT_SHIP_DRY_REVIEWERS
   fi
+  ship_decision_smell_advisory "$WT" "$ROOT" || true   # read-only; the assertion below proves it
 # Preflight: nothing since staging is allowed to have touched the index. Cheap, and it fails BEFORE
 # the operator pays for a multi-minute gate chain.
   ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { ship_run_keep "staged set changed before the commit"; exit 1; }
@@ -1499,12 +1499,6 @@ else
   GATE_SIGNAL_DEFER_EXIT=1
   COMMIT_STATUS=0
   commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY" || COMMIT_STATUS=$?
-  # --dry-gates skips the decision judge but names its regex smells, pass or fail (sc-4978).
-  if [ "$DRY_GATES" -eq 1 ] && [ "$REQUESTED_SIGNAL_STATUS" -eq 0 ] &&
-    case "$COMMIT_STATUS" in 124|129|130|131|137|143) false ;; *) true ;; esac &&
-    grep -qs 'guard-decisions' "$(gate_worktree_pre_commit "$WT" "$ROOT")" "$WT/.husky/pre-commit"; then
-    (cd "$WT" && node "$DECISION_ADVISORY" --root "$ROOT") >&2 || true
-  fi
 # Post-commit, pre-push: the gate chain ran with this worktree's index reachable through the
 # GIT_INDEX_FILE git exported into the hook. Prove the commit still contains the briefed work before
 # anything leaves the machine — dry runs included, so the check is exercised on every ship path.
