@@ -214,6 +214,8 @@ export function benchGateHash(reviewer) {
         path.join(repoRoot, 'gate-engine/review/evidence/packet/moved-lines.mts'),
         'utf8',
       ),
+      // Appends the execution rule to a tool-equipped codex judge's prompt: judge-visible bytes.
+      readFileSync(path.join(repoRoot, 'gate-engine/judge/codex/result.mts'), 'utf8'),
       // Every shared helper, for the same reason the checklist itself is hashed: it ships into the
       // fixture and its edits change what the gate does, so a baseline earned under the old one is
       // not comparable.
