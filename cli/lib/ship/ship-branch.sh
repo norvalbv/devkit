@@ -1472,14 +1472,14 @@ else
     if [ "$WITH_REVIEWERS" -eq 1 ]; then
       # Completeness stays off without a guard here: commit-with-gate-capture.sh never exports a
       # message file under dry-gates, and the hook refuses to arm the judge in this mode anyway.
-      export DEVKIT_REVIEW_GUARDS=comments,review
+      export DEVKIT_REVIEW_GUARDS=comments,review,ui-evidence
       export DEVKIT_SHIP_DRY_REVIEWERS=1
-      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included), and the domain reviewers." >&2
+      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included), the path-only UI screenshot reminder, and the domain reviewers." >&2
       echo "   Skipping decision, completeness, commit, push, and PR creation." >&2
     else
-      export DEVKIT_REVIEW_GUARDS=comments
+      export DEVKIT_REVIEW_GUARDS=comments,ui-evidence
       unset DEVKIT_SHIP_DRY_REVIEWERS
-      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included)." >&2
+      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included), and the path-only UI screenshot reminder." >&2
       echo "   Skipping decision, domain reviewer, completeness, commit, push, and PR creation." >&2
     fi
   else
@@ -1745,6 +1745,9 @@ git update-ref -d "$RECOVERY_GATE_ADDS_REF" 2>/dev/null || true
 # Joins the PR to its base PR's GitHub stack; best-effort, so it runs only once nothing is at stake.
 STACK_LINK="$SCRIPT_DIR/stack/link.mts"; [ -f "$STACK_LINK" ] || STACK_LINK="$SCRIPT_DIR/stack/link.mjs"
 [ "$NO_STACK" -eq 1 ] || [ -z "$PR_NUM" ] || node "$STACK_LINK" "$REPO" "$PR_NUM" || true
+# Only a gate-skipped recovery leaves the PR body without its UI item: every other run wrote it.
+GATES_SKIPPED_COMMIT=${LOCAL_BRANCH_EXISTS:+${RECOVERY_COMMIT:-}}
+[ -z "$PR_NUM" ] || [ -z "$GATES_SKIPPED_COMMIT" ] || publish_ui_item "$ROOT" "$PR_NUM" "$REPO" "$GATES_SKIPPED_COMMIT"
 # After every ref is settled, so a ship killed during the bounded test runs loses no recovery state.
 [ -z "$PR_NUM" ] || publish_reviewer_notes "$PR_NUM" "$REPO" "${RECOVERY_COMMIT:-$SHIP_COMMIT}" "$ROOT"
 [ -z "$PR_NUM" ] || publish_evidence_block "$WT" "$PR_NUM" "$REPO" "${RECOVERY_COMMIT:-$SHIP_COMMIT}" "$ROOT"

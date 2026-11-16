@@ -472,6 +472,12 @@ To be reminded about paths
 the judge misses, add their globs to `uiEvidence.paths` in `guard.config.json`; to drop the reminder
 entirely, deselect the `ui-evidence` guard with `devkit init --guards <the guards you keep>`.
 
+`devkit ship --dry-gates` runs the path rule only, so a rehearsal shows the reminder before you write
+the PR body. Every ship that has a PR also leaves an unticked `📸` task item in its body, and a ship
+that skipped its gates (a `--resume`, or an adopted PR) applies the path rule to its commit instead.
+Devkit never ticks or removes the item; tick it yourself once the PR carries the screenshots or the
+no-visible-change note.
+
 ## `bun install` fails: `no commit matching "<sha>" found for "@norvalbv/devkit"`
 
 Also seen as `error: GET https://codeload.github.com/norvalbv/devkit/legacy.tar.gz/<sha> - 404`. Two shapes,
