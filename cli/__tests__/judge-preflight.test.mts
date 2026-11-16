@@ -533,7 +533,8 @@ describe('readCodexRateLimits — the spawn, not just the parser', () => {
   function fakeCodex(body: string): string {
     const dir = mkdtempSync(join(tmpdir(), 'fake-codex-'));
     const bin = join(dir, 'codex');
-    writeFileSync(bin, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    // Hold stdin like the real server; `exec` makes the reader's SIGKILL reach the holder.
+    writeFileSync(bin, `#!/bin/sh\n${body}\nexec cat >/dev/null\n`, { mode: 0o755 });
     chmodSync(bin, 0o755);
     return bin;
   }
@@ -556,18 +557,18 @@ describe('readCodexRateLimits — the spawn, not just the parser', () => {
         `echo '{"id":1,"result":{"userAgent":"x"}}'`,
         `echo '{"method":"remoteControl/status/changed","params":{}}'`,
         `echo '{"id":2,"result":{"rateLimits":{"rateLimitReachedType":"rate_limit_reached","primary":{"usedPercent":100,"resetsAt":0}}}}'`,
-        'sleep 5',
       ].join('\n'),
     );
     expect(snap?.reached).toBe(true);
   });
 
   it('reports the CLI version from the handshake reply, and the account-level usage flag', async () => {
+    // Exit once all three requests are read: resolves on close, with no timeout race and no EPIPE.
     const snap = await withFake(
       [
         `echo '{"id":1,"result":{"userAgent":"devkit/0.162.1 (Mac OS 26.5.1; arm64) ghostty/1.3.1"}}'`,
         `echo '{"id":2,"result":{"ordinaryUsageAllowed":false,"rateLimits":{"credits":{"hasCredits":true},"primary":{"usedPercent":10}}}}'`,
-        'sleep 5',
+        'exec head -n 3 >/dev/null',
       ].join('\n'),
     );
     expect(snap).toMatchObject({
@@ -582,7 +583,7 @@ describe('readCodexRateLimits — the spawn, not just the parser', () => {
       [
         `echo '{"id":1,"result":{"userAgent":"x"}}'`,
         `echo '{"id":2,"result":{"ordinaryUsageAllowed":"yes","rateLimits":{"primary":{"usedPercent":10}}}}'`,
-        'sleep 5',
+        'exec head -n 3 >/dev/null',
       ].join('\n'),
     );
     expect(snap?.usedPercent).toBe(10);
@@ -598,7 +599,6 @@ describe('readCodexRateLimits — the spawn, not just the parser', () => {
         `printf '{"id":2,"result":{"rateLimits":'`,
         'sleep 0.2',
         `printf '{"rateLimitReachedType":"rate_limit_reached"}}}\\n'`,
-        'sleep 5',
       ].join('\n'),
     );
     expect(snap?.reached).toBe(true);
@@ -607,7 +607,7 @@ describe('readCodexRateLimits — the spawn, not just the parser', () => {
   it('resolves null — never hangs — when the child answers nothing', async () => {
     // The whole point of the preflight is speed; a silent daemon must not become a new stall.
     const started = Date.now();
-    expect(await withFake('sleep 30', 700)).toBeNull();
+    expect(await withFake('', 700)).toBeNull();
     expect(Date.now() - started).toBeLessThan(5000);
   });
 
