@@ -9,6 +9,8 @@
  * blocked: the shell settled that and published it on this ship's ship_result row, which this
  * reader consumes, so the two can never disagree.
  */
+import { STICKY_RULING } from '../../../../gate-engine/review/evidence/base-context.mts';
+import { branchNarration } from './advisories.mts';
 import { blockingFindings, judgeFinding } from './blocking.mts';
 import {
   baseDriftDetail,
@@ -20,7 +22,6 @@ import { count, oneLine, textOf } from './fields.mts';
 import { withRecurrence } from './recurrence.mts';
 import { SKIP_CONTROLS } from './skip-controls.mts';
 import { scanBackward } from './tail.mts';
-import { readBranchHistory, trendNarration } from './trend.mts';
 import { waivedRows } from './waived.mts';
 
 /**
@@ -481,7 +482,7 @@ if (/[/\\]gate-digest\.m[jt]s$/.test(process.argv[1] ?? '') && process.argv[2] =
   const key = { shipId, repo, branch };
   const text = [
     render(withRecurrence(summarise(readShipEvents(sink, shipId), shipId), sink, key), logPath),
-    trendNarration(readBranchHistory(sink, key), key),
+    branchNarration(sink, key),
   ]
     .filter(Boolean)
     .join('\n');
