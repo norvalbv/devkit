@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright-core';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { runFlow } from '../lib/machine/flow.mts';
+import { appPage, runFlow } from '../lib/machine/flow.mts';
 import {
   evidenceDir,
   provenance,
@@ -162,6 +162,77 @@ describe.runIf(browserReady)('machine capture (headless browser)', () => {
     ]);
     expect(existsSync(join(evidence, 'click.start.png'))).toBe(false);
   }, 90_000);
+});
+
+describe.runIf(browserReady)("machine capture (the app's own DevTools)", () => {
+  /** A browser standing in for an Electron app: one window on the fixture, DevTools on its own port. */
+  async function app() {
+    const profile = mkdtempSync(join(tmpdir(), 'machine-app-'));
+    temps.push(profile);
+    const args = ['--remote-debugging-port=0'];
+    const context = await chromium.launchPersistentContext(profile, { headless: true, args });
+    const [page] = context.pages();
+    await page.goto(url);
+    const [port] = readFileSync(join(profile, 'DevToolsActivePort'), 'utf8').split('\n');
+    return { context, page, devtools: `http://127.0.0.1:${port}` };
+  }
+
+  it("drives and records the app's own window, then leaves the app running", async () => {
+    const root = repo();
+    const { context, page, devtools } = await app();
+    try {
+      const body = `assert.equal(url, ${JSON.stringify(`${url}/`)});\n${CLICK}`;
+      const flowPath = flowFile(root, 'attach', body);
+      const evidence = evidenceDir(root);
+      const input = {
+        root,
+        flowPath,
+        url: devtools,
+        profile: join(root, 'unused'),
+        evidence,
+        devtools: true,
+      };
+      expect(await runFlow(input)).toMatchObject({ flow: 'attach', passed: true });
+      expect(readManifest(evidence).map(({ file }) => file)).toEqual([
+        'attach.webm',
+        'attach.start.png',
+        'attach.final.png',
+      ]);
+      expect(await page.locator('#t').textContent()).toBe('clicked');
+    } finally {
+      await context.close();
+    }
+  }, 60_000);
+
+  it('fails, naming the remedy, when the slot port is not a DevTools endpoint', async () => {
+    const root = repo();
+    const flowPath = flowFile(root, 'attach', CLICK);
+    const input = {
+      root,
+      flowPath,
+      url,
+      profile: join(root, 'unused'),
+      evidence: evidenceDir(root),
+    };
+    await expect(runFlow({ ...input, devtools: true })).rejects.toThrow(
+      /nothing answers DevTools at .*--remote-debugging-port=\{port\}/s,
+    );
+  }, 60_000);
+});
+
+describe('the app page among DevTools targets', () => {
+  const target = (address: string) => ({ url: () => address });
+
+  it('is the first page that is not an inspector, an extension or a blank one', () => {
+    const pages = [
+      'devtools://devtools/x',
+      'chrome-extension://y/z',
+      'about:blank',
+      'file:///app/index.html',
+    ];
+    expect(appPage(pages.map(target))?.url()).toBe('file:///app/index.html');
+    expect(appPage(pages.slice(0, 3).map(target))).toBeUndefined();
+  });
 });
 
 describe('machine evidence location and provenance', () => {

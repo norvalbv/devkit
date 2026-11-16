@@ -6,9 +6,15 @@ import { CONFIG_FILENAME } from '../../../gate-engine/config.mts';
 
 const argv = z.array(z.string().min(1)).min(1);
 
-const machineSchema = z.strictObject({
+export const DEVTOOLS_NEEDS_LIGHT =
+  '"devtools" needs light mode: it attaches to an app on this Mac, and a full machine\'s page is its own desktop browser';
+
+const machineRecipe = z.strictObject({
   /** light: a headless browser slot on this Mac; full: a desktop computer per agent in a container. */
   mode: z.enum(['light', 'full']).default('light'),
+  /** The app serves Chrome DevTools on its slot port (Electron started with
+   * --remote-debugging-port={port}), so a flow drives and records the app's own window. */
+  devtools: z.boolean().optional(),
   command: argv.optional(),
   seed: argv.optional(),
   env: z
@@ -18,6 +24,12 @@ const machineSchema = z.strictObject({
     })
     .optional(),
 });
+const machineSchema = machineRecipe.refine(
+  (recipe) => !(recipe.devtools && recipe.mode === 'full'),
+  {
+    error: DEVTOOLS_NEEDS_LIGHT,
+  },
+);
 export type MachineConfig = z.infer<typeof machineSchema>;
 
 const fileSchema = z.object({ machine: z.unknown().optional() });
