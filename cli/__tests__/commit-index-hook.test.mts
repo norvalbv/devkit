@@ -330,6 +330,7 @@ const ROUTED_ELSEWHERE = {
   'gate-engine/decisions/check-alignment.mts': 'argv routed through decisions/git-io.mts git()',
   'gate-engine/decisions/depth/depth-pass.mts': 'argv routed through decisions/git-io.mts git()',
   'gate-engine/decisions/detect.mts': 'argv routed through decisions/git-io.mts git()',
+  'gate-engine/decisions/scope/scope-miss.mts': 'argv routed through decisions/git-io.mts git()',
   'gate-engine/decisions/ruling-checks/enforce.mts':
     'argv routed through decisions/git-io.mts git()',
   'gate-engine/review/baseline-gate.mts': 'review-mode only, in devkit review scratch worktrees',
