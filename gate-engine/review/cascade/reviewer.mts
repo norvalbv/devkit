@@ -3,6 +3,7 @@ import { judgeBinForModel } from '../../judge/codex/result.mts';
 import { JUDGE_ISOLATION } from '../../judge/judge-isolation.mts';
 import { mcpSpawnTracker, namedAgentMcpProfile } from '../../judge/mcp/profile.mts';
 import type { JudgeOutage } from '../../judge/outage/classify.mts';
+import { spawnWithRetry } from '../../judge/outage/retry.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, remedyCause } from '../../judge/run-judge.mts';
 import { outageReason } from '../../judge/outage/wording.mts';
 import { renderGoverningClaudeMd } from '../claude-md.mts';
@@ -264,29 +265,25 @@ async function cascadeVerdict(
     lens,
     codexWritableFile: reviewer.stateFile,
   };
-  let firstOutage: JudgeOutage | undefined;
   const firstOpts = {
     ...shared,
     label: `review:${reviewer.name}`,
     args: args(prompt, passModel),
-    timeout: budgetLeft(),
-    onOutage: (outage: JudgeOutage) => {
-      firstOutage = outage;
-    },
   };
-  let first = await exec(firstOpts);
-  let initialRetryUsed = false;
-  // `permanent`, not `!== 'timeout'`: a usage lock cannot clear inside a retry, and re-spawning it
-  // cost EIGHT wasted judge calls per ship for six days. A timeout stays permanent as before.
-  if (first === null && retryFirst && !firstOutage?.permanent) {
-    initialRetryUsed = true;
-    console.error(
-      `guard-review: ${reviewer.name}: judge run failed (${firstOutage?.kind ?? 'transient'}), retrying once…`,
-    );
-    cleanupChecklistState(cwd, reviewer);
-    initializeCommitGuardChecklist(cwd, reviewer, checklistRoot, env);
-    first = await exec(firstOpts);
-  }
+  const firstRun = await spawnWithRetry(
+    (timeout, onOutage) => exec({ ...firstOpts, timeout, onOutage }),
+    {
+      retry: retryFirst,
+      label: reviewer.name,
+      capMs: budgetLeft(),
+      beforeRetry: () => {
+        cleanupChecklistState(cwd, reviewer);
+        initializeCommitGuardChecklist(cwd, reviewer, checklistRoot, env);
+      },
+    },
+  );
+  let first = firstRun.result;
+  const { outage: firstOutage, retried: initialRetryUsed } = firstRun;
   if (first === null) {
     const outcome: ReviewOutcome = {
       name: reviewer.name,
@@ -331,6 +328,7 @@ async function cascadeVerdict(
         let contractRetryOutage: JudgeOutage | undefined;
         const retried = await exec({
           ...firstOpts,
+          timeout: budgetLeft(),
           args: args(`${prompt}\n\n${responseContract.retryInstruction}`, passModel),
           onOutage: (outage: JudgeOutage) => {
             contractRetryOutage = outage;

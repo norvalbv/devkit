@@ -129,10 +129,22 @@ describe('strictRemedy', () => {
     expect(r).toContain('smaller commit');
   });
 
-  it('a genuine outage LEADS with the auth/quota remedy — that cause really is auth/quota', () => {
+  it('a genuine outage LEADS with the auth/quota check, then a resume that keeps cached PASSes', () => {
     expect(
-      strictRemedy('outage').startsWith('check `claude` CLI auth/quota, then re-run devkit ship'),
+      strictRemedy('outage').startsWith(
+        'check `claude` CLI auth/quota, then resume with `devkit ship --resume <branch>`',
+      ),
     ).toBe(true);
+  });
+
+  // A capacity blip on one call once read as an account outage: the operator took the family
+  // move, which discards every cached PASS, when a same-family resume re-judged only the failure.
+  it('a genuine outage offers the PASS-keeping resume before the PASS-discarding family move', () => {
+    const r = strictRemedy('outage', 'codex');
+    const move = r.indexOf(familyOverrideRemedy('codex', true));
+    expect(r.indexOf('every cached PASS replays')).toBeGreaterThan(-1);
+    expect(r.indexOf('every cached PASS replays')).toBeLessThan(move);
+    expect(r).toContain('Only if the account stays dark');
   });
 
   // sc-2769: every binary reaching the generic arm RAN (only ENOENT reads as absent), so doctor's
@@ -223,7 +235,7 @@ describe('strictRemedy', () => {
   it('an outage remedy names the binary that went dark — codex outages must not send you to claude auth', () => {
     const r = strictRemedy('outage', 'codex');
     const diagnosis = r.slice(0, r.indexOf(familyOverrideRemedy('codex', true)));
-    expect(diagnosis).toContain('check `codex` CLI auth/quota, then re-run devkit ship');
+    expect(diagnosis).toContain('check `codex` CLI auth/quota, then resume');
     expect(diagnosis).not.toContain('claude');
     expect(r).not.toContain('check `claude`');
     expect(r).not.toContain('claude CLI auth');
