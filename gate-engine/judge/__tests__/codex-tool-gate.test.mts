@@ -47,10 +47,10 @@ afterEach(() => {
 
 describe('codexHookTrustHash', () => {
   it('matches the hash codex trusted live and an independent implementation', () => {
-    // A command string codex-cli 0.150.0, 0.159.3 and 0.162.1 trusted live with no bypass flag.
-    const live = `'/Users/benji/.nvm/versions/node/v22.20.0/bin/node' '/tmp/sc4645/hook.mjs' eyJsZWRnZXIiOiIvdG1wL3NjNDY0NS9sZWRnZXIuanNvbmwifQ`;
+    // Same shape as a command codex-cli 0.150.0, 0.159.3 and 0.162.1 trusted live (only the node path differs).
+    const live = `'/usr/local/bin/node' '/tmp/sc4645/hook.mjs' eyJsZWRnZXIiOiIvdG1wL3NjNDY0NS9sZWRnZXIuanNvbmwifQ`;
     expect(codexHookTrustHash('pre_tool_use', '*', live)).toBe(
-      'sha256:57adac4171bff63cde8a176f1a3833de471047988eaf6810a8161135e2b1aa06',
+      'sha256:87e0abb72ec923d60011a7942a94d4e48fa501c025c8ca6e19e8a670187a48fb',
     );
     // A second, independent implementation of codex's hook hash agrees on a matcherless Stop hook.
     expect(codexHookTrustHash('stop', undefined, 'echo stop')).toBe(

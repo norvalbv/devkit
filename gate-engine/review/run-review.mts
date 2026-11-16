@@ -67,12 +67,12 @@ import {
   reportLensPartAdvisories,
 } from './valve/recheck.mts';
 import {
-  mapLimit,
   planReviewWork,
   resolveChunkCap,
   resolveLensGroups,
   taskLabel,
 } from './lens/split.mts';
+import { mapLimit } from './lens/map-limit.mts';
 import { clearProgress, writeProgress } from './progress.mts';
 import {
   type ParkedRecovery,

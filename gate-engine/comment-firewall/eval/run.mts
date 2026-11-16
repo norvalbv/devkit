@@ -12,7 +12,7 @@ import {
   type Variant,
 } from './arms.mts';
 import { type EvalItem, loadCorpus, type ReadBlob, readCorpusFile } from './corpus.mts';
-import { mapLimit } from '../../review/lens/split.mts';
+import { mapLimit } from '../../review/lens/map-limit.mts';
 import { buildRequest, DECISIONS_ENDPOINT } from './request.mts';
 import { type ScoredItem, summarizeVariant } from './score.mts';
 
