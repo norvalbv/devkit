@@ -12,7 +12,7 @@
  */
 
 const DAY_MS = 86_400_000;
-const DEFAULT_DECAY_DAYS = 7;
+export const DEFAULT_DECAY_DAYS = 7;
 
 /** A decayable allowlist entry (symbol `pair` or token `clone`). */
 export interface DecayableEntry {
