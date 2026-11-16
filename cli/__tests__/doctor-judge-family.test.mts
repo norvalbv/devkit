@@ -251,7 +251,7 @@ describe('bindClaudeFamily', () => {
   // The docs hand-copy the escape-hatch export; a stale copy sends operators to the old family.
   it('both operator docs quote every family knob at its current value', () => {
     for (const doc of ['docs/troubleshooting.md', 'skills/commit-gates/SKILL.md']) {
-      const text = readFileSync(join(__dirname, '..', '..', doc), 'utf8');
+      const text = readFileSync(join(import.meta.dirname, '..', '..', doc), 'utf8');
       for (const k of FAMILY_ENV_KEYS) expect(text).toContain(`${k.env}=${k.envValue}`);
     }
   });
