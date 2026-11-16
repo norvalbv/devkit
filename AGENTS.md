@@ -162,7 +162,7 @@ comments citing Shortcut tickets, autonomous reports or decision records.
 
 <rule name="file_size">
 `guard.config.json` caps source files at 500 lines and test files at 2000; oversized files are
-grandfathered shrink-only. When shrinking a file below its ratchet, move whole functions, and move a
+grandfathered shrink-only. `maxLinesExtensions` puts shell scripts under the same cap. When shrinking a file below its ratchet, move whole functions, and move a
 function's tests alongside it. `guard-size preflight` previews the real ceiling before a ship.
 </rule>
 
