@@ -138,6 +138,21 @@ describe('format-after-edit.sh — session-edits ledger writer', () => {
     expect(existsSync(join(tmp, 'devkit-session-edits', `${repoKey(root)}-s1`))).toBe(false);
   });
 
+  it('runs Oxfmt on the edited file through its marked, locked lines', () => {
+    const root = mkTmp('sesfb-');
+    write(root, 'src/mine.ts');
+    write(root, 'package.json', JSON.stringify({ name: 'fx', version: '0.0.0' }));
+    write(root, '.oxfmtrc.json', '{}\n');
+    writeExec(root, 'node_modules/.bin/oxfmt', '#!/bin/sh\necho "$@" > oxfmt-args.txt\n');
+    const abs = join(root, 'src/mine.ts');
+    const r = runHook(FORMAT_HOOK, root, { session_id: 's1', file_path: abs }, mkTmp('sesfb-t-'));
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe('{}');
+    expect(readFileSync(join(root, 'oxfmt-args.txt'), 'utf8')).toBe(
+      `--no-error-on-unmatched-pattern --write ${abs}\n`,
+    );
+  });
+
   it('records a worktree edit when CLAUDE_PROJECT_DIR is the main checkout and cwd the worktree', () => {
     const { main, worktree } = mainWithWorktree(mkTmp);
     write(worktree, 'src/mine.ts');
@@ -297,6 +312,20 @@ describe.skipIf(!HAS_BUN)('lint-check.sh — session scoping', () => {
     const r = runHook(LINT_HOOK, root, { session_id: 's1' }, tmp);
     expect(r.status).toBe(0);
     expect(existsSync(join(root, 'oxfmt-args.txt'))).toBe(false);
+  });
+
+  it('an Oxfmt failure blocks with the fix hint, and the locked lines keep their marker out of it', () => {
+    const root = mkTmp('sesbf-');
+    write(root, 'src/mine.ts');
+    write(root, 'package.json', JSON.stringify({ name: 'fx', version: '0.0.0' }));
+    write(root, '.oxfmtrc.json', '{}\n');
+    writeExec(root, 'node_modules/.bin/oxfmt', '#!/bin/sh\necho "OXFMT_DIAG $@"\nexit 1\n');
+    const tmp = seedSessionLedger(root, 's1', ['src/mine.ts']);
+    const r = runHook(LINT_HOOK, root, { session_id: 's1' }, tmp);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('OXFMT_DIAG --no-error-on-unmatched-pattern --check src/mine.ts');
+    expect(r.stderr).toContain("Run './node_modules/.bin/oxfmt --write <file>' to auto-fix.\n");
+    expect(r.stderr).not.toContain('# devkit');
   });
 
   it('fail-open when session-edits-lib.sh is missing', () => {
