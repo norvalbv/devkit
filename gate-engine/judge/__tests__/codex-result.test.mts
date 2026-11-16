@@ -131,6 +131,12 @@ describe('judgeCliFor', () => {
     expect(cli.argv).toEqual(['--output-format', 'json', ...args]);
   });
 
+  // The claude family's CLAUDE.md memory is disabled at spawn (judge-exec), pinned in judge-exec-telemetry.
+  it('keeps AGENTS.md project docs out of a codex judge', () => {
+    const codex = judgeCliFor(['-p', '--model', 'gpt-5.6-sol', '--disallowedTools', '*', 'P']);
+    expect(codex.argv.join(' ')).toContain('-c project_doc_max_bytes=0');
+  });
+
   it('maps a read-only gpt judge onto the read-only sandbox and an investigating one onto workspace-write', () => {
     const ro = judgeCliFor(['-p', '--model', 'gpt-5.6-sol', '--disallowedTools', '*', 'P']);
     expect(ro.bin).toBe('codex');
