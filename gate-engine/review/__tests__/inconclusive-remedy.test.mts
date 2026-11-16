@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CONTRACT_MISS, RESPONSE_CONTRACT_REMEDY } from '../contracts/response.mts';
 import { runReviewGate } from '../run-review.mts';
-import type { ReviewOutcome } from '../runtime.mts';
+import { type ReviewOutcome, verifyChecklist } from '../runtime.mts';
 import { reportInconclusive } from '../valve/inconclusive.mts';
 import {
   cleanupReviewFixtures,
@@ -109,6 +110,70 @@ describe('reportInconclusive prints one Remedy per cause and binary', () => {
     expect(lines()).toEqual([
       'guard-review: a inconclusive — judge unavailable (fail-open, not cached)',
     ]);
+  });
+});
+
+describe('a checklist contract miss whose judge was refused tool calls', () => {
+  const MISSING = 'checklist artifact missing — ';
+  const contract = (extra: Partial<ReviewOutcome> = {}) =>
+    row('correctness-reviewer', { inconclusiveCause: 'response-contract', ...extra });
+  const remediesOf = (rows: ReviewOutcome[], strict: boolean): string[] => {
+    const lines = captureStderr();
+    reportInconclusive(rows, strict);
+    return lines().filter((l) => l.startsWith('   Remedy:'));
+  };
+
+  it('the reason counts unrelated refusals without calling them checklist commands', () => {
+    expect(verifyChecklist(null, 'PASS', ['Bash: vitest run', 'Bash: bun test'])).toBe(
+      `${MISSING}2 tool call(s) were denied by the judge's tool allowlist (the allowlist runs Bash only for the checklist commands, spelled as given)`,
+    );
+  });
+
+  it('measured-none and unmeasured spawns keep their reason and remedy byte for byte', () => {
+    expect(verifyChecklist(null, 'PASS', [])).toBe(
+      `${MISSING}the judge skipped the checklist workflow (no tool call was denied)`,
+    );
+    expect(verifyChecklist(null, 'PASS', null)).toBe(
+      `${MISSING}the judge skipped the checklist workflow`,
+    );
+    expect(RESPONSE_CONTRACT_REMEDY).toBe(
+      'the judge response did not satisfy its declared contract; inspect the transcript or checklist above, fix a real violation if present, then re-run devkit ship',
+    );
+    expect(remediesOf([contract()], true)).toEqual([
+      `   Remedy: ${RESPONSE_CONTRACT_REMEDY} (completed verdicts are cached).`,
+    ]);
+  });
+
+  it('strict ship names the re-run and every judge-model knob, never a violation to fix', () => {
+    const [remedy, ...rest] = remediesOf([contract({ refusedCalls: 2 }), contract()], true);
+    expect(rest).toEqual([
+      `   Remedy: ${RESPONSE_CONTRACT_REMEDY} (completed verdicts are cached).`,
+    ]);
+    expect(remedy).toContain('re-run devkit ship, and if it repeats move that judge');
+    for (const knob of [
+      'GUARD_REVIEW_MODEL',
+      'GUARD_REVIEW_ESCALATION_MODEL',
+      'GUARD_CORRECTNESS_MODEL',
+    ])
+      expect(remedy).toContain(knob);
+    expect(remedy).toContain('review.correctnessModel');
+    expect(remedy).not.toMatch(/fix a real violation|correctnessChunkLoc|GUARD_CORRECTNESS_CHUNK/);
+  });
+
+  it('a plain commit prints one fail-open Remedy per contract wording and none for an outage', () => {
+    const remedies = remediesOf(
+      [
+        contract(),
+        contract({ name: 'commit-guard' }),
+        contract({ refusedCalls: 1 }),
+        limited('a', 'codex', Date.now()),
+      ],
+      false,
+    );
+    expect(remedies).toHaveLength(2);
+    expect(remedies[0]).toBe(`   Remedy: ${CONTRACT_MISS}.`);
+    expect(remedies[1]).toContain('if it repeats, move that judge to another model');
+    for (const l of remedies) expect(l).not.toMatch(/devkit ship|cached/);
   });
 });
 
