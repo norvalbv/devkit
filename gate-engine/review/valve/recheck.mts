@@ -4,8 +4,8 @@
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mts';
 import { type LensPart, type ReviewTask, taskLabel } from '../lens/split.mts';
 import { isShipLane } from '../cascade/consumer-assets.mts';
-import { emitAdvisoryResult, FINDING_SEPARATOR } from '../../judge/advisory/emit.mts';
-import { ADVISORY_CAP, parseAdvisories } from '../contracts/response.mts';
+import { emitAdvisoryResult } from '../../judge/advisory/emit.mts';
+import { parseAdvisories } from '../contracts/response.mts';
 import { printAdvisories } from '../evidence/base-context.mts';
 import { emitReviewSkipped } from '../evidence/scope.mts';
 import { lensGroupId, resolveLensGroups } from '../lens/groups.mts';
@@ -104,7 +104,7 @@ export function printRemedy(
 }
 
 /** A lens recheck emits no merged row, so each live PASS part prints its own advisories, and each
- * reviewer still gets ONE advisory_result. A cached part carries no transcript: it already replayed. */
+ * advisory still gets its own advisory_result. A cached part carries no transcript: it already replayed. */
 export function reportLensPartAdvisories(splitParts: Map<string, LensPart[]>): void {
   for (const [name, parts] of splitParts) {
     const all: string[] = [];
@@ -117,8 +117,6 @@ export function reportLensPartAdvisories(splitParts: Map<string, LensPart[]>): v
       printAdvisories(label, advisories, saveTranscript(`review-${label}`, text));
       all.push(...advisories);
     }
-    const unique = [...new Set(all)].slice(0, ADVISORY_CAP);
-    if (unique.length)
-      emitAdvisoryResult(`review:${name}`, 'finding', unique.join(FINDING_SEPARATOR));
+    for (const a of new Set(all)) emitAdvisoryResult(`review:${name}`, 'finding', a);
   }
 }
