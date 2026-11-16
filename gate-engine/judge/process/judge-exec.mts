@@ -258,14 +258,14 @@ export function cleanupJudgeRun(run: JudgeRun): void {
 /** Route the argv to its binary and build the spawn options. Callers run it inside their try, so
  *  an argv a codex model cannot express settles as ONE outage instead of throwing. */
 export function routeJudge(opts: ExecJudgeOpts, run: JudgeRun) {
-  run.ws = prepareCodexSandbox(opts.args, opts, opts.cwd ?? process.cwd());
+  run.ws = prepareCodexSandbox(opts.args, opts, opts.cwd ?? process.cwd(), opts.env);
   const cli = spawnFor(opts.args, run.mcp, run.ws);
   opts.onMcpPrepared?.(run.mcp.capabilityFingerprint, spawnDegradedCause(run.mcp, cli.mcpInjected));
   const spawnOptions = {
     cwd: opts.cwd,
     // Never the caller's env verbatim: git leaks an absolute GIT_INDEX_FILE/GIT_DIR into hooks in a
     // linked worktree, and a judge touching another repo would write over the staged diff.
-    env: { ...withoutGitEnv(opts.env), ...cli.extraEnv },
+    env: { ...withoutGitEnv(opts.env), ...cli.extraEnv, ...run.ws.env },
     encoding: 'utf8' as const,
     timeout: opts.timeout,
     // SIGTERM can be trapped by the child; SIGKILL cannot, so the timeout always terminates.

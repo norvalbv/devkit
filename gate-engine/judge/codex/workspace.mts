@@ -12,8 +12,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { ensureCodexJudgeHome } from './home.mts';
 import type { CodexWritablePaths } from './permissions.mts';
-import { needsCodexWorkspace } from './result.mts';
+import { isCodexModel, needsCodexWorkspace, parseClaudeArgv } from './result.mts';
 
 /** A workspace-write judge's scratch cwd and state file, plus the repo it reviews read-only. */
 export interface CodexWorkspace extends CodexWritablePaths {
@@ -23,6 +24,8 @@ export interface CodexWorkspace extends CodexWritablePaths {
 export interface CodexSandbox {
   codexReadOnly: boolean;
   workspace?: CodexWorkspace;
+  /** Spawn env for every codex judge: its own CODEX_HOME, so the owner's AGENTS.md never loads. */
+  env?: { CODEX_HOME: string };
   /** Never throws: a judge's verdict must not turn into an outage over a leftover temp dir. */
   cleanup: () => void;
 }
@@ -39,13 +42,17 @@ export interface CodexSandboxOpts {
 // root's; copying them keeps the confined judge's instructions identical.
 const PROJECT_DOCS = ['AGENTS.md', 'AGENTS.override.md'];
 
-/** Create the workspace when this argv routes to a workspace-write codex judge; a no-op otherwise. */
+/** Any codex judge gets its own home; a workspace-write one also a scratch cwd. Claude: a no-op. */
 export function prepareCodexSandbox(
   args: string[],
   { codexReadOnly = false, codexWritableFile }: CodexSandboxOpts,
   cwd: string,
+  ownerEnv: NodeJS.ProcessEnv = process.env,
 ): CodexSandbox {
-  if (!needsCodexWorkspace(args, codexReadOnly)) return { codexReadOnly, cleanup: () => {} };
+  if (!isCodexModel(parseClaudeArgv(args).model)) return { codexReadOnly, cleanup: () => {} };
+  // Before mkdtemp: a home that cannot be made must not leak a scratch dir.
+  const env = { CODEX_HOME: ensureCodexJudgeHome(ownerEnv) };
+  if (!needsCodexWorkspace(args, codexReadOnly)) return { codexReadOnly, env, cleanup: () => {} };
   const repoRoot = resolve(cwd);
   const stateFile = codexWritableFile ? writableStateFile(repoRoot, codexWritableFile) : undefined;
   // Real path: macOS's tmpdir sits under the /var symlink, and codex refuses symlinked roots.
@@ -57,7 +64,7 @@ export function prepareCodexSandbox(
     cleanup();
     throw error;
   }
-  return { codexReadOnly, workspace: { scratch, repoRoot, stateFile }, cleanup };
+  return { codexReadOnly, env, workspace: { scratch, repoRoot, stateFile }, cleanup };
 }
 
 // No-follow: a prior judge may have planted a link here, and the gate must not create its target.
