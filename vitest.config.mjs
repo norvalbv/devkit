@@ -14,6 +14,7 @@ const GIT_INTEGRATION_TESTS = [
   'cli/__tests__/baseline-status-edges.test.mts',
   'cli/__tests__/baseline-status-tests.test.mts',
   'cli/__tests__/baseline-status-run.test.mts',
+  'cli/__tests__/baseline-status-compare.test.mts',
   'cli/__tests__/dist-integrity-release-only.test.mts',
   'cli/__tests__/electron-cli-grammar-mixed.test.mts',
   'cli/__tests__/doctor-hookspath-owner.test.mts',
