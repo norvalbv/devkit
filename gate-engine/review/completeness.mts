@@ -202,8 +202,11 @@ export function wrapCompleteness(
     '───── END BRIEF ─────\n' +
     'Judge ONLY what this commit claims to be (per its message) against what it ships. A found gap does not end ' +
     'the review: check every remaining claim and touched surface, then list EVERY gap that matters (one line each, ' +
-    'with its file path, at most 12 lines). Never list to fill; minor nice-to-haves are not findings. END with ' +
-    'exactly one line:\nVERDICT: PASS | FAIL — <one-line reason; on FAIL the most severe gap first, then the gap count>\n' +
+    'with its file path, at most 12 lines). Never list to fill; minor nice-to-haves are not findings. A limitation ' +
+    'a code comment present at HEAD records as accepted, in code this commit reuses unchanged, is inherited, not a ' +
+    'gap; it IS one if the message claims a guarantee it rules out (e.g. "race-free") or this diff adds or edits ' +
+    'that note.\n' +
+    'END with exactly one line:\nVERDICT: PASS | FAIL — <one-line reason; on FAIL the most severe gap first, then the gap count>\n' +
     'FAIL only for a gap that makes the shipped change misleading or operationally unsafe.'
   );
 }
