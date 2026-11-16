@@ -35,6 +35,7 @@ import {
   resolveReferenceCheckouts,
 } from '../prior-art/reference-checkouts.mts';
 import { runCompleteness } from './completeness.mts';
+import { type ArchiveOutcome, archiveBytes } from './evidence/diff-archive.mts';
 import { gitCached, stagedFiles } from './evidence/staged-git.mts';
 import { loadReviewerTargetsBlocks, reviewerTargetSalts } from './evidence/targets-block.mts';
 import { planReviewWork, resolveChunkCap, resolveLensGroups } from './lens/split.mts';
@@ -116,6 +117,8 @@ interface AgentRunReceipt {
   request_sha256?: string;
   request_status?: 'unreadable' | 'not_utf8';
   output_status?: 'not_utf8';
+  /** prior-art only: whether the raw bytes reached `<telemetry-dir>/evidence/<sha256>.gz`. */
+  evidence?: ArchiveOutcome['status'];
 }
 
 /** Strict UTF-8 text, or null: a lossy decode would store bytes the recorded hash does not cover. */
@@ -125,6 +128,14 @@ function exactText(bytes: Buffer): string | null {
   } catch {
     return null;
   }
+}
+
+/** Archive a prior-art run's raw bytes under its receipt hashes; transcripts are pruned and framed. */
+function archivePriorArt(output: Buffer, request: Buffer | null): ArchiveOutcome['status'] {
+  const statuses = [output, ...(request ? [request] : [])].map(
+    (bytes) => archiveBytes(bytes, 'evidence', '.gz').status,
+  );
+  return statuses.find((status) => status !== 'archived') ?? 'archived';
 }
 
 function sha256(bytes: Buffer): string {
@@ -159,7 +170,7 @@ function captureAgentRun(stdin: Buffer, requestFile: string | undefined) {
   if (request) receipt.request_sha256 = sha256(request);
   if (requestFile !== undefined && input === null)
     receipt.request_status = request ? 'not_utf8' : 'unreadable';
-  return { receipt, input, output, exactOutput };
+  return { receipt, input, output, exactOutput, request };
 }
 
 // Spend flags keyed like execJudge's judge_exec usage, so the row prices identically. A malformed
@@ -205,7 +216,7 @@ function recordAgent(label: string, rest: string[]): number {
   // A tty or closed pipe reads as empty — still emit the event. That the agent RAN is the fact the
   // dashboard needs most, and a run recorded without its transcript beats a run recorded nowhere.
   const stdin = readBytes(0) ?? Buffer.alloc(0);
-  const { receipt, input, output, exactOutput } = captureAgentRun(
+  const { receipt, input, output, exactOutput, request } = captureAgentRun(
     stdin,
     readFlag(rest, 'request-file'),
   );
@@ -217,6 +228,7 @@ function recordAgent(label: string, rest: string[]): number {
       `guard-review: ignoring unknown --disposition "${disposition}" ` +
         `(expected ${[...DISPOSITIONS].join(' | ')})`,
     );
+  if (label === 'prior-art') receipt.evidence = archivePriorArt(stdin, request);
   const extra: NonNullable<RecordAgentRunOpts['extra']> = { ...receipt };
   if (disposition !== undefined && DISPOSITIONS.has(disposition)) extra.disposition = disposition;
   if (reason) extra.disposition_reason = reason;
