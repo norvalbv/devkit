@@ -359,8 +359,8 @@ export async function waitForChecks(options: WaitCiOptions): Promise<WaitCiResul
 /** The gh invocation, injectable so the classifier is testable without a network or a PR. */
 export type ChecksExec = (args: string[], cwd: string) => string;
 
-const defaultExec =
-  (timeout: number): ChecksExec =>
+export const defaultExec =
+  (timeout = DEFAULT_EXEC_TIMEOUT_MS): ChecksExec =>
   (args, cwd) =>
     execFileSync('gh', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout });
 
@@ -377,7 +377,7 @@ export interface ChecksPollerOptions {
 
 /** Build the poller `waitForChecks` drives. It never throws: every outcome is a PollResult. */
 export function ghChecksPoller(options: ChecksPollerOptions): () => PollResult {
-  const exec = options.exec ?? defaultExec(options.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS);
+  const exec = options.exec ?? defaultExec(options.execTimeoutMs);
   const args = ['pr', 'checks', options.pr, '--repo', options.repo, '--json', CHECKS_JSON_FIELDS];
   if (options.required) args.push('--required');
   const read = (raw: string): PollResult => {
@@ -432,18 +432,24 @@ function unknownAttribution(reason: string): Attribution {
   };
 }
 
+/** The attribution engine's signature, injectable so a caller's tests need no gh. */
+export type AttributeFn = (input: { cwd: string; pr: string; failures: CheckRow[] }) => Attribution;
+
 /** Loaded lazily, so a broken import can never cost the verdict line of any outcome. */
 export async function attribute(
   pr: string,
   failures: CheckRow[],
   pending: CheckRow[],
+  cwd = process.cwd(),
+  run?: AttributeFn,
 ): Promise<Attribution> {
   // A red that ended the wait early leaves a run unfinished: no summary yet, and more red to come.
   if (pending.length > 0 || failures.some((f) => f.failedSteps))
     return unknownAttribution('run-in-progress');
   try {
-    const { attributeFailures } = await import('../../baseline-status/attribution.mts');
-    return attributeFailures({ cwd: process.cwd(), pr, failures });
+    const attributeFailures =
+      run ?? (await import('../../baseline-status/attribution.mts')).attributeFailures;
+    return attributeFailures({ cwd, pr, failures });
   } catch {
     return unknownAttribution('attribution-error');
   }
