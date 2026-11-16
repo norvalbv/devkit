@@ -318,6 +318,10 @@ export function installPostCommitHang(dir) {
 /** Ship's own ceiling banner: it proves the 124 came from our supervisor, not spawnSync's deadline. */
 export const POST_COMMIT_CEILING_BANNER = /gate chain hit the 15s ceiling \(exit 124\)/;
 
+/** The reap notice naming a leaking hook's `sleep`, as the banner and the archived gate log print it. */
+export const REAPED_SLEEP_NOTICE =
+  /till running when (?:the gate chain was )?reaped:\n\s*\d+ ppid=\d+ pgid=\d+ up=\S+ sleep$/m;
+
 /** Swap the hook in AFTER seeding: a seeder's own commits would run COUNTING_HOOK with
  *  TEST_HOOK_COUNT unset, and the failed append fails the commit. */
 export function installHook(dir, body) {
