@@ -5,7 +5,7 @@
 
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mts';
-import { parseAdvisories } from '../contracts/response.mts';
+import { ADVISORY_CAP, verdictAdvisories } from '../contracts/response.mts';
 import {
   reportAdvisories,
   reportMcpDegraded,
@@ -127,7 +127,8 @@ export function emitMergedLensResults(
     if (mcpCause) reportMcpDegraded(name, mcpCause, mcp?.mcpDegraded?.cached === true);
     reportVerdictTranscript(name, merged.status, transcriptRef);
     // Live parts only: a cached part's advisories replay with its own cache line.
-    if (merged.status === 'pass')
-      reportAdvisories(name, parseAdvisories(transcript), transcriptRef);
+    // Per part, so a FAIL merge keeps PASS lenses' advisories but not an inconclusive part's.
+    const advisories = [...new Set(parts.flatMap((p) => verdictAdvisories(p.res)))];
+    reportAdvisories(name, advisories.slice(0, ADVISORY_CAP), transcriptRef);
   }
 }
