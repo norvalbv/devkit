@@ -86,6 +86,13 @@ describe('gate.yml required job', () => {
   });
 });
 
+describe('gate.yml triggers', () => {
+  it('can be dispatched, so devkit ci-probe can run the suite on a branch without a PR', () => {
+    const on = text.slice(text.indexOf('\non:\n'), text.indexOf('\nconcurrency:'));
+    expect(on).toMatch(/^ {2}workflow_dispatch:$/m);
+  });
+});
+
 describe('gate.yml checks and test shards', () => {
   // Ship's pre-push leaves typecheck to CI, so an early red step must never skip a later check.
   it('runs every check step of the gate job once Install succeeds, whatever failed before it', () => {
