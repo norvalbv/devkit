@@ -279,7 +279,7 @@ export function degradedSuffix(res: { degraded?: unknown; mcpDegraded?: unknown 
 export function reportMcpDegraded(name: string, cause: string, cached = false): void {
   const detail = cached ? `${cause} — ${MCP_DEGRADED_REMEDY}` : cause;
   console.error(`⚠️  guard-review: ${name} — DEGRADED: ${detail}`);
-  emitGateEvent({ type: 'gate_degraded', judge: name, cause, detail });
+  emitGateEvent({ type: 'gate_degraded', judge: name, cause, detail, kind: 'mcp-missing' });
 }
 
 const storedAdvisories = z.array(z.string().min(1));

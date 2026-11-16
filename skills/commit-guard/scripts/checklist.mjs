@@ -11,9 +11,9 @@
  *   status                Show progress summary
  *   check-file <path>     Mark file as reviewed (--pass or --fail "reason")
  *   finalize              Verify every item was resolved; refuses if any are pending or failed
- *                         --retrieval ok | --retrieval unavailable --cause "why" records whether
- *                         semantic duplicate retrieval ran (the gate reports an unrecorded or
- *                         unavailable retrieval as DEGRADED — sc-2317)
+ *                         --retrieval ok | --retrieval skipped|unavailable --cause "why" records
+ *                         whether semantic duplicate retrieval ran (the gate reports anything but
+ *                         ok as DEGRADED)
  */
 
 import { execFileSync } from 'node:child_process';
@@ -170,8 +170,8 @@ function finalize(retrieval) {
   if (retrieval) {
     data.retrieval = retrieval;
     saveChecklist(data);
-    if (retrieval.status === 'unavailable')
-      log(`⚠️  Semantic retrieval unavailable: ${retrieval.cause}`);
+    if (retrieval.status !== 'ok')
+      log(`⚠️  Semantic retrieval ${retrieval.status}: ${retrieval.cause}`);
   }
   // Automatic tidy — same contract as checklist-store.mjs finalize: env guards keep gate/review artifacts.
   tidy();
@@ -187,7 +187,9 @@ function tidy() {
   }
 }
 
-const FINALIZE_USAGE = 'Usage: finalize [--retrieval ok | --retrieval unavailable --cause "why"]';
+const FINALIZE_USAGE =
+  'Usage: finalize [--retrieval ok | --retrieval skipped|unavailable --cause "why"]';
+const CAUSED = new Set(['skipped', 'unavailable']);
 
 // Reason: strict finalize grammar for the retrieval flag the gate reads back (sc-2317): null = no --retrieval (interactive runs stay valid; the gate reads absent as DEGRADED), undefined = refused; each branch rejects one malformed or contradictory shape
 // fallow-ignore-next-line complexity
@@ -204,7 +206,7 @@ function parseRetrieval(argv) {
   const cause = flags.get('--cause');
   if (status === undefined) return cause === undefined ? null : undefined;
   if (status === 'ok') return cause === undefined ? { status: 'ok' } : undefined;
-  return status === 'unavailable' && cause ? { status: 'unavailable', cause } : undefined;
+  return CAUSED.has(status) && cause ? { status, cause } : undefined;
 }
 
 // ============ MAIN ============
@@ -245,6 +247,8 @@ switch (cmd) {
     log('  init                         Create checklist from staged files');
     log('  status                       Show progress');
     log('  check-file <path> --pass|--fail  Mark file reviewed');
-    log('  finalize [--retrieval ok|unavailable --cause "why"]  Verify every item was resolved');
+    log(
+      '  finalize [--retrieval ok|skipped|unavailable --cause "why"]  Verify every item was resolved',
+    );
     process.exit(1);
 }
