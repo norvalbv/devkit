@@ -5,7 +5,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
-import { emitAdvisoryResult, FINDING_SEPARATOR } from '../../judge/advisory/emit.mts';
+import { emitAdvisoryResult } from '../../judge/advisory/emit.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import type { VerdictMeta } from '../../judge/verdict-store.mts';
 import { ADVISORY_CAP } from '../contracts/response.mts';
@@ -291,7 +291,7 @@ export function cachedAdvisories(...metas: VerdictMeta[]): string[] | undefined 
 }
 
 /** A PASS's non-blocking findings: self-labelled lines printed whole (a split merge prints no
- * verdict line to sit under), where the full reasoning lives, and ONE advisory_result. */
+ * verdict line to sit under), where the full reasoning lives, and one advisory_result EACH. */
 export function reportAdvisories(
   name: string,
   advisories: string[] | undefined,
@@ -299,10 +299,11 @@ export function reportAdvisories(
 ): void {
   if (!advisories?.length) return;
   printAdvisories(name, advisories, ref);
-  emitAdvisoryResult(`review:${name}`, 'finding', advisories.join(FINDING_SEPARATOR));
+  // One row per finding: a joined detail hits the sink's 500-char cap and drops the later ones.
+  for (const a of advisories) emitAdvisoryResult(`review:${name}`, 'finding', a);
 }
 
-/** The screen half of reportAdvisories, for a caller that emits one row across several labels. */
+/** The screen half of reportAdvisories, for a caller that emits its rows across several labels. */
 export function printAdvisories(label: string, advisories: string[], ref?: string | null): void {
   for (const a of advisories.slice(0, ADVISORY_CAP))
     console.error(`guard-review: ${label} — advisory (non-blocking): ${a}`);

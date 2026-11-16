@@ -240,8 +240,21 @@ describe('a lens-split reviewer', () => {
       ({ res: outcome('pass', transcript), secs: 1, task }) as LensPart;
     const parts = [part(ADVISED), part('ADVISORY: c.ts:3 — third\nVERDICT: PASS')];
     emitMergedLensResults(new Map([[REVIEWER, parts]]), 'sonnet');
-    expect(advisoryRows()).toHaveLength(1);
-    expect(advisoryRows()[0].detail).toContain('c.ts:3 — third');
+    expect(advisoryRows().map((r) => r.detail)).toEqual([
+      '`src/a.ts:1` — mobile passes the display status, unlike desktop',
+      'c.ts:3 — third',
+    ]);
+  });
+});
+
+describe('a PASS with several long advisories', () => {
+  it('emits one row per advisory, so none falls past the sink cap of a joined detail', () => {
+    const long = (i: number) => `src/a.ts:${i} — ${'consequence '.repeat(33)}end ${i}`;
+    const raw = [1, 2, 3, 4, 5].map((i) => `ADVISORY: ${long(i)}`).join('\n');
+    settleReviewOutcome(ctx(cwd), plan(cwd).tasks[0], outcome('pass', `${raw}\nVERDICT: PASS`), 1);
+    const details = advisoryRows().map((r) => r.detail);
+    expect(details).toEqual([1, 2, 3, 4, 5].map((i) => long(i).trim()));
+    expect(details.every((d) => d.length > 400 && d.length <= 500)).toBe(true);
   });
 
   it('on a lens recheck, reports each live PASS part under its part label', () => {
@@ -256,7 +269,7 @@ describe('a lens-split reviewer', () => {
     expect(advisoryRows().map((r) => r.gate)).toEqual(['review:commit-guard']); // reviewer key
   });
 
-  it("gives each chunk part its own transcript, and the reviewer ONE row holding every chunk's advisory", () => {
+  it("gives each chunk part its own transcript, and the reviewer one row per chunk advisory", () => {
     const task = { ...plan(cwd).tasks[0], splitOf: REVIEWER, group: 'g' };
     const chunk = (index: number): LensPart =>
       // SAFETY: the report reads only res/task (task.chunk.index for the label), supplied here.
@@ -271,10 +284,11 @@ describe('a lens-split reviewer', () => {
       .map((l) => l.split('guard-review transcript ')[1]);
     expect(refs).toHaveLength(2);
     expect(new Set(refs).size).toBe(2);
-    // The digest keeps the first row per gate, so a row per chunk would hide chunk 1's advisory.
-    expect(advisoryRows()).toHaveLength(1);
-    expect(advisoryRows()[0]).toMatchObject({ gate: 'review:commit-guard' });
-    expect(advisoryRows()[0].detail).toContain('chunk 0');
-    expect(advisoryRows()[0].detail).toContain('chunk 1');
+    // One row per advisory: the digest groups them per reviewer, so none is hidden behind another.
+    expect(advisoryRows().map((r) => r.gate)).toEqual(['review:commit-guard', 'review:commit-guard']);
+    expect(advisoryRows().map((r) => r.detail)).toEqual([
+      'c0.ts:1 — chunk 0',
+      'c1.ts:1 — chunk 1',
+    ]);
   });
 });
