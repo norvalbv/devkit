@@ -221,6 +221,8 @@ export function codexExecArgs(
       : ['--sandbox', parts.readOnly ? 'read-only' : 'workspace-write']),
     '-c',
     'web_search="disabled"',
+    '-c',
+    'skills.include_instructions=false',
     ...mcpArgv,
     '--ignore-user-config',
     '--ignore-rules',
