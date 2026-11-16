@@ -3,11 +3,11 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { CONFIG_FILENAME, resolveGuardConfigJson } from '../config.mts';
-import { parseJsonObject } from '../config-json.mts';
-import { LINE_ANCHOR_RE } from '../markdown/referenced-paths.mts';
-import { commitIndexEnv } from '../ratchets/commit-index.mts';
-import { gitIgnores, indexFile } from '../review/evidence/staged-git.mts';
+import { CONFIG_FILENAME, resolveGuardConfigJson } from '../../config.mts';
+import { parseJsonObject } from '../../config-json.mts';
+import { LINE_ANCHOR_RE } from '../../markdown/referenced-paths.mts';
+import { commitIndexEnv } from '../../ratchets/commit-index.mts';
+import { gitIgnores, indexFile } from '../../review/evidence/staged-git.mts';
 
 export interface CommentPolicy {
   /** Every configured reference pattern, global so one comment reports each match. */

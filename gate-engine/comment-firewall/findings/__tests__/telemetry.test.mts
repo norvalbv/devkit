@@ -2,10 +2,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EVENT_BUDGET } from '../../judge/odb-probe.mts';
+import { EVENT_BUDGET } from '../../../judge/odb-probe.mts';
 import { emptyInventory } from '../inventory.mts';
 import { COMMENT_POLICY, commentBudgetEvent, emitCommentBudget } from '../telemetry.mts';
-import type { CommentFinding, CommentInventory } from '../types.mts';
+import type { CommentFinding, CommentInventory } from '../../types.mts';
 
 const finding = (index: number): CommentFinding => ({
   id: index.toString(16).padStart(12, '0'),

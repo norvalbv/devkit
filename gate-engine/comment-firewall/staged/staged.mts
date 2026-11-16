@@ -1,14 +1,14 @@
 /** Staged-diff git plumbing shared by the comment detector and the moved-comment pool. */
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { commitIndexEnv } from '../ratchets/commit-index.mts';
+import { commitIndexEnv } from '../../ratchets/commit-index.mts';
 import {
   gitPrefix,
   nameStatusRecords,
   type Renames,
   renamesFrom,
   splitNul,
-} from '../ratchets/git-index.mts';
+} from '../../ratchets/git-index.mts';
 
 const MAX_GIT_OUTPUT = 16 * 1024 * 1024;
 

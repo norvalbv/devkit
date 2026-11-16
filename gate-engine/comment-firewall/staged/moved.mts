@@ -1,6 +1,6 @@
 /** Standalone comment lines removed anywhere in the staged set excuse an added run made wholly of
  * them: moved text is relocated, not written by this change. Each line excuses once. */
-import { gitPrefix, splitNul } from '../ratchets/git-index.mts';
+import { gitPrefix, splitNul } from '../../ratchets/git-index.mts';
 import type { CommentToken } from './scan.mts';
 import { parsePatchHunks } from './patch.mts';
 import { git, patch } from './staged.mts';

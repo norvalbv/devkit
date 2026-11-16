@@ -10,7 +10,7 @@ import {
 } from '../detect.mts';
 import { applyVariant, QUESTION_SETS } from '../eval/arms.mts';
 import { loadCorpus, readCorpusFile } from '../eval/corpus.mts';
-import { scanCommentTokens } from '../scan.mts';
+import { scanCommentTokens } from '../staged/scan.mts';
 import { buildRequest, COMMENT_MARKER, firstTwoLines, JEV_MODEL } from '../eval/request.mts';
 import { runEval } from '../eval/run.mts';
 import { auroc } from '../eval/score.mts';

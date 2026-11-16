@@ -1,7 +1,7 @@
-import { emitGateEvent } from '../judge/gate-events.mts';
-import { EVENT_BUDGET } from '../judge/odb-probe.mts';
-import { runEnvelope } from '../judge/run-context.mts';
-import type { CommentFinding, CommentInventory } from './types.mts';
+import { emitGateEvent } from '../../judge/gate-events.mts';
+import { EVENT_BUDGET } from '../../judge/odb-probe.mts';
+import { runEnvelope } from '../../judge/run-context.mts';
+import type { CommentFinding, CommentInventory } from '../types.mts';
 
 export const COMMENT_BUDGET_EVENT = 'comment_budget';
 /** Names the gate's blocking regime so dashboards can split events recorded under different rules. */

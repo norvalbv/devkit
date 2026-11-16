@@ -6,7 +6,7 @@ import { oneLine } from '../../../cli/lib/ship/digest/fields.mts';
 import { GATE_REASON_ENV, readGateReason, reasonDetail } from '../../deterministic/reason.mts';
 import { runCommentCli } from '../cli.mts';
 import { runCommentFirewall } from '../gate.mts';
-import { emptyInventory } from '../inventory.mts';
+import { emptyInventory } from '../findings/inventory.mts';
 import type { CommentFinding, DetectionResult, RefFinding } from '../types.mts';
 
 const finding: CommentFinding = {

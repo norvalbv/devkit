@@ -19,16 +19,16 @@ import {
   hunkTouches,
   recordParagraph,
   textLineCount,
-} from './inventory.mts';
-import { commentTouchLines, type PatchHunk } from './patch.mts';
-import { loadCommentPolicy } from './policy.mts';
-import { addedCommentText, meaningfulLine, movedLines, movedPool } from './moved.mts';
-import { refFindings } from './refs.mts';
-import { type CommentToken, scanCommentTokens } from './scan.mts';
-import { type StagedEntry, stagedDiff } from './staged-diff.mts';
+} from './findings/inventory.mts';
+import { commentTouchLines, type PatchHunk } from './staged/patch.mts';
+import { loadCommentPolicy } from './findings/policy.mts';
+import { addedCommentText, meaningfulLine, movedLines, movedPool } from './staged/moved.mts';
+import { refFindings } from './findings/refs.mts';
+import { type CommentToken, scanCommentTokens } from './staged/scan.mts';
+import { type StagedEntry, stagedDiff } from './staged/staged-diff.mts';
 import type { CommentFinding, CommentInventory, DetectionResult } from './types.mts';
 
-export { parsePatchHunks } from './patch.mts';
+export { parsePatchHunks } from './staged/patch.mts';
 
 export const COMMENT_ADAPTER_VERSION = 'typescript-scanner-v2';
 export const COMMENT_FINDING_POLICY = 'changed-comment-paragraph-v6';

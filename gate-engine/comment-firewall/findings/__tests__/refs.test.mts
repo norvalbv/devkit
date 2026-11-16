@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { detectChangedComments } from '../detect.mts';
-import { runCommentFirewall } from '../gate.mts';
+import { detectChangedComments } from '../../detect.mts';
+import { runCommentFirewall } from '../../gate.mts';
 
 /** The guard.config.json `comments` block as a consumer writes it. */
 interface CommentsConfig {
