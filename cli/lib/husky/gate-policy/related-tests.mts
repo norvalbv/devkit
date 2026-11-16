@@ -4,9 +4,18 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import {
+  displayPath,
+  readDiagnosis,
+  RESULTS_NAME,
+  type RunDiagnosis,
+  UNHANDLED_REPORTER,
+} from '../../../../gate-engine/coverage/failures.mts';
+import { GATE_REASON_ENV, writeGateReason } from '../../../../gate-engine/deterministic/reason.mts';
 import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mts';
 
 // Runs with every selection: it fails when a module is left unreachable to `vitest related` itself.
@@ -27,6 +36,9 @@ import { errorMessage } from '../../ship/review/shared/common.mts';
 // vitest's forceRerunTriggers (**/package.json, **/{vitest,vite}.config.*, setupFiles) select the
 // whole suite, which CI already runs.
 const RERUN_TRIGGER_RE = /(^|\/)(package\.json|(vitest|vite)\.config\.[^/]*)$|^vitest\.setup\.mjs$/;
+
+/** Failing tests named in the reason; the rest stay in vitest's own output above it. */
+const NAMED_TESTS = 5;
 
 /** The staged paths the related-test listing starts from, sorted, minus the full-suite triggers. */
 export function relatedPaths(staged: Iterable<string>): string[] {
@@ -106,11 +118,16 @@ export function noteUnmapped(root: string, paths: string[], grep: Grep = gitGrep
   }
 }
 
+interface SpawnResult {
+  status: number | null;
+  error?: Error;
+}
+
 type Exec = (
   cmd: string,
   args: string[],
-  opts: { cwd: string; stdio: 'inherit' },
-) => { status: number | null; error?: Error };
+  opts: { cwd: string; stdio: 'inherit'; env: NodeJS.ProcessEnv },
+) => SpawnResult;
 
 interface RunOpts {
   staged: Iterable<string>;
@@ -128,6 +145,62 @@ export async function listRelated(root: string, paths: string[]): Promise<string
     return [...new Set(specs.map((s) => s.moduleId))].sort();
   } finally {
     await ctx.close();
+  }
+}
+
+/** Why a failed run blocked: the failing tests by file and title, or why vitest never reported. */
+export function relatedTestsReason(
+  result: SpawnResult,
+  diagnosis: RunDiagnosis | null,
+  root: string,
+): string[] {
+  if (result.error || result.status === null) {
+    const why = result.error?.message ?? 'it was killed before exiting';
+    return [`related-tests could not run vitest: ${why}`];
+  }
+  if (!diagnosis) {
+    return [
+      `vitest exited ${result.status} without a test report — its output is in the full log above`,
+    ];
+  }
+  if (diagnosis.unhandled) {
+    return [
+      'No test failed; the run ended on:',
+      ...diagnosis.unhandled.map((e) =>
+        e.file ? `${displayPath(e.file, root)}: ${e.message}` : e.message,
+      ),
+    ];
+  }
+  const named = [
+    ...(diagnosis.failures?.tests ?? []).map((t) => `${displayPath(t.file, root)} > ${t.name}`),
+    ...(diagnosis.collection ?? []).map(
+      (c) => `${displayPath(c.file, root)} — failed to load: ${c.message.split('\n')[0]}`,
+    ),
+  ];
+  const hidden = named.length - NAMED_TESTS;
+  return [
+    `${diagnosis.failedFiles.length} test file(s) failed:`,
+    ...named.slice(0, NAMED_TESTS),
+    ...(hidden > 0 ? [`(${hidden} more in the full log above)`] : []),
+  ];
+}
+
+/** A private directory for vitest's json report; '' when none can be made, and the run goes unnarrated. */
+function reportDir(): string {
+  try {
+    return mkdtempSync(join(tmpdir(), 'devkit-related-tests-'));
+  } catch {
+    return '';
+  }
+}
+
+/** Record the failure reason. Narration only: nothing here may throw into the verdict. */
+function narrate(result: SpawnResult, report: string, root: string): void {
+  try {
+    const diagnosis = report ? readDiagnosis(report, result.status ?? 1) : null;
+    writeGateReason(relatedTestsReason(result, diagnosis, root));
+  } catch {
+    // The exit code already carries the verdict.
   }
 }
 
@@ -159,11 +232,30 @@ export async function runRelatedTests(root: string, opts: RunOpts): Promise<numb
     `related-tests: ${tests.length} test file(s) for ${paths.length} staged path(s)${forced.length ? `, ${forced.length} forced` : ''}`,
   );
   const vitest = join(root, 'node_modules', '.bin', 'vitest');
-  const args = ['run', '--reporter=dot', ...tests];
-  const result = (opts.exec ?? spawnSync)(vitest, args, { cwd: root, stdio: 'inherit' });
-  if (result.error) console.error(`✗ related-tests could not run vitest: ${result.error.message}`);
-  // A null status is a signal kill or a failed spawn: nothing passed, so block.
-  return result.status ?? 1;
+  const dir = reportDir();
+  const report = dir && join(dir, RESULTS_NAME);
+  const reporters = report
+    ? ['--reporter=json', `--outputFile.json=${report}`, `--reporter=${UNHANDLED_REPORTER}`]
+    : [];
+  const args = ['run', '--reporter=dot', ...reporters, ...tests];
+  // A test that drives gate code must not write into this gate's own reason file.
+  const env = { ...process.env };
+  delete env[GATE_REASON_ENV];
+  try {
+    const result = (opts.exec ?? spawnSync)(vitest, args, { cwd: root, stdio: 'inherit', env });
+    if (result.error)
+      console.error(`✗ related-tests could not run vitest: ${result.error.message}`);
+    // A null status is a signal kill or a failed spawn: nothing passed, so block.
+    const status = result.status ?? 1;
+    if (status !== 0) narrate(result, report, root);
+    return status;
+  } finally {
+    try {
+      if (dir) rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // A leftover temp dir never outranks the verdict.
+    }
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
