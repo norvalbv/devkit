@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   advisoryBodyFile,
-  freshRecordStamp,
+  recordStampAge,
   originRepo,
   provenBool,
   provenString,
@@ -32,12 +32,12 @@ export const intentFile = (root: string, branch: string) => path.join(root, relI
 const malformedField = (f: string) =>
   `recorded invocation is malformed (${f}) — run the full command, which re-records`;
 
-/** Parse + validate the stored manifest, or return a refusal string (never both). */
+/** Parse + validate the stored manifest, or refuse; only a stale-only refusal carries the record. */
 export function readIntent(
   root: string,
   branch: string,
   nowMs: number = Date.now(),
-): { intent: ShipIntent } | { reason: string } {
+): { intent: ShipIntent } | { reason: string; stale?: ShipIntent } {
   const file = intentFile(root, branch);
   let raw: string;
   try {
@@ -169,10 +169,9 @@ export function readIntent(
       reason: `recorded branch-source frozen membership failed its Git binding — run the full command, which re-records`,
     };
   const createdAt = provenString(r.createdAt) ?? '';
-  if (!freshRecordStamp(createdAt, nowMs))
-    return {
-      reason: `recorded invocation is stale or misdated (recorded ${String(r.createdAt)}; every live attempt re-records) — run the full command`,
-    };
+  const age = recordStampAge(createdAt, nowMs);
+  const staleReason = `recorded invocation is stale or misdated (recorded ${String(r.createdAt)}; every live attempt re-records) — run the full command`;
+  if (age === 'misdated') return { reason: staleReason };
   const intent: ShipIntent = {
     version: storedVersion,
     mode,
@@ -193,5 +192,6 @@ export function readIntent(
   };
   if (sourceAttemptId) intent.sourceAttemptId = sourceAttemptId;
   intent.bodyFile = advisoryBodyFile(r.bodyFile);
-  return { intent };
+  // Stale is the last check, so `stale` carries a record that passed every other one.
+  return age === 'stale' ? { reason: staleReason, stale: intent } : { intent };
 }
