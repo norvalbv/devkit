@@ -36,6 +36,15 @@ describe('machine recipe', () => {
     expect(readMachineConfig(repoWith(JSON.stringify(recipe)))).toEqual(recipe.machine);
   });
 
+  it("reads devtools, and refuses it in full mode, where the box's own browser is the page", () => {
+    const recipe = { machine: { mode: 'light', devtools: true, command: ['electron', '.'] } };
+    expect(readMachineConfig(repoWith(JSON.stringify(recipe)))).toEqual(recipe.machine);
+    expect(() =>
+      readMachineConfig(repoWith('{"machine": {"mode": "full", "devtools": true}}')),
+    ).toThrow('"devtools" needs light mode');
+    expect(() => readMachineConfig(repoWith('{"machine": {"devtools": "yes"}}'))).toThrow();
+  });
+
   it('refuses a malformed recipe instead of guessing', () => {
     expect(() => readMachineConfig(repoWith('{"machine": {"command": "next dev"}}'))).toThrow();
     expect(() => readMachineConfig(repoWith('{"machine": {"comand": ["x"]}}'))).toThrow();

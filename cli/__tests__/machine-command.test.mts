@@ -68,6 +68,15 @@ describe('devkit machine', () => {
     expect(await machine(['env'], root)).toBe(1);
   });
 
+  it('refuses --full on a devtools recipe, before leasing a slot', async () => {
+    const said = errors();
+    const root = repo();
+    writeFileSync(join(root, 'guard.config.json'), '{"machine": {"devtools": true}}');
+    expect(await machine(['up', '--full'], root)).toBe(1);
+    expect(said.filter((line) => line.includes('"devtools" needs light mode'))).toHaveLength(1);
+    expect(await machine(['env'], root)).toBe(1);
+  });
+
   it('refuses both mode flags, or an unknown one, before leasing a slot', async () => {
     const said = errors();
     const root = repo();
