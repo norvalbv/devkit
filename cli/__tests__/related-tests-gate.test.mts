@@ -116,7 +116,7 @@ describe('runRelatedTests', () => {
     expect(runRelatedTests('/repo', { staged: ['cli/a.mts'], exec })).toBe(1);
     expect(exec).toHaveBeenCalledWith(
       join('/repo', 'node_modules', '.bin', 'vitest'),
-      ['related', '--run', '--reporter=dot', 'cli/a.mts', REACH],
+      ['related', '--run', '--reporter=dot', '--silent=passed-only', 'cli/a.mts', REACH],
       { cwd: '/repo', stdio: 'inherit' },
     );
   });
@@ -125,7 +125,7 @@ describe('runRelatedTests', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const exec = fakeExec(0);
     runRelatedTests('/repo', { staged: [REACH], exec });
-    expect(exec.mock.calls[0][1]).toEqual(['related', '--run', '--reporter=dot', REACH]);
+    expect(exec.mock.calls[0][1]).toEqual(['related', '--run', '--reporter=dot', '--silent=passed-only', REACH]);
   });
 
   it('adds the forced test once, however many ship scripts are staged and when itself staged', () => {
@@ -137,6 +137,7 @@ describe('runRelatedTests', () => {
       'related',
       '--run',
       '--reporter=dot',
+      '--silent=passed-only',
       SCRUB,
       'cli/lib/ship/b.sh',
       'cli/lib/ship/reship.sh',
@@ -148,7 +149,7 @@ describe('runRelatedTests', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exec = fakeExec(1);
     expect(runRelatedTests('/repo', { staged: ['vitest.setup.mjs'], exec })).toBe(1);
-    expect(exec.mock.calls[0][1]).toEqual(['related', '--run', '--reporter=dot', SCRUB, REACH]);
+    expect(exec.mock.calls[0][1]).toEqual(['related', '--run', '--reporter=dot', '--silent=passed-only', SCRUB, REACH]);
     expect(log).toHaveBeenCalledWith('related-tests: 0 staged path(s), 1 forced');
   });
 

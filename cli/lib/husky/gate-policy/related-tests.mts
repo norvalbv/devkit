@@ -127,10 +127,12 @@ export function runRelatedTests(root: string, opts: RunOpts): number {
     `related-tests: ${paths.length} staged path(s)${forced.length ? `, ${forced.length} forced` : ''}`,
   );
   const vitest = join(root, 'node_modules', '.bin', 'vitest');
+  // A passing ship or reviewer test's console output would echo the ship's own progress lines.
   const args = [
     'related',
     '--run',
     '--reporter=dot',
+    '--silent=passed-only',
     ...new Set([...paths, ...forced, REACH_TEST]),
   ];
   const result = (opts.exec ?? spawnSync)(vitest, args, { cwd: root, stdio: 'inherit' });
