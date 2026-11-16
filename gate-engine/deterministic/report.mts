@@ -2,7 +2,7 @@
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { GUARD_PREFIX_RE } from './command-gates.mts';
 import { appendReviewNotice, type GateFailure, reasonDetail, reasonReport } from './reason.mts';
-import { printRecheckFooter } from './recheck.mts';
+import { printFailureFooter } from './recheck.mts';
 
 /** The blocked_gate token the ship script publishes for this whole chain. */
 export const DETERMINISTIC_FAMILY = 'deterministic';
@@ -57,9 +57,7 @@ export function reportFailures(
   }
   console.error(`✗ deterministic gates failed:${fails.map((f) => ` ${f.label}`).join('')}`);
   for (const line of reasonReport(fails)) console.error(line);
-  console.error('   Fix every failure above together, then commit once.');
-  console.error('   On commit or ship, decision and reviewer gates run only after these pass.');
-  printRecheckFooter(rechecks);
+  printFailureFooter(rechecks);
   if (fails.some((f) => f.label.startsWith('structure-lint'))) {
     console.error('   guard-structure blocks only violations your change adds, or all when');
     console.error('   it edits structure policy or deletes/renames. Fix those.');
