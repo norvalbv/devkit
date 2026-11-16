@@ -16,8 +16,9 @@
  */
 
 import { execFileSync, execSync } from 'node:child_process';
-import { realpathSync, statSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { usableChunkCount } from './chunk-index.mts';
 
 const MTIME_TOLERANCE_MS = 1;
 const BACKSLASH_RE = /\\/g;
@@ -57,6 +58,72 @@ export function primaryCheckout(cwd: string): string | null {
   }
 }
 
+/** `path` at the same place under the primary checkout, relative to this linked worktree's toplevel.
+ * Null in the primary itself, outside git, or for a path outside this worktree. */
+function primaryCounterpart(path: string, cwd: string): string | null {
+  try {
+    const top = execFileSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const primary = primaryCheckout(cwd);
+    if (!top || !primary || realpathSync(top) === realpathSync(primary)) return null;
+    const rel = relative(realpathSync(top), resolve(realpathSync(cwd), relative(cwd, path)));
+    return rel.startsWith('..') || isAbsolute(rel) ? null : resolve(primary, rel);
+  } catch {
+    return null;
+  }
+}
+
+/** The index's usable chunk count, read-only; null when it is missing, unreadable or a foreign schema.
+ * sqlite loads lazily so importers that only want `primaryCheckout` never pay for it. */
+export function usableChunksAt(dbPath: string): number | null {
+  if (!existsSync(dbPath)) return null;
+  const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
+  let db: InstanceType<typeof DatabaseSync> | undefined;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    return usableChunkCount(db);
+  } catch {
+    return null;
+  } finally {
+    db?.close();
+  }
+}
+
+/** The primary checkout's populated index when this linked worktree's own is missing or empty — what
+ * `devkit ship` links into its gate worktree. Null whenever the local index is the one to read. */
+export function primaryIndexFallback(indexPath: string, cwd: string): string | null {
+  if (existsSync(indexPath) && usableChunksAt(indexPath) !== 0) return null;
+  const primary = primaryCounterpart(indexPath, cwd);
+  return primary && (usableChunksAt(primary) ?? 0) > 0 ? primary : null;
+}
+
+/** The index doctor inspects for a configured `indexPath`, and how to name it: a linked worktree
+ * without a usable one inspects the primary checkout's, as the matcher reads it. */
+export function indexToInspect(indexPath: string, cwd: string) {
+  const local = resolve(cwd, indexPath);
+  const fallback = primaryIndexFallback(local, cwd);
+  if (!fallback) return { indexPath: local, reads: indexPath };
+  return { indexPath: fallback, reads: `${fallback} (the primary checkout's)` };
+}
+
+/** The index the matcher reads: the configured one, or (when `borrow`) the primary's when a linked
+ * worktree has none usable. A caller that writes the index passes false: it must own what it writes. */
+export function linkedWorktreeIndex(
+  cfg: { cwd: string; indexPath: string | null },
+  borrow: boolean,
+): string | null {
+  if (cfg.indexPath == null) return null;
+  const local = resolve(cfg.cwd, cfg.indexPath);
+  const primary = borrow ? primaryIndexFallback(local, cfg.cwd) : null;
+  if (!primary) return local;
+  process.stderr.write(
+    `guard-dup: this linked worktree has no usable index — reading the primary checkout's ${primary}, as \`devkit ship\` does.\n`,
+  );
+  return primary;
+}
+
 /**
  * True only when the index file physically lives INSIDE this checkout — the exact invariant the
  * refresh needs. Comparing realpaths catches every aliasing route into another checkout, not just
@@ -90,10 +157,10 @@ export function indexSourceRoot(
   try {
     if (indexIsInThisCheckout(indexPath, cfg.cwd)) return realpathSync(cfg.cwd);
     if (!cfg.indexPath) return null;
-    const primary = primaryCheckout(cfg.cwd);
-    if (!primary) return null;
-    const expected = realpathSync(resolve(primary, cfg.indexPath));
-    return realpathSync(indexPath) === expected ? realpathSync(primary) : null;
+    const counterpart = primaryCounterpart(resolve(cfg.cwd, cfg.indexPath), cfg.cwd);
+    const root = primaryCounterpart(cfg.cwd, cfg.cwd);
+    if (!counterpart || !root) return null;
+    return realpathSync(indexPath) === realpathSync(counterpart) ? realpathSync(root) : null;
   } catch {
     return null;
   }
@@ -208,24 +275,15 @@ export function staleIndexMessage(freshness: IndexFreshness): string {
   );
 }
 
-/**
- * What to tell someone whose checkout has no index. The common case by far is a linked worktree,
- * where the gate is not broken and not fixable by "build an index" — the primary checkout already
- * has one, and linking it is both cheaper and what `devkit ship` does. So name that path with a
- * command they can paste, rather than leaving a bare "no index" to be read as a hang or a bug.
- */
-export function missingIndexMessage(
-  indexPath: string,
-  cfg: { cwd: string; indexPath: string | null },
-): string {
-  const indexDir = dirname(cfg.indexPath ?? '.search-code/index.db');
-  const primary = primaryCheckout(cfg.cwd) ?? '<primary-checkout>';
-  return (
-    `No index at ${indexPath}. This checkout has no index — dup gate opted out (fail-open).\n` +
-    `  Build one with your indexer, or in a LINKED WORKTREE reuse the primary checkout's:\n` +
-    `    ln -s ${primary}/${indexDir} .\n` +
-    `  (devkit ship --link ${indexDir} does this for you.)`
-  );
+/** Reached when no checkout holds a usable index, or when a command that writes the index declined to
+ * borrow the primary's. Names the checkout to build in, or to run the writing command in. */
+export function missingIndexMessage(indexPath: string, cfg: { cwd: string }): string {
+  const primary = primaryCounterpart(indexPath, cfg.cwd);
+  const head = `No index at ${indexPath} — dup gate opted out (fail-open).\n`;
+  if (!primary) return `${head}  Build one with your indexer.`;
+  if ((usableChunksAt(primary) ?? 0) > 0)
+    return `${head}  This command writes the index, so it never borrows the primary checkout's ${primary}: run it in the primary checkout.`;
+  return `${head}  A linked worktree reads the primary checkout's index automatically, but ${primary} has no usable index either: build it there with your indexer.`;
 }
 
 /**
