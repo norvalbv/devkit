@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { type GateEvent, readShipEvents, render, summarise } from './gate-digest.mts';
-import { issuesUnder } from './trend.mts';
+import { issuesUnder } from './trend/trend.mts';
 
 const SHIP = 'ship-1';
 const REVIEWER = 'correctness-reviewer';

@@ -1,9 +1,9 @@
 /** Names a reviewer or file whose blocks on this branch are not converging. Narration only — no exit,
  * never fed to a reviewer; why it exists: decision ship-gates-converge-not-restart. */
 import { z } from 'zod';
-import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mts';
-import { issueLocations } from '../../../../gate-engine/review/contracts/response.mts';
-import { scanBackward } from './tail.mts';
+import { emitGateEvent } from '../../../../../gate-engine/judge/gate-events.mts';
+import { issueLocations } from '../../../../../gate-engine/review/contracts/response.mts';
+import { scanBackward } from '../tail.mts';
 
 /** Below this many consecutive blocks a re-ship is ordinary iteration, not a loop. */
 const MIN_STREAK = 3;

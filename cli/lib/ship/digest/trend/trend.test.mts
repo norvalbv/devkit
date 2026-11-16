@@ -715,7 +715,7 @@ const shellLines = (events: TrendRow[]) =>
     JSON.stringify(e.type === 'ship_result' ? { ...e, blocked_gate: 'review' } : e),
   );
 
-const CLI = join(import.meta.dirname, 'gate-digest.mts');
+const CLI = join(import.meta.dirname, '..', 'gate-digest.mts');
 /** Runs the digest the way commit-with-gate-capture.sh does, with the ship's exported envelope. */
 const runDigest = (sink: string, shipId: string, env: Record<string, string> = {}) =>
   execFileSync('node', [CLI, 'digest', sink, shipId], {
@@ -793,7 +793,7 @@ describe('gate-digest CLI — the wiring a ship actually runs', () => {
 });
 
 const CG = 'commit-guard';
-const FILE = 'cli/lib/ship/digest/trend.mts';
+const FILE = 'cli/lib/ship/digest/trend/trend.mts';
 /** A domain reviewer's blocking lens whose `n` issues each cite `file:line`. */
 const failAt = (n: number, file: string, lens = 'concurrency-races', reviewer = CR): Row => ({
   type: 'review_result',

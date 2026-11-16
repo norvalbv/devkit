@@ -14,7 +14,7 @@ import {
 } from '../../gate-engine/judge/outage/family-override.mts';
 import { findsFlag } from '../lib/help/wants-help.mts';
 import { enterShipQueue, prequeueEnv, queueAhead } from '../lib/ship/queue/enter.mts';
-import { listBranchAdvisories } from '../lib/ship/digest/advisories.mts';
+import { listBranchAdvisories } from '../lib/ship/digest/advisory/advisories.mts';
 import { formatShipQueue, readShipQueue } from '../lib/ship/queue/status.mts';
 import { reportShipRuntimeProvenance } from '../lib/ship/runtime-provenance.mts';
 import {

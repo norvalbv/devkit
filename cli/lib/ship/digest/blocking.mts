@@ -3,7 +3,7 @@
 import { waiveCommand } from '../../../../gate-engine/review/valve/shell-word.mts';
 import { count, oneLine, textOf } from './fields.mts';
 import type { GateEvent } from './gate-digest.mts';
-import { issuesUnder } from './trend.mts';
+import { issuesUnder } from './trend/trend.mts';
 import { FINGERPRINT } from './waived.mts';
 
 /** The detail of each row a review_result FAIL contributes, with the fingerprint it names. */

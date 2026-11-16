@@ -4,9 +4,9 @@ import { z } from 'zod';
 import {
   DEGRADED_KINDS,
   type DegradedKind,
-} from '../../../../gate-engine/review/contracts/degraded-kinds.mts';
-import type { DigestRow } from './gate-digest.mts';
-import { scanBackward } from './tail.mts';
+} from '../../../../../gate-engine/review/contracts/degraded-kinds.mts';
+import type { DigestRow } from '../gate-digest.mts';
+import { scanBackward } from '../tail.mts';
 import type { ShipKey } from './trend.mts';
 
 /** Attempts per judge the rate is taken over. */
