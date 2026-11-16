@@ -53,6 +53,12 @@ export const REVIEWER_TARGETS_FRAMING: TargetsFraming = Object.freeze({
     'the checklist alone; do not claim Target-alignment you did not check.',
 });
 
+/** `capBytes` for the decision judge (`detect`); skills/decisions/SKILL.md states it. */
+export const DETECT_TARGETS_BYTES = 8192;
+
+/** `capBytes` for the domain reviewers; skills/decisions/SKILL.md states it. */
+export const REVIEWER_TARGETS_BYTES = 8_192;
+
 /**
  * Render the governing-Targets block (the consumer prep-critique shape) or its SKIP note.
  *
@@ -148,7 +154,7 @@ function renderReviewerTargets(blocks: GoverningTarget[], changed: string[]): st
   // Only in-diff Targets matched: their note alone, not a SKIP note claiming none govern.
   const authority =
     kept.length > 0 || dropped.length === 0
-      ? renderTargets(kept, REVIEWER_TARGETS_FRAMING, 8_192)
+      ? renderTargets(kept, REVIEWER_TARGETS_FRAMING, REVIEWER_TARGETS_BYTES)
       : '';
   return authority + renderChangedTargets(dropped, REVIEWER_CHANGED_NOTE);
 }

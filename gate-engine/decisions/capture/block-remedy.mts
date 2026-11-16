@@ -14,7 +14,7 @@ const UNAVAILABLE =
 
 export async function loadRecordedTargets(files: string[], cwd: string): Promise<RecordedTargets> {
   try {
-    const [{ scopedTargets }, { renderTargets }] = await Promise.all([
+    const [{ scopedTargets }, { renderTargets, DETECT_TARGETS_BYTES }] = await Promise.all([
       import('../scoped-targets.mts'),
       import('../../review/evidence/targets-block.mts'),
     ]);
@@ -26,7 +26,7 @@ export async function loadRecordedTargets(files: string[], cwd: string): Promise
         skipHeader: '## RECORDED TARGETS — NONE',
         skipNote: 'No scoped Target matches. Judge the diff without assuming prior approval.',
       },
-      8192,
+      DETECT_TARGETS_BYTES,
     );
     return { slugs: blocks.map((b) => b.slug), text };
   } catch {
