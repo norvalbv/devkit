@@ -136,6 +136,29 @@ describe('devkit ship machine-wide queue wiring (sc-3785)', () => {
     expect(calls).toEqual(['script', 'release']);
   });
 
+  it('hands the script how long the slot took to grant, and when', async () => {
+    const test = harness();
+    let seenEnv: NodeJS.ProcessEnv | undefined;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-10-05T08:20:00Z'));
+      test.dependencies.enterQueue = async () => {
+        vi.setSystemTime(new Date('2026-10-05T08:21:30Z'));
+        return { env: {} };
+      };
+      test.dependencies.runManagedScript = (_s, _a, options) => {
+        seenEnv = options.env;
+        return 0;
+      };
+
+      await ship(['feat/q', 'ship it', 'a.txt'], '/consumer', test.dependencies);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(seenEnv?.DEVKIT_SHIP_QUEUED_S).toBe('90');
+    expect(seenEnv?.DEVKIT_SHIP_GRANTED_AT).toBe(String(Date.UTC(2026, 9, 5, 8, 21, 30) / 1000));
+  });
+
   it('releases the slot even when the script dispatch throws', async () => {
     const test = harness();
     const release = vi.fn();
