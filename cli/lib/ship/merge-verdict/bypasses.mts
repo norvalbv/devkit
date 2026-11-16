@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { envBool, envVar } from '../../../../gate-engine/config.mts';
 import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mts';
-import { readShipEvents } from '../digest/gate-digest.mts';
+import { ATTEMPT, readShipEvents } from '../digest/gate-digest.mts';
 import { scanBackward } from '../digest/tail.mts';
 
 /** One-run controls that skip a gate, each read as GUARD_<name> or FRINK_<name>. */
@@ -77,10 +77,10 @@ function rowBypasses(rows: Row[]): string[] {
 
 /** This attempt's bypasses, or undefined when its gate chain has not passed. */
 export function attemptBypasses(sink: string, shipId: string): string[] | undefined {
-  const all = readShipEvents(sink, shipId).map((event) => rowSchema.parse(event));
-  const opened = all.map((row) => row.type).lastIndexOf('ship_attempt');
-  const rows = opened < 0 ? [] : all.slice(opened);
-  if (!rows.some((row) => row.type === 'ship_result' && row.exit_code === 0)) return undefined;
+  const rows = readShipEvents(sink, shipId).map((event) => rowSchema.parse(event));
+  // The reader slices to the newest attempt; rows with no ship_attempt ahead of them have no record.
+  const passed = rows.some((row) => row.type === 'ship_result' && row.exit_code === 0);
+  if (rows[0]?.type !== ATTEMPT || !passed) return undefined;
   return [...new Set([...envBypasses(), ...rowBypasses(rows)])];
 }
 
