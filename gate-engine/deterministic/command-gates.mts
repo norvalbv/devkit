@@ -5,8 +5,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { CONFIG_FILENAME, envFlag, resolveGuardConfig } from '../config.mts';
-import { emitGateBypass } from '../judge/gate-events.mts';
+import { CONFIG_FILENAME, coverageBypassed, envFlag, resolveGuardConfig } from '../config.mts';
+import { emitGateBypass, emitGateEvent } from '../judge/gate-events.mts';
 import { gitPrefix, stagedSet } from '../ratchets/git-index.mts';
 import { recheckCommand } from './recheck.mts';
 import { DETERMINISTIC } from './registry.mts';
@@ -166,4 +166,34 @@ export function commandGate(label: string, cwd: string, cmd?: string): Gate {
   // The tokens that RUN, quoted. An expanded path list would go stale once the fix is staged.
   const recheck = usesStaged ? undefined : recheckCommand(argv, structure ? cwd : undefined);
   return { label, argv, failOpen2: structure, recheck };
+}
+
+/** Did this gate exit 0 only because its own one-run bypass flag told it to skip? */
+function selfBypassed(gate: string): boolean {
+  if (gate === 'coverage') return coverageBypassed();
+  return Object.entries(GATE_BYPASSES).some(([name, suffix]) => name === gate && envFlag(suffix));
+}
+
+/**
+ * One `gate_step` row per spawned gate: status in gate_result's vocabulary, exit code, duration.
+ * `failure` is the failure this gate recorded, if any; `optedOut` that it failed open. A gate that
+ * never reached an exit code (killed or failed to spawn) has no `exit_code`.
+ */
+export function emitGateStep(
+  label: string,
+  rc: number | string,
+  startedAt: number,
+  failure: { verdict: boolean } | undefined,
+  optedOut: boolean,
+): void {
+  const gate = label.replace(GUARD_PREFIX_RE, '');
+  const unverified = failure ? !failure.verdict : optedOut || selfBypassed(gate);
+  emitGateEvent({
+    type: 'gate_step',
+    gate,
+    family: 'deterministic',
+    status: unverified ? 'could_not_run' : failure ? 'fail' : 'pass',
+    exit_code: typeof rc === 'number' ? rc : undefined,
+    duration_ms: Math.max(0, Date.now() - startedAt),
+  });
 }
