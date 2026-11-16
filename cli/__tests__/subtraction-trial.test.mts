@@ -5,6 +5,8 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { subtractionTrial } from '../lib/baseline-status/subtraction-trial.mts';
 import { CLI, testSpawnSync } from './_helpers.mts';
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../commands/baseline/subtraction-trial.mts'));
 
 const roots: string[] = [];
 

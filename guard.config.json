@@ -67,6 +67,7 @@
       "templates",
       "anti-slop/src/devkit",
       "anti-slop/src/index.ts",
+      "oxc/rules",
       "scripts",
       "e2e/lib",
       "vitest.config.mjs",

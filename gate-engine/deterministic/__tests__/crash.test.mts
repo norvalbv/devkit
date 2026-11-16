@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GATE_REASON_ENV } from '../reason.mts';
 import { CRASH_EXIT } from '../registry.mts';
 import { runDeterministic } from '../run.mts';
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../crash-exit.mts'));
 
 const HERE = import.meta.dirname;
 const PRELOAD = pathToFileURL(join(HERE, '..', 'crash-exit.mts')).href;

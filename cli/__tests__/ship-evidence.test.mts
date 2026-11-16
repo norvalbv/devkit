@@ -26,6 +26,8 @@ import {
 
 // Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
 void (() => import('../lib/ship/evidence/run.mts'));
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../commands/pr/pr-evidence.mts'));
 
 const RUN = fileURLToPath(new URL('../lib/ship/evidence/run.mts', import.meta.url));
 const SHIP_DIR = fileURLToPath(new URL('../lib/ship', import.meta.url));
