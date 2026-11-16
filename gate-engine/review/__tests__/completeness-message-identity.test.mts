@@ -5,7 +5,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { normalizeCommitMessage, runCompleteness } from '../completeness.mts';
+import { runCompleteness } from '../completeness.mts';
+import { normalizeCommitMessage } from '../evidence/commit-message.mts';
 import {
   cleanupReviewFixtures,
   consumerRepo,
