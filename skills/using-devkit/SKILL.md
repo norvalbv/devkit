@@ -174,6 +174,9 @@ devkit command.
   `--resume` whose previous attempt already printed every reviewer's PASS: those replay from
   cache, and moving the judges re-pays them. `--dry-gates` prints the same block without running a
   reviewer.
+  Never pipe ship through `tail` or `head`: `tail` holds every line until ship exits, and `head`'s early exit can SIGPIPE-kill
+  it. Poll the unpiped output (or `> /tmp/ship-<slug>.log 2>&1`, one file per ship) and trim when you
+  read it; the heartbeat's `log:` path holds this attempt's gate chain.
 - **A blocked or timed-out ship retries with `devkit ship --resume <branch>` — never re-type the
   invocation.** Reviewer PASSes checkpoint as they land, cleared decisions judgements and the
   deterministic gate prefix are cached, so a retry only pays for the unfinished work; `--resume`
