@@ -249,7 +249,8 @@ export function resolveEscalationModel(cfg: { review: { escalationModel: string 
 }
 
 /** Comma-joined --allowedTools for one reviewer: the read-only base, its exact-path checklist
- *  script, the consumer's search tool where wired, and named-agent MCP tools. */
+ *  script, the consumer's search tool where wired (commit-guard also gets the read-only
+ *  `guard-dup-allowlist check:*`), and named-agent MCP tools. */
 export function allowedToolsFor(
   reviewer: Reviewer,
   cfg: GuardConfig,
@@ -261,10 +262,10 @@ export function allowedToolsFor(
   // A skill-less reviewer has no checklist script; its evidence is pre-rendered onto stdin/prompt.
   if (!hasChecklist(reviewer)) return withNamedAgentMcpTools(JUDGE_READ_TOOLS);
   const tools = `${JUDGE_READ_TOOLS},Bash(node ${checklistScriptAt(reviewer, assetRoot)}:*)`;
-  if (reviewer.domain === 'code') return withNamedAgentMcpTools(tools, cfg.searchTool);
-  // The correctness reviewer's writer/reader-contract lens benefits from semantic search, but
-  // only when the consumer actually wired an index (indexPath set) — otherwise cfg.searchTool is
-  // a generic default naming an MCP tool the judge doesn't have, and Grep is the core mechanism.
+  if (reviewer.domain === 'code')
+    return withNamedAgentMcpTools(`${tools},Bash(guard-dup-allowlist check:*)`, cfg.searchTool);
+  // The correctness reviewer gets semantic search only when the consumer wired an index
+  // (indexPath set): else cfg.searchTool names an MCP tool the judge lacks, and Grep is the mechanism.
   if (reviewer.domain === 'all' && cfg.indexPath)
     return withNamedAgentMcpTools(tools, cfg.searchTool);
   return withNamedAgentMcpTools(tools);

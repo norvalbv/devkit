@@ -25,7 +25,8 @@ is unset, treat all staged source files as in scope.
   exact-name lookups grep is faster and more reliable.
 - If the configured MCP search tool is unavailable, run `search-code search "<natural-language query>" --json`
   from the repo root. `search-code` is an externally installed engine, not a vendored project file.
-  If the executable or repository index is unavailable, or the command is denied, semantic
+  In HEADLESS COMMIT GATE mode, skip this shell fallback (it is not granted there) and record
+  `--retrieval unavailable --cause "codebase MCP not available to the judge"`. If the executable or repository index is unavailable, or the command is denied, semantic
   retrieval is unavailable: do not retry it, and record it at finalize (`--retrieval unavailable
   --cause "<why>"`) so the gate reports the PASS as DEGRADED. Grep never changes that status, but
   still Grep each added symbol's distinctive body tokens: a duplicate confirmed by reading both

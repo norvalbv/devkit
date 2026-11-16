@@ -137,8 +137,9 @@ describe('reviewer fleet without the codebase MCP server (sc-2837)', () => {
       const bash = args[args.indexOf('--allowedTools') + 1]
         .split(',')
         .filter((tool: string) => tool.startsWith('Bash'));
-      expect(bash.length, label).toBeLessThanOrEqual(1);
-      for (const rule of bash) expect(rule, label).toMatch(/^Bash\(node \S+\/checklist\.mjs:\*\)$/);
+      const rules = bash.filter((rule: string) => rule !== 'Bash(guard-dup-allowlist check:*)');
+      expect(rules.length, label).toBeLessThanOrEqual(1);
+      for (const rule of rules) expect(rule, label).toMatch(/^Bash\(node \S+\/checklist\.mjs:\*\)$/);
     }
   });
 
