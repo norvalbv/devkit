@@ -31,7 +31,7 @@ type Reachability =
   | 'unavailable'
   | 'unknown';
 
-interface ModelStatus {
+export interface ModelStatus {
   role: JudgeRole;
   model: string;
   bin: string;
@@ -103,13 +103,20 @@ const DEFAULT_DEPS: PreflightDeps = {
 
 /** Classify every resolved judge model, cheapest check first. The rate-limit RPC runs at most ONCE
  *  per report even with three codex roles, because they share one account. */
-export async function judgeReachability(
+export function judgeReachability(
   root: string,
   deps: PreflightDeps = DEFAULT_DEPS,
   guards: JudgeGuards = { review: true, sentry: false },
 ): Promise<ModelStatus[]> {
-  const cfg = resolveGuardConfig(root);
-  const roles = resolvedJudgeRoles(cfg, guards);
+  return reachabilityOf(resolvedJudgeRoles(resolveGuardConfig(root), guards), root, deps);
+}
+
+/** Classify an explicit role list — the reviewer bench probes its own effective models this way. */
+export async function reachabilityOf(
+  roles: { role: JudgeRole; model: string }[],
+  root: string,
+  deps: PreflightDeps = DEFAULT_DEPS,
+): Promise<ModelStatus[]> {
   const models = roles.map((r) => r.model);
   const statuses: ModelStatus[] = [];
 
