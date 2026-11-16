@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { detectGitRoot } from '../detect-git-root.mts';
 import { GhUnavailable, type RunRef, type UnknownReason, isUsableRun, runById } from './gh.mts';
 import { BranchWalk } from './history.mts';
-import type { TestReportSummary } from './produce.mts';
+import type { FileTests, TestReportSummary } from './produce.mts';
 import { DEFAULT_ARTIFACT, DEFAULT_WORKFLOW, loadSummary, workflowSelector } from './source.mts';
 import {
   type FailingTests,
@@ -42,6 +42,8 @@ export interface BaselineAnswer {
   attempt: number | null;
   sha: string | null;
   failingFiles: string[];
+  /** The answering run's recorded test names for its failed files, when its producer wrote them. */
+  tests?: Record<string, FileTests>;
   /** The branch head as the remote reported it, which `sha` is measured against. */
   head: string | null;
   /** First-parent commits between `head` and `sha`; above 0, the newer commits had no usable run. */
@@ -187,6 +189,7 @@ function producerRemedy(workflow: string, artifact: string, branch: string): str
 export function queryBaseline({
   cwd = process.cwd(),
   ref,
+  at,
   file,
   test,
   workflow = DEFAULT_WORKFLOW,
@@ -195,6 +198,7 @@ export function queryBaseline({
 }: {
   cwd?: string;
   ref?: string;
+  at?: string;
   file?: string;
   test?: string;
   workflow?: string;
@@ -210,7 +214,7 @@ export function queryBaseline({
   for (let i = 0; ; i++) {
     let walked: ReturnType<BranchWalk['at']>;
     try {
-      walk ??= new BranchWalk({ cwd, workflow, ref: branch, maxCommits });
+      walk ??= new BranchWalk({ cwd, workflow, ref: branch, maxCommits, at });
       walked = walk.at(i);
     } catch (e) {
       // Answering from an older commit after a failed lookup would present it as the newest evidence.
@@ -341,6 +345,7 @@ function answerFromRun(
       .filter(([, outcome]) => outcome === 'failed')
       .map(([path]) => path)
       .sort(),
+    ...(summary.tests && { tests: summary.tests }),
     head: null,
     commitsBehindHead: null,
     commitsWithoutRun: [],

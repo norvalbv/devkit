@@ -1,4 +1,12 @@
 /** `devkit baseline-status` (sc-2245) — see `meta.help` below for the full contract. */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import {
+  compareFailures,
+  renderComparison,
+  writeStepSummary,
+} from '../../lib/baseline-status/compare.mts';
+import type { TestReportSummary } from '../../lib/baseline-status/produce.mts';
 import {
   type BaselineAnswer,
   DEFAULT_MAX_RUNS,
@@ -11,6 +19,7 @@ import {
   DEFAULT_ARTIFACT,
   DEFAULT_WORKFLOW,
   configuredSource,
+  parseSummary,
   workflowSelector,
 } from '../../lib/baseline-status/source.mts';
 import type { TestStatus } from '../../lib/baseline-status/test-verdict.mts';
@@ -23,7 +32,8 @@ export const meta = {
 
 Usage:
   devkit baseline-status [--file <path> [--test <name>]] [--json] [--ref <branch>]
-                         [--max-runs <n>] [--workflow <file>]
+                         [--max-runs <n>] [--workflow <file>] [--at <sha>]
+                         [--against <summary.json>]
   devkit baseline-status --run <id> [--file <path> [--test <name>]] [--json]
 
   --file <path>      answer for one test file, plus the last run in which it passed
@@ -34,6 +44,10 @@ Usage:
   --max-runs <n>     how many commits to walk back (default: ${DEFAULT_MAX_RUNS})
   --workflow <file>  the CI workflow to read (default: guard.config.json, else ${DEFAULT_WORKFLOW})
   --run <id>         answer for one CI run of any event or branch, pull_request included
+  --at <sha>         walk back from this local commit instead of the branch head (a PR's base)
+  --against <file>   split that run summary's failures into NEW (not failing at the base run) and
+                     inherited, by test name where both runs recorded names; narration only, and
+                     also appended to $GITHUB_STEP_SUMMARY when set
 
 Reads the per-file summary artifact that \`devkit test-report-run\` uploads from a CI workflow.
 Configure both in guard.config.json — { "baselineStatus": { "workflow": "<file>", "artifact":
@@ -183,10 +197,19 @@ function lastPassedText(file: FileAnswer): string {
 }
 
 /** Every option this command accepts, and which of them consume the argument after them. */
-const VALUED_FLAGS = new Set(['--file', '--test', '--ref', '--max-runs', '--workflow', '--run']);
+const VALUED_FLAGS = new Set([
+  '--file',
+  '--test',
+  '--ref',
+  '--max-runs',
+  '--workflow',
+  '--run',
+  '--at',
+  '--against',
+]);
 const KNOWN_FLAGS = new Set([...VALUED_FLAGS, '--json']);
 /** Options that pick the branch walk, which a named run replaces. */
-const WALK_FLAGS = ['--ref', '--max-runs', '--workflow'];
+const WALK_FLAGS = ['--ref', '--max-runs', '--workflow', '--at', '--against'];
 
 /** Flag > guard.config.json > default. A corrupt config is a usage error, not a stack trace. */
 function source(args: string[], cwd: string): BaselineSource {
@@ -224,8 +247,19 @@ function assertOnlyKnownArgs(args: string[]): void {
   }
 }
 
+/** The `--against` summary, or null after saying why it cannot be read — the comparison cannot run. */
+function readPrSummary(cwd: string, path: string): TestReportSummary | null {
+  try {
+    return parseSummary(readFileSync(resolve(cwd, path), 'utf8'), path);
+  } catch (e) {
+    console.log(`❔ no readable run summary at ${path} — ${e instanceof Error ? e.message : e}`);
+    return null;
+  }
+}
+
 export default function baselineStatus(args: string[], cwd: string) {
   let answer: BaselineAnswer;
+  let pr: TestReportSummary | null = null;
   try {
     assertOnlyKnownArgs(args);
     const file = flag(args, '--file');
@@ -251,9 +285,18 @@ export default function baselineStatus(args: string[], cwd: string) {
     if (!Number.isInteger(maxRuns) || maxRuns < 1) {
       throw new UsageError(`--max-runs must be a positive whole number (got ${maxRunsRaw})`);
     }
+    const against = flag(args, '--against');
+    if (against && file) {
+      throw new UsageError('--file and --against answer different questions; pass one');
+    }
+    if (against) {
+      pr = readPrSummary(cwd, against);
+      if (!pr) return 2;
+    }
     answer = queryBaseline({
       cwd,
       ref: flag(args, '--ref'),
+      at: flag(args, '--at'),
       file,
       test,
       maxRuns,
@@ -263,6 +306,14 @@ export default function baselineStatus(args: string[], cwd: string) {
     if (!(e instanceof UsageError)) throw e;
     console.error(`🚫 ${e.message}.`);
     return 1;
+  }
+  if (pr && !answer.reason) {
+    const comparison = compareFailures(pr, answer);
+    const lines = renderComparison(comparison, answer);
+    if (args.includes('--json')) console.log(JSON.stringify({ ...answer, comparison }, null, 2));
+    else console.log(lines.join('\n'));
+    writeStepSummary(lines);
+    return 0;
   }
   return report(answer, args, false);
 }
