@@ -1,8 +1,8 @@
 /** The staged set, its renames, blob ids and hunks from one `git diff --cached` per parent. */
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { commitIndexEnv } from '../ratchets/commit-index.mts';
-import { gitPrefix } from '../ratchets/git-index.mts';
+import { commitIndexEnv } from '../../ratchets/commit-index.mts';
+import { gitPrefix } from '../../ratchets/git-index.mts';
 import { type PatchHunk, parsePatchHunks } from './patch.mts';
 
 const MAX_DIFF_OUTPUT = 512 * 1024 * 1024;

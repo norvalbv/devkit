@@ -1,9 +1,9 @@
 import { failLine, writeGateReason } from '../deterministic/reason.mts';
 import { lineAnchors } from '../markdown/referenced-paths.mts';
 import { detectChangedComments, PARAGRAPH_CHANGED_LINE_LIMIT } from './detect.mts';
-import { emptyInventory } from './inventory.mts';
-import { recordShown, shownAnchors } from './shown.mts';
-import { emitCommentBudget } from './telemetry.mts';
+import { emptyInventory } from './findings/inventory.mts';
+import { recordShown, shownAnchors } from './findings/shown.mts';
+import { emitCommentBudget } from './findings/telemetry.mts';
 import type { CommentFinding, DetectionResult, RefFinding } from './types.mts';
 
 interface FirewallDeps {

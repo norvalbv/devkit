@@ -2,7 +2,7 @@
  * change, and its VIOLATION quotes a rule from a CLAUDE.md that governs that file. */
 
 import { execFileSync } from 'node:child_process';
-import { parsePatchHunks } from '../../comment-firewall/patch.mts';
+import { parsePatchHunks } from '../../comment-firewall/staged/patch.mts';
 import { nameStatusRecords, type Renames, renamesFrom } from '../../ratchets/git-index.mts';
 import { countLines } from '../../ratchets/size-line-authority.mts';
 import { ancestorDirs } from '../claude-md.mts';

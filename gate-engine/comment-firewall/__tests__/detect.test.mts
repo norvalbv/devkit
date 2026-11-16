@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { detectChangedComments, parsePatchHunks } from '../detect.mts';
-import { scanCommentTokens } from '../scan.mts';
+import { scanCommentTokens } from '../staged/scan.mts';
 import { runCommentFirewall } from '../gate.mts';
 
 const roots: string[] = [];

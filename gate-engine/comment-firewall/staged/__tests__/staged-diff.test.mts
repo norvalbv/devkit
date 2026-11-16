@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { detectChangedComments } from '../detect.mts';
+import { detectChangedComments } from '../../detect.mts';
 import { parseStagedDiff, stagedDiff } from '../staged-diff.mts';
 
 const roots: string[] = [];

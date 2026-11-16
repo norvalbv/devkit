@@ -1,7 +1,7 @@
 /** Changed comment lines that cite a reference the repo's comment policy forbids. */
-import type { CommentToken } from './scan.mts';
-import type { ChangeRun, PatchHunk } from './patch.mts';
-import type { RefFinding } from './types.mts';
+import type { CommentToken } from '../staged/scan.mts';
+import type { ChangeRun, PatchHunk } from '../staged/patch.mts';
+import type { RefFinding } from '../types.mts';
 
 const WHITESPACE = /\s+/g;
 const squash = (text: string) => text.replace(WHITESPACE, ' ').trim();

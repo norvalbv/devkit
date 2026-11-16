@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import type { CommentToken } from './scan.mts';
-import type { PatchHunk } from './patch.mts';
-import type { CommentInventory, TouchedParagraph } from './types.mts';
+import type { CommentToken } from '../staged/scan.mts';
+import type { PatchHunk } from '../staged/patch.mts';
+import type { CommentInventory, TouchedParagraph } from '../types.mts';
 
 const ANCHOR_LINES = 2;
 
