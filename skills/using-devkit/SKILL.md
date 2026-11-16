@@ -171,20 +171,26 @@ devkit command.
   only` warning is expected when the target is your own repo.
 - **Run `devkit ship` in the BACKGROUND** (`run_in_background`), never as a foreground tool call: the
   gate chain's worst case (AI reviewer cascades) exceeds the 10-minute foreground Bash cap, which kills
-  the ship mid-gates as exit 143 with no banner. Poll the shell output for the per-reviewer heartbeat
-  lines (`guard-review: <name> — PASS … (checkpointed)`). A judge still in flight (completeness can
-  take many minutes) prints `guard-review: still running — <lane> <elapsed> (killed in ≤<bound>) · log:
-  <path>` about every 45s; while those keep arriving the gate is alive, not hung. Before polling,
-  read the `guard-judge preflight` block near the top of the output. If it says
-  `every reviewer that is not already cached will fail closed`, this attempt will fail closed at
-  the reviewers: stop it now, take the move its `To ship inside this window,` line names
-  (commit-gates skill, "Judge outage"), then re-run the same full `devkit ship` command in the same
-  shell command, since an export does not outlive the tool call that ran it. An attempt stopped this
-  early has recorded nothing, so `--resume` refuses it. If it says
-  `Both judge CLIs are dark`, install or authenticate one instead. The one exception is a
-  `--resume` whose previous attempt already printed every reviewer's PASS: those replay from
-  cache, and moving the judges re-pays them. `--dry-gates` prints the same block without running a
-  reviewer.
+  the ship mid-gates as exit 143 with no banner. The shell output is for humans: a gate's subprocess
+  (a test run) can print `guard-review: <name> — PASS` lines and stage banners identical to the real
+  ones, so never read the stage from it. Read `.devkit/review-progress-<branch>.json` instead
+  (`/` in the branch becomes `-`; a `--dry-gates` rehearsal writes `…-<branch>-dry-*.json`), and
+  only once its mtime is newer than your launch, since a killed attempt leaves its file until the
+  next gate chain starts. Present, `running` lists every reviewer this run judges (queued ones too)
+  and `completed` the ones done; absent, the reviewer gate has not started or has finished — and
+  with every reviewer cached it never appears, so absence is never a PASS. The outcome is the task's
+  exit plus the `ship_exit=` line and the tail. A judge still in flight (completeness can take many
+  minutes) prints `guard-review: still running — <lane> <elapsed> (killed in ≤<bound>) · log:
+  <path>` about every 45s: a liveness hint that the gate is not hung, not evidence of its stage.
+  Before polling, read the `guard-judge preflight` block near the top of the output. If it says
+  `every reviewer that is not already cached will fail closed`, this attempt will fail closed at the
+  reviewers: stop it now, take the move its `To ship inside this window,` line names (commit-gates
+  skill, "Judge outage"), then re-run the same full `devkit ship` command in the same shell command,
+  since an export does not outlive the tool call that ran it. An attempt stopped this early has
+  recorded nothing, so `--resume` refuses it. If it says `Both judge CLIs are dark`, install or
+  authenticate one instead. The one exception is a `--resume` whose previous attempt already printed
+  every reviewer's PASS: those replay from cache, and moving the judges re-pays them. `--dry-gates`
+  prints the same block without running a reviewer.
   Never pipe ship through `tail` or `head`: `tail` holds every line until ship exits, and `head`'s early exit can SIGPIPE-kill
   it. Poll the unpiped output (or `> /tmp/ship-<slug>.log 2>&1`, one file per ship) and trim when you
   read it; the heartbeat's `log:` path holds this attempt's gate chain.

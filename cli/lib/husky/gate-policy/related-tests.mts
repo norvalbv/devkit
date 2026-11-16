@@ -159,7 +159,8 @@ export async function runRelatedTests(root: string, opts: RunOpts): Promise<numb
     `related-tests: ${tests.length} test file(s) for ${paths.length} staged path(s)${forced.length ? `, ${forced.length} forced` : ''}`,
   );
   const vitest = join(root, 'node_modules', '.bin', 'vitest');
-  const args = ['run', '--reporter=dot', ...tests];
+  // A passing ship or reviewer test's console output would echo the ship's own progress lines.
+  const args = ['run', '--reporter=dot', '--silent=passed-only', ...tests];
   const result = (opts.exec ?? spawnSync)(vitest, args, { cwd: root, stdio: 'inherit' });
   if (result.error) console.error(`✗ related-tests could not run vitest: ${result.error.message}`);
   // A null status is a signal kill or a failed spawn: nothing passed, so block.

@@ -144,7 +144,7 @@ describe('runRelatedTests', () => {
     expect(await runRelatedTests('/repo', { staged: ['cli/a.mts'], list, exec })).toBe(1);
     expect(exec).toHaveBeenCalledWith(
       join('/repo', 'node_modules', '.bin', 'vitest'),
-      ['run', '--reporter=dot', '/repo/cli/a.test.mts', join('/repo', REACH)],
+      ['run', '--reporter=dot', '--silent=passed-only', '/repo/cli/a.test.mts', join('/repo', REACH)],
       { cwd: '/repo', stdio: 'inherit' },
     );
   });
@@ -154,7 +154,7 @@ describe('runRelatedTests', () => {
     const exec = fakeExec(0);
     const list = vi.fn(async () => [join('/repo', REACH)]);
     await runRelatedTests('/repo', { staged: [REACH], list, exec });
-    expect(exec.mock.calls[0][1]).toEqual(['run', '--reporter=dot', join('/repo', REACH)]);
+    expect(exec.mock.calls[0][1]).toEqual(['run', '--reporter=dot', '--silent=passed-only', join('/repo', REACH)]);
   });
 
   it('adds the forced test once, however many ship scripts are staged and when itself staged', async () => {
@@ -162,7 +162,7 @@ describe('runRelatedTests', () => {
     const exec = fakeExec(0);
     const staged = ['cli/lib/ship/reship.sh', SCRUB, 'cli/lib/ship/b.sh'];
     await runRelatedTests('/repo', { staged, list: vi.fn(async () => [join('/repo', SCRUB)]), exec });
-    expect(exec.mock.calls[0][1]).toEqual(['run', '--reporter=dot', join('/repo', SCRUB), join('/repo', REACH)]);
+    expect(exec.mock.calls[0][1]).toEqual(['run', '--reporter=dot', '--silent=passed-only', join('/repo', SCRUB), join('/repo', REACH)]);
   });
 
   it('runs the forced test when the setup file is staged alone', async () => {
@@ -171,7 +171,7 @@ describe('runRelatedTests', () => {
     const list = vi.fn(async () => []);
     expect(await runRelatedTests('/repo', { staged: ['vitest.setup.mjs'], list, exec })).toBe(1);
     expect(list).not.toHaveBeenCalled();
-    expect(exec.mock.calls[0][1]).toEqual(['run', '--reporter=dot', join('/repo', SCRUB), join('/repo', REACH)]);
+    expect(exec.mock.calls[0][1]).toEqual(['run', '--reporter=dot', '--silent=passed-only', join('/repo', SCRUB), join('/repo', REACH)]);
     expect(log).toHaveBeenCalledWith('related-tests: 2 test file(s) for 0 staged path(s), 1 forced');
   });
 
