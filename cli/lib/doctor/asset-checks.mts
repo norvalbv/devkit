@@ -353,12 +353,12 @@ export function checkRegistrations(
       'DRIFT',
       [
         trackedAdvice,
-        fallow.length ? `fallow-gate.sh hooks devkit will not remove: ${fallowAdvice}` : '',
+        fallow.length ? `hooks devkit will not remove: ${fallowAdvice}` : '',
       ]
         .filter(Boolean)
         .join('; '),
       fallow.length
-        ? 'delete them from the named files by hand: devkit never edits a committed file or removes an unrecognised spelling'
+        ? 'delete them from the named files by hand: devkit never edits a committed file, an edited copy of its own hook, or an unrecognised fallow-gate.sh spelling'
         : '',
       false,
       true,
