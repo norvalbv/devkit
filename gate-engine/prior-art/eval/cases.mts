@@ -34,6 +34,11 @@ export interface Row {
   note: string;
   difficulty: 'normal' | 'adversarial';
   provenance: 'mined' | 'authored';
+  /** The family: rows sharing it are variants of one case and share one partition. */
+  caseId?: string;
+  holdout?: boolean;
+  /** Where a mined row's label comes from, outside the run it was mined from. */
+  source?: { url?: string; receipt?: string; invocationId: string };
 }
 
 const LEG_STATUSES = ['reached', 'unavailable', 'failed'];
@@ -86,8 +91,20 @@ export function lintRows(rows: Row[]): string[] {
     }
     if (row?.contractOnly && (row.gold?.length || row.decoys?.length))
       errors.push(`${at}: contractOnly rows carry no slots`);
+    if (row?.source && !row.source.url && !row.source.receipt)
+      errors.push(`${at}: source needs a url or a receipt`);
   });
+  for (const [caseId, family] of familyHoldouts(rows))
+    if (family.size > 1) errors.push(`case ${caseId}: variants split across holdout partitions`);
   return errors;
+}
+
+function familyHoldouts(rows: Row[]) {
+  const families = new Map<string, Set<boolean>>();
+  for (const row of rows)
+    if (row?.caseId)
+      families.set(row.caseId, (families.get(row.caseId) ?? new Set()).add(row.holdout === true));
+  return families;
 }
 
 export function loadRows(): Row[] {

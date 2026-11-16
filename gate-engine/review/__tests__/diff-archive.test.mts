@@ -1,11 +1,19 @@
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { archiveFailedDiff } from '../evidence/diff-archive.mts';
+import { archiveBytes, archiveFailedDiff } from '../evidence/diff-archive.mts';
 import { REVIEWERS } from '../reviewers.mts';
 import { runReviewGate } from '../run-review.mts';
 
@@ -68,6 +76,29 @@ describe('archiveFailedDiff', () => {
     process.env.DEVKIT_GATE_EVENTS = path.join(notADir, 'gate-events.jsonl');
     expect(() => archiveFailedDiff('some diff\n')).not.toThrow();
     expect(archiveFailedDiff('some diff\n')).toBeNull();
+  });
+
+  it('archiveBytes keeps raw bytes exact and leaves no temp file behind', () => {
+    const bytes = Buffer.from([0xef, 0xbb, 0xbf, 0x61, 0x0d, 0x0a, 0xff]);
+    const outcome = archiveBytes(bytes, 'evidence', '.gz');
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    expect(outcome).toEqual({ status: 'archived', ref: path.join('evidence', `${hash}.gz`) });
+    expect(gunzipSync(readFileSync(path.join(dir, 'evidence', `${hash}.gz`))).equals(bytes)).toBe(
+      true,
+    );
+    expect(archiveBytes(bytes, 'evidence', '.gz')).toEqual(outcome);
+    expect(readdirSync(path.join(dir, 'evidence'))).toEqual([`${hash}.gz`]);
+  });
+
+  it('archiveBytes names why it archived nothing', () => {
+    expect(archiveBytes(Buffer.alloc(8 * 1024 * 1024 + 1), 'evidence', '.gz').status).toBe(
+      'too_large',
+    );
+    delete process.env.DEVKIT_GATE_EVENTS;
+    expect(archiveBytes(Buffer.from('x'), 'evidence', '.gz')).toEqual({
+      status: 'disabled',
+      ref: null,
+    });
   });
 
   it('skips (returns null, does not throw) a diff over the archive size cap', () => {
