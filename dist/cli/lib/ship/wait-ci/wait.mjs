@@ -7,14 +7,12 @@ import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { setTimeout as sleepFor } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { CHECK_BUCKETS, CHECKS_JSON_FIELDS, parseChecksJson, } from './checks-json.mjs';
+export { CHECK_BUCKETS, CHECKS_JSON_FIELDS, parseChecksJson };
 import { classifyChecksFailure } from './classify.mjs';
 import { requiredSetPoller } from './required.mjs';
 import { withFailedSteps } from './steps.mjs';
 import { recordCiEvent } from './telemetry.mjs';
-/** The five states gh collapses `state` into. Ordered for stable rendering, not by severity. */
-export const CHECK_BUCKETS = ['pass', 'fail', 'pending', 'skipping', 'cancel'];
-/** The `--json` fields this reader dereferences, as one gh argument. */
-export const CHECKS_JSON_FIELDS = 'bucket,name,state,link,workflow';
 /** Every outcome line starts here, including the not-run one ship-branch.sh echoes on a skip. */
 export const VERDICT_PREFIX = 'ship: ci-outcome=';
 const DEFAULT_INTERVAL_MS = 10_000;
@@ -111,35 +109,6 @@ export function verdictLines(result, pr, repo) {
     if (result.outcome === 'timed-out')
         lines.push(`  checks so far: gh pr checks ${pr} --repo ${repo} --json ${CHECKS_JSON_FIELDS}`);
     return lines;
-}
-const BUCKET_NAMES = new Set(CHECK_BUCKETS);
-/** Blank for non-Actions checks (CodeRabbit reports both), so presence is proven, not content. */
-const TEXT_FIELDS = ['name', 'state', 'link', 'workflow'];
-/** Every field this reader dereferences, compared by round-trip rather than a representation check. */
-function isCheckRow(value) {
-    return (!!value &&
-        `${value.bucket}` === value.bucket &&
-        BUCKET_NAMES.has(String(value.bucket)) &&
-        TEXT_FIELDS.every((f) => `${value[f]}` === value[f]));
-}
-/** Parse gh's `--json` array, rejecting any row that fails the guard above. */
-export function parseChecksJson(raw) {
-    let parsed;
-    try {
-        parsed = JSON.parse(raw);
-    }
-    catch {
-        return null;
-    }
-    if (!Array.isArray(parsed))
-        return null;
-    const rows = [];
-    for (const entry of parsed) {
-        if (!isCheckRow(entry))
-            return null;
-        rows.push(entry);
-    }
-    return rows;
 }
 /**
  * Poll until the check set settles, the deadline passes, or gh fails in a way waiting cannot fix.

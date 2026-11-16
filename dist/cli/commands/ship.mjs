@@ -10,7 +10,7 @@ import { delimiter, dirname } from 'node:path';
 import { claudeFamilyEnvLine, JUDGE_MODEL_ENVS, judgeEnvUnsetLine, } from '../../gate-engine/judge/outage/family-override.mjs';
 import { findsFlag } from '../lib/help/wants-help.mjs';
 import { enterShipQueue, prequeueEnv, queueAhead } from '../lib/ship/queue/enter.mjs';
-import { listBranchAdvisories } from '../lib/ship/digest/advisories.mjs';
+import { listBranchAdvisories } from '../lib/ship/digest/advisory/advisories.mjs';
 import { formatShipQueue, readShipQueue } from '../lib/ship/queue/status.mjs';
 import { reportShipRuntimeProvenance } from '../lib/ship/runtime-provenance.mjs';
 import { runManagedPackagedScript, runPackagedScriptQuiet, } from '../lib/ship/run-packaged-script.mjs';

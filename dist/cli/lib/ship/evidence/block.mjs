@@ -2,7 +2,7 @@
 // caller or another tool; ship only ever replaces the span between them.
 import { stripVTControlCharacters } from 'node:util';
 import { z } from 'zod';
-import { codeSpan, fencedJson, MAX_FAILURES, } from '../../baseline-status/regression-evidence.mjs';
+import { codeSpan, fencedJson, MAX_FAILURES, } from '../../baseline-status/regression/evidence.mjs';
 import { EVIDENCE_ABSTENTIONS, EVIDENCE_STATUSES, } from './outcome.mjs';
 export const EVIDENCE_BEGIN = '<!-- devkit:evidence:begin -->';
 export const EVIDENCE_END = '<!-- devkit:evidence:end -->';

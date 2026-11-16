@@ -1,7 +1,7 @@
 /** Quote grounding: a finding blocks only if its OFFENDING quote is in the cited file and part of this
  * change, and its VIOLATION quotes a rule from a CLAUDE.md that governs that file. */
 import { execFileSync } from 'node:child_process';
-import { parsePatchHunks } from '../../comment-firewall/patch.mjs';
+import { parsePatchHunks } from '../../comment-firewall/staged/patch.mjs';
 import { nameStatusRecords, renamesFrom } from '../../ratchets/git-index.mjs';
 import { countLines } from '../../ratchets/size-line-authority.mjs';
 import { ancestorDirs } from '../claude-md.mjs';

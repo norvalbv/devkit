@@ -15,7 +15,7 @@ import { UNHANDLED_REPORTER } from '../../../gate-engine/coverage/failures.mjs';
 import { UNHANDLED_NAME, unhandledKey, } from '../../../gate-engine/coverage/unhandled-reporter.mjs';
 import { resolveVitest, runVitest } from '../../../gate-engine/coverage/vitest-cli.mjs';
 import { writeFileAtomic } from '../atomic-write.mjs';
-import { boundedText } from './regression-evidence.mjs';
+import { boundedText } from './regression/evidence.mjs';
 /**
  * Every run writes into its OWN directory under here and nothing is ever published to a shared path.
  *

@@ -1,9 +1,9 @@
 import { failLine, writeGateReason } from '../deterministic/reason.mjs';
 import { lineAnchors } from '../markdown/referenced-paths.mjs';
 import { detectChangedComments, PARAGRAPH_CHANGED_LINE_LIMIT } from './detect.mjs';
-import { emptyInventory } from './inventory.mjs';
-import { recordShown, shownAnchors } from './shown.mjs';
-import { emitCommentBudget } from './telemetry.mjs';
+import { emptyInventory } from './findings/inventory.mjs';
+import { recordShown, shownAnchors } from './findings/shown.mjs';
+import { emitCommentBudget } from './findings/telemetry.mjs';
 const defaults = {
     detect: detectChangedComments,
     shown: shownAnchors,

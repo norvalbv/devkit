@@ -39,7 +39,9 @@ import { exitGate, failLine } from '../deterministic/reason.mjs';
 import { ALLOWLIST_CLI, loadAllowlist, saveAllowlist } from './allowlist-io.mjs';
 import { flagReader } from './argv.mjs';
 import { loadChangedSet } from './changed-files.mjs';
-import { DEFAULT_DECAY_DAYS, isExpired } from './decay.mjs';
+import { isExpired } from './decay.mjs';
+import { cloneRow, lapsedNote, loc } from './clones/clone-format.mjs';
+import { IMPORT_IGNORE_PATTERNS } from './clones/import-ignore-patterns.mjs';
 import { JSCPD_OWN_ROOT, jscpdVersionMismatch, resolveJscpdBin } from './jscpd-bin.mjs';
 // Resolve config against the consumer cwd (W-3). Scan roots, allowlist, jscpd cwd all key off it.
 const cfg = resolveGuardConfig(process.cwd());
@@ -181,35 +183,6 @@ export function relPath(f) {
     }
     return path;
 }
-/**
- * Import/re-export declarations are excluded from clone detection AT THE TOKENIZER, via jscpd's
- * `--ignore-pattern` (each entry becomes an ignore token rule in the format grammar; matched
- * text never enters any fragment). Two modules using the same shared libs are FORCED into
- * identical, linter-sorted import preambles — the module system working, not copy-paste debt —
- * and a big enough preamble clears the min-tokens floor on its own, false-blocking sibling
- * files. Removing imports up front gives the clean semantic "clones are measured over
- * non-import code": nothing can ride a preamble over the token floor, and nothing real can hide
- * behind one. (A post-hoc fragment classifier was tried first; six reviewer-verified holes —
- * ratio leaks, dynamic import(...), quote-terminated statements, import attributes — showed
- * that design to be unfixable. See the gate-contract tests.)
- *
- * Each pattern is bounded so it can never span arbitrary code: single-line forms forbid `\n`,
- * the multi-line named form crosses lines only inside `{...}` and requires the `} from '...'`
- * closer. Dynamic `import(...)` is runtime code and deliberately matches none of them. jscpd's
- * CLI comma-splits this option, so patterns must stay comma-free. Unmatched exotic shapes
- * (import attributes, default+named multi-line) fall through to normal tokenization — the safe
- * direction: worst case a clone REPORTS and the allowlist is the remedy, never the reverse.
- */
-export const IMPORT_IGNORE_PATTERNS = [
-    // Named / namespace-in-braces, incl. multi-line specifier lists: import [type] { ... } from 'x';
-    String.raw `import\s*(type\s+)?\{[^}]*\}\s*from\s*['"][^'"]+['"];?`,
-    // Default / namespace, single-line only: import foo from 'x'; import * as ns from 'x';
-    String.raw `import\s+(type\s+)?[\w$*][^\n]*?from\s*['"][^'"]+['"];?`,
-    // Side-effect: import 'x';
-    String.raw `import\s*['"][^'"]+['"];?`,
-    // Re-export barrels: export { a } from 'x'; / export * from 'x';
-    String.raw `export\s*(\{[^}]*\}|\*)\s*from\s*['"][^'"]+['"];?`,
-];
 /** Stable key: hash the fragment with whitespace collapsed so reformatting
  * doesn't change the key, but real code changes do. */
 export function hashFragment(fragment) {
@@ -280,21 +253,6 @@ function findIgnoreMarkers(paths, changed) {
         .flatMap((file) => readFileSync(resolve(repoRoot, file), 'utf8')
         .split('\n')
         .flatMap((text, i) => (text.includes(IGNORE_MARKER) ? [{ file, line: i + 1 }] : [])));
-}
-const loc = (c, side) => {
-    const v = c[side];
-    return typeof v === 'number' ? v : v.line;
-};
-const cloneRow = (c) => `  ${String(c.lines).padStart(3)}L  ${c.fragmentHash}  ${c.fileA}:${loc(c, 'startA')} <> ${c.fileB}:${loc(c, 'startB')}${c.kind === 'similar' ? `  (similar ${c.similarity})` : ''}`;
-const filePairKey = (a, b) => [a, b].sort().join('\0');
-/** Provenance of a lapsed approval, so a re-approval re-judges the original reason. */
-function lapsedNote(c, e) {
-    const lifetime = e.decayDays === undefined
-        ? `no lifetime recorded (${DEFAULT_DECAY_DAYS}-day default)`
-        : `${e.decayDays}-day lifetime`;
-    const moved = e.fileA && e.fileB && filePairKey(e.fileA, e.fileB) !== filePairKey(c.fileA, c.fileB);
-    const where = moved ? ` — approved for ${e.fileA} <> ${e.fileB}` : '';
-    return `approved ${e.date}, ${lifetime}${where}: "${e.description || 'no reason recorded'}"`;
 }
 // ── CLI ───────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);

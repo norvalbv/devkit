@@ -1,8 +1,8 @@
-import { branchNarration } from './advisories.mjs';
-import { groupAdvisories } from './advisory-rows.mjs';
+import { branchNarration } from './advisory/advisories.mjs';
+import { groupAdvisories } from './advisory/advisory-rows.mjs';
 import { COMPLETENESS, classify } from './event-rows.mjs';
 import { oneLine, textOf } from './fields.mjs';
-import { withRecurrence } from './recurrence.mjs';
+import { withRecurrence } from './trend/recurrence.mjs';
 import { scanBackward } from './tail.mjs';
 import { waivedRows } from './waived.mjs';
 /** The ship_attempt row opens this attempt's span, so finding it bounds the backward read exactly. */
