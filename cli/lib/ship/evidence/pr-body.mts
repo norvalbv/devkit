@@ -2,6 +2,7 @@
 // so the upsert re-reads after writing and refuses once the PR head is no longer the evidence head.
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
+import { carryEvidenceBlock } from './block.mts';
 
 const GH_TIMEOUT_MS = 60_000;
 /** Uploads of a few MB each can take a while on a slow link; this bounds one `--attach` call. */
@@ -50,6 +51,23 @@ export function writeBodyAttaching(repo: string, pr: string, dir: string, files:
   }
 }
 
+/** Rewrite the body from a fresh read each attempt; `edit` returns null once the head has moved. */
+function rewriteBody(
+  repo: string,
+  pr: string,
+  edit: (pull: PullState) => string | null,
+): PublishResult {
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    const pull = readPull(repo, pr);
+    const next = edit(pull);
+    if (next === null) return 'head-moved';
+    if (next === pull.body) return 'unchanged';
+    writeBody(repo, pr, next);
+    if (readPull(repo, pr).body.trimEnd() === next.trimEnd()) return 'written';
+  }
+  return 'contended';
+}
+
 /** Apply `edit` while the PR head is still `head`; a lost concurrent write is retried, bounded. */
 export function publishBody(
   repo: string,
@@ -57,13 +75,10 @@ export function publishBody(
   head: string,
   edit: (body: string) => string,
 ): PublishResult {
-  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-    const pull = readPull(repo, pr);
-    if (pull.headRefOid !== head) return 'head-moved';
-    const next = edit(pull.body);
-    if (next === pull.body) return 'unchanged';
-    writeBody(repo, pr, next);
-    if (readPull(repo, pr).body.trimEnd() === next.trimEnd()) return 'written';
-  }
-  return 'contended';
+  return rewriteBody(repo, pr, (pull) => (pull.headRefOid === head ? edit(pull.body) : null));
+}
+
+/** Replace the caller-authored text and keep the PR's evidence block; a failed read writes nothing. */
+export function replaceCallerText(repo: string, pr: string, caller: string): PublishResult {
+  return rewriteBody(repo, pr, (pull) => carryEvidenceBlock(caller, pull.body));
 }
