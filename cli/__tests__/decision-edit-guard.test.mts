@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { decide, renderOutput } from '../../agents-hooks/decision-edit-guard.mjs';
+import { cursorPayload } from './_cursor-payloads.mts';
 import { mainWithWorktree } from './_worktree-fixture.mts';
 
 const HOOK = fileURLToPath(new URL('../../agents-hooks/decision-edit-guard.mjs', import.meta.url));
@@ -17,11 +18,11 @@ beforeEach(() => {
 
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-const payload = (toolName: string, filePath: string, cursor = false) => ({
+const payload = (toolName: string, filePath: string) => ({
   tool_name: toolName,
   tool_input: { file_path: filePath },
   cwd: root,
-  ...(cursor ? { cursor_version: '3.12.10' } : { hook_event_name: 'PreToolUse' }),
+  hook_event_name: 'PreToolUse',
 });
 
 describe('decision-edit-guard path policy', () => {
@@ -35,20 +36,12 @@ describe('decision-edit-guard path policy', () => {
     },
   );
 
-  it('honours a custom decisionsDir and Cursor path-shaped input', () => {
+  it('honours a custom decisionsDir', () => {
     writeFileSync(
       join(root, 'guard.config.json'),
       JSON.stringify({ decisionsDir: 'architecture/records' }),
     );
-    const reason = decide(
-      {
-        tool_name: 'Write',
-        tool_input: { path: 'architecture/records/new.md' },
-        cwd: root,
-        cursor_version: '3.12.10',
-      },
-      root,
-    );
+    const reason = decide(cursorPayload('write-create', root, 'architecture/records/new.md'), root);
     expect(reason).toContain('architecture/records');
   });
 
@@ -97,6 +90,47 @@ describe('decision-edit-guard path policy', () => {
   });
 });
 
+describe('decision-edit-guard on Cursor IDE payloads', () => {
+  it.each(['write-create', 'write-edit', 'delete'] as const)(
+    'denies a %s aimed at a decision record and allows the same call elsewhere',
+    (name) => {
+      expect(decide(cursorPayload(name, root, 'docs/decisions/axis.md'), root)).toContain(
+        'guard-decisions add',
+      );
+      expect(decide(cursorPayload(name, root), root)).toBeNull();
+    },
+  );
+
+  it('denies a Write and a Delete whose tool_input arrives as a JSON params string', () => {
+    for (const name of ['write-create', 'delete'] as const) {
+      const input = cursorPayload(name, root, 'docs/decisions/axis.md');
+      const stringified = { ...input, tool_input: JSON.stringify(input.tool_input) };
+      expect(decide(stringified, root)).not.toBeNull();
+    }
+  });
+
+  it('fails open on a tool_input string that is not a JSON object', () => {
+    const input = cursorPayload('delete', root, 'docs/decisions/axis.md');
+    for (const tool_input of ['{"file_path":', 'null', 'docs/decisions/axis.md']) {
+      expect(decide({ ...input, tool_input }, root)).toBeNull();
+    }
+  });
+
+  it('answers a stringified Delete on stdout with the Cursor denial', () => {
+    const input = cursorPayload('delete', root, 'docs/decisions/axis.md');
+    const out = spawnSync(process.execPath, [HOOK], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_PROJECT_DIR: root },
+      input: JSON.stringify({ ...input, tool_input: JSON.stringify(input.tool_input) }),
+    }).stdout;
+    const parsed = JSON.parse(out);
+    expect(parsed.permission).toBe('deny');
+    expect(parsed.agent_message).toContain('guard-decisions add');
+    expect(parsed.hookSpecificOutput).toBeUndefined();
+  });
+});
+
 describe('decision-edit-guard in a project-config-root session', () => {
   it('guards the decisions directory of the worktree the payload cwd names', () => {
     // CLAUDE_PROJECT_DIR stays on the main checkout while the agent works in a linked worktree.
@@ -140,7 +174,7 @@ describe('decision-edit-guard vendor adapters', () => {
 
   it('emits Cursor preToolUse denial JSON', () => {
     const reason = 'blocked';
-    expect(renderOutput(payload('Write', 'docs/decisions/a.md', true), reason)).toEqual({
+    expect(renderOutput(cursorPayload('write-create', root), reason)).toEqual({
       permission: 'deny',
       user_message: reason,
       agent_message: reason,

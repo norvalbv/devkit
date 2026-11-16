@@ -13,6 +13,7 @@ import {
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { cursorPayload } from './_cursor-payloads.mts';
 import { rootRegistry } from './_helpers.mts';
 import { mainWithWorktree } from './_worktree-fixture.mts';
 
@@ -233,8 +234,8 @@ describe('anti-slop-preflight.sh', () => {
 
   it('reads the Cursor afterFileEdit mirror, whose payload is spaced JSON with a top-level file_path', () => {
     const { root, log } = repo('fail');
-    const file = write(root, 'src/a.ts');
-    const cursor = JSON.stringify({ conversation_id: 'c1', file_path: file, edits: [] }, null, 2);
+    write(root, 'src/a.ts');
+    const cursor = JSON.stringify(cursorPayload('after-file-edit', root, 'src/a.ts'), null, 2);
     expect(run(root, cursor).status).toBe(2);
     expect(argv(log).at(-1)).toBe('src/a.ts');
   });

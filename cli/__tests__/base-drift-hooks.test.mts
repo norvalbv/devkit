@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { cursorPayload } from './_cursor-payloads.mts';
 import { mainWithWorktree } from './_worktree-fixture.mts';
 
 const BRIEF = fileURLToPath(new URL('../../agents-hooks/base-drift-brief.mjs', import.meta.url));
@@ -186,20 +187,23 @@ describe('base-drift-brief (PreToolUse)', () => {
     }
   });
 
-  it("answers Cursor in ITS envelope, not Claude's, or the advisory is dropped", () => {
+  it("answers a Cursor IDE Write in Cursor's additional_context, the field it reads on an allow", () => {
     stubDevkit(payload());
-    const raw = runHook(BRIEF, {
-      cursor_version: '1.0',
-      tool_name: 'Write',
-      session_id: 'cursor-1',
-      tool_input: { path: 'a.mts' },
-    });
-    const parsed = JSON.parse(raw);
-    expect(parsed.agent_message).toBe('EDIT TEXT');
+    const parsed = JSON.parse(runHook(BRIEF, cursorPayload('write-edit', root, 'a.mts')));
+    expect(parsed.additional_context).toBe('EDIT TEXT');
+    // `agent_message` reaches the Cursor agent only when the call is denied.
+    expect(parsed.agent_message).toBeUndefined();
     expect(parsed.hookSpecificOutput).toBeUndefined();
     // Never a permission verdict: `deny` would block an edit over an advisory, and `allow` would
     // strip the user's own permission prompts.
     expect(parsed.permission).toBeUndefined();
+  });
+
+  it('reads a Cursor Write whose tool_input arrives as a JSON params string', () => {
+    stubDevkit(payload());
+    const input = cursorPayload('write-create', root, 'a.mts');
+    const raw = runHook(BRIEF, { ...input, tool_input: JSON.stringify(input.tool_input) });
+    expect(JSON.parse(raw).additional_context).toBe('EDIT TEXT');
   });
 
   it('finds a MultiEdit-shaped path nested below the top level', () => {
@@ -367,6 +371,15 @@ describe('base-drift-session (SessionStart)', () => {
     stubDevkit(payload());
     expect(context(runHook(SESSION, start()))).toBe('SESSION TEXT');
     expect(runHook(SESSION, start())).toBe('');
+  });
+
+  it('answers a Cursor sessionStart (a Claude settings hook Cursor imports) in additional_context', () => {
+    stubDevkit(payload());
+    const parsed = JSON.parse(
+      runHook(SESSION, { ...start('cursor-s'), cursor_version: '3.24.18' }),
+    );
+    expect(parsed.additional_context).toBe('SESSION TEXT');
+    expect(parsed.agent_message).toBeUndefined();
   });
 
   it('briefs on an UNKNOWN source rather than assuming context survived', () => {

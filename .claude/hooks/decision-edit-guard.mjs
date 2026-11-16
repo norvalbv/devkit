@@ -15,6 +15,8 @@ import { pathToFileURL } from "node:url";
 
 const DEFAULT_DECISIONS_DIR = "docs/decisions";
 const MUTATING_TOOLS = new Set(["Edit", "Write", "MultiEdit", "Delete"]);
+// Claude and Cursor send `file_path`. The other keys stay, because a missed key lets an edit
+// through silently, while an extra key costs nothing.
 const PATH_KEYS = new Set(["file_path", "path", "target_file", "target_path"]);
 
 function configuredDir(root, env = process.env) {
@@ -33,6 +35,15 @@ function configuredDir(root, env = process.env) {
       : null;
   } catch {
     return null;
+  }
+}
+
+/** The tool input as an object: Cursor documents some tools' `tool_input` as a JSON params string. */
+function toolInputOf(input) {
+  try {
+    return JSON.parse(input?.tool_input);
+  } catch {
+    return input?.tool_input;
   }
 }
 
@@ -115,7 +126,7 @@ export function decide(input, roots = guardedRoots(input), env = process.env) {
   try {
     const toolName = input?.tool_name;
     if (!MUTATING_TOOLS.has(toolName)) return null;
-    const paths = collectPaths(input?.tool_input);
+    const paths = collectPaths(toolInputOf(input));
     const log = [roots].flat().map((root) => blockedLog(root, paths, env)).find(Boolean);
     if (!log) return null;
     return (
