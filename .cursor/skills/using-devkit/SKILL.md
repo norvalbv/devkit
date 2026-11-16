@@ -230,6 +230,13 @@ devkit command.
   A whole-file percentage on a large existing file mostly measures code your change never touched,
   so 40% there can be 80%+ of what you added. Run `devkit coverage-run` first; the report names the
   uncovered added lines, which is where any extra test belongs — not padding the rest of the file.
+- **A new test must catch a failure no other test catches — check with `devkit test-redundancy`.**
+  Run it after your last test edit, before you ship. `not caught` lines are planted bugs on lines
+  you changed that no test failed on: add or strengthen a test there, or note why the change cannot
+  matter. That is the stronger signal. `redundant` tests are a review prompt, never a deletion
+  order: two tests that catch the same failures are both listed, so review each on its own, delete
+  one, then run it again. Keep a test that guards data or a removal, and state that guard.
+  `not judged` is never a pass.
 - **Coverage gate in diff scope (`"scope": "diff"` in `guard.config.json`): run only your tests.**
   `devkit coverage-run <your test files>` takes seconds and is all the gate needs; it blocks on
   added lines that ran under none of them, and on a source file those tests never loaded. Re-run it
