@@ -254,6 +254,15 @@ export const HOOK_REGISTRATIONS: Record<string, HookRegistration[]> = {
       matcher: 'Edit|Write|MultiEdit',
       command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/anti-slop-preflight.sh"',
     },
+    // Bash writes are found through the payload's duration_ms, which only Claude sends. The flag also
+    // keeps the command distinct: one command under two matchers of an event reads as a moved one.
+    {
+      registrationId: 'anti-slop:preflight-bash',
+      event: 'PostToolUse',
+      matcher: 'Bash',
+      command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/anti-slop-preflight.sh" --bash-writes',
+      providers: ['claude'],
+    },
   ],
   // comments: the edit-time preview of guard-comments, owned by that guard. Advisory only.
   comments: [

@@ -58,6 +58,11 @@ describe('devkit init --anti-slop', () => {
           entry.startsWith('Edit|Write|MultiEdit::') && entry.includes(ANTI_SLOP_PREFLIGHT_HOOK),
       ),
     ).toBe(true);
+    expect(
+      postToolUse(root).some(
+        (entry) => entry.startsWith('Bash::') && entry.includes(ANTI_SLOP_PREFLIGHT_HOOK),
+      ),
+    ).toBe(true);
   });
 
   it('is absent without anti-slop, even with the agent-hook bundle on', () => {
@@ -74,6 +79,7 @@ describe('devkit init --anti-slop', () => {
     if (!existsSync(cursorHooks)) return;
     const hooks = readJson(root, '.cursor/hooks.json').hooks ?? {};
     expect(JSON.stringify(hooks.afterFileEdit ?? [])).toContain(ANTI_SLOP_PREFLIGHT_HOOK);
+    expect(JSON.stringify(hooks.afterShellExecution ?? [])).not.toContain(ANTI_SLOP_PREFLIGHT_HOOK);
   });
 
   it('removes the script and registration when anti-slop is later deselected', () => {
