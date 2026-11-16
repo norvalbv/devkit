@@ -10,6 +10,7 @@ import {
   artifactLine,
   BYPASS_REMEDY,
   canonicalPath,
+  changedRunHint,
   classifier,
   emitProvenance,
   listPaths,
@@ -31,8 +32,6 @@ import {
   readArtifact,
 } from './provenance.mts';
 
-const RERUN_HINT =
-  '   Measure them: `devkit coverage-run <test files that exercise them>` (seconds, not a full run).';
 const REPO_KEYS = ['statements', 'functions', 'branches', 'lines'] as const;
 
 // Only the fields lineHits reads; a wrong shape here is corrupt data, never a crash or a pass.
@@ -132,21 +131,21 @@ export function addedLineVerdict(covered: number, total: number, unmeasured: num
   };
 }
 
-function failAbsent(changed: string[], cwd: string, top: string): number {
+function failAbsent(changed: string[], cwd: string, top: string, head: string): number {
   failLine(
     `🚫 Coverage gate FAILED — no coverage data (${COVERAGE_FILE} absent) for added lines in:`,
   );
   for (const line of listPaths(changed, cwd, top)) failLine(line);
-  console.error(RERUN_HINT);
+  for (const line of changedRunHint(head)) console.error(line);
   for (const line of BYPASS_REMEDY) console.error(line);
   for (const line of OPT_OUT_REMEDY) console.error(line);
   return 1;
 }
 
-function failUnreadable(file: string, why: string): number {
+function failUnreadable(file: string, why: string, head: string): number {
   failLine(`🚫 Coverage gate FAILED — ${COVERAGE_FILE} ${why}.`);
   console.error(artifactLine(file));
-  console.error(RERUN_HINT);
+  for (const line of changedRunHint(head)) console.error(line);
   for (const line of BYPASS_REMEDY) console.error(line);
   return 1;
 }
@@ -166,11 +165,13 @@ export function runDiffCoverage(
   const top = repoTop(cwd);
   const classify = diffClassifier(cwd, top);
   let added: Map<string, Set<number>>;
+  let head: string;
   try {
     added = addedProductionLines(top, (p) => classify(p, false) === 'production', [
       '--cached',
       baseTreeish(top),
     ]);
+    head = git(top, ['rev-parse', 'HEAD']).trim();
   } catch {
     failLine(
       '🚫 Coverage gate FAILED — git could not read the staged diff, so the added lines are unknown.',
@@ -188,18 +189,18 @@ export function runDiffCoverage(
 
   const file = resolve(cwd, COVERAGE_FILE);
   if (!existsSync(file))
-    return reviewMode ? reviewNotMeasuredAbsent(cwd) : failAbsent(changed, cwd, top);
+    return reviewMode ? reviewNotMeasuredAbsent(cwd) : failAbsent(changed, cwd, top, head);
   let artifact: ArtifactRead;
   let cov: z.infer<typeof artifactSchema>;
   try {
     artifact = readArtifact(file);
     cov = artifactSchema.parse(JSON.parse(artifact.bytes));
   } catch {
-    return failUnreadable(file, 'is present but not valid coverage data');
+    return failUnreadable(file, 'is present but not valid coverage data', head);
   }
   if (Object.keys(cov).length === 0) {
     const empty = 'measured no files';
-    return reviewMode ? reviewNotMeasuredEmpty(empty) : failUnreadable(file, empty);
+    return reviewMode ? reviewNotMeasuredEmpty(empty) : failUnreadable(file, empty, head);
   }
 
   const provenance = checkProvenance(cwd, resolve(cwd, COVERAGE_DIR), artifact, classify);
@@ -215,7 +216,7 @@ export function runDiffCoverage(
     failLine(`🚫 Coverage gate FAILED — artifact provenance unknown (${provenance.reason}).`);
     console.error(artifactLine(file));
     console.error('   Diff scope reads line numbers, so it needs a run whose tree is known.');
-    console.error(RERUN_HINT);
+    for (const line of changedRunHint(head)) console.error(line);
     for (const line of BYPASS_REMEDY) console.error(line);
     return 1;
   }
@@ -274,9 +275,7 @@ export function runDiffCoverage(
   if (notMeasured.length) {
     failLine(`   Not measured — source files with added lines absent from ${COVERAGE_FILE}:`);
     for (const line of listPaths(notMeasured, cwd, top)) failLine(line);
-    console.error(
-      '   Run a test that imports them, or exclude them from coverage if they hold no code.',
-    );
+    for (const line of changedRunHint(head)) console.error(line);
   }
   console.error(artifactLine(file));
   console.error('   Add tests for the uncovered lines, then `devkit coverage-run <test files>`.');
