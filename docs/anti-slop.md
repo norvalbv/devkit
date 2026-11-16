@@ -52,8 +52,10 @@ HEAD, or no committed baseline (bootstrap and overlay installs), create writes a
 unreadable committed baseline writes with a notice that growth was not pre-checked. The committed baseline is
 **.anti-slop-baseline.json**. Check never edits it: existing entries are allowed, a new
 error-severity finding fails, and a new warning-severity finding is reported without failing.
-Prune refuses to write while a new error exists, removes fixed fingerprints, and reduces the
-count when one of several identical occurrences is fixed. It cannot add a current finding.
+Prune removes fixed fingerprints and reduces the count when one of several identical occurrences
+is fixed. It cannot add a current finding. While a new error exists it keeps fixed debt, but an
+unscoped prune still drops the debt of deleted files, except a finding that reappears new elsewhere:
+that is a rename or move, so run adopt-renames or adopt-relocations first.
 Devkit clean deliberately keeps the baseline because it is the repository's debt record, not
 replaceable Devkit state.
 
