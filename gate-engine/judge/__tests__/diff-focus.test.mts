@@ -46,7 +46,7 @@ describe('filePathOf', () => {
   it.each([
     [git('src/a.ts', '+x'), 'src/a.ts'], // via +++ b/
     ['diff --git a/only.ts b/only.ts\nnew file mode 100644', 'only.ts'], // via diff --git (no +++)
-    ['--- a/z.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-gone', null], // deletion → /dev/null → null
+    ['--- a/z.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-gone', 'z.ts'], // deletion → the deleted name
   ])('path of a segment', (seg, expected) => {
     expect(filePathOf(seg)).toBe(expected);
   });

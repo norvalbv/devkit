@@ -20,12 +20,14 @@ export function gitCached(
   const pathspecs = files.map(
     (file) => `:(top,literal)${normalizeRepositoryFile(file, 'review evidence file')}`,
   );
-  return execFileSync('git', [...config, 'diff', '--cached', ...args, '--', ...pathspecs], {
-    cwd,
-    env: commitIndexEnv(cwd),
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  // Explicit a/ b/ prefixes override a consumer's diff.noprefix / mnemonicPrefix / srcPrefix,
+  // so filePathOf can strip them.
+  const prefixes = ['--src-prefix=a/', '--dst-prefix=b/'];
+  return execFileSync(
+    'git',
+    [...config, 'diff', '--cached', ...prefixes, ...args, '--', ...pathspecs],
+    { cwd, env: commitIndexEnv(cwd), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+  );
 }
 
 function snapshotFile(cwd: string, spec: string): string {
