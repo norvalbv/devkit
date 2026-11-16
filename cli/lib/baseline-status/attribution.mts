@@ -62,6 +62,14 @@ export function compareSummaries(pr: TestReportSummary, base: TestReportSummary)
   return out;
 }
 
+/** Files the base passed that the PR run did not run at all — a collection change hides failures. */
+export function lostFiles(pr: TestReportSummary, base: TestReportSummary): string[] {
+  return Object.keys(base.files).filter((file) => {
+    const outcome = own(pr.files, file);
+    return own(base.files, file) === 'passed' && outcome !== 'passed' && outcome !== 'failed';
+  });
+}
+
 /** `inherited-only` is earned: no new or unsure file, no new failing step or outside-test error, no
  * check left unread. `extraUnhandled` is null when either run did not record its errors. */
 export function attributionToken(
