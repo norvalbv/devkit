@@ -21,6 +21,9 @@ import {
 
 const reshipPath = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
 const originBasePath = fileURLToPath(new URL('../lib/ship/origin-base.sh', import.meta.url));
+const branchPointPath = fileURLToPath(
+  new URL('../lib/ship/base-ancestry/branch-point.sh', import.meta.url),
+);
 const REWRITE_FN_RE = /^rewrite_remote\(\) \{[\s\S]*?^\}/m;
 // A detached auto-gc/maintenance inherits the supervisor's ownership token and is reaped as a leaked
 // tree, turning a finished fetch into 124 (sc-3761). Every supervised remote git call carries this.
@@ -47,6 +50,8 @@ function shipTree(ext: 'mts' | 'mjs') {
 function runBoundedRemoteGit(scriptDir: string, env: NodeJS.ProcessEnv = process.env) {
   const lib = join(scriptDir, 'origin-base.sh');
   copyFileSync(originBasePath, lib);
+  mkdirSync(join(scriptDir, 'base-ancestry'), { recursive: true });
+  copyFileSync(branchPointPath, join(scriptDir, 'base-ancestry/branch-point.sh'));
   return spawnSync(
     '/bin/bash',
     ['-c', `set -eu; . ${JSON.stringify(lib)}; bounded_remote_git ls-remote`],

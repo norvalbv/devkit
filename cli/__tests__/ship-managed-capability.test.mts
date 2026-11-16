@@ -1,4 +1,5 @@
 import {
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -10,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { ANTI_SLOP_MANIFEST_REL, ANTI_SLOP_RULE_IDS } from '../lib/install/anti-slop/constants.mts';
@@ -340,6 +341,11 @@ describe('ship managed capability refresh — degraded environments', () => {
     dirs.push(lone);
     const copy = join(lone, 'prepare-gate-worktree.sh');
     writeFileSync(copy, readFileSync(prepareGateWorktreeScript, 'utf8'));
+    mkdirSync(join(lone, 'prepare-gate-worktree'));
+    copyFileSync(
+      join(dirname(prepareGateWorktreeScript), 'prepare-gate-worktree/node-modules-source.sh'),
+      join(lone, 'prepare-gate-worktree/node-modules-source.sh'),
+    );
 
     const res = spawnSync(
       '/bin/bash',
