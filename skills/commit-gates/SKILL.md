@@ -104,11 +104,11 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   sandbox` applies the same host sandbox as the judge's `codex exec` (Seatbelt on macOS, Landlock on
   Linux), with no model call, and runs the command in your login shell as the judge does. From the
   repo root, a workspace-write (investigating) judge's view is:
-  `r=$(pwd -P) s=$(cd "$(mktemp -d)" && pwd -P); cp AGENTS.md "$s"; (cd "$s" && CODEX_HOME=$(mktemp -d) codex sandbox -c 'default_permissions="devkit_judge"' -c "permissions.devkit_judge.filesystem={\":root\"=\"read\",\":tmpdir\"=\"write\",\":slash_tmp\"=\"write\",\"$s\"=\"write\",\"$r/.claude/.correctness-review.json\"=\"write\"}" -c 'permissions.devkit_judge.network.enabled=false' -- "$SHELL" -lc '<cmd>'); echo "exit $?"`.
+  `r=$(pwd -P) s=$(cd "$(mktemp -d)" && pwd -P); cp AGENTS.md "$s"; (cd "$s" && TMPDIR="$s" TMPPREFIX="$s/zsh" CODEX_HOME=$(mktemp -d) codex sandbox -c 'default_permissions="devkit_judge"' -c "permissions.devkit_judge.filesystem={\":root\"=\"read\",\"$s\"=\"write\",\"$r/.claude/.correctness-review.json\"=\"write\"}" -c 'permissions.devkit_judge.network.enabled=false' -- "$SHELL" -lc '<cmd>'); echo "exit $?"`.
   On macOS, add `--log-denials` after `sandbox` to name each denied operation; Linux has no such
-  flag. A read-only judge runs in the repo root itself: drop the `cd` and both `-c` overrides, and
+  flag. A read-only judge runs in the repo root itself: drop the `cd`, the `TMPDIR`/`TMPPREFIX` settings and both `-c` overrides, and
   pass `-c 'sandbox_mode="read-only"'`. Both modes read the whole disk and have no network.
-  Workspace-write can write only the scratch cwd, `/tmp`, `$TMPDIR` and one checklist state file
+  Workspace-write can write only the scratch cwd (also its temp dir) and one checklist state file
   (above, correctness's; another reviewer's is its own `.claude/.<name>-review.json`). Run the
   bare command, not a pipeline, since a pipe's exit status hides the denial. Cite the output in a
   waive rationale.

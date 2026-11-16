@@ -18,7 +18,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { codexPermissionArgs } from '../codex/permissions.mts';
 import { codexExecArgs, judgeCliFor, NO_TEST_RUNS } from '../codex/result.mts';
 import { prepareCodexSandbox } from '../codex/workspace.mts';
@@ -40,7 +40,7 @@ function fakeCodex(tail = 'echo VERDICT'): string {
   const bin = path.join(dir, 'codex');
   writeFileSync(
     bin,
-    `#!/bin/sh\ncat >/dev/null\nwhile [ $# -gt 0 ]; do [ "$1" = -C ] && S="$2"; shift; done\n{ echo "$S"; echo "$DEVKIT_JUDGE_REPO_ROOT"; ls "$S"; } > '${record}'\n${tail}\n`,
+    `#!/bin/sh\ncat >/dev/null\nwhile [ $# -gt 0 ]; do [ "$1" = -C ] && S="$2"; shift; done\n{ echo "$S"; echo "$DEVKIT_JUDGE_REPO_ROOT"; echo "$TMPDIR"; ls "$S"; } > '${record}'\n${tail}\n`,
   );
   chmodSync(bin, 0o755);
   process.env.GUARD_CODEX_BIN = bin;
@@ -59,10 +59,10 @@ function judgeOpts(timeout = 30000) {
   };
 }
 
-/** What the fake codex saw: its `-C` dir, DEVKIT_JUDGE_REPO_ROOT, and that dir's listing. */
+/** What the fake codex saw: its `-C` dir, DEVKIT_JUDGE_REPO_ROOT, TMPDIR and that dir's listing. */
 function spawned(record: string) {
-  const [cwd, repoEnv, ...rest] = readFileSync(record, 'utf8').split('\n');
-  return { cwd, repoEnv, listing: rest.join('\n') };
+  const [cwd, repoEnv, tmpEnv, ...rest] = readFileSync(record, 'utf8').split('\n');
+  return { cwd, repoEnv, tmpEnv, listing: rest.join('\n') };
 }
 
 beforeEach(() => {
@@ -97,16 +97,53 @@ describe('codex judge argv — workspace confinement', () => {
       'permissions.devkit_judge.network.enabled=false',
     ]);
     expect(codexPermissionArgs(workspace)[3]).toBe(
-      `permissions.devkit_judge.filesystem={":root"="read",":tmpdir"="write",":slash_tmp"="write","/tmp/scratch"="write","${stateFile}"="write"}`,
+      `permissions.devkit_judge.filesystem={":root"="read","/tmp/scratch"="write","${stateFile}"="write"}`,
     );
     expect(cli.argv[cli.argv.length - 1]).toMatch(/^The repository under review is \/work\/repo\./);
     expect(cli.argv[cli.argv.length - 1]).toContain(`read-only to you except ${stateFile}.`);
     expect(cli.argv[cli.argv.length - 1]).toContain(NO_TEST_RUNS);
     expect(cli.argv[cli.argv.length - 1].endsWith('P')).toBe(true);
-    expect(cli.extraEnv).toEqual({ DEVKIT_JUDGE_REPO_ROOT: '/work/repo' });
+    expect(cli.extraEnv).toEqual({
+      DEVKIT_JUDGE_REPO_ROOT: '/work/repo',
+      TMPDIR: '/tmp/scratch',
+      TMPPREFIX: '/tmp/scratch/zsh',
+    });
   });
 
-  it('grants a judge with no checklist only its scratch and the temp dirs', () => {
+  // A checkout under /tmp or $TMPDIR stays writable unless neither default temp root is granted.
+  it('grants neither /tmp nor $TMPDIR to an investigating judge', () => {
+    const profile = judgeCliFor(INVESTIGATING, {}, false, workspace).argv.join(' ');
+    expect(profile).not.toContain(':tmpdir');
+    expect(profile).not.toContain(':slash_tmp');
+  });
+
+  // Codex forwards server env by name from its own env, so a server cannot keep a different value.
+  it('skips an MCP server that redefines a confined env key, and keeps the rest', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const servers = {
+        tmp: { command: 'x', env: { TMPDIR: '/server/tmp' } },
+        root: { command: 'y', env: { DEVKIT_JUDGE_REPO_ROOT: '/elsewhere' } },
+        plain: { command: 'z', env: { TOKEN: 't' } },
+      };
+      const args = [...INVESTIGATING.slice(0, -1), 'Read,mcp__tmp__*,mcp__root__*,mcp__plain__*'];
+      const cli = judgeCliFor(args, servers, false, workspace);
+      expect(cli.mcpInjected).toEqual(['plain']);
+      // A read-only judge redirects nothing, so it must not drop the same servers.
+      expect(judgeCliFor(args, servers, true, workspace).mcpInjected).toEqual([
+        'tmp',
+        'root',
+        'plain',
+      ]);
+      expect(cli.extraEnv).toMatchObject({ TMPDIR: '/tmp/scratch', TOKEN: 't' });
+      expect(cli.extraEnv?.DEVKIT_JUDGE_REPO_ROOT).toBe('/work/repo');
+      expect(err).toHaveBeenCalledWith(expect.stringContaining('mcp env TMPDIR collides'));
+    } finally {
+      err.mockRestore();
+    }
+  });
+
+  it('grants a judge with no checklist only its scratch', () => {
     const cli = judgeCliFor(INVESTIGATING, {}, false, { scratch: '/s', repoRoot: '/work/repo' });
     expect(cli.argv.find((a) => a.startsWith('permissions.'))).not.toContain('/work/repo');
     expect(cli.argv.at(-1)).toContain('Its working tree is read-only to you. ');
@@ -224,6 +261,7 @@ describe('execJudge — scratch lifecycle around a real spawn', () => {
     const run = spawned(record);
     expect(run.cwd).toMatch(/devkit-judge-/);
     expect(run.repoEnv).toBe(repo);
+    expect(run.tmpEnv).toBe(run.cwd);
     expect(run.listing).toContain('AGENTS.md');
     expect(existsSync(run.cwd)).toBe(false);
   });
@@ -235,6 +273,8 @@ describe('execJudge — scratch lifecycle around a real spawn', () => {
     const killed = fakeCodex("trap '' TERM\nsleep 5");
     expect(await execJudgeAsync(judgeOpts(500))).toBeNull();
     expect(existsSync(spawned(killed).cwd)).toBe(false);
+    // The async twin spawns with the same env: its shell's temp dir is that scratch too.
+    expect(spawned(killed).tmpEnv).toBe(spawned(killed).cwd);
   });
 });
 
@@ -286,7 +326,7 @@ describe('the commit-gates skill replay of a workspace-write judge sandbox', () 
     mkdirSync(bin);
     writeFileSync(
       path.join(bin, 'codex'),
-      `#!/bin/sh\n{ pwd -P; ls -A "$CODEX_HOME" | wc -l; ls; for a; do echo "ARG:$a"; done; } > '${record}'\n`,
+      `#!/bin/sh\n{ pwd -P; ls -A "$CODEX_HOME" | wc -l; ls; echo "TMP:$(cd "$TMPDIR" && pwd -P) $TMPPREFIX"; for a; do echo "ARG:$a"; done; } > '${record}'\n`,
     );
     chmodSync(path.join(bin, 'codex'), 0o755);
     const out = execFileSync('bash', ['-c', line.replace('<cmd>', 'true')], {
@@ -306,6 +346,16 @@ describe('the commit-gates skill replay of a workspace-write judge sandbox', () 
     expect(judge.join(' ')).toContain(codexPermissionArgs(view).join(' '));
     expect(args.slice(-3)).toEqual(['/bin/sh', '-lc', 'true']);
     expect(out.trim()).toBe('exit 0');
+  });
+
+  it('points the shell temp dirs into the scratch cwd, as the judge env does', () => {
+    const [cwd, , ...rest] = replay().seen;
+    const tmp = rest
+      .find((l) => l.startsWith('TMP:'))
+      ?.slice(4)
+      .split(' ');
+    expect(tmp?.[0]).toBe(cwd);
+    expect(tmp?.[1]).toMatch(/\/zsh$/);
   });
 
   it('runs from a scratch cwd holding the root AGENTS.md, with an empty CODEX_HOME', () => {
