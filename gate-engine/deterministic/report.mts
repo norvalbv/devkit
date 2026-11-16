@@ -43,6 +43,7 @@ export function reportFailures(
   fails: readonly GateFailure[],
   failed: readonly FailedGate[],
   rechecks: string[],
+  notRun: readonly string[] = [],
 ): void {
   // A gate that never reached a verdict (`(unexpected:rc)`, `(could-not-run)`) is not a `fail`.
   // `family` lets a reader join this per-gate chain to the family-level blocked_gate.
@@ -57,7 +58,14 @@ export function reportFailures(
   }
   console.error(`✗ deterministic gates failed:${fails.map((f) => ` ${f.label}`).join('')}`);
   for (const line of reasonReport(fails)) console.error(line);
-  console.error('   Fix every failure above together, then commit once.');
+  if (notRun.length > 0) {
+    console.error(
+      `   NOT run (an earlier gate failed): ${notRun.join(' ')} — they run on the next attempt once the failures above are fixed.`,
+    );
+    console.error('   Fix every failure above together, then commit again.');
+  } else {
+    console.error('   Fix every failure above together, then commit once.');
+  }
   console.error('   On commit or ship, decision and reviewer gates run only after these pass.');
   printRecheckFooter(rechecks);
   if (fails.some((f) => f.label.startsWith('structure-lint'))) {

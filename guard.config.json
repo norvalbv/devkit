@@ -5,10 +5,13 @@
   "indexPath": ".search-code/index.db",
   "//generated": "Paths ship's three-way staging abort points at a generator instead of a hand-merge (sc-2770). .devkit/*-manifest.json are built-in defaults.",
   "generated": [{ "glob": "dist/**", "command": "bun run build" }],
-  "//extraGates": "related-tests runs the tests vitest relates to the staged paths ({staged}), so a test the change breaks blocks before any AI judge runs. typecheck covers e2e/, which no test run does, so an export only an e2e file imports cannot vanish unseen.",
+  "//extraGates": "related-tests runs the tests vitest relates to the staged paths ({staged}), so a test the change breaks blocks before any AI judge runs. It is afterGreen: it runs last, and only when every other deterministic gate passed, because a fix to an earlier failure changes the staged tree and discards its verdict. typecheck covers e2e/, which no test run does, so an export only an e2e file imports cannot vanish unseen.",
   "extraGates": {
     "git-pathspec": "node scripts/git-pathspec-check.mts",
-    "related-tests": "node cli/lib/husky/gate-policy/related-tests.mts {staged}",
+    "related-tests": {
+      "cmd": "node cli/lib/husky/gate-policy/related-tests.mts {staged}",
+      "afterGreen": true
+    },
     "typecheck": "bun run typecheck"
   },
   "//comments": "devkit is open source: a comment citing a private Shortcut ticket, an autonomous report id or a decision record means nothing to an outside reader, so guard-comments blocks changed comments that do.",

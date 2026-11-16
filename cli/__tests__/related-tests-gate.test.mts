@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { configExtraGates } from '../../gate-engine/deterministic/command-gates.mts';
 import {
   forcedTests,
   noteUnmapped,
@@ -297,5 +298,16 @@ describe('related-tests entrypoint', () => {
     const r = spawnSync(process.execPath, [GATE, ...staged], { cwd: repo, encoding: 'utf8' });
     expect(r.stdout).toContain(', 1 forced');
     expect(r.stdout).not.toContain('not run here');
+  });
+});
+
+describe('self-host registration', () => {
+  it("devkit's guard.config.json declares related-tests afterGreen, so a cheap failure skips it", () => {
+    const root = join(import.meta.dirname, '..', '..');
+    expect(configExtraGates(root)).toContainEqual({
+      label: 'related-tests',
+      cmd: 'node cli/lib/husky/gate-policy/related-tests.mts {staged}',
+      afterGreen: true,
+    });
   });
 });
