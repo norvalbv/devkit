@@ -18,8 +18,8 @@ import {
   resolveToStaged,
   type ResultsFile,
 } from './labels.mts';
-import { identityByPath, postImagePathOf } from '../../../lens/chunk.mts';
-import { splitDiffByFile } from '../../../../judge/diff-focus.mts';
+import { identityByPath } from '../../../lens/chunk.mts';
+import { filePathOf, splitDiffByFile } from '../../../../judge/diff-focus.mts';
 import { silenceBenchTelemetry } from './bench-args.mts';
 
 // The bench is not a gate run: silence the telemetry sink for the verifier's judge calls too.
@@ -141,10 +141,10 @@ const hunkFor = (diffSha: string, file: string): string | null => {
   if (!diff) return null;
   // Same ambiguity-safe resolution as scoring: a mention that does not uniquely identify one
   // changed file gets no hunk rather than a same-basename sibling's hunk. Resolve segments with
-  // postImagePathOf — the SAME rename-aware, quote-aware rule identityByPath (Line 88's
-  // stagedPaths) uses, so the two closed sets of paths never disagree on a rename-only segment.
+  // filePathOf — the SAME rule identityByPath (Line 88's stagedPaths) uses, so the two closed
+  // sets of paths never disagree on a rename-only segment.
   const segs = splitDiffByFile(diff);
-  const paths = segs.map((seg) => postImagePathOf(seg));
+  const paths = segs.map((seg) => filePathOf(seg));
   const resolved = resolveToStaged(
     file,
     paths.filter((p): p is string => p !== null),

@@ -95,6 +95,7 @@
   "dependencies": {
     "@clack/prompts": "^1.8.1",
     "@oxlint/plugins": "1.78.0",
+    "diff": "^9.0.0",
     "@typescript-eslint/parser": "^8.72.0",
     "es-module-lexer": "^2.3.2",
     "eslint": "^10.13.0",
