@@ -56,7 +56,9 @@ not apply: review on the checklist alone and do not go looking for Targets yours
 ## 1. Read skill for detailed rules:
 - `.claude/skills/frontend-security/SKILL.md`
 
+<!-- interactive-only -->
 SCRIPT=".claude/skills/frontend-security/scripts/checklist.mjs"
+<!-- /interactive-only -->
 
 ## 2. Generate the checklist
 ```bash
