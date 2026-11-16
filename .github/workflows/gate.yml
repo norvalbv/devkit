@@ -37,6 +37,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The runner's default node is not the version package.json engines allows; bun runs PATH node.
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
