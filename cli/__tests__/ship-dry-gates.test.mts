@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -13,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import {
   buildAndRun,
+  dropWorktree,
   localBranchExists,
   remoteBranchExists,
   reviewerTimeoutEnv,
@@ -198,44 +200,102 @@ echo DRY_GATES_LOCKED_OK`,
   });
 });
 
-describe('ship-branch.sh — --dry-gates decision-smell advisory', () => {
+describe('ship — decision-smell advisory before the gate chain', () => {
   const BIG = `${Array.from({ length: 150 }, (_, i) => `line ${i}`).join('\n')}\n`;
+  const SMELL = 'decision smell (regex only, not a verdict): legacy-deletion — old.ts';
+  const DECISIONS_HOOK = '# devkit:guard-decisions\necho GATE_START >&2';
+  const reshipPath = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
+  const count = (text: string) => text.split(SMELL).length - 1;
 
-  /** Commits a 150-line file, then rehearses its deletion: the legacy-deletion smell. */
-  function rehearseDeletion(hookBody: string) {
+  /** Commits a 150-line file, deletes it, and ships the deletion: the legacy-deletion smell. */
+  function shipDeletion(
+    hookBody: string,
+    args: string[],
+    env: Record<string, string> = {},
+    prepare: (dir: string) => void = () => {},
+  ) {
     const seeded = seedShipRepo({ hookBody });
+    prepare(seeded.dir);
     writeFileSync(join(seeded.dir, 'old.ts'), BIG);
     seeded.git(['add', 'old.ts']);
     seeded.git(['commit', '-q', '--no-verify', '-m', 'old module']);
-    seeded.git(['rm', '-q', '--cached', 'old.ts']);
     rmSync(join(seeded.dir, 'old.ts'));
     const r = spawnSync(
       '/bin/bash',
-      [scriptPath, 'feat/dry-smell', 'drop old', '--dry-gates', '--', 'old.ts'],
-      { cwd: seeded.dir, input: '', encoding: 'utf8', env: { ...seeded.env, GUARD_NO_LOG: '' } },
+      [scriptPath, 'feat/smell', 'drop old', ...args, '--', 'old.ts'],
+      {
+        cwd: seeded.dir,
+        input: 'b\n',
+        encoding: 'utf8',
+        env: { ...seeded.env, GUARD_NO_LOG: '', GUARD_DECISION_NO_LLM: '', ...env },
+      },
     );
     return { ...seeded, r };
   }
 
-  it('names the smell and its file without the judge, and keeps the exit code', () => {
-    const { r, git } = rehearseDeletion('# devkit:guard-decisions\nexit 0');
+  it('a rehearsal names the smell before the chain and again last, keeping the exit code', () => {
+    const { r, git } = shipDeletion(DECISIONS_HOOK, ['--dry-gates']);
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).toMatch(
-      /decision smell \(regex only — the judge did not run\): legacy-deletion — old\.ts/,
+    expect(r.stderr.indexOf(SMELL)).toBeGreaterThan(-1);
+    expect(r.stderr.indexOf(SMELL)).toBeLessThan(r.stderr.indexOf('GATE_START'));
+    expect(r.stderr.lastIndexOf(SMELL)).toBeGreaterThan(r.stderr.indexOf('GATE_START'));
+    expect(localBranchExists(git, 'feat/smell')).toBe(false);
+  });
+
+  it('a real ship prints it before the chain, once, when the decisions gate rules', () => {
+    const { r, git } = shipDeletion(
+      `${DECISIONS_HOOK}\necho 'decision-gate: judge cleared as ROUTINE' >&2`,
+      [],
+      { SHIP_DRY_RUN: '1' },
     );
-    expect(localBranchExists(git, 'feat/dry-smell')).toBe(false);
-  });
-
-  it('still prints the advisory when a gate blocks the rehearsal', () => {
-    const { r } = rehearseDeletion('# devkit:guard-decisions\necho BLOCKED >&2\nexit 1');
-    expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/legacy-deletion — old\.ts/);
-  });
-
-  it('stays silent when the hook does not run the decisions gate', () => {
-    const { r } = rehearseDeletion('exit 0');
+    dropWorktree(git, r.stderr);
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).not.toMatch(/decision smell/);
+    expect(r.stderr.indexOf(SMELL)).toBeLessThan(r.stderr.indexOf('GATE_START'));
+    expect(count(r.stderr)).toBe(1);
+  });
+
+  it("reads an overlay's git-excluded config, which reaches the gate worktree only once linked", () => {
+    const { r } = shipDeletion(DECISIONS_HOOK, ['--dry-gates'], {}, (dir) => {
+      writeFileSync(join(dir, 'guard.config.json'), '{"decisionsDir": ".devkit/decisions"}\n');
+      writeFileSync(join(dir, '.git/info/exclude'), 'guard.config.json\n.devkit/decisions/\n');
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain(
+      'If it blocks: git cannot confirm .devkit/decisions is stageable here',
+    );
+    expect(r.stderr).not.toContain("pass the record's path");
+  });
+
+  it('is silent under GUARD_NO_LOG and when the hook has no decisions gate', () => {
+    const bypassed = shipDeletion(DECISIONS_HOOK, ['--dry-gates'], { GUARD_NO_LOG: '1' });
+    const noGate = shipDeletion('echo GATE_START >&2', ['--dry-gates']);
+    for (const { r } of [bypassed, noGate]) {
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stderr).not.toContain('decision smell');
+    }
+  });
+
+  it('a --pr re-ship prints it before the chain too', () => {
+    const { dir, env, git } = seedShipRepo({ hookBody: DECISIONS_HOOK });
+    const bare = join(dir, '.origin.git');
+    execFileSync('git', ['init', '-q', '--bare', bare]);
+    git(['remote', 'set-url', 'origin', bare]);
+    writeFileSync(join(dir, 'old.ts'), BIG);
+    git(['add', 'old.ts']);
+    git(['commit', '-q', '--no-verify', '-m', 'old module']);
+    git(['push', '-q', 'origin', 'HEAD:work', 'HEAD:feat/pr']);
+    git(['fetch', '-q', 'origin']);
+    rmSync(join(dir, 'old.ts'));
+    const r = spawnSync('/bin/bash', [reshipPath, 'feat/pr', 'drop old', '--pr', '--', 'old.ts'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1', GUARD_NO_LOG: '', GUARD_DECISION_NO_LLM: '' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr.indexOf(SMELL)).toBeGreaterThan(-1);
+    expect(r.stderr.indexOf(SMELL)).toBeLessThan(r.stderr.indexOf('GATE_START'));
   });
 });
 
