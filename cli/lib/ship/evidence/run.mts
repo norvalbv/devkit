@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
 // Ship's PR-body steps, run by publish-evidence.sh. `budget` sizes the bound, `publish` writes the
-// red/green block, `publish-media` the QA capture, `notes` advisories, `body` cleans caller text.
+// red/green block, `publish-media` the QA capture, `notes` advisories, `body` cleans caller text and
+// adds the UI task item, and `ui-item` adds that item to an open PR whose body this ship did not write.
 import { readFileSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { resolveGuardConfig } from '../../../../gate-engine/config.mts';
@@ -14,8 +16,16 @@ import {
   type PreparedRegressionRepository,
   prepareRegressionRepository,
 } from '../../baseline-status/regression-repository.mts';
+import { git } from '../../../../gate-engine/decisions/git-io.mts';
+import {
+  instruction,
+  UI_EVIDENCE,
+  uiPathReason,
+} from '../../../../gate-engine/ui-evidence/check.mts';
+import { textOf } from '../digest/fields.mts';
 import { telemetrySink } from '../../../../gate-engine/judge/run-context.mts';
-import { readShipEvents } from '../digest/gate-digest.mts';
+import { ATTEMPT, readShipEvents } from '../digest/gate-digest.mts';
+import { readJson } from '../../fs-helpers.mts';
 import { errorMessage } from '../review/shared/common.mts';
 import type { VerdictInput } from '../merge-verdict/ship-change.mts';
 import {
@@ -32,11 +42,13 @@ import { publishBody, type PublishResult, readPull } from './pr-body.mts';
 import { publishMedia, withPrEvidenceLock } from './publish-media.mts';
 import { buildRedCommit, classifyChange, prBase, treeOf } from './red-ref.mts';
 import { noteLines, upsertNotes } from './reviewer-notes.mts';
+import { withUiItem } from './ui-item.mts';
 
 /** Ship waits out a `devkit machine attach` on the same PR, whose upload is bounded at 300 s. */
 const LOCK_WAIT_MS = 330_000;
 
 const REPORT = '.devkit-evidence-report.json';
+const SKIPPED_QUIET = `📸 ${UI_EVIDENCE}: the gates were skipped (an earlier run passed them), so only file paths were checked, and none is a UI file; if this change is visible, add before/after screenshots to the PR`;
 
 interface Produced {
   outcome: EvidenceOutcome;
@@ -251,6 +263,47 @@ function publishNotes(repo: string, pr: string, head: string, replace: boolean):
   console.error(`reviewer notes: ${lines.length} advisory row(s) [PR body ${result}]`);
 }
 
+/** This ship attempt's screenshot reminder, read from its own gate events; null when it was quiet. */
+function uiEvidenceDetail(env: NodeJS.ProcessEnv): string | null {
+  const events = readShipEvents(env.DEVKIT_GATE_EVENTS ?? '', env.DEVKIT_SHIP_ID ?? '');
+  // One ship id can span attempts: only rows after the newest marker are this run's. With no
+  // marker the rows cannot be attributed, and a reminder that cannot tell stays quiet.
+  const opened = events.map((e) => e.type).lastIndexOf(ATTEMPT);
+  const mine = opened < 0 ? [] : events.slice(opened);
+  const rows = mine.filter((e) => e.type === 'advisory_result' && e.gate === UI_EVIDENCE);
+  // A sink row is arbitrary JSON, so a non-string detail reads as no reminder instead of throwing.
+  return textOf(rows[rows.length - 1]?.detail) || null;
+}
+
+/** The reminder a gate-skipped run would have given: the model-free path rule over its commit. */
+function skippedCommitDetail(cwd: string, commit: string): string | null {
+  const paths = git(cwd, ['diff', '--name-only', '-z', `${commit}^`, commit]).split('\0');
+  const reason = uiPathReason(paths.filter(Boolean), resolveGuardConfig(cwd).uiEvidence.paths);
+  return reason ? instruction(reason) : null;
+}
+
+/** Whether the repo installed the ui-evidence guard; a deselected one never reminds. */
+function uiEvidenceSelected(cwd: string): boolean {
+  const record = readJson<{ components?: { guards?: unknown } }>(
+    join(cwd, '.devkit', 'config.json'),
+  );
+  const guards = record?.components?.guards;
+  return Array.isArray(guards) && guards.includes(UI_EVIDENCE);
+}
+
+/** Add the item to the open PR's own body; an item already there, ticked or not, is left alone. */
+function publishUiItem(cwd: string, repo: string, pr: string, skipped: string | undefined): void {
+  if (skipped && !uiEvidenceSelected(cwd)) return;
+  const detail = skipped ? skippedCommitDetail(cwd, skipped) : uiEvidenceDetail(process.env);
+  if (!detail) {
+    if (skipped) console.error(SKIPPED_QUIET);
+    return;
+  }
+  if (publishBody(repo, pr, null, (body) => withUiItem(body, body, detail)) === 'written') {
+    console.error(`📸 ${UI_EVIDENCE}: added the screenshot task item to the PR`);
+  }
+}
+
 function required(values: Record<string, string | undefined>, name: string): string {
   const value = values[name];
   if (!value) throw new Error(`--${name} is required`);
@@ -272,12 +325,19 @@ async function main(argv: string[]): Promise<void> {
     source: { type: 'string' },
     mode: { type: 'string' },
     started: { type: 'string' },
+    'skipped-commit': { type: 'string' },
   } as const;
   const { values } = parseArgs({ args: rest, options, strict: true });
   if (command === 'body') {
     const caller = readFileSync(0, 'utf8');
     const current = values.pr ? readPull(required(values, 'repo'), values.pr).body : '';
-    process.stdout.write(carryEvidenceBlock(caller, current));
+    const body = carryEvidenceBlock(caller, current);
+    process.stdout.write(withUiItem(body, current, uiEvidenceDetail(process.env)));
+    return;
+  }
+  if (command === 'ui-item') {
+    const [cwd, repo, pr] = ['cwd', 'repo', 'pr'].map((name) => required(values, name));
+    publishUiItem(cwd, repo, pr, values['skipped-commit']);
     return;
   }
   if (command === 'publish-media') {
@@ -297,7 +357,7 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
   if (command !== 'publish')
-    throw new Error('usage: run.mts budget <dir> | publish … | publish-media … | notes … | body …');
+    throw new Error('usage: run.mts budget <dir> | publish … | publish-media … | notes … | body … | ui-item …');
   // The step's start, from the shell, so a fallback run after a killed one times the whole step.
   const started = Number(values.started) * 1000;
   const run = {

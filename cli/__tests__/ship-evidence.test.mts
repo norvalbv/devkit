@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { EVIDENCE_BEGIN, readEvidenceBlock, VERDICT_SLOT } from '../lib/ship/evidence/block.mts';
+import { UI_ITEM_BEGIN, UI_ITEM_END } from '../lib/ship/evidence/ui-item.mts';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import {
   dirs,
@@ -32,6 +33,7 @@ const NOTES_END = '<!-- devkit:evidence:notes:end -->';
 /** An evidence block holding only a notes section, as a repo with no evidence config gets. */
 const notesBlock = (bullet: string) =>
   `${EVIDENCE_BEGIN}\n${NOTES_BEGIN}\n${bullet}\n${NOTES_END}\n<!-- devkit:evidence:end -->`;
+const UI_GATE = fileURLToPath(new URL('../../gate-engine/ui-evidence/cli.mts', import.meta.url));
 const VITEST = fileURLToPath(new URL('../../node_modules/vitest/vitest.mjs', import.meta.url));
 const COMMAND = [
   process.execPath,
@@ -66,7 +68,14 @@ if (args[1] === 'create') {
   writeFileSync(env.GH_STATE + '.title', args[args.indexOf('--title') + 1]);
   console.log(url);
 }
-else if (args[1] === 'edit') writeFileSync(env.GH_STATE, readFileSync(0, 'utf8'));
+else if (args[1] === 'edit') {
+  writeFileSync(env.GH_STATE, readFileSync(0, 'utf8'));
+  // GH_CLOBBER: another writer replaces the body right after this edit lands, exactly once.
+  if (env.GH_CLOBBER && !existsSync(env.GH_STATE + '.clobbered')) {
+    writeFileSync(env.GH_STATE + '.clobbered', '');
+    writeFileSync(env.GH_STATE, env.GH_CLOBBER);
+  }
+}
 else if (json.startsWith('title,body') && env.GH_VIEW_FAIL && !existsSync(env.GH_VIEW_FAIL)) {
   if (env.GH_VIEW_FAIL_ONCE) writeFileSync(env.GH_VIEW_FAIL, '');
   process.exit(1);
@@ -273,6 +282,243 @@ describe('devkit ship evidence block', () => {
     expect(rowsOf(repo.sink, 'ship_attempt')).not.toEqual([]);
     expect(rowsOf(repo.sink, 'ship_evidence')).toEqual([]);
   }, 240_000);
+
+  it('a UI ship leaves an unticked screenshot item; re-ships keep its tick and add one when the PR has none', () => {
+    const repo = shipRepo(null, 'feat/ui');
+    // Installed after the seed commit, so only the ship and re-ship run the real reminder.
+    write(repo.dir, {
+      '.husky/_/pre-commit': `#!/bin/sh\n"${process.execPath}" "${UI_GATE}" || true\n`,
+    });
+    write(repo.dir, { 'src/Card.tsx': 'export const Card = 1;\n' });
+
+    const shipped = bash(repo.dir, repo.env, [scriptPath, 'feat/ui', 'feat: card', 'src/Card.tsx']);
+    expect(shipped.status, shipped.stderr).toBe(0);
+    const item = /<!-- devkit:ui-evidence:begin -->\n.*\n<!-- devkit:ui-evidence:end -->/.exec(
+      readFileSync(repo.state, 'utf8'),
+    )?.[0];
+    expect(item).toMatch(/^.*\n- \[ \] 📸 Add before .*UI paths changed: src\/Card\.tsx\n.*$/);
+
+    // The author ticks it; a markdown-only re-ship fires no reminder and must not reset or drop it.
+    const done = item!.replace('- [ ]', '- [x]');
+    writeFileSync(repo.state, `b\n\n${done}\n`);
+    write(repo.dir, { 'docs/note.md': 'note\n' });
+    const reworded = bash(repo.dir, repo.env, [
+      reshipScript,
+      'feat/ui',
+      'feat: card',
+      '--pr',
+      '--body',
+      'reworded',
+      '--',
+      'docs/note.md',
+    ]);
+    expect(reworded.status, reworded.stderr).toBe(0);
+    expect(readFileSync(repo.state, 'utf8')).toBe(`reworded\n\n${done}\n`);
+    expect(done).toContain(UI_ITEM_BEGIN);
+    expect(done).toContain(UI_ITEM_END);
+
+    // Re-ship is the other body writer. The PR holds no item now, so its own reminder adds one.
+    writeFileSync(repo.state, 'reworded\n');
+    write(repo.dir, { 'src/Panel.tsx': 'export const Panel = 1;\n' });
+    const widened = bash(repo.dir, repo.env, [
+      reshipScript,
+      'feat/ui',
+      'feat: card',
+      '--pr',
+      '--body',
+      'widened',
+      '--',
+      'src/Panel.tsx',
+    ]);
+    expect(widened.status, widened.stderr).toBe(0);
+    expect(readFileSync(repo.state, 'utf8')).toMatch(
+      /^widened\n\n<!-- devkit:ui-evidence:begin -->\n- \[ \] 📸 Add before .*UI paths changed: src\/Panel\.tsx\n<!-- devkit:ui-evidence:end -->\n$/,
+    );
+  }, 360_000);
+
+  it('a re-ship without a body flag adds the item byte-for-byte after the body, and never edits a ticked one', () => {
+    const repo = shipRepo(null, 'feat/nobody');
+    write(repo.dir, {
+      '.husky/_/pre-commit': `#!/bin/sh\n"${process.execPath}" "${UI_GATE}" || true\n`,
+    });
+    write(repo.dir, { 'src/Card.tsx': 'export const Card = 1;\n' });
+    const shipped = bash(repo.dir, repo.env, [
+      scriptPath,
+      'feat/nobody',
+      'feat: card',
+      'src/Card.tsx',
+    ]);
+    expect(shipped.status, shipped.stderr).toBe(0);
+
+    const typed = 'Typed by hand  \r\n\r\nno item here';
+    writeFileSync(repo.state, typed);
+    write(repo.dir, { 'src/Panel.tsx': 'export const Panel = 1;\n' });
+    const reship = (path: string) =>
+      bash(repo.dir, repo.env, [reshipScript, 'feat/nobody', 'feat: card', '--pr', '--', path]);
+    const added = reship('src/Panel.tsx');
+    expect(added.status, added.stderr).toBe(0);
+    const body = readFileSync(repo.state, 'utf8');
+    expect(body.startsWith(typed)).toBe(true);
+    expect(body.slice(typed.length)).toMatch(
+      /^\n\n<!-- devkit:ui-evidence:begin -->\n- \[ \] 📸 Add before .*UI paths changed: src\/Panel\.tsx\n<!-- devkit:ui-evidence:end -->\n$/,
+    );
+    expect(added.stderr).toContain('📸 ui-evidence: added the screenshot task item to the PR');
+
+    const ticked = body.replace('- [ ]', '- [x]');
+    writeFileSync(repo.state, ticked);
+    const logged = readFileSync(repo.log, 'utf8').length;
+    write(repo.dir, { 'src/Footer.tsx': 'export const Footer = 1;\n' });
+    const kept = reship('src/Footer.tsx');
+    expect(kept.status, kept.stderr).toBe(0);
+    expect(readFileSync(repo.state, 'utf8')).toBe(ticked);
+    expect(readFileSync(repo.log, 'utf8').slice(logged)).not.toContain('pr edit');
+  }, 480_000);
+
+  it('a ship that skips its gates recomputes the item from the gated commit paths', () => {
+    const SELECTED = {
+      '.devkit/config.json': JSON.stringify({ components: { guards: ['ui-evidence'] } }),
+    };
+    // A receipt-verified commit from an earlier run, as a lost push response or a crash leaves it.
+    // `root` lands uncommitted in the caller's checkout, where the consumer's config lives.
+    const preserved = (branch: string, file: string, onOrigin: boolean, root = SELECTED) => {
+      const repo = shipRepo(null, branch);
+      const wt = mkdtempSync(join(tmpdir(), 'evidence-preserved-'));
+      dirs.push(wt);
+      repo.git(['worktree', 'add', '-q', '-b', branch, wt]);
+      write(wt, { [file]: 'export const changed = 1;\n' });
+      execFileSync('git', ['add', file], { cwd: wt, env: repo.env });
+      execFileSync('git', ['commit', '--no-verify', '-qm', 'feat: card', '-m', 'b'], {
+        cwd: wt,
+        env: repo.env,
+      });
+      repo.git(['worktree', 'remove', '--force', wt]);
+      write(repo.dir, { [file]: 'export const changed = 1;\n', ...root });
+      repo.git(['update-ref', `refs/devkit/ship-receipts/${branch}`, branch]);
+      if (onOrigin) repo.git(['push', '-q', '--no-verify', 'origin', `${branch}:${branch}`]);
+      return repo;
+    };
+    const ship = (repo: ReturnType<typeof preserved>, branch: string, file: string) =>
+      bash(repo.dir, repo.env, [scriptPath, branch, 'feat: card', file]);
+
+    // A non-ASCII name with a space: git C-quotes it unless the paths are read NUL-delimited.
+    const adopted = preserved('feat/adopted', 'src/Café Card.tsx', true);
+    writeFileSync(adopted.state, 'Opened by the earlier run\n');
+    const adopt = ship(adopted, 'feat/adopted', 'src/Café Card.tsx');
+    expect(adopt.status, adopt.stderr).toBe(0);
+    expect(adopt.stderr).toContain('already holds gated commit');
+    expect(readFileSync(adopted.state, 'utf8')).toMatch(
+      /^Opened by the earlier run\n\n<!-- devkit:ui-evidence:begin -->\n- \[ \] 📸 Add before .*UI paths changed: src\/Café Card\.tsx\n<!-- devkit:ui-evidence:end -->\n$/,
+    );
+
+    const resumed = preserved('feat/resumed', 'src/Card.tsx', false);
+    const resume = ship(resumed, 'feat/resumed', 'src/Card.tsx');
+    expect(resume.status, resume.stderr).toBe(0);
+    expect(resume.stderr).toContain('gate receipt verified');
+    expect(readFileSync(resumed.state, 'utf8')).toMatch(
+      /^b\n\n<!-- devkit:ui-evidence:begin -->\n- \[ \] 📸 .*src\/Card\.tsx\n/,
+    );
+
+    // uiEvidence.paths comes from the caller's own, uncommitted config, not the gated commit's.
+    const paths = {
+      'guard.config.json': JSON.stringify({ uiEvidence: { paths: ['src/**/*.mjs'] } }),
+    };
+    const configured = preserved('feat/configured', 'src/value.mjs', false, {
+      ...SELECTED,
+      ...paths,
+    });
+    expect(ship(configured, 'feat/configured', 'src/value.mjs').status).toBe(0);
+    expect(readFileSync(configured.state, 'utf8')).toContain('UI paths changed: src/value.mjs');
+
+    const quiet = preserved('feat/quiet', 'src/value.mjs', false);
+    const plain = ship(quiet, 'feat/quiet', 'src/value.mjs');
+    expect(plain.status, plain.stderr).toBe(0);
+    expect(plain.stderr).toContain(
+      '📸 ui-evidence: the gates were skipped (an earlier run passed them), so only file paths were checked, and none is a UI file',
+    );
+    expect(readFileSync(quiet.state, 'utf8')).not.toContain(UI_ITEM_BEGIN);
+    expect(readFileSync(quiet.log, 'utf8')).not.toContain('pr edit');
+
+    // A repo that deselected the guard gets no reminder from a skipped run either.
+    const off = { '.devkit/config.json': JSON.stringify({ components: { guards: ['size'] } }) };
+    const optedOut = preserved('feat/opted-out', 'src/Card.tsx', false, off);
+    const silent = ship(optedOut, 'feat/opted-out', 'src/Card.tsx');
+    expect(silent.status, silent.stderr).toBe(0);
+    expect(silent.stderr).not.toContain('📸');
+    expect(readFileSync(optedOut.state, 'utf8')).not.toContain(UI_ITEM_BEGIN);
+    expect(readFileSync(optedOut.log, 'utf8')).not.toContain('pr edit');
+  }, 600_000);
+
+  it('the ui-item step writes whatever the PR head, and a gh failure never fails the ship', () => {
+    const sink = join(mkdtempSync(join(tmpdir(), 'evidence-sink-')), 'events.jsonl');
+    dirs.push(dirname(sink));
+    writeFileSync(
+      sink,
+      ['ship_attempt', 'advisory_result']
+        .map((type) => JSON.stringify({ ship_id: 's', type, gate: 'ui-evidence', detail: 'look' }))
+        .join('\n'),
+    );
+    const gh = ghEnv({
+      GH_HEAD_OID: 'moved',
+      GH_BASE_OID: 'base',
+      DEVKIT_GATE_EVENTS: sink,
+      DEVKIT_SHIP_ID: 's',
+    });
+    writeFileSync(gh.state, 'mine');
+    const step = (env: NodeJS.ProcessEnv) =>
+      spawnSync(
+        '/bin/bash',
+        [
+          '-c',
+          `SCRIPT_DIR='${dirname(dirname(RUN))}'; . "$SCRIPT_DIR/publish-evidence.sh"; publish_ui_item . 42 acme/app`,
+        ],
+        { encoding: 'utf8', env },
+      );
+
+    expect(step(gh.env).status).toBe(0);
+    expect(readFileSync(gh.state, 'utf8')).toBe(
+      `mine\n\n${UI_ITEM_BEGIN}\n- [ ] 📸 look\n${UI_ITEM_END}\n`,
+    );
+    // A concurrent writer's body wins the race; the re-read sees it and adds the item on top.
+    writeFileSync(gh.state, 'mine');
+    expect(step({ ...gh.env, GH_CLOBBER: 'theirs' }).status).toBe(0);
+    expect(readFileSync(gh.state, 'utf8')).toBe(
+      `theirs\n\n${UI_ITEM_BEGIN}\n- [ ] 📸 look\n${UI_ITEM_END}\n`,
+    );
+    writeFileSync(join(dirname(gh.log), 'gh'), '#!/bin/sh\nexit 1\n');
+    const failed = step(gh.env);
+    expect(failed.status).toBe(0);
+    expect(failed.stderr).toMatch(/^evidence: /m);
+  });
+
+  it('the body step reads the reminder from the newest attempt of its own ship id only', () => {
+    const sink = join(mkdtempSync(join(tmpdir(), 'evidence-sink-')), 'events.jsonl');
+    dirs.push(dirname(sink));
+    const row = (shipId: string, fields: Record<string, string | number>) =>
+      `${JSON.stringify({ ship_id: shipId, ...fields })}\n`;
+    const attempt = row('ship-1', { type: 'ship_attempt' });
+    const reminder = (shipId: string, detail: string | number) =>
+      row(shipId, { type: 'advisory_result', gate: 'ui-evidence', status: 'finding', detail });
+    const body = (events: string) => {
+      writeFileSync(sink, events);
+      return spawnSync(process.execPath, [RUN, 'body', '--repo', 'acme/app'], {
+        input: 'mine\n',
+        encoding: 'utf8',
+        env: { ...process.env, DEVKIT_GATE_EVENTS: sink, DEVKIT_SHIP_ID: 'ship-1' },
+      }).stdout;
+    };
+
+    // A blocked attempt reminded, then a resumed attempt under the same id stayed quiet.
+    expect(body(attempt + reminder('ship-1', 'stale') + attempt)).toBe('mine\n');
+    expect(
+      body(attempt + reminder('ship-1', 'stale') + attempt + reminder('ship-1', 'fresh')),
+    ).toBe(`mine\n\n${UI_ITEM_BEGIN}\n- [ ] 📸 fresh\n${UI_ITEM_END}\n`);
+    // A sink row is arbitrary JSON: a non-string detail adds nothing and must not fail the step.
+    expect(body(attempt + reminder('ship-1', 7))).toBe('mine\n');
+    // No attempt marker: the row cannot be told apart from an earlier run's, so it adds nothing.
+    expect(body(reminder('ship-1', 'unattributed'))).toBe('mine\n');
+    // The sink is per machine: a parallel ship's reminder is not this ship's.
+    expect(body(attempt + reminder('ship-2', 'theirs'))).toBe('mine\n');
+  });
 
   it('drops a block pasted into the caller body before the PR is created', () => {
     const repo = shipRepo(null, 'feat/pasted');
