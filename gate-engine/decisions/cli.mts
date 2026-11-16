@@ -58,6 +58,7 @@ const SUB_ENGINES: Record<string, URL> = {
   'scoped-targets': new URL(`./scoped-targets${SELF_EXT}`, import.meta.url),
   enforce: new URL(`./ruling-checks/enforce${SELF_EXT}`, import.meta.url),
 };
+const SCOPE_MISS = new URL(`./scope/scope-miss${SELF_EXT}`, import.meta.url);
 
 /** An agent's reads of the log. Each is its own agent run, so no `git write-tree` and no commit row. */
 const AGENT_READS = new Set(['show', 'query', 'scoped-targets']);
@@ -113,6 +114,14 @@ function usage(cmd: string | undefined): string {
   return `Usage:\n${lines.map((entry) => `  guard-decisions ${entry}`).join('\n')}\n`;
 }
 
+/** Runs before detect's main, which exits the process; an advisory that fails prints nothing. */
+async function printScopeMiss() {
+  try {
+    const line = await (await import(SCOPE_MISS.href)).scopeMissAdvisory();
+    if (line) console.error(line);
+  } catch {}
+}
+
 async function run(argv: string[]) {
   const [cmd, ...rest] = argv;
   if (cmd === undefined) {
@@ -145,7 +154,10 @@ async function run(argv: string[]) {
   const sub = SUB_ENGINES[cmd];
   if (sub) {
     // The hook runs only `detect --gate`; check-alignment is an on-demand run and stays unmarked.
-    if (cmd === 'detect' && rest[0] === '--gate') markGateRun();
+    if (cmd === 'detect' && rest[0] === '--gate') {
+      markGateRun();
+      await printScopeMiss();
+    }
     await (await import(sub.href)).main(rest);
     return;
   }
