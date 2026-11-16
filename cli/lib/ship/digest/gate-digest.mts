@@ -12,16 +12,9 @@
 import { STICKY_RULING } from '../../../../gate-engine/review/evidence/base-context.mts';
 import { branchNarration } from './advisories.mts';
 import { groupAdvisories } from './advisory-rows.mts';
-import { blockingFindings, judgeFinding } from './blocking.mts';
-import {
-  baseDriftDetail,
-  earlierDiffDetail,
-  partialPacket,
-  partialPacketDetail,
-} from './cache-detail.mts';
-import { count, oneLine, textOf } from './fields.mts';
+import { type Attributable, type Buckets, COMPLETENESS, classify } from './event-rows.mts';
+import { oneLine, textOf } from './fields.mts';
 import { withRecurrence } from './recurrence.mts';
-import { SKIP_CONTROLS } from './skip-controls.mts';
 import { scanBackward } from './tail.mts';
 import { waivedRows } from './waived.mts';
 
@@ -105,29 +98,14 @@ export interface DigestRow {
   why?: string;
 }
 
-/** A row that COULD have stopped the run, so its blocking status must be computed, never assumed. */
-interface Attributable {
-  gate: string;
-  family: string;
-  detail: string;
-  state: 'finding' | 'could-not-run';
-  fp?: string;
-  findings?: number;
-}
-
 /** The ship_attempt row opens this attempt's span, so finding it bounds the backward read exactly. */
 export const ATTEMPT = 'ship_attempt';
 /** From the newest ship_attempt on, else all: an inherited DEVKIT_SHIP_ID spans attempts. */
 const fromNewestAttempt = <T extends { type?: string }>(rows: T[]): T[] =>
   rows.slice(Math.max(0, rows.map((r) => r.type).lastIndexOf(ATTEMPT)));
-/** The parallel judge's gate name — a `gate_result` row, not a fleet `review_result`. */
-const COMPLETENESS = 'completeness';
 /** Caps on what one terminus prints: past these the digest is the wall of text it replaces. */
 const MAX_FINDINGS = 8;
 const MAX_MISSING = 3;
-/** Never the bare word "transient": it reads as "a retry clears it", and a usage lock wore it. */
-const UNCLASSIFIED =
-  'judge failed, cause unclassified — read the guard-judge preflight lines at the top of the log';
 
 /**
  * The I/O boundary: one JSONL line in, this ship's event or nothing. Every downstream function
@@ -182,10 +160,6 @@ function isBlocking(finding: Attributable, blocked: string, siblings: Attributab
   return !siblings.some((s) => s.family === 'review' && s.gate !== COMPLETENESS);
 }
 
-/** Causes whose judge_exec ledger row holds the words that explain them; a response-contract
- *  inconclusive is a judge that answered, so an earlier failed spawn's words would mislead. */
-const OUTAGE_CAUSES = new Set(['outage', 'rate-limited', 'transient', 'unauthenticated', 'absent']);
-
 /** A codex error envelope's message (`error.message` or `detail`, one JSON line), else
  *  the text as given — the envelope alone would spend the whole detail budget before the cause. */
 function providerMessage(text: string): string {
@@ -214,30 +188,6 @@ function outageWordsByJudge(events: GateEvent[]): Map<string, string> {
   return new Map([...last.values()].filter(([, detail]) => detail));
 }
 
-/** No-LLM mode skips the whole fleet, and either the env flag or the repo's config can set it. */
-const NO_LLM = 'GUARD_DECISION_NO_LLM or noLlm config';
-
-/** An env-authorized skip, or a PASS a bypass flag produced: it verified nothing and never blocks. */
-function bypassRow(e: GateEvent): DigestRow | undefined {
-  const skip = e.type === 'review_skipped';
-  const reason = textOf(e.reason);
-  const flag = skip
-    ? reason === 'no_llm'
-      ? NO_LLM
-      : SKIP_CONTROLS.get(reason)
-    : e.type === 'gate_result' && e.status === 'pass' && textOf(e.bypass);
-  if (!flag) return undefined;
-  const reviewer = textOf(e.reviewer);
-  const gate = skip ? (reviewer ? `review:${reviewer}` : 'review') : (e.gate ?? 'unknown');
-  return {
-    gate,
-    state: 'could-not-run',
-    blocking: false,
-    detail: `bypassed via ${flag} — verified nothing`,
-    skipped: true,
-  };
-}
-
 /** Pure: events → the rows the terminus should show. No IO, so the interesting cases unit-test. */
 export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
   const mine = fromNewestAttempt(events.filter((e) => e.ship_id === shipId));
@@ -256,130 +206,19 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
   // Findings and could-not-runs share one list because BOTH can be the blocker: under
   // GUARD_DETERMINISTIC_STRICT=1 an opted-out gate is labelled could-not-run and exits 1, so
   // hard-coding these rows non-blocking misattributes the run to whatever else it found.
-  const attributable: Attributable[] = [];
-  const cached: DigestRow[] = [];
-  // Held OUT of attributable[], not merely marked non-blocking: a stage holding no exit is then
-  // structurally ineligible for isBlocking(), whatever family token it carries.
-  const advisory: DigestRow[] = [];
-  const outageWords = outageWordsByJudge(mine);
-  // Held out of attributable[] for the same reason: a downgrade or a reused PASS holds no exit.
-  const unverified: DigestRow[] = [];
-  // Held out too: a gate an env flag skipped never ran, so it cannot be what stopped the run.
-  const bypassed: DigestRow[] = [];
-  for (const e of mine) {
-    const skip = bypassRow(e);
-    if (skip) bypassed.push(skip);
-    else if (e.type === 'review_result' && e.status === 'fail') {
-      const gate = `review:${e.reviewer ?? 'unknown'}`;
-      for (const f of blockingFindings(e)) {
-        attributable.push({ gate, family: 'review', state: 'finding', ...f });
-      }
-    } else if (e.type === 'review_result' && e.status === 'inconclusive') {
-      // Strict ship fails closed on every one of these, so omitting them hid most of what blocked.
-      const gate = `review:${e.reviewer ?? 'unknown'}`;
-      const cause = textOf(e.inconclusive_cause);
-      const words = OUTAGE_CAUSES.has(cause) ? outageWords.get(gate) : undefined;
-      attributable.push({
-        gate,
-        family: 'review',
-        detail: (words ?? oneLine(e.reason)) || oneLine(cause) || 'could not run',
-        state: 'could-not-run',
-      });
-    } else if (e.type === 'gate_result' && e.status === 'fail') {
-      const gate = e.gate ?? 'unknown';
-      // A row without its own family IS its family — only the deterministic chain reports finer
-      // than the blocked_gate vocabulary.
-      attributable.push({ gate, family: e.family ?? gate, state: 'finding', ...judgeFinding(e) });
-    } else if (
-      e.type === 'gate_result' &&
-      (e.status === 'could_not_run' || e.status === 'bypassed')
-    ) {
-      const gate = e.gate ?? 'unknown';
-      attributable.push({
-        gate,
-        family: e.family ?? gate,
-        // A bypassed gate verified NOTHING — the reason the green banner already says to hunt for
-        // SKIP lines. Naming the flag makes that hunt unnecessary.
-        detail: e.bypass ? `bypassed via ${e.bypass} — verified nothing` : oneLine(e.detail),
-        state: 'could-not-run',
-      });
-    } else if (e.type === 'gate_infra_failure') {
-      const gate = e.gate ?? 'unknown';
-      attributable.push({
-        gate,
-        family: e.family ?? gate,
-        // `cause` is where this event names WHY (timeout / empty / transient / absent /
-        // unauthenticated / rate-limited / response_contract — see classifyJudgeOutage).
-        // Reading only `detail` collapsed every one of them to "could not run" and threw away the
-        // field that decides whether an operator checks quota or simply re-runs.
-        detail:
-          oneLine(e.detail) ||
-          (OUTAGE_CAUSES.has(textOf(e.cause)) ? outageWords.get(`review:${gate}`) : '') ||
-          (e.cause === 'transient' ? UNCLASSIFIED : oneLine(e.cause)) ||
-          'could not run',
-        state: 'could-not-run',
-      });
-    } else if (e.type === 'advisory_result') {
-      // A stage that CANNOT block (the self-host fallow audit, the skill-projection check): its
-      // findings used to exist only as prose printed above the success banner (sc-2526).
-      advisory.push({
-        gate: e.gate ?? 'unknown',
-        state: e.status === 'could_not_run' ? 'could-not-run' : 'finding',
-        blocking: false,
-        detail: textOf(e.detail), // whole: groupAdvisories reads it, then cuts it to one line
-        advisory: true,
-      });
-    } else if (e.type === 'gate_degraded') {
-      // A judge that stripped its own blocking authority (sentry on insufficient capture evidence).
-      // It emits no result row, so before sc-3175 its only trace was a stderr line mid-log.
-      unverified.push({
-        gate: e.judge ?? 'unknown',
-        state: 'unverified',
-        blocking: false,
-        // A judge that names its own degradation (commit-guard without semantic retrieval,
-        // sc-2317) supplies `detail`; sentry's downgrade keeps its historical wording.
-        detail:
-          oneLine(e.detail) ||
-          `downgraded to advisory: ${oneLine(e.cause) || 'cause not recorded'} — could not block this commit`,
-      });
-    } else if (
-      (e.type === 'review_result' && e.status === 'pass') ||
-      (e.type === 'cache_hit' && partialPacket(e))
-    ) {
-      // sc-2305: a PASS whose capped packet left files out. A clean review_result adds no row; a
-      // cached one may ALSO sit on a drifted base, and one row per gate survives, so it names both.
-      const reuse = e.type === 'cache_hit' ? [earlierDiffDetail(e), baseDriftDetail(e)] : [];
-      if (partialPacket(e))
-        unverified.push({
-          gate: e.type === 'review_result' ? `review:${e.reviewer ?? 'unknown'}` : cacheGate(e),
-          state: 'unverified',
-          blocking: false,
-          detail: [partialPacketDetail(e), ...reuse].filter(Boolean).join('; '),
-        });
-    } else if (e.type === 'cache_hit' && e.diff_matches === false) {
-      // A PASS reused across a reshaped diff. `=== false`, not falsy: a byte-keyed hit carries no
-      // field, and a missing field must keep meaning "this cache key covers the diff".
-      unverified.push({
-        gate: cacheGate(e),
-        state: 'unverified',
-        blocking: false,
-        detail: earlierDiffDetail(e),
-      });
-    } else if (e.type === 'cache_hit' && baseDriftDetail(e)) {
-      unverified.push({
-        gate: e.judge ?? 'unknown',
-        state: 'unverified',
-        blocking: false,
-        detail: baseDriftDetail(e),
-      });
-    } else if (e.type === 'cache_hit') {
-      cached.push({ gate: e.judge ?? 'unknown', state: 'cached', blocking: false, detail: '' });
-    }
-  }
+  const b: Buckets = {
+    attributable: [],
+    advisory: [],
+    unverified: [],
+    bypassed: [],
+    cached: [],
+    outageWords: outageWordsByJudge(mine),
+  };
+  for (const e of mine) classify(e, b);
 
   const seen = new Set<string>();
   const key = (a: Attributable): string => `${a.state}:${a.gate}:${a.fp ?? ''}`;
-  const unique = attributable.filter((a) => !seen.has(key(a)) && seen.add(key(a)) !== undefined);
+  const unique = b.attributable.filter((a) => !seen.has(key(a)) && seen.add(key(a)) !== undefined);
   const stoppers = unattributed ? [] : unique.filter((a) => isBlocking(a, blocked, unique));
   const why = notBlockingWhy([...new Set(stoppers.map((a) => a.gate))], blocked, exitCode);
   return [
@@ -391,14 +230,14 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
       if (a.findings) row.findings = a.findings;
       return row;
     }),
-    ...firstPerGate(bypassed),
+    ...firstPerGate(b.bypassed),
     // NOT passed through the `unattributed` null-blocking arm: that arm exists for a run whose
     // blocker is unknowable, and an advisory's non-blocking status is knowable on every run.
-    ...groupAdvisories(advisory),
+    ...groupAdvisories(b.advisory),
     // Deduped for the same reason: pre-commit and commit-msg can both replay one stale verdict.
-    ...firstPerGate(unverified),
+    ...firstPerGate(b.unverified),
     ...waivedRows(mine),
-    ...cached,
+    ...b.cached,
   ];
 }
 
@@ -409,10 +248,6 @@ function notBlockingWhy(stoppers: string[], blocked: string, exitCode: number | 
     return ` only because ${stoppers.join(', ')} stopped it first — read it before retrying`;
   return ` — the run ended on ${oneLine(blocked)} — read it before retrying`;
 }
-
-/** A cache_hit's gate label; completeness's intent key reports under the judge's own gate name. */
-const cacheGate = (e: GateEvent): string =>
-  e.judge === `review:${COMPLETENESS}` ? COMPLETENESS : (e.judge ?? 'unknown');
 
 /** The first row per state+gate, in event order. */
 function firstPerGate(rows: DigestRow[]): DigestRow[] {
