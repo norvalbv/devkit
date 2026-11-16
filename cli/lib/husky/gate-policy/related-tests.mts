@@ -22,15 +22,19 @@ const SCRUB_INPUT_RE =
 export function forcedTests(staged: Iterable<string>): string[] {
   return [...staged].some((p) => SCRUB_INPUT_RE.test(p)) ? [SCRUB_TEST] : [];
 }
+import { errorMessage } from '../../ship/review/shared/common.mts';
 
 // vitest's forceRerunTriggers (**/package.json, **/{vitest,vite}.config.*, setupFiles) select the
 // whole suite, which CI already runs.
 const RERUN_TRIGGER_RE = /(^|\/)(package\.json|(vitest|vite)\.config\.[^/]*)$|^vitest\.setup\.mjs$/;
 
-/** The staged paths handed to `vitest related`, sorted, minus the full-suite triggers. */
+/** The staged paths the related-test listing starts from, sorted, minus the full-suite triggers. */
 export function relatedPaths(staged: Iterable<string>): string[] {
   return [...staged].filter((p) => !RERUN_TRIGGER_RE.test(p)).sort();
 }
+
+// Source modules whose reachability the reach test guards.
+const SOURCE_RE = /\.[cm]?[jt]sx?$/;
 
 // Extensions vite can hold in its module graph; any other staged path never selects a test.
 const MODULE_RE = /\.[cm]?[jt]sx?$|\.json$/;
@@ -111,10 +115,24 @@ type Exec = (
 interface RunOpts {
   staged: Iterable<string>;
   exec?: Exec;
+  list?: typeof listRelated;
+}
+
+/** The test files `vitest related` would select, resolved in-process so no queued vitest CLI starts. */
+export async function listRelated(root: string, paths: string[]): Promise<string[]> {
+  const { createVitest } = await import('vitest/node');
+  const related = paths.map((p) => join(root, p));
+  const ctx = await createVitest({ root, related, watch: false, run: true });
+  try {
+    const specs = await ctx.getRelevantTestSpecifications();
+    return [...new Set(specs.map((s) => s.moduleId))].sort();
+  } finally {
+    await ctx.close();
+  }
 }
 
 /** Exit code of the related-tests run: 0 when nothing is selected, vitest's status otherwise. */
-export function runRelatedTests(root: string, opts: RunOpts): number {
+export async function runRelatedTests(root: string, opts: RunOpts): Promise<number> {
   const staged = [...opts.staged];
   const paths = relatedPaths(staged);
   // From the raw set: relatedPaths drops vitest.setup.mjs, which the env-scrub test binds.
@@ -123,16 +141,25 @@ export function runRelatedTests(root: string, opts: RunOpts): number {
     console.log('related-tests: none selected');
     return 0;
   }
+  let files: string[] = [];
+  try {
+    if (paths.length) files = await (opts.list ?? listRelated)(root, paths);
+  } catch (err) {
+    console.error(`✗ related-tests could not list related tests: ${errorMessage(err)}`);
+    return 1;
+  }
+  // The reach test only answers for source modules, so a config-only commit skips the queue.
+  if (!files.length && !forced.length && !paths.some((p) => SOURCE_RE.test(p))) {
+    console.log(`related-tests: no test relates to the ${paths.length} staged path(s)`);
+    return 0;
+  }
+  // listRelated returns absolute paths, so absolutise the rest for the set to dedupe.
+  const tests = [...new Set([...files, ...[...forced, REACH_TEST].map((t) => join(root, t))])];
   console.log(
-    `related-tests: ${paths.length} staged path(s)${forced.length ? `, ${forced.length} forced` : ''}`,
+    `related-tests: ${tests.length} test file(s) for ${paths.length} staged path(s)${forced.length ? `, ${forced.length} forced` : ''}`,
   );
   const vitest = join(root, 'node_modules', '.bin', 'vitest');
-  const args = [
-    'related',
-    '--run',
-    '--reporter=dot',
-    ...new Set([...paths, ...forced, REACH_TEST]),
-  ];
+  const args = ['run', '--reporter=dot', ...tests];
   const result = (opts.exec ?? spawnSync)(vitest, args, { cwd: root, stdio: 'inherit' });
   if (result.error) console.error(`✗ related-tests could not run vitest: ${result.error.message}`);
   // A null status is a signal kill or a failed spawn: nothing passed, so block.
@@ -148,7 +175,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     );
     process.exitCode = 1;
   } else {
-    process.exitCode = runRelatedTests(process.cwd(), { staged });
+    process.exitCode = await runRelatedTests(process.cwd(), { staged });
     // The raw set, not relatedPaths: a staged vitest.setup.mjs must still mark its forced test as run.
     noteUnmapped(process.cwd(), staged);
   }
