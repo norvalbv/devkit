@@ -237,7 +237,8 @@ export async function runRelatedTests(root: string, opts: RunOpts): Promise<numb
   const reporters = report
     ? ['--reporter=json', `--outputFile.json=${report}`, `--reporter=${UNHANDLED_REPORTER}`]
     : [];
-  const args = ['run', '--reporter=dot', ...reporters, ...tests];
+  // A passing ship or reviewer test's console output would echo the ship's own progress lines.
+  const args = ['run', '--reporter=dot', '--silent=passed-only', ...reporters, ...tests];
   // A test that drives gate code must not write into this gate's own reason file.
   const env = { ...process.env };
   delete env[GATE_REASON_ENV];
