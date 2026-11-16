@@ -1,0 +1,195 @@
+/** `devkit test-redundancy` — which tests in the changed test files catch nothing that another
+ * test does not already catch. Advisory: it reports fallow's kill-matrix evidence and never blocks. */
+import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { diffClassifier } from '../../../gate-engine/coverage/diff-gate.mjs';
+import { detectFallow } from '../../lib/install/install-fallow.mjs';
+import { gitRunner, line, ok } from '../../lib/ship/base-drift/git-run.mjs';
+import { mergeBaseOf, nulList } from '../coverage/diff.mjs';
+import { killMatrixReport, redundancy } from './report.mjs';
+/** The first fallow release with `mutation --kill-matrix-for`. */
+const FALLOW_FLOOR = [3, 40, 0];
+const DEFAULT_BUDGET = '4m';
+export const meta = {
+    name: 'test-redundancy',
+    agentFacing: true,
+    summary: 'Tests in your changed test files that catch nothing another test misses.',
+    help: `devkit test-redundancy — which tests in the changed test files catch no failure that another
+test does not already catch.
+
+Usage:
+  devkit test-redundancy [--base <ref>] [--time-budget <duration>] [-- <source path>...]
+
+  --base <ref>              Compare against the merge-base of HEAD and <ref>. Default as
+                            \`devkit coverage-diff\`.
+  --time-budget <duration>  Stop starting mutants after this long, for example 90s or 10m. The
+                            warm-up run of the test suite gets the same limit. Default ${DEFAULT_BUDGET}.
+  -- <source path>...       The source files to mutate. Default: the production files the change
+                            touches. Name them when the change touches test files only.
+
+It runs \`fallow mutation --kill-matrix-for\` (fallow 3.40.0 or later): fallow plants small bugs in
+the source, runs the whole test suite against each, and records which tests catch which bug. Run it
+before you ship, after your last test edit.
+
+  redundant      Other tests already catch every bug this test catches. Review each one on its
+                 own: two tests with equal evidence are both listed, so deleting both removes the
+                 protection.
+  kills nothing  The test ran the code and caught no planted bug. It may guard data or a removal
+                 that no planted bug expresses; keep it only with that reason stated.
+  not judged     fallow's evidence was incomplete, with its reason. This is never a pass.
+
+Every flagged test in the changed test files is listed, including tests that were there before the
+change. The report does not say which tests the change added.
+
+Exit code: always 0. A wrong argument, a base that cannot be resolved and a directory outside a git
+repository each print why nothing was judged.`,
+};
+/** fallow on PATH, then the project's own copy; a missing binary is a null status, never a throw. */
+function runFallow(args, cwd) {
+    for (const [cmd, prefix] of [
+        ['fallow', []],
+        ['npx', ['--no-install', 'fallow']],
+    ]) {
+        const r = spawnSync(cmd, [...prefix, ...args], {
+            cwd,
+            encoding: 'utf8',
+            maxBuffer: 512 * 1024 * 1024,
+            stdio: ['ignore', 'pipe', 'inherit'],
+        });
+        if (!r.error)
+            return { status: r.status, stdout: r.stdout ?? '' };
+    }
+    return { status: null, stdout: '' };
+}
+function parseOptions(args) {
+    const opts = { budget: DEFAULT_BUDGET, sources: [] };
+    for (let i = 0; i < args.length; i += 1) {
+        const flag = args[i];
+        if (flag === '--') {
+            opts.sources = args.slice(i + 1);
+            break;
+        }
+        const value = args[i + 1];
+        if (flag === '--base' && value)
+            opts.base = value;
+        else if (flag === '--time-budget' && value)
+            opts.budget = value;
+        else
+            return { error: `unknown or incomplete argument: ${flag}` };
+        i += 1;
+    }
+    return opts;
+}
+function atLeastFloor(version) {
+    const parts = version.split('.').map((n) => Number.parseInt(n, 10));
+    for (let i = 0; i < FALLOW_FLOOR.length; i += 1) {
+        const have = parts[i] ?? 0;
+        if (have !== FALLOW_FLOOR[i])
+            return have > FALLOW_FLOOR[i];
+    }
+    return true;
+}
+const notJudged = (why) => ({ stop: `Not judged: ${why}` });
+/** The change's test files and the source to mutate, or the one line that says why not. */
+function findChange(cwd, opts) {
+    const topResult = gitRunner(cwd)(['rev-parse', '--show-toplevel']);
+    if (!ok(topResult))
+        return notJudged('not inside a git repository.');
+    const top = realpathSync(line(topResult));
+    const here = realpathSync(cwd);
+    const run = gitRunner(top);
+    const mb = mergeBaseOf(run, opts.base);
+    if ('error' in mb)
+        return notJudged(`${mb.error}.`);
+    const listed = run(['ls-files', '-z', '--others', '--exclude-standard']);
+    const diffed = run(['diff', '--name-only', '-z', '--no-renames', '--diff-filter=AM', mb.sha]);
+    if (!ok(listed) || !ok(diffed))
+        return notJudged('git could not list the changed files.');
+    const untracked = nulList(listed.stdout);
+    const changed = [...nulList(diffed.stdout), ...untracked];
+    const classify = diffClassifier(cwd, top);
+    const tests = changed.filter((p) => classify(p, false) === 'test');
+    if (tests.length === 0) {
+        return { stop: `No test file changed since ${mb.label}; nothing to judge.` };
+    }
+    const fromHere = (p) => relative(here, join(top, p));
+    const sources = opts.sources.length
+        ? opts.sources
+        : changed.filter((p) => classify(p, false) === 'production').map(fromHere);
+    if (sources.length === 0) {
+        return notJudged('the change touches no production source. Name the source these tests cover: devkit test-redundancy -- <source path>...');
+    }
+    return { testFiles: tests.length, targets: tests.map(fromHere), sources };
+}
+/** fallow's kill-matrix report for the change, or why fallow could not give one. */
+function askFallow(deps, cwd, change, budget) {
+    const { available, version } = deps.detect({ cwd });
+    if (!available || !version)
+        return notJudged('fallow was not found. `devkit init` installs it.');
+    if (!atLeastFloor(version)) {
+        return notJudged(`fallow ${version} has no --kill-matrix-for; it needs ${FALLOW_FLOOR.join('.')} or later.`);
+    }
+    const ran = deps.runFallow([
+        'mutation',
+        ...change.sources,
+        ...change.targets.flatMap((t) => ['--kill-matrix-for', t]),
+        '--allow-dirty',
+        '--time-budget',
+        budget,
+        '--setup-timeout',
+        budget,
+        '--format',
+        'json',
+        '--quiet',
+    ], cwd);
+    let parsed;
+    try {
+        parsed = killMatrixReport.safeParse(JSON.parse(ran.stdout));
+    }
+    catch {
+        // Falls through: output that is not JSON is no report.
+    }
+    if (!parsed?.success) {
+        return notJudged(`fallow printed no report (exit ${ran.status ?? 'none'}).`);
+    }
+    const report = parsed.data;
+    if (report.error)
+        return notJudged(`fallow could not run: ${report.message ?? 'no message'}`);
+    return { version, report };
+}
+function printReport({ version, report }, change) {
+    const { flagged, unjudged, judged } = redundancy(report);
+    const counts = report.summary?.counts;
+    const mutants = counts?.total ?? 0;
+    const done = mutants - (counts?.pending ?? 0);
+    const seconds = Math.round((report.elapsed_ms ?? 0) / 1000);
+    console.log(`fallow ${version}: ${done} of ${mutants} planted bugs ran in ${seconds}s, ${judged} tests judged in ${change.testFiles} changed test file(s).`);
+    for (const t of flagged) {
+        console.log(`  ${t.verdict.padEnd(13)}  ${t.testId}`);
+    }
+    if (judged > 0 && flagged.length === 0)
+        console.log('  No judged test is redundant.');
+    for (const u of unjudged) {
+        console.log(`  not judged     ${u.target} (${u.tests} tests): ${u.reasons.join(', ')}`);
+    }
+    if (flagged.length)
+        console.log('What each word means: devkit help test-redundancy');
+}
+export default function testRedundancy(args, cwd, deps = { detect: detectFallow, runFallow }) {
+    const say = (text) => {
+        console.log(text);
+        return 0;
+    };
+    const opts = parseOptions(args);
+    if ('error' in opts)
+        return say(`Not judged: ${opts.error}\n\n${meta.help}`);
+    const change = findChange(cwd, opts);
+    if ('stop' in change)
+        return say(change.stop);
+    const answer = askFallow(deps, cwd, change, opts.budget);
+    if ('stop' in answer)
+        return say(answer.stop);
+    printReport(answer, change);
+    return 0;
+}

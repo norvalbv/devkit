@@ -67,6 +67,7 @@ const COMMANDS: Record<string, CommandLoader> = {
   machine: () => import('./commands/machine/machine.mts'),
   'coverage-run': () => import('./commands/coverage/run.mts'),
   'coverage-diff': () => import('./commands/coverage/diff.mts'),
+  'test-redundancy': () => import('./commands/test-redundancy/test-redundancy.mts'),
   'test-report-run': () => import('./commands/baseline/test-report-run.mts'),
   'baseline-status': () => import('./commands/baseline/status.mts'),
   'prove-regression': () => import('./commands/baseline/prove-regression.mts'),
@@ -76,6 +77,7 @@ const COMMANDS: Record<string, CommandLoader> = {
 const GIT_COMMANDS = new Set([
   'baseline-status',
   'coverage-diff',
+  'test-redundancy',
   'base-status',
   'prove-regression',
   'ship',
