@@ -119,7 +119,9 @@ devkit command.
   red (PR base plus only the PR's test files) and green (PR head) after the PR opens and writes the
   outcome there: captured, inconclusive or not-run, never "proved", and stale once the head moves.
   An explicit `--body` keeps the current block, a block pasted into a body is dropped, and a
-  re-ship that pushes rewrites only the block. It can never fail the ship.
+  re-ship that pushes rewrites only the block. It can never fail the ship. An inconclusive block
+  names the red and green failures, and ship prints `evidence: kept the red/green logs at <path>`.
+  After fixing a flaky cause, `devkit pr-evidence <pr>` re-captures it from a checkout at the PR head.
 - **The block also carries a "Reviewer notes" section** (`devkit:evidence:notes`): every PASS
   reviewer advisory, one bullet per finding with the commit it was raised at, even when no
   `evidence` entry is configured. A `--pr` re-ship adds its own and keeps the earlier ones; a
