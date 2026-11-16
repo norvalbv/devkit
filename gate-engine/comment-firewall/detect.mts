@@ -8,7 +8,8 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { resolveGuardConfig, sourceMatchers } from '../config.mts';
-import { gitPrefix, type Renames } from '../ratchets/git-index.mts';
+import { mergeInProgress } from '../ratchets/git-index.mts';
+import { catBlobs } from '../ratchets/tree-blobs.mts';
 import {
   anchorContext,
   anchorFor,
@@ -19,12 +20,12 @@ import {
   recordParagraph,
   textLineCount,
 } from './inventory.mts';
-import { commentTouchLines, type PatchHunk, parsePatchHunks } from './patch.mts';
+import { commentTouchLines, type PatchHunk } from './patch.mts';
 import { loadCommentPolicy } from './policy.mts';
 import { addedCommentText, meaningfulLine, movedLines, movedPool } from './moved.mts';
 import { refFindings } from './refs.mts';
 import { type CommentToken, scanCommentTokens } from './scan.mts';
-import { git, patch, stagedPaths, stagedRenames } from './staged.mts';
+import { type StagedEntry, stagedDiff } from './staged-diff.mts';
 import type { CommentFinding, CommentInventory, DetectionResult } from './types.mts';
 
 export { parsePatchHunks } from './patch.mts';
@@ -40,37 +41,40 @@ const LEADING_BLANKS = /^[ \t]+/;
 
 const sha12 = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 12);
 
-function isPure(renames: Renames | null, file: string): boolean {
-  return renames?.get(file)?.pure === true;
-}
+const ZERO_OID = /^0+$/;
 
 interface ChangedPaths {
   files: string[];
-  head: Renames;
-  merge: Renames | null;
+  head: Map<string, StagedEntry>;
+  merge: Map<string, StagedEntry> | null;
 }
 
-/** Merge resolutions are attributed only when they differ from both parents. Paths are read before
- * renames, so an edit staged in between widens the set instead of hiding behind a stale R100. */
+const isPureRename = (entry: StagedEntry | undefined) => entry?.status === 'R100';
+
+/** Merge resolutions are attributed only when they differ from both parents. Both parents' paths,
+ * renames, blob ids and hunks come from one diff each, so they describe one index snapshot. */
 function changedPaths(cwd: string): ChangedPaths {
-  const firstParent = [...stagedPaths(cwd)];
-  const head = stagedRenames(cwd);
-  try {
-    const mergeParent = stagedPaths(cwd, 'MERGE_HEAD');
-    const merge = stagedRenames(cwd, 'MERGE_HEAD');
-    const files = firstParent.filter(
-      (file) => mergeParent.has(file) && !(isPure(head, file) && isPure(merge, file)),
-    );
-    return { files, head, merge };
-  } catch {
-    return { files: firstParent.filter((file) => !isPure(head, file)), head, merge: null };
+  const head = stagedDiff(cwd);
+  if (!mergeInProgress(cwd)) {
+    return {
+      files: [...head.keys()].filter((file) => !isPureRename(head.get(file))),
+      head,
+      merge: null,
+    };
   }
+  const merge = stagedDiff(cwd, 'MERGE_HEAD');
+  const files = [...head.keys()].filter(
+    (file) => merge.has(file) && !(isPureRename(head.get(file)) && isPureRename(merge.get(file))),
+  );
+  return { files, head, merge };
 }
 
-
-function stagedBlob(cwd: string, file: string): string {
-  const repoPath = `${gitPrefix(cwd)}${file}`;
-  return git(cwd, ['show', `:${repoPath}`]);
+/** UTF-8 text of each blob id in one `cat-file --batch`; the all-zero id of an added path is skipped. */
+function blobTexts(cwd: string, oids: string[]): Map<string, string | null> {
+  const wanted = [...new Set(oids.filter((oid) => !ZERO_OID.test(oid)))];
+  const read = catBlobs(cwd, wanted);
+  if (!read) throw new Error('git cat-file could not read the staged blobs');
+  return new Map(wanted.map((oid, index) => [oid, read[index]?.toString('utf8') ?? null]));
 }
 
 const extensionOf = (file: string) => path.extname(file).slice(1).toLowerCase();
@@ -81,17 +85,11 @@ function lexerFor(file: string): ((source: string) => CommentToken[]) | null {
   return (source) => scanCommentTokens(source, extension);
 }
 
-/** Each comment line of `ref`'s version of the file, lexed by that path's own extension. */
-function commentFragmentsAt(cwd: string, file: string, ref: string) {
+/** Each comment line of an old-side blob, lexed by its own (pre-rename) path's extension. */
+function commentFragments(source: string | null | undefined, file: string) {
   const fragments = new Map<number, string[]>();
   const extension = extensionOf(file);
-  if (!SUPPORTED_EXTENSIONS.has(extension)) return fragments;
-  let source: string;
-  try {
-    source = git(cwd, ['show', `${ref}:./${file}`]);
-  } catch {
-    return fragments;
-  }
+  if (source == null || !SUPPORTED_EXTENSIONS.has(extension)) return fragments;
   for (const token of scanCommentTokens(source, extension)) {
     token.text.split('\n').forEach((part, offset) => {
       const line = token.startLine + offset;
@@ -99,6 +97,47 @@ function commentFragmentsAt(cwd: string, file: string, ref: string) {
     });
   }
   return fragments;
+}
+
+interface StagedFile {
+  file: string;
+  extension: string;
+  source: string;
+  tokens: CommentToken[];
+  effective: PatchHunk[];
+  added: Set<number>;
+  touchLines: Set<number>;
+  headFragments: Map<number, string[]>;
+}
+
+interface Attribution {
+  effective: PatchHunk[];
+  touchLines: Set<number>;
+  headFragments: Map<number, string[]>;
+}
+
+/** The first-parent hunks, narrowed during a merge to lines that also differ from MERGE_HEAD. */
+function attribution(
+  head: StagedEntry,
+  merge: StagedEntry | undefined,
+  texts: Map<string, string | null>,
+): Attribution {
+  const headFragments = commentFragments(texts.get(head.srcOid), head.from);
+  const touchLines = commentTouchLines(head.hunks, new Set(headFragments.keys()));
+  if (!merge) return { effective: head.hunks, touchLines, headFragments };
+  const secondLines = new Set(merge.hunks.flatMap((hunk) => [...hunk.addedLines]));
+  const secondTouch = commentTouchLines(
+    merge.hunks,
+    new Set(commentFragments(texts.get(merge.srcOid), merge.from).keys()),
+  );
+  return {
+    effective: head.hunks.map((hunk) => ({
+      ...hunk,
+      addedLines: new Set([...hunk.addedLines].filter((line) => secondLines.has(line))),
+    })),
+    touchLines: new Set([...touchLines].filter((line) => secondTouch.has(line))),
+    headFragments,
+  };
 }
 
 function normalizedRoot(cwd: string, root: string): string {
@@ -289,62 +328,6 @@ function findingFor(
   };
 }
 
-/** One parent's added-line hunks and comment-touch lines, diffing a moved file from its old path. */
-function parentAttribution(cwd: string, file: string, renames: Renames | null, ref?: string) {
-  const from = renames?.get(file)?.from;
-  const hunks = parsePatchHunks(patch(cwd, file, ref, from));
-  const fragments = commentFragmentsAt(cwd, from ?? file, ref ?? 'HEAD');
-  return { hunks, fragments, touch: commentTouchLines(hunks, new Set(fragments.keys())) };
-}
-
-interface StagedFile {
-  file: string;
-  extension: string;
-  source: string;
-  tokens: CommentToken[];
-  effective: PatchHunk[];
-  added: Set<number>;
-  touchLines: Set<number>;
-  headFragments: Map<number, string[]>;
-}
-
-/** One staged file's comments and the added lines attributed to this change. */
-function attributed(
-  cwd: string,
-  file: string,
-  extension: string,
-  headRenames: Renames,
-  mergeRenamed: Renames | null,
-): StagedFile {
-  const first = parentAttribution(cwd, file, headRenames);
-  let effective = first.hunks;
-  let touchLines = first.touch;
-  try {
-    const second = parentAttribution(cwd, file, mergeRenamed, 'MERGE_HEAD');
-    const secondLines = new Set(second.hunks.flatMap((hunk) => [...hunk.addedLines]));
-    effective = first.hunks.map((hunk) => ({
-      ...hunk,
-      addedLines: new Set([...hunk.addedLines].filter((line) => secondLines.has(line))),
-    }));
-    touchLines = new Set([...touchLines].filter((line) => second.touch.has(line)));
-  } catch {
-    // Ordinary commit: the first-parent staged patch is the complete attribution set.
-  }
-  const source = stagedBlob(cwd, file);
-  const tokens = scanCommentTokens(source, extension);
-  const added = new Set(effective.flatMap((hunk) => [...hunk.addedLines]));
-  return {
-    file,
-    extension,
-    source,
-    tokens,
-    effective,
-    added,
-    touchLines,
-    headFragments: first.fragments,
-  };
-}
-
 export function detectChangedComments(
   cwd = process.cwd(),
   only?: ReadonlySet<string>,
@@ -358,25 +341,41 @@ export function detectChangedComments(
   const unsupported: DetectionResult['unsupported'] = [];
   const inventory = emptyInventory();
   const decisionsDir = normalizedRoot(cwd, cfg.decisionsDir);
+  const { files, head, merge } = changedPaths(cwd);
   inventory.decisionsStaged =
-    decisionsDir !== '' && [...stagedPaths(cwd)].some((file) => insideRoots(file, [decisionsDir]));
-  const { files, head: headRenames, merge: mergeRenamed } = changedPaths(cwd);
-  const staged: StagedFile[] = [];
+    decisionsDir !== '' && [...head.keys()].some((file) => insideRoots(file, [decisionsDir]));
+  const scanned: string[] = [];
   for (const file of files.sort()) {
     if (only && !only.has(file)) continue;
     if (!insideRoots(file, roots) || !isConfiguredSource(file)) continue;
     const extension = extensionOf(file);
-    if (!SUPPORTED_EXTENSIONS.has(extension)) {
-      unsupported.push({ extension, path: file });
-      continue;
-    }
-    inventory.files += 1;
-    staged.push(attributed(cwd, file, extension, headRenames, mergeRenamed));
+    if (SUPPORTED_EXTENSIONS.has(extension)) scanned.push(file);
+    else unsupported.push({ extension, path: file });
   }
+  const texts = blobTexts(
+    cwd,
+    scanned.flatMap((file) => {
+      const entry = head.get(file);
+      return [entry?.srcOid, entry?.dstOid, merge?.get(file)?.srcOid].filter(
+        (oid): oid is string => oid !== undefined,
+      );
+    }),
+  );
+  const staged: StagedFile[] = scanned.map((file) => {
+    const entry = head.get(file);
+    const source = entry && texts.get(entry.dstOid);
+    if (!entry || source == null) throw new Error(`git could not read the staged blob of ${file}`);
+    inventory.files += 1;
+    const extension = extensionOf(file);
+    const { effective, touchLines, headFragments } = attribution(entry, merge?.get(file), texts);
+    const tokens = scanCommentTokens(source, extension);
+    const added = new Set(effective.flatMap((hunk) => [...hunk.addedLines]));
+    return { file, extension, source, tokens, effective, added, touchLines, headFragments };
+  });
   const candidates = new Set(
     staged.flatMap(({ source, tokens, added }) => addedCommentText(source, tokens, added)),
   );
-  const pool = mergeRenamed ? new Map<string, number>() : movedPool(cwd, lexerFor, candidates);
+  const pool = merge ? new Map<string, number>() : movedPool(cwd, lexerFor, candidates);
   for (const {
     file,
     extension,

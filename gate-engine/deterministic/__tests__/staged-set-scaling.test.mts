@@ -29,14 +29,6 @@ const EXCLUDED = new Map([
     "needs a `devkit coverage-run` artifact whose provenance matches each fixture's staged tree",
   ],
 ]);
-// Git spawns per in-scope staged file today. Lower one when a gate gets cheaper; never raise it.
-const IN_SCOPE_SLOPE = {
-  'rename-in-scope': new Map([['size', 2]]),
-  'codemod-in-scope': new Map([
-    ['size', 2],
-    ['comments', 6],
-  ]),
-};
 const MEASURED = DETERMINISTIC.filter((gate) => !EXCLUDED.has(gate.id));
 
 const dirs: string[] = [];
@@ -264,21 +256,20 @@ describe('deterministic gate cost against the staged-set size', () => {
         MEASURED.map((gate) => [gate.id, { starts: 0, blobs: 0 }]),
       );
       // whitespace and anti-slop judge every staged path or JS/TS file, not scanRoots, so each
-      // reads every renamed or edited file once.
+      // reads every renamed or edited file once. comments takes one whole-set patch diff, which
+      // reads each renamed or edited blob once.
       if (change !== 'delete-out-of-scope') {
-        for (const id of ['whitespace', 'anti-slop']) expected[id] = { starts: 0, blobs: 1 };
+        for (const id of ['whitespace', 'anti-slop', 'comments']) expected[id] = { starts: 0, blobs: 1 };
       }
       expect(slopes(change)).toEqual(expected);
     },
   );
 
   it.each(['rename-in-scope', 'codemod-in-scope'] as const)(
-    'starts at most the pinned git processes per staged file inside scanRoots (%s)',
+    'starts no git process per staged file inside scanRoots (%s)',
     (change) => {
       const measured = slopes(change);
-      for (const [id, slope] of Object.entries(measured)) {
-        expect(slope.starts, id).toBeLessThanOrEqual(IN_SCOPE_SLOPE[change].get(id) ?? 0);
-      }
+      for (const [id, slope] of Object.entries(measured)) expect(slope.starts, id).toBe(0);
       expect(
         measured.size.blobs,
         'size reads each in-scope blob it line-counts, so 0 means the blob count is blind',
