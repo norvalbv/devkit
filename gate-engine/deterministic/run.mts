@@ -55,6 +55,7 @@ import {
   bypassedSuffixes,
   commandGate,
   configExtraGates,
+  emitGateStep,
   GUARD_PREFIX_RE,
   reportCachedBypasses,
   type ExtraGate,
@@ -293,7 +294,9 @@ function runGates(cwd: string, gates: Gate[], exec: typeof execFileSync): GateOu
       }
       if (!gate.argv) return;
       const reasonFile = fileFor(i);
+      const startedAt = Date.now();
       const rc = runArgv(cwd, gate.argv, exec, reasonFile);
+      const [nFailed, nSkipped] = [out.failed.length, out.skipped.length];
       // Not an exit code, so no rcLabel, opt-out or strict rule applies: it blocks as could-not-run.
       if (typeof rc === 'string') {
         const next = rc.startsWith('killed:')
@@ -302,18 +305,24 @@ function runGates(cwd: string, gates: Gate[], exec: typeof execFileSync): GateOu
         recordFailure(out, gate, `(${rc})`, false, [
           `${rc}: the gate never reached a verdict, so this is not a code finding. ${next}`,
         ]);
+        emitGateStep(gate.label, rc, startedAt, out.failed[nFailed], false);
         return;
       }
       const failRc = (suffix = '') =>
         recordFailure(out, gate, suffix, undefined, readGateReason(reasonFile));
       // failOpen2 belongs to the GATE (exit 2 = opt-out), strict to the RUN: so an `--extra`'s
       // fatal exit 2 (never an opt-out) stays `(unexpected:2)` under strict, not a skip.
-      if (rc === 1) failRc();
-      else if (gate.rcLabels && Object.hasOwn(gate.rcLabels, rc)) failRc(gate.rcLabels[rc]);
-      else if (rc === 2 && gate.failOpen2) {
-        if (deterministicStrict()) failRc(COULD_NOT_RUN);
-        else out.skipped.push(gate.label);
-      } else if (rc !== 0) failRc(`(unexpected:${rc})`);
+      // `finally`, so an early return added to this classification still records the gate's step.
+      try {
+        if (rc === 1) failRc();
+        else if (gate.rcLabels && Object.hasOwn(gate.rcLabels, rc)) failRc(gate.rcLabels[rc]);
+        else if (rc === 2 && gate.failOpen2) {
+          if (deterministicStrict()) failRc(COULD_NOT_RUN);
+          else out.skipped.push(gate.label);
+        } else if (rc !== 0) failRc(`(unexpected:${rc})`);
+      } finally {
+        emitGateStep(gate.label, rc, startedAt, out.failed[nFailed], out.skipped.length > nSkipped);
+      }
     });
   });
   return out;
