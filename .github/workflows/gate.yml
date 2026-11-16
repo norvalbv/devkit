@@ -145,6 +145,7 @@ jobs:
         env:
           VITEST_MAX_WORKERS: 3
           SHARD: ${{ matrix.shard }}
+          DEVKIT_INSTALL_LAYOUTS: 1
         run: bun run test:run --shard="$SHARD/4" --reporter=blob --reporter=default
 
       # download-artifact takes the newest artifact per name across run attempts, so a shard that
