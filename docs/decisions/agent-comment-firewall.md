@@ -130,3 +130,4 @@ created: 2026-08-15
 **Scope:** gate-engine/comment-firewall/**
 **Source:** collab
 **Evidence-change:** Live OpenRouter Decisions API measurements of typesafe/jev-1.13 (about 1,000 calls with an owner-supplied temporary key) on 2026-10-03, after the owner asked to make Jev the blocker.
+- 2026-10-16 — sc-2665 — a third opt-in reference key, comments.forbidLineAnchors, adds the shared LINE_ANCHOR_RE (gate-engine/markdown/referenced-paths.mts) to the forbidden refs, so an added comment citing <file>.<ext>:<line> blocks on every attempt and the block prints a symbol-citing remedy line. It is a builtin rather than a forbiddenRefs regex so config never duplicates the pattern and the remedy can name the right fix. Existing anchors keep passing under the added-lines rule and the HEAD-fragment excuse. Default off; devkit sets it. Shell and other non-JS/TS comments stay uncovered because the firewall only lexes JS/TS.
