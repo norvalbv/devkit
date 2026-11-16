@@ -20,7 +20,7 @@ import { parseArgs } from 'node:util';
 import { cancel, confirm, isCancel } from '@clack/prompts';
 import { branchHead, type CommitCi, commitCi, GhUnavailable } from '../lib/baseline-status/gh.mts';
 import { configuredSource } from '../lib/baseline-status/source.mts';
-import { shellQuote } from '../lib/ship/dist-integrity.mts';
+import { shellQuote } from '../../gate-engine/review/valve/shell-word.mts';
 import ship from './ship.mts';
 
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;

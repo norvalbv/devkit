@@ -20,7 +20,7 @@ import {
   printReleaseOnlyDist,
   releaseVersion,
 } from '../lib/ship/preflight/release-only-dist.mts';
-import { shellQuote } from '../lib/ship/dist-integrity.mts';
+import { shellQuote } from '../../gate-engine/review/valve/shell-word.mts';
 import { SELF_HOST_EXTRAS } from '../lib/husky/self-host.mts';
 import { scopedTargets } from '../../gate-engine/decisions/scoped-targets.mts';
 import { loadReviewerTargetsBlocks } from '../../gate-engine/review/evidence/targets-block.mts';

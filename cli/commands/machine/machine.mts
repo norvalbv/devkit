@@ -49,7 +49,7 @@ import {
   updateLease,
 } from '../../lib/machine/lease.mts';
 import { clearEvidence, evidenceDir } from '../../lib/machine/manifest.mts';
-import { shellQuote } from '../../lib/ship/dist-integrity.mts';
+import { shellQuote } from '../../../gate-engine/review/valve/shell-word.mts';
 import { VIDEO_CAP } from '../../lib/ship/evidence/media.mts';
 
 const READY_TIMEOUT_MS = 120_000;
