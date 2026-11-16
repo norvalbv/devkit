@@ -11,11 +11,16 @@ import path from 'node:path';
 import { commitIndexEnv, commitIndexTree } from '../../ratchets/commit-index.mts';
 import { normalizeRepositoryFile } from '../../../skills/_devkit/review-roots.mjs';
 
-export function gitCached(cwd: string, args: string[], files: string[]): string {
+export function gitCached(
+  cwd: string,
+  args: string[],
+  files: string[],
+  config: string[] = [],
+): string {
   const pathspecs = files.map(
     (file) => `:(top,literal)${normalizeRepositoryFile(file, 'review evidence file')}`,
   );
-  return execFileSync('git', ['diff', '--cached', ...args, '--', ...pathspecs], {
+  return execFileSync('git', [...config, 'diff', '--cached', ...args, '--', ...pathspecs], {
     cwd,
     env: commitIndexEnv(cwd),
     encoding: 'utf8',
