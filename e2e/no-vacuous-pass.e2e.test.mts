@@ -162,7 +162,7 @@ const DEPRIVED: Deprivation[] = [
     because: "the linked Check's command cannot be spawned, so the ruling was never checked",
     config: true,
     speaks: true,
-    expected: 1,
+    expected: 2,
     setup: (repoDir) => {
       mkdirSync(join(repoDir, 'docs', 'decisions'), { recursive: true });
       writeFileSync(
