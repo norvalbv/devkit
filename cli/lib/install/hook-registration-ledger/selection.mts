@@ -23,6 +23,8 @@ export const FANOUT_BRIEF_HOOK = 'fanout-brief.mjs';
 export const PLACEMENT_BRIEF_HOOK = 'placement-brief.mjs';
 /** Codex apply_patch → edited paths; imported by edit hooks of five components, never wired alone. */
 export const EDIT_TARGETS_LIB = 'edit-targets-lib.mjs';
+/** The after-edit line-ceiling advisory; owned by the size guard whose ceiling it reports. */
+export const SIZE_HEADROOM_HOOK = 'size-headroom-check.mjs';
 
 export function bundledHookNames(): string[] {
   return readdirSync(join(packageDir(), 'agents-hooks'), {
@@ -47,6 +49,7 @@ export function hookScriptsFor({
   comments = false,
   fanout = false,
   placement = false,
+  size = false,
 }: {
   agentHooks: boolean;
   decisions: boolean;
@@ -58,6 +61,7 @@ export function hookScriptsFor({
   comments?: boolean;
   fanout?: boolean;
   placement?: boolean;
+  size?: boolean;
 }): string[] {
   const all = bundledHookNames();
   // Scripts owned by a component OTHER than agentHooks — selecting agent hooks must not drag them
@@ -80,6 +84,7 @@ export function hookScriptsFor({
     FANOUT_BRIEF_HOOK,
     PLACEMENT_BRIEF_HOOK,
     EDIT_TARGETS_LIB,
+    SIZE_HEADROOM_HOOK,
     ...decisionsOwned,
     ...adhdOwned,
     ...baseDriftOwned,
@@ -97,7 +102,8 @@ export function hookScriptsFor({
       (comments && name === COMMENT_PREFLIGHT_HOOK) ||
       (fanout && name === FANOUT_BRIEF_HOOK) ||
       (placement && name === PLACEMENT_BRIEF_HOOK) ||
-      (editHooks && name === EDIT_TARGETS_LIB),
+      (editHooks && name === EDIT_TARGETS_LIB) ||
+      (size && name === SIZE_HEADROOM_HOOK),
   );
 }
 
@@ -124,6 +130,7 @@ function hookComponents(selection: Partial<Selection>, searchSteering: boolean):
   const decisions = selection.guards?.includes('decisions') ?? false;
   const comments = selection.guards?.includes('comments') ?? false;
   const fanout = selection.guards?.includes('fanout') ?? false;
+  const size = selection.guards?.includes('size') ?? false;
   return [
     searchSteering && selection.searchSteering && 'searchSteering',
     selection.agentHooks && 'agentHooks',
@@ -136,6 +143,7 @@ function hookComponents(selection: Partial<Selection>, searchSteering: boolean):
     comments && 'comments',
     fanout && 'fanout',
     placementSelected(selection) && 'placement',
+    size && 'size',
   ].filter((value): value is string => Boolean(value));
 }
 
@@ -160,6 +168,7 @@ export function selectedHookAssets(
       comments: selection.guards?.includes('comments') ?? false,
       fanout: selection.guards?.includes('fanout') ?? false,
       placement: placementSelected(selection),
+      size: selection.guards?.includes('size') ?? false,
     }),
   };
 }
