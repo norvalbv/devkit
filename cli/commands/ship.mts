@@ -207,10 +207,10 @@ Usage:
   --dry-gates         Rehearse the exact ship base + selected source staging in an ephemeral worktree.
                       Runs the formatter, configured deterministic/structure/extra gates, and the
                       deterministic comment budget gate; skips the decision judge,
-                      domain/completeness review, commit, push, and PR creation. The decision gate's
-                      regex smells (e.g. legacy-deletion) print as an advisory with the remedy this
-                      repo allows; they never change the exit code. With --base, refreshes and uses the
-                      current origin tip just like ship.
+                      domain/completeness review, commit, push, and PR creation. With --base,
+                      refreshes and uses the current origin tip just like ship. Like every gated
+                      ship, it first prints the decision gate's regex smells (e.g. legacy-deletion)
+                      as an advisory with this repo's remedy; they never change the exit code.
                       Never leaves a local branch or commit. Cannot be combined with --resume.
   --with-reviewers    With --dry-gates only: also run the configured domain reviewers on that same
                       staging. Decisions and completeness stay off (there is no commit

@@ -1,5 +1,5 @@
-// `devkit ship --dry-gates` advisory: the decisions gate's deterministic smell regex on ship's exact
-// staging, without the judge. Informational only — always exits 0 and stays silent on any error.
+// Ship's pre-chain advisory: the decisions gate's deterministic smell regex on ship's exact staging,
+// without the judge. Informational only — always exits 0 and prints nothing on any error.
 
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -13,32 +13,50 @@ import {
 } from '../../../../gate-engine/decisions/detect.mts';
 import { git, stagedFiles } from '../../../../gate-engine/decisions/git-io.mts';
 
-/** True when a record written under `decisionsDir` would be git-ignored in the caller's checkout. */
-export function decisionsDirIgnored(root: string, decisionsDir: string): boolean {
+/** True only when git proves a record under `decisionsDir` would be tracked in the caller's checkout. */
+export function decisionsDirStageable(root: string, decisionsDir: string): boolean {
   try {
     git(root, ['check-ignore', '-q', '--no-index', '--', path.join(decisionsDir, '__probe__.md')]);
-    return true;
-  } catch {
-    return false; // exit 1 = not ignored; anything else cannot prove it ignored either
+    return false;
+  } catch (err) {
+    // exit 1 = not ignored; 128 (a symlinked decisions dir) or a spawn error cannot prove it stageable
+    return err instanceof Error && 'status' in err && err.status === 1;
   }
+}
+
+// Named pairs before the rest collapse to a count: the advisory prints twice, and a verdict sits below it.
+const SHOWN = 5;
+
+type AdviceOpts = { stageable: boolean; noLlm: boolean; decisionsDir: string };
+
+function smellLines(sources: { label: string; path: string }[]): string[] {
+  const lines = sources
+    .slice(0, SHOWN)
+    .map((s) => `⚠️  decision smell (regex only, not a verdict): ${s.label} — ${s.path}`);
+  if (sources.length > SHOWN)
+    lines.push(
+      `   … and ${sources.length - SHOWN} more smelly file(s); the decisions gate judges every one.`,
+    );
+  return lines;
+}
+
+function guidanceLines(opts: AdviceOpts): string[] {
+  return [
+    opts.noLlm
+      ? '   The decision judge is disabled here (noLlm), so a ship will likely block on this; see the remedy below.'
+      : "   No action needed now: the decisions gate's judge runs after the deterministic gates (every ship except --dry-gates) and may clear this as ROUTINE.",
+    opts.stageable
+      ? "   If it blocks: record a real architectural decision with guard-decisions and pass the record's path to devkit ship."
+      : `   If it blocks: git cannot confirm ${opts.decisionsDir} is stageable here (git-ignored, or a symlink git will not follow), so do not pass a record; re-ship with GUARD_NO_LOG=1 only with the user's OK.`,
+  ];
 }
 
 /** The advisory lines for each (smell, file) pair, with the remedy this repo layout allows. */
 export function renderAdvisory(
   sources: { label: string; path: string }[],
-  ignored: boolean,
-  decisionsDir: string,
+  opts: AdviceOpts,
 ): string[] {
-  if (sources.length === 0) return [];
-  const lines = sources.map(
-    (s) => `⚠️  decision smell (regex only — the judge did not run): ${s.label} — ${s.path}`,
-  );
-  lines.push(
-    ignored
-      ? `   ${decisionsDir} is git-ignored here: do not pass a record to ship (it would be force-committed). The real ship's judge may clear this as ROUTINE; otherwise GUARD_NO_LOG=1 needs the user's OK.`
-      : `   Record the decision (guard-decisions) and pass the record's path to devkit ship, or let the real ship's judge decide.`,
-  );
-  return lines;
+  return sources.length === 0 ? [] : [...smellLines(sources), ...guidanceLines(opts)];
 }
 
 /** Advisory for the staged set in `cwd`; `root` is the caller's checkout, where ignore rules live. */
@@ -52,16 +70,18 @@ export function adviseStaged(cwd: string, root: string): string[] {
     smells: sources.map((s) => s.label),
   });
   if (verdict === 0) return [];
-  return renderAdvisory(sources, decisionsDirIgnored(root, cfg.decisionsDir), cfg.decisionsDir);
+  return renderAdvisory(sources, {
+    stageable: decisionsDirStageable(root, cfg.decisionsDir),
+    noLlm: cfg.noLlm,
+    decisionsDir: cfg.decisionsDir,
+  });
 }
 
 export function main(argv: string[]): void {
   try {
-    const at = argv.indexOf('--root');
-    const root = at >= 0 && argv[at + 1] ? argv[at + 1] : process.cwd();
-    for (const line of adviseStaged(process.cwd(), root)) console.error(line);
+    for (const line of adviseStaged(process.cwd(), argv[0] ?? process.cwd())) console.log(line);
   } catch {
-    // advisory: an unreadable config or index must never change the rehearsal's outcome
+    // advisory: an unreadable config or index must never change the ship's outcome
   }
 }
 
