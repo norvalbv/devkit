@@ -12,6 +12,8 @@
     "run-as-main": "node_modules/.bin/vitest run --reporter=dot cli/__tests__/bin-run-as-main.test.mts",
     "typecheck": "bun run typecheck"
   },
+  "//gateTimeoutMs": "Per-gate deadline for guard-deterministic (default 30 min). Raised here because related-tests has legitimately run for about 32 minutes on a loaded machine before reporting a real failure.",
+  "gateTimeoutMs": 3000000,
   "//comments": "devkit is open source: a comment citing a private Shortcut ticket, an autonomous report id or a decision record means nothing to an outside reader, so guard-comments blocks changed comments that do.",
   "comments": {
     "forbiddenRefs": ["\\bsc-\\d+\\b", "\\breport-[0-9a-f]{6,}\\b"],

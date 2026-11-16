@@ -131,6 +131,10 @@ export const TEST_ONLY_ADDITIONS = [
   // The launching agent's session; inherited, it is stamped as every telemetry row's parent_session_id.
   'CLAUDE_CODE_SESSION_ID',
   'CODEX_THREAD_ID',
+  // An operator may export this for one ship; inherited through the related-tests gate, it would
+  // replace the deadline the deterministic gate tests assert.
+  'GUARD_GATE_TIMEOUT_MS',
+  'FRINK_GATE_TIMEOUT_MS',
 ];
 
 // One-run gate bypasses (BYPASS_FLAGS in cli/lib/ship/merge-verdict/bypasses.mts), in both

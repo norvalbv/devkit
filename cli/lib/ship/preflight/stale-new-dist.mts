@@ -133,7 +133,7 @@ export function writeNewDist(
     );
   }
   const compiled = artifacts.filter((file) => file !== `dist/${distSource(file)}`);
-  const fresh = compiled.length > 0 ? freshEmit(root, compiled) : new Map();
+  const fresh = compiled.length > 0 ? freshEmit(root, compiled, TSC_TIMEOUT_MS) : new Map();
   const unemitted = compiled.filter((file) => fresh.get(file) === undefined);
   if (unemitted.length > 0) throw new Error(`tsc emitted nothing for: ${unemitted.join(', ')}`);
   for (const file of artifacts) {

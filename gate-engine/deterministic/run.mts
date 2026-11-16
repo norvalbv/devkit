@@ -44,23 +44,26 @@ import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { z } from 'zod';
 import { coverageBypassed, deterministicStrict } from '../config.mts';
 import { emitGateBypass, finishGateTiming } from '../judge/gate-events.mts';
 import { markGateRun } from '../judge/run-context.mts';
 import { reportOlderOverlayRunner } from '../overlay-mode.mts';
 import { describeCachedPrefix, prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
-import { type GateFailure, gateEnv, readGateReason, withReasonFiles } from './reason.mts';
+import { type GateFailure, readGateReason, withReasonFiles } from './reason.mts';
 import {
   bypassedSuffixes,
   commandGate,
   configExtraGates,
   emitGateStep,
+  gateTimeoutMs,
   GUARD_PREFIX_RE,
   reportCachedBypasses,
+  runArgv,
   type ExtraGate,
   type Gate,
   structureBypassed,
+  TIMED_OUT,
+  timeoutReason,
 } from './command-gates.mts';
 import { type ParsedOpts, parseOpts } from './parse-opts.mts';
 import { recheckLines, registryRecheck } from './recheck.mts';
@@ -144,33 +147,6 @@ export function prefixCacheScope(scope?: string, effectiveIds?: string[]): strin
   return shipBase ? `${prScope ?? 'devkit-guards'}:ship-base:${shipBase}` : prScope;
 }
 
-// What execFileSync throws: `status` when the child exited, `signal` when one ended it, `code` when
-// the spawn itself failed (ENOENT, EACCES, EAGAIN).
-const spawnErrorSchema = z.object({
-  status: z.number().optional().catch(undefined),
-  signal: z.string().optional().catch(undefined),
-  code: z.string().optional().catch(undefined),
-});
-
-// Run one gate as a subprocess: its exit code (0 on success), or `killed:<SIG>` / `spawn-failed:<CODE>`
-// when it never reached one. stdio is inherited; the gate's failure reason returns via `reasonFile`.
-function runArgv(
-  cwd: string,
-  argv: string[],
-  exec: typeof execFileSync,
-  reasonFile: string,
-): number | string {
-  try {
-    exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit', env: gateEnv(reasonFile) });
-    return 0;
-  } catch (e: unknown) {
-    const { status, signal, code } = spawnErrorSchema.safeParse(e).data ?? {};
-    if (status !== undefined) return status;
-    if (signal) return `killed:${signal}`;
-    return code ? `spawn-failed:${code}` : 1;
-  }
-}
-
 // What one run settled before any gate spawned: computed once, passed to every phase below.
 interface RunPlan {
   cwd: string;
@@ -251,6 +227,7 @@ function recordFailure(
 
 function runGates(cwd: string, gates: Gate[], exec: typeof execFileSync): GateOutcome {
   const out: GateOutcome = { fails: [], failed: [], rechecks: [], skipped: [] };
+  const timeoutMs = gateTimeoutMs(cwd);
   withReasonFiles((fileFor) => {
     gates.forEach((gate, i) => {
       if (gate.notRun) console.log(`${gate.label}: ${gate.notRun}`);
@@ -260,8 +237,14 @@ function runGates(cwd: string, gates: Gate[], exec: typeof execFileSync): GateOu
       if (!gate.argv) return;
       const reasonFile = fileFor(i);
       const startedAt = Date.now();
-      const rc = runArgv(cwd, gate.argv, exec, reasonFile);
+      const rc = runArgv(cwd, gate.argv, exec, reasonFile, timeoutMs);
       const [nFailed, nSkipped] = [out.failed.length, out.skipped.length];
+      // Its own outcome, not an exit code: no rcLabel, opt-out or strict rule applies to it.
+      if (rc === TIMED_OUT) {
+        recordFailure(out, gate, `(timed-out:${timeoutMs / 1000}s)`, false, timeoutReason(timeoutMs));
+        emitGateStep(gate.label, rc, startedAt, out.failed[nFailed], false);
+        return;
+      }
       // Not an exit code, so no rcLabel, opt-out or strict rule applies: it blocks as could-not-run.
       if (typeof rc === 'string') {
         const next = rc.startsWith('killed:')
