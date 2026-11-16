@@ -101,6 +101,9 @@ same directory, kept for the newest 300 runs only (`DEVKIT_TELEMETRY_KEEP`), and
   - `pre-existing`: the defect is real but already on the base; this change did not introduce it.
   - `accepted`: the behaviour is real and deliberate, accepted as a known residual.
   A real defect waived as `false-positive` mislabels the reviewer's benchmark corpus.
+  A failing reviewer also prints `reviewed diff: guard-review transcript <ref>`: that transcript
+  holds the staged diff of the files the reviewer was given, and it outlives the ship's worktree. A
+  path missing from it may sit outside that reviewer's files rather than be unstaged.
   When a correctness or conventions finding names a concrete input and running that input against
   the reviewed code gives the correct result, waive it with the command and its output as the
   rationale. Do not add tests or edits only to change the diff and re-sample the judge: any real
