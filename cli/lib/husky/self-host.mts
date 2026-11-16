@@ -129,8 +129,9 @@ else
                 __dk_no_git_env fallow audit $FALLOW_BASE_ARGS --diff-stdin --format json --output-file "$DK_FALLOW_JSON" <"$DK_FALLOW_DIFF" >/dev/null 2>&1 || DK_FALLOW_RC=$?
             fi
             # Runs even when mktemp failed (an unset, unwritable or full TMPDIR), and is handed the
-            # exit code so a clean verdict from a FAILED audit is refused rather than believed.
-            DK_FALLOW_STATE="$(node gate-engine/judge/advisory/emit.mts fallow-advisory "$DK_FALLOW_JSON" "$DK_FALLOW_RC" 2>/dev/null || echo unreadable)"
+            # exit code so a clean verdict from a FAILED audit is refused rather than believed. Its
+            # stderr stays in the log: it lists the findings fallow's own report prints unmarked.
+            DK_FALLOW_STATE="$(node gate-engine/judge/advisory/emit.mts fallow-advisory "$DK_FALLOW_JSON" "$DK_FALLOW_RC" || echo unreadable)"
             rm -f "$DK_FALLOW_JSON" 2>/dev/null || true
             # Anything but a clean verdict prints the report. A crashed emitter lands here too, so a
             # broken narrator makes the hook say MORE rather than swallow a finding.

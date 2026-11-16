@@ -509,6 +509,31 @@ describe('advisory_result', () => {
     }
   });
 
+  it("keeps the first introduced finding's name inside the row cap, however deep its path", () => {
+    const findings = [
+      {
+        path: 'gate-engine/review/eval/reviewers/scale/lens-run.mts',
+        name: 'runOne',
+        line: 366,
+        introduced: true,
+      },
+      { path: 'gate-engine/review/eval/reviewers/scale/lens-run.mts', name: 'b', introduced: true },
+    ];
+    const audit = {
+      verdict: 'fail',
+      attribution: { complexity_introduced: 2 },
+      complexity: { findings },
+    };
+    const detail = summariseFallowAudit(JSON.stringify(audit))?.detail ?? '';
+    const text = render(
+      summarise(
+        [ev({ type: 'ship_attempt' }), advisory('fallow-advisory', 'finding', detail)],
+        SHIP,
+      ),
+    );
+    expect(text).toContain('2 complexity introduced: lens-run.mts:366 runOne');
+  });
+
   it('can never be rendered as the blocker, even when the run failed unattributably', () => {
     // 'unknown' blocked_gate is the arm that turns every ATTRIBUTABLE row's blocking to null
     // ("finding recorded" with no claim either way). An advisory is knowable on every run.
