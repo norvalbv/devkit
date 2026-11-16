@@ -1,11 +1,19 @@
 // Both spawned-eslint sites against REAL installs behind a linked node_modules (ship worktree shape).
-// Run: DEVKIT_INSTALL_LAYOUTS=1 bun run test:run -- install-layouts (first run installs over the network).
+// Run: DEVKIT_INSTALL_LAYOUTS=1 bun run test:run -- install-layouts (installs over the network).
 
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { eslintOverlayContent } from '../lib/install/overlay-lint-configs.mts';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import { overlayStagedStep, runHookFragment } from './_husky-hook-harness.mts';
@@ -14,6 +22,7 @@ import {
   INSTALL_LAYOUTS_ENABLED,
   type InstallLayout,
   installLayout,
+  removeInstallLayouts,
 } from './_install-layouts.mts';
 
 const DEVKIT_ROOT = realpathSync(join(dirname(fileURLToPath(import.meta.url)), '../..'));
@@ -21,6 +30,8 @@ const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+afterAll(removeInstallLayouts);
+if (!INSTALL_LAYOUTS_ENABLED) console.info('install-layouts skipped: set DEVKIT_INSTALL_LAYOUTS=1');
 
 const ESLINT_CONFIG = `import {
   createFolderStructure,
@@ -118,4 +129,11 @@ describe.skipIf(!INSTALL_LAYOUTS_ENABLED)('spawned eslint across real install la
       });
     }
   }
+
+  it('reuses each install within a run, then removes it rather than caching it for the next', () => {
+    const paths = INSTALL_LAYOUTS.map(installLayout);
+    expect(INSTALL_LAYOUTS.map(installLayout)).toEqual(paths);
+    removeInstallLayouts();
+    for (const path of paths) expect(existsSync(path), path).toBe(false);
+  });
 });
