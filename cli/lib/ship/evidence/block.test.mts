@@ -91,6 +91,16 @@ describe('evidence block', () => {
     expect(readEvidenceBlock(block, 'f'.repeat(40))?.stale).toBe(true);
   });
 
+  it('lists each green failure and green file error, bounded like the red ones', () => {
+    const fileError = { fullName: '<checkout>/src/extra.test.mjs', message: 'x'.repeat(400) };
+    const green = { ...operand(HEAD, 1, 1), fileErrors: [fileError] };
+    const block = renderEvidenceBlock(captured, { ...evidence, green });
+    expect(block).toContain('<summary>Failed on green (1 test)</summary>');
+    expect(block).toContain('- `<checkout>/src/extra.test.mjs`: `' + 'x'.repeat(239) + '…`');
+    expect(block).toContain('<summary>Did not load on green (1 file)</summary>');
+    expect(renderEvidenceBlock(captured, evidence)).not.toContain('Failed on green');
+  });
+
   it('names the abstention reason and renders no runs when nothing was captured', () => {
     const block = renderEvidenceBlock(notRun('docs-only', 'only Markdown', HEAD, BASE), null);
     expect(block).toContain(
