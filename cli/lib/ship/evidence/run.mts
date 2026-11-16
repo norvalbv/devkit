@@ -172,7 +172,7 @@ const notProduced = (why: string, head: string): Produced => ({
 });
 
 /** Loaded only once a block is being written, so a ship that writes none never pays for it. */
-async function shipVerdict(input: VerdictInput): Promise<PrintedVerdict> {
+async function shipVerdict(input: VerdictInput): Promise<PrintedVerdict | undefined> {
   try {
     const { printVerdict } = await import('../merge-verdict/ship-change.mts');
     return printVerdict(input);
@@ -234,7 +234,7 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<Pu
     `evidence: ${status}${reason ? ` (${reason})` : ''}: ${detail} [PR body ${result}]`,
   );
   const { outcome, tests } = produced;
-  return { outcome, tests, publish: result, verdict: verdict.verdict?.verdict ?? null };
+  return { outcome, tests, publish: result, verdict: verdict?.verdict?.verdict ?? null };
 }
 
 /** This ship's reviewer advisories into the PR body; a ship whose reviewers raised none makes no gh call. */
