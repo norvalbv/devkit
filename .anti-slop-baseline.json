@@ -483,14 +483,6 @@
       "count": 2
     },
     {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/install/agent-asset-manifest/codec.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "if (fields.has('generatedAt') && typeof generatedAt !== 'string')",
-      "fingerprint": "0cce94bdf34f3e9c89e98db5b8c468c004582a2a8bf1083cb4bd8f79586e5015",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/lib/install/agent-asset-lock.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -1764,14 +1756,6 @@
     },
     {
       "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/install/agent-asset-manifest/compatibility.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "typeof previous.generatedAt === 'string' &&",
-      "fingerprint": "2cf4e4ad87acfd4e098dc0beb34345902733c06a92a0323adbc3abefb19a7ff5",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-runtime-typeof",
       "file": "cli/lib/install/oxc/lifecycle.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "(candidate.createdDigest === null || typeof candidate.createdDigest === 'string')",
@@ -1977,14 +1961,6 @@
       "context": "typeof value === 'string' &&",
       "fingerprint": "32510a298595884d5e028c3ad1614b0c2661fc27f907c188183686fca1805333",
       "count": 2
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/ratchets/size-disable.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "cfg = JSON.parse(readFileSync(cfgPath, 'utf8')) as Record<string, unknown>;",
-      "fingerprint": "3275a22a55cb6a9d075128e02cfacc1363dd5354525f86cffa08aa1e1c392bf3",
-      "count": 1
     },
     {
       "ruleId": "anti-slop/no-module-mocking",
@@ -2240,14 +2216,6 @@
       "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
       "context": "expect(Object.keys(BIN).length).toBeGreaterThan(10);",
       "fingerprint": "38cb6c576ef3ce87145e838dbf8373cf3866ece66e09f9eaaaddb09d549702f8",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "cli/lib/install/agent-asset-manifest/codec.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "...(typeof generatedAt === 'string' ? { generatedAt } : {}),",
-      "fingerprint": "38cc458bccc080d3b8bab2022c22d7bb7c54a192b1a998a2a751cd9a7f39baac",
       "count": 1
     },
     {
@@ -2984,14 +2952,6 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "return typeof v === 'number' ? v : v.line;",
       "fingerprint": "48e3651562345047ac100788fe11ef1a8d0c12ffbf41c7687763d0dba30f0c7f",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/install/agent-asset-manifest/codec.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "if (typeof generatedAt !== 'string')",
-      "fingerprint": "48f328b815b80e643681a58f580ff865317ac810f2339571972b2c99dc2cd25b",
       "count": 1
     },
     {
@@ -3900,14 +3860,6 @@
     },
     {
       "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/install/agent-asset-manifest/codec.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "...(typeof generatedAt === 'string' ? { generatedAt } : {}),",
-      "fingerprint": "6046e599d715c4a9584e0ae79a124915c7ebd9c5b9d8e044633a16f5fbba8284",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/review/eval/reviewers/corpus.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "if (row.caseId !== undefined && typeof row.caseId !== 'string')",
@@ -4208,7 +4160,7 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "if (e && typeof e === 'object' && 'status' in e && typeof e.status === 'number') {",
       "fingerprint": "682b15f60d16789c86edf600fea6fd003ed0f588c5c57050fe20e72ac13edc5b",
-      "count": 2
+      "count": 1
     },
     {
       "ruleId": "anti-slop/no-unsafe-dictionary-type",
@@ -5692,14 +5644,6 @@
     },
     {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/lib/ship/review/setup-runtime-format.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const raw = parsed as Record<string, unknown>;",
-      "fingerprint": "8894ff6062215b70a6329d13397c8cbcd95536413f7a0e5a7dac8f2697f36483",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/lib/wizard.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "selection.guards = (guards as string[]).filter((g) => g !== LINE_GROWTH_ID);",
@@ -5792,14 +5736,6 @@
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
       "context": "Object.entries(value as Record<string, unknown>)",
       "fingerprint": "8a6f71b5697bc8ab0b0b1a1465aa32711d41006e833a285d6f456ddffa12eb92",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/install/agent-asset-manifest/codec.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "if (typeof generatedAt === 'string')",
-      "fingerprint": "8a9597abe2cf8a05ab1bdde91fec1a31d24fda2fa82ebf46de77aa9d46009fe9",
       "count": 1
     },
     {
@@ -7160,14 +7096,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "if ((cause as NodeJS.ErrnoException).code !== 'ESRCH') throw cause;",
       "fingerprint": "a6c046f0831309ec41d070d8a2639c0ae5ba06b8d0e540cf54c7f3fe85bb5d52",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/components.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "typeof partial?.decisionsDir === 'string' && partial.decisionsDir.trim()",
-      "fingerprint": "a6ee625fdc83b70fa8b0d026421ada6522433f0a76b1a097bb6a353676b6f668",
       "count": 1
     },
     {
@@ -9179,14 +9107,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/ship/review/setup-runtime-format.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))",
-      "fingerprint": "d1226b96012020e77611891f6f3973d2038b0e4f3f3e21c310f5f1d234b8ba9d",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unsafe-dictionary-type",
       "file": "cli/commands/migrate-config.mts",
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
@@ -10625,14 +10545,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "return raw as unknown as ParsedManifestHeader;",
       "count": 2
-    },
-    {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/lib/ship/review/setup-runtime-format.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "const raw = parsed as Record<string, unknown>;",
-      "fingerprint": "f1b30219e343a4f179e19b2ef3c5c1ec0ef8a525065ca9d0a812e5cb30ed77ea",
-      "count": 1
     },
     {
       "ruleId": "anti-slop/no-unknown-parameters",
