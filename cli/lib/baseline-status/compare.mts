@@ -60,7 +60,7 @@ export function compareFailures(pr: TestReportSummary, base: BaselineAnswer): Co
   return result;
 }
 
-const label = (entry: FailureEntry): string =>
+export const label = (entry: FailureEntry): string =>
   entry.test ? `${entry.file} > ${entry.test}` : entry.file;
 
 /** One titled list, or nothing when it is empty. */
@@ -72,7 +72,7 @@ function section(title: string, mark: string, items: string[]): string[] {
 export function renderComparison(c: Comparison, base: BaselineAnswer): string[] {
   const sha = base.sha?.slice(0, 8) ?? 'unknown';
   const behind = base.commitsBehindHead
-    ? `, ${base.commitsBehindHead} commit(s) before the PR base`
+    ? `, ${base.commitsBehindHead} commit(s) before the base`
     : '';
   const lines = [`compared with ${base.ref} @ ${sha} (run ${base.runId}${behind})`];
   if (!c.fresh.length) {

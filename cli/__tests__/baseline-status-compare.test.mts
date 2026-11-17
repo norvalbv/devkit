@@ -120,7 +120,7 @@ describe('compareFailures', () => {
   it('names the sha that answered and its distance from the PR base', () => {
     const answer = { ...base([]), commitsBehindHead: 2 };
     expect(renderComparison(compareFailures(pr({}), answer), answer)[0]).toBe(
-      'compared with main @ bbbbbbbb (run 7, 2 commit(s) before the PR base)',
+      'compared with main @ bbbbbbbb (run 7, 2 commit(s) before the base)',
     );
   });
 });
@@ -230,7 +230,7 @@ describe('baseline-status --at / --against', () => {
     writeFileSync(join(fixture, 'runs.json'), JSON.stringify(runs));
     const { out } = run(['--ref', 'main', '--at', baseSha, '--against', 'pr.json']);
     expect(out).toContain(
-      `compared with main @ ${older.slice(0, 8)} (run 100, 1 commit(s) before the PR base)`,
+      `compared with main @ ${older.slice(0, 8)} (run 100, 1 commit(s) before the base)`,
     );
   });
 
