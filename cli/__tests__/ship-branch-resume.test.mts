@@ -1,8 +1,9 @@
 /** Resuming a commit preserved by a post-commit gate timeout, when the BASE MOVED under it. Sibling of
  *  ship-branch.test.mts, which keeps the moved-base-free resume cases and has no maxTestLines headroom. */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 import {
@@ -51,6 +52,63 @@ function advanceSharedHead(dir, git, file = 'other.txt') {
   return git(['rev-parse', 'HEAD']).trim();
 }
 
+/** A parallel agent merges into `studio`. Pushed from a throwaway clone so the bare advances without
+ *  touching this checkout (a clone carries no core.hooksPath, so the hooks are inert). */
+function pushToStudio(bare, file, body) {
+  const clone = mkdtempSync(join(tmpdir(), 'shipbaseadv-'));
+  dirs.push(clone);
+  const cgit = (a) =>
+    execFileSync('git', a, { cwd: clone, env: { ...process.env, ...GIT_ENV }, encoding: 'utf8' });
+  cgit(['clone', '-q', '--branch', 'studio', bare, '.']);
+  cgit(['config', 'user.email', 'a@b.c']);
+  cgit(['config', 'user.name', 'a']);
+  writeFileSync(join(clone, file), body);
+  cgit(['add', file]);
+  cgit(['commit', '-q', '-m', `studio advances ${file}`]);
+  cgit(['push', '-q', 'origin', 'studio']);
+}
+
+/** Lands a gated commit for note.txt on studio and ends the attempt at the post-commit ceiling. */
+function preserveOnStudio(dir, env, git, branch) {
+  installHook(dir, COUNTING_HOOK); // only the SHIP's commit may count, not the seed's
+  const { hookCount, publishEnv } = publishEnvFor(dir, env);
+  const argv = [scriptPath, branch, 'ship it', '--base', 'studio', '--', 'note.txt'];
+  installPostCommitHang(dir);
+  const first = spawnSync('/bin/bash', argv, {
+    cwd: dir,
+    input: 'pr body\n',
+    encoding: 'utf8',
+    env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
+  });
+  expect(first.status, first.stderr).toBe(124);
+  expect(first.stderr).toMatch(POST_COMMIT_CEILING_BANNER);
+  expect(git(['rev-parse', `refs/devkit/ship-receipts/${branch}`]).trim()).toBe(
+    git(['rev-parse', branch]).trim(),
+  );
+  // The retry is the exact command the operator is told to run, replayed from the recorded intent.
+  const run = () =>
+    spawnSync('/bin/bash', [scriptPath, '--resume', branch], {
+      cwd: dir,
+      input: '',
+      encoding: 'utf8',
+      env: publishEnv,
+    });
+  return { hookCount, run };
+}
+
+/** The refusal every conflicting resume must print: before any push, gates untouched. */
+function expectConflictRefusal(retry, bare, hookCount, branch) {
+  expect(retry.status, retry.stderr).toBe(1);
+  expect(retry.stderr).toContain('no longer merges cleanly into studio');
+  expect(retry.stderr).toContain('conflicting paths (1): note.txt');
+  expect(retry.stderr).toContain(`git branch -D ${branch} && devkit ship --resume ${branch}`);
+  expect(retry.stderr).not.toContain('choose a new branch name');
+  expect(retry.stderr).not.toContain('three-way merged'); // no staging runs on this path
+  expect(retry.stderr).not.toContain('gate receipt verified');
+  expect(remoteBranchExists(bare, branch)).toBe(false);
+  expect(readFileSync(hookCount, 'utf8').trim().split('\n')).toHaveLength(1);
+}
+
 describe('ship-branch.sh — resume when the base moved', () => {
   // The primary regression. Non-dry on purpose: dry-run keeps the strict new-branch precondition and
   // would refuse before the resume checks are reached.
@@ -79,19 +137,8 @@ describe('ship-branch.sh — resume when the base moved', () => {
     );
     expect(remoteBranchExists(bare, 'feat/base-advance')).toBe(false);
 
-    // A parallel agent merges into the PR base. Push from a throwaway clone so the bare advances
-    // without touching this checkout (a clone carries no core.hooksPath, so the hooks are inert).
-    const clone = mkdtempSync(join(tmpdir(), 'shipbaseadv-'));
-    dirs.push(clone);
-    const cgit = (a) =>
-      execFileSync('git', a, { cwd: clone, env: { ...process.env, ...GIT_ENV }, encoding: 'utf8' });
-    cgit(['clone', '-q', '--branch', 'studio', bare, '.']);
-    cgit(['config', 'user.email', 'a@b.c']);
-    cgit(['config', 'user.name', 'a']);
-    writeFileSync(join(clone, 'other.txt'), 'advanced\n');
-    cgit(['add', 'other.txt']);
-    cgit(['commit', '-q', '-m', 'studio advances']);
-    cgit(['push', '-q', 'origin', 'studio']);
+    // A parallel agent merges into the PR base.
+    pushToStudio(bare, 'other.txt', 'advanced\n');
     expect(
       execFileSync('git', ['-C', bare, 'rev-parse', 'studio'], {
         env: { ...process.env, ...GIT_ENV },
@@ -129,6 +176,57 @@ describe('ship-branch.sh — resume when the base moved', () => {
     expect(entry.prNumber).toBe(42);
     expect(entry.baseSha).toBe(studioTip);
   }, 240_000);
+
+  // The resume used to publish this commit unchanged, open a PR GitHub marked CONFLICTING, and exit 0.
+  it('refuses a preserved commit the moved base now conflicts with, and its remedy re-stages it', () => {
+    const { dir, env, git, bare } = seedBaseRepo();
+    const { hookCount, run } = preserveOnStudio(dir, env, git, 'feat/base-conflict');
+    pushToStudio(bare, 'note.txt', 'parallel agent\n');
+
+    expectConflictRefusal(run(), bare, hookCount, 'feat/base-conflict');
+
+    // Following the printed remedy reaches staging's own three-way verdict, before any gate runs.
+    git(['branch', '-D', 'feat/base-conflict'], { stdio: 'ignore' });
+    const restaged = run();
+    expect(restaged.status, restaged.stderr).toBe(1);
+    expect(restaged.stderr).toContain('blocked before creating a branch or worktree');
+    expect(restaged.stderr).toContain('note.txt');
+    expect(restaged.stderr).toContain('three-way merged'); // a fresh ship still announces its merge
+    expect(readFileSync(hookCount, 'utf8').trim().split('\n')).toHaveLength(1);
+  }, 240_000);
+
+  // GitHub ignores merge drivers, so a locally union-merged path still opens CONFLICTING there.
+  it('refuses a conflict that a merge=union attribute would hide locally', () => {
+    const { dir, env, git, bare } = seedBaseRepo();
+    writeFileSync(join(dir, '.gitattributes'), 'note.txt merge=union\n');
+    git(['add', '.gitattributes'], { stdio: 'ignore' });
+    git(['commit', '-q', '--no-verify', '-m', 'union notes'], { stdio: 'ignore' });
+    pushToStudio(bare, '.gitattributes', 'note.txt merge=union\n');
+    const { hookCount, run } = preserveOnStudio(dir, env, git, 'feat/union-conflict');
+    pushToStudio(bare, 'note.txt', 'parallel agent\n');
+
+    expectConflictRefusal(run(), bare, hookCount, 'feat/union-conflict');
+  }, 240_000);
+
+  // Unverified is not clean: publishing it would reopen the CONFLICTING-PR exit 0 on an older git.
+  it('refuses, with the re-stage remedy, when git cannot run the merge check', () => {
+    const { dir, env, git, bare } = seedShipRepoLocalRemote();
+    const { publishEnv } = publishEnvFor(dir, env);
+    preserveWithReceipt(dir, env, git, 'feat/old-git');
+    advanceSharedHead(dir, git); // disjoint: a git that could check would publish this
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/old-git', 'ship it', '--', 'note.txt'], {
+      cwd: dir,
+      input: 'pr body\n',
+      encoding: 'utf8',
+      env: { ...publishEnv, PATH: oldGitPath(publishEnv.PATH) },
+    });
+
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toContain('could not verify it still merges cleanly into');
+    expect(r.stderr).toContain('git branch -D feat/old-git && devkit ship --resume feat/old-git');
+    expect(remoteBranchExists(bare, 'feat/old-git')).toBe(false);
+  });
 
   // BASE is pinned from HEAD (:144), so a sibling agent's commit between attempts moves it with no
   // --base involved. The commonest form of the defect, and one an earlier draft of the fix missed.
@@ -530,5 +628,159 @@ describe('ship-branch.sh — resume refusals that name their own cause', () => {
       '  cannot safely resume it: it has no matching prior-ship gate receipt',
       '  choose a new branch name, or inspect and remove the local branch yourself',
     ]);
+  });
+});
+
+const lib = (name) => fileURLToPath(new URL(`../lib/ship/${name}`, import.meta.url));
+
+/** main and side both edit every one of `files`; disjoint only adds o.txt. */
+function mergeRepo({ files = ['n.txt'], objectFormat = 'sha1' } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'ship-merge-check-'));
+  dirs.push(dir);
+  const git = (a) =>
+    execFileSync('git', a, { cwd: dir, env: { ...process.env, ...GIT_ENV }, encoding: 'utf8' });
+  const commit = (paths, body) => {
+    for (const f of paths) writeFileSync(join(dir, f), body);
+    git(['add', ...paths]);
+    git(['commit', '-q', '-m', body.trim()]);
+  };
+  git(['init', '-q', '-b', 'main', `--object-format=${objectFormat}`]);
+  git(['config', 'user.email', 'a@b.c']);
+  git(['config', 'user.name', 'a']);
+  commit(files, 'a\n');
+  git(['branch', 'side']);
+  git(['branch', 'disjoint']);
+  commit(files, 'main\n');
+  git(['checkout', '-q', 'side']);
+  commit(files, 'side\n');
+  git(['checkout', '-q', 'disjoint']);
+  commit(['o.txt'], 'o\n');
+  return dir;
+}
+
+/** A PATH whose git rejects merge-tree's options the way git before 2.38 does (exit 129). */
+function oldGitPath(path = process.env.PATH) {
+  const bin = mkdtempSync(join(tmpdir(), 'ship-old-git-'));
+  dirs.push(bin);
+  const real = execFileSync('/usr/bin/env', ['which', 'git'], { encoding: 'utf8' }).trim();
+  writeFileSync(
+    join(bin, 'git'),
+    `#!/bin/sh\nfor a in "$@"; do [ "$a" = merge-tree ] && exit 129; done\nexec '${real}' "$@"\n`,
+  );
+  chmodSync(join(bin, 'git'), 0o755);
+  return `${bin}:${path}`;
+}
+
+function runLib(dir, script, vars = {}) {
+  return spawnSync(
+    '/bin/bash',
+    [
+      '-c',
+      `set -euo pipefail; . "${lib('origin-base.sh')}"; . "${lib('ship-branch/staging-and-record.sh')}"; ${script}`,
+    ],
+    { cwd: dir, encoding: 'utf8', env: { ...process.env, ...GIT_ENV, ...vars } },
+  );
+}
+
+describe('ship-branch.sh — the preserved-commit merge check and its remedy', () => {
+  const CHECK = `rc=0; ship_preserved_merge_check "$PWD" "$B" "$C" || rc=$?; echo "rc=$rc $RECOVERY_CONFLICT_HINT"`;
+  const files = (n) => Array.from({ length: n }, (_, i) => `f${i + 1}.txt`);
+
+  it.each([
+    ['a clean merge', {}, 'disjoint', 'rc=0'],
+    ['a same-line conflict, naming the path', {}, 'side', 'rc=1 conflicting paths (1): n.txt'],
+    // A 40-hex-only OID check would read every SHA-256 repository as cannot-tell and publish.
+    [
+      'a conflict in a SHA-256 repository',
+      { objectFormat: 'sha256' },
+      'side',
+      'rc=1 conflicting paths (1): n.txt',
+    ],
+    [
+      'five conflicting paths in full',
+      { files: files(5) },
+      'side',
+      'rc=1 conflicting paths (5): f1.txt f2.txt f3.txt f4.txt f5.txt',
+    ],
+    [
+      'only the first five of six paths',
+      { files: files(6) },
+      'side',
+      'rc=1 conflicting paths (6): f1.txt f2.txt f3.txt f4.txt f5.txt (+1 more)',
+    ],
+  ])('reports %s', (_label, repo, commit, expected) => {
+    const r = runLib(mergeRepo(repo), CHECK, { B: 'main', C: commit });
+    expect(r.stdout.trim(), r.stderr).toBe(expected);
+  });
+
+  // A user-level attributes file is as invisible to GitHub as a committed one.
+  it('ignores merge drivers declared in the global attributes file', () => {
+    const dir = mergeRepo();
+    writeFileSync(join(dir, 'union.attr'), 'n.txt merge=union\n');
+    writeFileSync(
+      join(dir, 'global.cfg'),
+      `[core]\n\tattributesFile = ${join(dir, 'union.attr')}\n`,
+    );
+    const r = runLib(dir, CHECK, {
+      B: 'main',
+      C: 'side',
+      GIT_CONFIG_GLOBAL: join(dir, 'global.cfg'),
+    });
+    expect(r.stdout.trim(), r.stderr).toBe('rc=1 conflicting paths (1): n.txt');
+  });
+
+  // merge-tree exits 1 for an unresolvable rev too; reading that as a conflict would fail closed.
+  it.each([
+    ['an unresolvable rev', { B: 'deadbeef', C: 'side' }],
+    ['a git older than 2.38', { B: 'main', C: 'side', PATH: oldGitPath() }],
+  ])('reports cannot-tell, not a conflict, for %s', (_label, vars) => {
+    const r = runLib(mergeRepo(), CHECK, vars);
+    expect(r.stdout.trim(), r.stderr).toBe('rc=2');
+  });
+
+  const ARMS = {
+    BR: 'feat/x',
+    BASE_REF: 'main',
+    TITLE: "it's done",
+    FROM_BRANCH: '0',
+    REMOTE_HOLDS_PRESERVED: '',
+    PR_SEEN_STATE: '',
+    PR_SEEN_NUM: '',
+  };
+  const REMEDY =
+    'RECOVERY_PARENT=$(git rev-parse side~1) RECOVERY_COMMIT=$(git rev-parse side) ship_preserved_conflict_remedy';
+
+  it.each([
+    [
+      'an explicit-path ship',
+      {},
+      ['re-stage it on main: git branch -D feat/x && devkit ship --resume feat/x'],
+    ],
+    [
+      'a branch-source ship, which must rebase first',
+      { FROM_BRANCH: '1' },
+      [
+        'first rebase this checkout: git fetch origin main && git rebase origin/main',
+        're-stage it on main: git branch -D feat/x && devkit ship --resume feat/x',
+      ],
+    ],
+    [
+      'a commit origin already holds with no PR',
+      { REMOTE_HOLDS_PRESERVED: '1', PR_SEEN_STATE: 'NONE' },
+      ['git push origin --delete feat/x && git branch -D feat/x && devkit ship --resume feat/x'],
+    ],
+    [
+      'a commit an open PR already shows, as a rewrite with the PR paths',
+      { REMOTE_HOLDS_PRESERVED: '1', PR_SEEN_STATE: 'OPEN', PR_SEEN_NUM: '7' },
+      [
+        'PR #7 already shows this commit',
+        `devkit ship --pr feat/x 'it'\\''s done' --base main -- n.txt`,
+      ],
+    ],
+  ])('prints the remedy for %s', (_label, vars, expected) => {
+    const r = runLib(mergeRepo(), REMEDY, { ...ARMS, ...vars });
+    expect(r.status, r.stderr).toBe(0);
+    for (const line of expected) expect(r.stderr).toContain(line);
+    if (!vars.FROM_BRANCH) expect(r.stderr).not.toContain('rebase this checkout');
   });
 });

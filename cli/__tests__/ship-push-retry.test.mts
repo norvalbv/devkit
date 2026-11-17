@@ -235,6 +235,30 @@ describe('ship-branch.sh — origin already holds the preserved commit', () => {
     expect(existsSync(created)).toBe(false);
   });
 
+  // The PR already shows the stale commit, so the remedy is a rewrite, never deleting the PR's branch.
+  it('refuses an adopted commit the advanced base now conflicts with, naming the PR rewrite', () => {
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    preservedOnOrigin(dir, env, git, 'feat/adopt-stale');
+    writeFileSync(join(dir, 'note.txt'), 'sibling\n');
+    git(['add', 'note.txt'], { stdio: 'ignore' });
+    git(['commit', '-q', '--no-verify', '-m', 'a sibling lands note.txt'], { stdio: 'ignore' });
+    const created = join(dir, 'pr-created');
+    const gh = `case "$2" in view) printf '7\\tOPEN\\tfeat/adopt-stale\\tx\\tacme/app\\twork\\tu\\n' ;; create) touch '${created}' ;; esac`;
+    const { count, env: runEnv } = shipEnv(dir, env, { gh });
+
+    const r = ship(dir, runEnv, 'feat/adopt-stale');
+
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toContain('no longer merges cleanly into work');
+    expect(r.stderr).toContain('PR #7 already shows this commit');
+    expect(r.stderr).toContain(
+      "devkit ship --pr feat/adopt-stale 'ship it' --base work -- note.txt",
+    );
+    expect(r.stderr).not.toContain('git push origin --delete');
+    expect(existsSync(count)).toBe(false);
+    expect(existsSync(created)).toBe(false);
+  });
+
   it('still refuses when origin holds a different commit', () => {
     const { dir, env, git } = seedShipRepoLocalRemote();
     preservedOnOrigin(dir, env, git, 'feat/diverged');

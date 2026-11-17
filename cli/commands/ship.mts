@@ -96,8 +96,9 @@ Usage:
   so is <branch> checked out in this worktree (say, a story branch made with git switch -c): ship
   refuses it and prints a \`git branch -m\` that frees the name without touching a file, then the
   re-run with --base. An exact commit preserved by a prior post-commit failure is resumed after its
-  ship gate receipt, base, message, and paths are verified. Explicit-path recovery also rebuilds the
-  current scoped tree; branch-source recovery instead publishes the already-gated immutable commit.
+  ship gate receipt, base, message, and paths are verified, and only while it still merges cleanly
+  into the base (otherwise ship refuses and prints the re-stage command). Explicit-path recovery
+  also rebuilds the current scoped tree; branch-source recovery instead publishes the already-gated immutable commit.
   Before any commit lands, branch-source resume keeps frozen membership but refreshes those paths
   from current HEAD. Paths that ship's OWN gates added to a commit (a ratchet baseline it lowered)
   are exempt from the path and explicit-tree checks — recorded when the commit landed, so narrowing

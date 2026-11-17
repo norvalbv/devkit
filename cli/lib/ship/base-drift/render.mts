@@ -95,7 +95,7 @@ export function renderShipNotice(report: BaseDriftReport): string {
   return [
     `⚠️  devkit ship: ${report.overlap.length} shipped path(s) also changed on origin/${base} since this branch diverged.`,
     listing(report),
-    '  Not a verdict on this ship: whether your edits still apply over these is decided at staging.',
+    '  Not a verdict on this ship: whether your edits still apply over these is decided at staging, or by the merge check when --resume publishes a preserved commit.',
     '  Check any of these you hand-edited after reading a local copy.',
   ]
     .filter(Boolean)

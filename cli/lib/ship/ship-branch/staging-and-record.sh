@@ -64,6 +64,50 @@ ship_base_conflict_preflight() {
   [ -n "$LOCAL_BRANCH_EXISTS" ] || ship_text_arm_trial
 }
 
+# Test-merges a preserved commit as GitHub will, ignoring tree/global/system merge drivers (GitHub
+# does, so merge=union passes here and conflicts there; info/attributes stays live). 0 clean, 1 conflict, 2 cannot tell.
+ship_preserved_merge_check() {  # <root> <base> <commit>; a conflict sets RECOVERY_CONFLICT_HINT
+  local out rc=0 rec first=1 empty n=0 list=
+  RECOVERY_CONFLICT_HINT=
+  empty=$(git -C "$1" hash-object -t tree /dev/null) || return 2
+  out=$(mktemp "${TMPDIR:-/tmp}/ship-preserved-merge.XXXXXX") || return 2
+  GIT_ATTR_SOURCE=$empty GIT_ATTR_NOSYSTEM=1 git -c core.attributesFile=/dev/null -C "$1" merge-tree --write-tree --name-only --no-messages -z "$2" "$3" \
+    > "$out" 2>/dev/null || rc=$?
+  while IFS= read -r -d '' rec; do
+    if [ "$first" -eq 1 ]; then
+      first=0
+      [[ "$rec" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || { rc=2; break; }
+    elif [ -n "$rec" ]; then
+      n=$((n + 1))
+      [ "$n" -gt 5 ] || list="$list $rec"
+    fi
+  done < "$out"
+  rm -f "$out"
+  # rc 1 with no tree OID is a fatal error ("not something we can merge"), not a conflict.
+  [ "$rc" -eq 1 ] && [ "$first" -eq 1 ] && rc=2
+  [ "$rc" -le 1 ] || return 2
+  [ "$n" -le 5 ] || list="$list (+$((n - 5)) more)"
+  [ "$n" -eq 0 ] || RECOVERY_CONFLICT_HINT="conflicting paths ($n):$list"
+  return "$rc"
+}
+
+# The closing advice for a preserved commit that no longer merges: one command that re-stages it on the
+# moved base, or a rewrite when origin already shows it in an open PR.
+ship_preserved_conflict_remedy() {
+  local br p paths=
+  br=$(printf '%q' "$BR")
+  if [ -n "$REMOTE_HOLDS_PRESERVED" ] && [ "${PR_SEEN_STATE:-}" = OPEN ]; then
+    while IFS= read -r -d '' p; do paths="$paths $(printf '%q' "$p")"; done \
+      < <(git diff --name-only --no-renames -z "$RECOVERY_PARENT" "$RECOVERY_COMMIT" --)
+    echo "  PR #$PR_SEEN_NUM already shows this commit: bring $BASE_REF into your checkout and resolve, then replace it:" >&2
+    echo "    devkit ship --pr $br $(ship_shell_quote "$TITLE") --base $BASE_REF --$paths" >&2
+    return 0
+  fi
+  [ "$FROM_BRANCH" -eq 0 ] ||
+    echo "  first rebase this checkout: git fetch origin $BASE_REF && git rebase origin/$BASE_REF (resolve any conflicts)" >&2
+  echo "  re-stage it on $BASE_REF: ${REMOTE_HOLDS_PRESERVED:+git push origin --delete $br && }git branch -D $br && devkit ship --resume $br" >&2
+}
+
 record_ship_intent() {
   RESUME_EXTRAS_UNRECORDED=0
   [ "$DRY_GATES" -eq 0 ] || return 0
