@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { detectGitRoot } from '../detect-git-root.mjs';
 import { canonicalPath, packageDir } from '../fs-helpers.mjs';
-import { shellQuote } from './dist-integrity.mjs';
+import { shellQuote } from '../../../gate-engine/review/valve/shell-word.mjs';
 const DEVKIT_PACKAGE = '@norvalbv/devkit';
 const RELEASE_VERSION = /^\d+\.\d+\.\d+$/;
 const PACKAGED_SHIP_PATHS = ['cli/commands/ship.mts', 'cli/lib/ship'];

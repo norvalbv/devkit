@@ -6,11 +6,11 @@ import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { groupAlive, ownsGroup, pickPort, seedSlot, signalGroup, slotProcessEnv, startApp, stopGroup, waitForHttp, } from '../../lib/machine/app.mjs';
 import { boxExec, boxRunning, engineProblem, ensureImage, removeBox, screenshot, startBox, viewUrl, } from '../../lib/machine/box.mjs';
-import { expand, readMachineConfig, slotEnv, } from '../../lib/machine/config.mjs';
+import { DEVTOOLS_NEEDS_LIGHT, expand, readMachineConfig, slotEnv, } from '../../lib/machine/config.mjs';
 import { runFlow } from '../../lib/machine/flow.mjs';
 import { acquireLease, claimStart, findLease, listLeases, machinesRoot, memoryPressure, PORT_BASE, PORTS_PER_SLOT, releaseLease, slotDir, updateLease, } from '../../lib/machine/lease.mjs';
 import { clearEvidence, evidenceDir } from '../../lib/machine/manifest.mjs';
-import { shellQuote } from '../../lib/ship/dist-integrity.mjs';
+import { shellQuote } from '../../../gate-engine/review/valve/shell-word.mjs';
 import { VIDEO_CAP } from '../../lib/ship/evidence/media.mjs';
 const READY_TIMEOUT_MS = 120_000;
 const BOX_READY_MS = 60_000;
@@ -37,7 +37,9 @@ A slot is a lease on this Mac for one worktree, like Grok Bot's "own screen on a
 its own port block (40000+10n), its own app-data dir, its own process group and its own evidence dir.
 guard.config.json "machine": {"mode": "light" | "full"} (default light; --full/--light override it,
 and each \`up\` brings the slot to that mode):
-- light: a headless Chromium profile on this Mac. Web apps only.
+- light: a headless Chromium profile on this Mac, for web apps. With "devtools": true in the recipe
+  it is instead the window of your own app here (Electron, started by the recipe with
+  --remote-debugging-port={port}); native menus and dialogs are not captured.
 - full: its own Linux desktop computer (1280x800, xfce, Chromium, sudo) in a container in Docker's
   Linux VM, with a live view (DEVKIT_MACHINE_VIEW) and DevTools (DEVKIT_MACHINE_CDP). The worktree is
   read-only at /work, and 127.0.0.1 on the slot's ports reaches this Mac's app. The first \`up --full\`
@@ -53,7 +55,8 @@ argv (["env", "DB={data}/app.db", "next", "dev", "-p", "{port}"]) and keep secre
 environment, which the app inherits. \`up\` waits until the app answers HTTP on its port.
 
 A flow is \`export default async ({ page, url, shot, exec }) => { … }\`: assert with
-node:assert/strict and locator waits, call \`shot('name')\` for a screenshot. In full mode \`page\` is
+node:assert/strict and locator waits, call \`shot('name')\` for a screenshot. With "devtools",
+\`page\` is your app's window and \`url\` its own address. In full mode \`page\` is
 whatever answers DevTools on the desktop (its Chromium, or an app started with
 --remote-debugging-port=9222 after \`exec -- pkill chromium\`), \`exec([...])\` returns a desktop
 command's stdout, and the video is the whole screen. A throw fails the run (exit 1). Captures land in
@@ -191,14 +194,16 @@ function upArgs(rest) {
     const unknown = after[0]?.startsWith('-') && after[0] !== '--';
     return { flags: [...flags], unknown, override: after[0] === '--' ? after.slice(1) : after };
 }
+const fullModeProblem = (recipe) => recipe.devtools ? DEVTOOLS_NEEDS_LIGHT : engineProblem();
 async function up(root, rest) {
     const { flags, unknown, override } = upArgs(rest);
     if (flags.length > 1 || unknown) {
         say('usage: devkit machine up [--full|--light] [-- <command…>]');
         return 1;
     }
-    const full = (flags[0] ?? readMachineConfig(root).mode) === 'full';
-    const problem = full ? engineProblem() : null;
+    const recipe = readMachineConfig(root);
+    const full = (flags[0] ?? recipe.mode) === 'full';
+    const problem = full ? fullModeProblem(recipe) : null;
     if (problem)
         say(problem);
     if (problem || !memoryAllows())
@@ -274,7 +279,9 @@ async function run(root, rest) {
     const evidence = evidenceDir(root);
     const url = `http://127.0.0.1:${lease.port}`;
     const { box } = lease;
-    const result = await runFlow({ root, flowPath, name: values.name, url, profile, evidence, box });
+    const { devtools } = readMachineConfig(root);
+    const input = { root, flowPath, name: values.name, url, profile, evidence, box, devtools };
+    const result = await runFlow(input);
     return report(result, evidence);
 }
 /** `exec [-d] -- <command…>`: run anything in the box: xdotool input, apt-get, an Electron app. */

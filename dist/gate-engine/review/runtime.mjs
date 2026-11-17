@@ -48,7 +48,7 @@ export const deniedCalls = (denied) => `${denied.length} tool call(s) were denie
 /** Why a PASS left no artifact, from the spawn's measured denials; unmeasured keeps the bare text. */
 function missingArtifactCause(denied) {
     if (denied?.length)
-        return `${deniedCalls(denied)}; run the checklist commands exactly as written`;
+        return `${deniedCalls(denied)}; run each checklist command as its own plain node call, with no chains, loops or variables`;
     return `the judge skipped the checklist workflow${denied ? ' (no tool call was denied)' : ''}`;
 }
 /**
@@ -219,14 +219,6 @@ export function gateJudgeEnv(reviewMode, cfg) {
 }
 // The staged-list channel lives in its own module (sc-3400); re-exported so callers keep one seam.
 export { withStagedFiles } from './evidence/staged-files-env.mjs';
-/** GUARD_REVIEW_SKIP / FRINK_REVIEW_SKIP: comma-list of reviewer names to drop from a run — the
- * per-reviewer rollback lever (GUARD_NO_REVIEW kills the whole gate; this surgically disables one). */
-export function skippedReviewers() {
-    return new Set((process.env.GUARD_REVIEW_SKIP ?? process.env.FRINK_REVIEW_SKIP ?? '')
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean));
-}
 /** Parsed checklist state-file artifact for a reviewer, or null (missing/corrupt/no checklist at
  * all — a skill-less reviewer has no stateFile to read → unverifiable). */
 export function readChecklistState(cwd, reviewer) {

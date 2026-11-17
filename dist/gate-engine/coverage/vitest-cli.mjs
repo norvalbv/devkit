@@ -5,6 +5,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 /** Forwarded to the vitest child so a Ctrl-C'd run leaves no run directory and no stale report. */
 const INTERRUPT_SIGNALS = ['SIGINT', 'SIGTERM'];
+/** A detached group no longer receives the terminal's own signals, so group mode forwards these. */
+const GROUP_SIGNALS = ['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGTERM'];
 /** 128 + SIGINT/SIGTERM: vitest traps both and exits with these instead of dying on the signal. */
 const TRAPPED_SIGNAL_EXIT_CODES = new Set([130, 143]);
 /** The consumer's vitest binary, or null when this repo doesn't have one. */
@@ -12,20 +14,34 @@ export function resolveVitest(cwd) {
     const bin = join(cwd, 'node_modules', '.bin', 'vitest');
     return existsSync(bin) ? bin : null;
 }
+/** Signal vitest, or its whole process group when it was spawned detached. */
+function signalVitest(child, signal, grouped) {
+    if (!grouped || child.pid === undefined) {
+        child.kill(signal);
+        return;
+    }
+    try {
+        process.kill(-child.pid, signal);
+    }
+    catch {
+        // ESRCH: the group is gone. EPERM: macOS reports it while still reaping the group.
+    }
+}
 /**
  * Run vitest to completion and report how it ended. `interrupted` exists so a caller never mistakes
  * a Ctrl-C for a failure worth acting on — the code alone cannot tell them apart once a test failed.
  */
-export async function runVitestDetailed(bin, args, cwd, env = process.env) {
-    const child = spawn(bin, args, { cwd, env, stdio: 'inherit' });
+export async function runVitestDetailed(bin, args, cwd, env = process.env, { group = false } = {}) {
+    const grouped = group && process.platform !== 'win32';
+    const child = spawn(bin, args, { cwd, env, stdio: 'inherit', detached: grouped });
     let interrupted = false;
     // Forwarded so a Ctrl-C leaves no run dir or stale report; removed in `finally`, since a leaked
     // listener stops the host answering SIGTERM (sc-2228).
-    const forwarders = INTERRUPT_SIGNALS.map((signal) => [
+    const forwarders = (grouped ? GROUP_SIGNALS : INTERRUPT_SIGNALS).map((signal) => [
         signal,
         () => {
             interrupted = true;
-            child.kill(signal);
+            signalVitest(child, signal, grouped);
         },
     ]);
     for (const [signal, forward] of forwarders)

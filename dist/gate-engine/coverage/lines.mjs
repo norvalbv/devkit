@@ -1,6 +1,6 @@
 /** Line coverage from an istanbul/V8 coverage-final.json entry, and its intersection with the lines a
  * change added — the unit a "coverage of the new diff" target means (sc-3228). */
-import { parsePatchHunks } from '../comment-firewall/patch.mjs';
+import { parsePatchHunks } from '../comment-firewall/staged/patch.mjs';
 /** istanbul's line definition: a line is executable when a statement STARTS on it, and covered when
  * ANY statement starting on it ran. Shared with the gate's `lines` metric so the two never disagree. */
 export function lineHits(file) {

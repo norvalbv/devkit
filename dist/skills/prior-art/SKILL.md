@@ -32,7 +32,8 @@ Only Problem Statement is required.
 [What has been observed. Prior fixes/patches on this axis — count them.]
 
 ## Dependency & Context
-[The SDK/library/platform involved. Version, consumption mode, constraints.]
+[The SDK/library/platform involved. Version, consumption mode, constraints. The hand-built
+ layer this work extends, if any.]
 
 ## What's Been Tried
 [Approaches already attempted or considered, and how they failed.]
@@ -60,7 +61,9 @@ The agent answers all seven, every time (status ANSWERED / NO_EVIDENCE / NOT_APP
 
 1. **local** — reference checkouts declared in `guard.config.json` →
    `research.referenceCheckouts` (globs relative to the config's directory), plus the repo's own
-   decision log and utilities. In a linked worktree, a pattern that matches nothing is retried once
+   decision log and utilities. A linked worktree with no `guard.config.json`, where git ignores
+   that path, reads the main worktree's copy in the same directory and resolves from there. When the
+   worktree has its own config, a pattern that matches nothing is retried once
    against the same directory inside the main worktree — the first `worktree` entry of
    `git worktree list --porcelain`, skipped when that entry is `bare` — because sibling clones sit
    beside the main checkout, not beside a worktree. Each non-blank string pattern counts once
@@ -119,6 +122,10 @@ ruling: benchmark rows are admitted only after independent review.
    - `GENUINE_NEW_WORK` → proceed; carry the absence evidence into the plan's context.
    - `INSUFFICIENT_EVIDENCE`, `aborted`, or invalid JSON → say "prior art unverified" and continue.
      Never treat it as clearance or as a blocker.
+   - A `Layer:` sentence in `summary` → relay it to the user in one line, whatever the verdict.
+     Adopting or declining that standard is a road-not-taken decision: record it through the
+     brainstorming skill's Capture A when the decisions guard is selected, so later runs receive
+     it as Settled Axes.
 3. The eventual plan records one line: `Prior-art: <verdict> — <how the plan responds>`.
    (A skipped run records `Prior-art: skipped — <reason>` instead; keep the two distinguishable.)
 4. At plan-exit, pass `feature-critique` a **bounded 3-line summary only** (verdict,

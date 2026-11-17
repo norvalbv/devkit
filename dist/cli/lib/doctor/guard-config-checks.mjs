@@ -35,8 +35,9 @@ import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { usableChunkCount } from '../../../gate-engine/co-occurrence/chunk-index.mjs';
-import { inspectIndexFreshness, missingIndexMessage, staleIndexMessage, } from '../../../gate-engine/co-occurrence/index-refresh.mjs';
-import { isCodexModel, parseModelSpec } from '../../../gate-engine/judge/codex/result.mjs';
+import { inspectIndexFreshness, missingIndexMessage, indexToInspect, staleIndexMessage, } from '../../../gate-engine/co-occurrence/index-refresh.mjs';
+import { isCodexModel } from '../../../gate-engine/judge/codex/result.mjs';
+import { parseModelSpec } from '../../../gate-engine/judge/codex/model-spec.mjs';
 import { claudeFamilyEnvLine, claudeFamilyKeyLine, } from '../../../gate-engine/judge/outage/family-override.mjs';
 import { REVIEWERS } from '../../../gate-engine/review/reviewers.mjs';
 import { detectStack } from '../detect-stack.mjs';
@@ -86,9 +87,9 @@ function envWired() {
  */
 export function checkSearchIndex(cwd, resolved, searchCodeSelected) {
     if (resolved) {
-        const indexPath = resolve(cwd, resolved);
+        const { indexPath, reads } = indexToInspect(resolved, cwd);
         if (!existsSync(indexPath)) {
-            return check(SEARCH_INDEX_CHECK, 'MISSING', missingIndexMessage(indexPath, { cwd, indexPath: resolved }), 'build the configured index, or link the primary checkout index as shown above', false, true);
+            return check(SEARCH_INDEX_CHECK, 'MISSING', missingIndexMessage(indexPath, { cwd }), 'build the configured index; linked worktrees then read the primary checkout index', false, true);
         }
         let db = null;
         try {
@@ -98,16 +99,16 @@ export function checkSearchIndex(cwd, resolved, searchCodeSelected) {
                 return check(SEARCH_INDEX_CHECK, 'DRIFT', staleIndexMessage(freshness), 'run `touch <files> && search-code index --seed-files "<files>"` and retry', false, true);
             }
             if (usableChunkCount(db) === 0) {
-                return check(SEARCH_INDEX_CHECK, 'DRIFT', `matcher reads ${resolved}, but it holds no embedded chunks with a symbol_name — the duplication gate compares nothing and opts out on every commit`, 'populate it with `search-code index` (a --phase0-only or interrupted run leaves embeddings empty)', false, true);
+                return check(SEARCH_INDEX_CHECK, 'DRIFT', `matcher reads ${reads}, but it holds no embedded chunks with a symbol_name — the duplication gate compares nothing and opts out on every commit`, 'populate it with `search-code index` (a --phase0-only or interrupted run leaves embeddings empty)', false, true);
             }
             if (freshness.status === 'unverifiable') {
-                return check(SEARCH_INDEX_CHECK, 'OK', `matcher reads ${resolved}; freshness unavailable (${freshness.reason ?? 'unknown index schema'}), so scan-time body verification remains the fallback`);
+                return check(SEARCH_INDEX_CHECK, 'OK', `matcher reads ${reads}; freshness unavailable (${freshness.reason ?? 'unknown index schema'}), so scan-time body verification remains the fallback`);
             }
-            return check(SEARCH_INDEX_CHECK, 'OK', `matcher reads ${resolved}; ${freshness.checkedFiles} indexed file(s) match the source checkout`);
+            return check(SEARCH_INDEX_CHECK, 'OK', `matcher reads ${reads}; ${freshness.checkedFiles} indexed file(s) match the source checkout`);
         }
         catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            return check(SEARCH_INDEX_CHECK, 'DRIFT', `matcher reads ${resolved}, but the index cannot be inspected: ${msg}`, 'rebuild the search-code index and retry', false, true);
+            return check(SEARCH_INDEX_CHECK, 'DRIFT', `matcher reads ${reads}, but the index cannot be inspected: ${msg}`, 'rebuild the search-code index and retry', false, true);
         }
         finally {
             db?.close();

@@ -11,7 +11,7 @@
 import { resolve } from 'node:path';
 import { createFolderStructure, projectStructureParser, projectStructurePlugin, } from 'eslint-plugin-project-structure';
 import { resolveGuardConfig, resolveTreeExtensions } from '../config.mjs';
-import { compileToEslint } from './compile.mjs';
+import { compileToEslint } from './tree/compile.mjs';
 import { makeBaselineLoaders } from './load-baseline.mjs';
 /**
  * Build the eslint flat-config array governing a repo's declared structure trees (one

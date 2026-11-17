@@ -1,6 +1,6 @@
 // One module-scope classifier per gate event type, so summarise() only dispatches and attributes.
 import { blockingFindings, judgeFinding } from './blocking.mjs';
-import { baseDriftDetail, earlierDiffDetail, partialPacket, partialPacketDetail } from './cache-detail.mjs';
+import { baseDriftDetail, earlierDiffDetail, partialPacket, partialPacketDetail, } from './cache-detail.mjs';
 import { oneLine, textOf } from './fields.mjs';
 import { SKIP_CONTROLS } from './skip-controls.mjs';
 /** The parallel judge's gate name — a `gate_result` row, not a fleet `review_result`. */

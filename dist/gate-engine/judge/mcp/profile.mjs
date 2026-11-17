@@ -198,6 +198,13 @@ function missingReason(resolution) {
         return 'trusted MCP registry is unreadable';
     return 'missing from the trusted MCP registry';
 }
+/** How to restore a verdict-bearing server a readable registry lacks; empty otherwise. */
+function registryRemedy(resolution) {
+    const lost = verdictBearingMissing(resolution).join(', ');
+    if (resolution.kind !== 'resolved' || !lost)
+        return '';
+    return ` — to restore it, add or re-enable the \`${lost}\` MCP server for this project in ${resolution.registryPath}, or point ${REGISTRY_ENV} at a registry that defines it`;
+}
 /** One-line cause a DEGRADED reviewer verdict carries, or undefined when nothing verdict-bearing is
  * missing. */
 export function mcpDegradedCause(resolution) {
@@ -264,7 +271,7 @@ export function reportMissingMcpServers(resolution, agents = []) {
     const servers = resolution.missing.join(', ');
     if (agents.length > 0) {
         warnOnce(resolution.warnKey, degraded
-            ? `${marker}guard-review: DEGRADED — no MCP ${servers} for ${agents.join(', ')} (${missingReason(resolution)}) under strict isolation; a judged PASS from them is marked DEGRADED`
+            ? `${marker}guard-review: DEGRADED — no MCP ${servers} for ${agents.join(', ')} (${missingReason(resolution)}) under strict isolation; a judged PASS from them is marked DEGRADED${registryRemedy(resolution)}`
             : `guard-review: no MCP ${servers} for ${agents.join(', ')} (${missingReason(resolution)}) — continuing under strict isolation`);
         return;
     }
@@ -274,7 +281,7 @@ export function reportMissingMcpServers(resolution, agents = []) {
     else if (resolution.kind === 'unreadable')
         warnOnce(resolution.warnKey, `${marker}guard-review: trusted MCP registry is unreadable — named agents continue with strict-empty MCP isolation${suffix}`);
     else
-        warnOnce(resolution.warnKey, `${marker}guard-review: named-agent MCP profile missing ${servers} — continuing with the configured subset under strict isolation${suffix}`);
+        warnOnce(resolution.warnKey, `${marker}guard-review: named-agent MCP profile missing ${servers} — continuing with the configured subset under strict isolation${suffix}${registryRemedy(resolution)}`);
 }
 /** Secret-safe cache partition over the declared tools, trusted registry and selected server
  * definitions: an entry never survives a capability change, and no secret reaches the cache. */

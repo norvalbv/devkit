@@ -6,7 +6,7 @@ import { resolveOxlintEntryConfig } from '../oxc/lifecycle.mjs';
 import { resolveOxcRuntime } from '../oxc/runtime.mjs';
 import { adoptManagedCapability, AntiSlopCapabilityError, withManagedCapabilityLock, } from './base-capability.mjs';
 import { ANTI_SLOP_BASELINE_MODE, ANTI_SLOP_EXECUTION_MODE_ENV, ANTI_SLOP_IGNORE_PATTERNS, } from './constants.mjs';
-import { groupFindings, parseAntiSlopFindings } from './diagnostics.mjs';
+import { groupFindings, parseAntiSlopFindings, } from './diagnostics.mjs';
 import { antiSlopCapabilityIssue } from './lifecycle.mjs';
 const MAX_OUTPUT = 64 * 1024 * 1024;
 /** Resolve literal existing repository paths and expose their baseline-entry membership. */
@@ -54,17 +54,21 @@ export function resolveAntiSlopScope(cwd, args) {
  * git-excluded entry config in overlay. `pinCapabilityTo` copies the capability THIS lint used.
  */
 export function collectAntiSlopGroups(cwd, args, pinCapabilityTo) {
+    return groupFindings(collectAntiSlopFindings(cwd, args, pinCapabilityTo));
+}
+/** Ungrouped findings, each still carrying its legacy fingerprint for a baseline re-key. */
+export function collectAntiSlopFindings(cwd, args, pinCapabilityTo) {
     if (!existsSync(resolve(cwd, '.devkit'))) {
         throw new Error('anti-slop is not installed — run `devkit init --anti-slop`');
     }
     return withManagedCapabilityLock(cwd, () => {
-        const groups = collectAntiSlopGroupsUnlocked(cwd, args);
+        const findings = collectAntiSlopFindingsUnlocked(cwd, args);
         if (pinCapabilityTo)
             adoptManagedCapability(cwd, pinCapabilityTo);
-        return groups;
+        return findings;
     });
 }
-function collectAntiSlopGroupsUnlocked(cwd, args) {
+function collectAntiSlopFindingsUnlocked(cwd, args) {
     const issue = antiSlopCapabilityIssue(cwd);
     if (issue)
         throw new AntiSlopCapabilityError(issue);
@@ -97,5 +101,5 @@ function collectAntiSlopGroupsUnlocked(cwd, args) {
     if (!result.stdout.trim()) {
         throw new Error(`Oxlint returned no diagnostics JSON: ${result.stderr.trim().split('\n')[0] || 'no detail'}`);
     }
-    return groupFindings(parseAntiSlopFindings(cwd, result.stdout));
+    return parseAntiSlopFindings(cwd, result.stdout);
 }

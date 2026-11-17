@@ -5,8 +5,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { telemetrySink } from '../../../../../gate-engine/judge/run-context.mjs';
-import { OUTPUT_HEADER, readTranscript } from '../../../../../gate-engine/judge/transcript-store.mjs';
-import { issueLocations, parseAdvisories } from '../../../../../gate-engine/review/contracts/response.mjs';
+import { OUTPUT_HEADER, readTranscript, } from '../../../../../gate-engine/judge/transcript-store.mjs';
+import { issueLocations, parseAdvisories, } from '../../../../../gate-engine/review/contracts/response.mjs';
 import { scanBackward } from '../tail.mjs';
 import { attemptsOf, branchAttempts, HISTORY_CAP, parseTrendRow, readBranchHistory, renderVersionChange, trendNarration, } from '../trend/trend.mjs';
 /** How the gate joins one reviewer's advisories into a single sink row (base-context.mts). */

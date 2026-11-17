@@ -73,9 +73,9 @@ function isSymlink(path) {
     }
 }
 /**
- * Write `content` to `path` only if the file is absent (idempotent create). With
- * `{ force: true }` it replaces the file atomically, keeping its mode. Creates parent dirs.
- * Returns one of:
+ * Create `path` exclusively (`wx`) unless forced: a file, live symlink or dir already there is kept
+ * as 'exists'. `{ force: true }` replaces the file atomically, keeping its mode. Creates parent
+ * dirs. Returns one of:
  *   'created'   — file did not exist, written
  *   'forced'    — file existed, overwritten (force)
  *   'exists'    — file existed, left untouched (no force)
@@ -90,16 +90,28 @@ export function writeIfAbsent(path, content, { force = false } = {}) {
     // dangling-symlink dir, and a live one would route the write outside devkit's tree. Only the leaf
     // is touched — never an ancestor the user may have symlinked on purpose.
     const dir = dirname(path);
-    if (isSymlink(dir))
+    if (isSymlink(dir) && (force || !existsSync(dir)))
         rmSync(dir, { force: true });
     mkdirSync(dir, { recursive: true });
-    if (isSymlink(path))
+    if (isSymlink(path) && (force || !existsSync(path)))
         rmSync(path, { force: true });
-    // Replace via temp + rename, so a crash or a concurrent reader never sees a truncated file.
-    const st = statSync(path, { throwIfNoEntry: false });
-    if (st)
-        writeFileAtomic(path, content, st.mode & 0o777);
-    else
-        writeFileSync(path, content);
-    return present ? 'forced' : 'created';
+    if (force) {
+        // Replace via temp + rename, so a crash or a concurrent reader never sees a truncated file.
+        const st = statSync(path, { throwIfNoEntry: false });
+        if (st)
+            writeFileAtomic(path, content, st.mode & 0o777);
+        else
+            writeFileSync(path, content);
+        return present ? 'forced' : 'created';
+    }
+    // Exclusive create: a file appearing since the check above is kept, never clobbered.
+    try {
+        writeFileSync(path, content, { flag: 'wx' });
+    }
+    catch (e) {
+        if (e instanceof Error && 'code' in e && e.code === 'EEXIST')
+            return 'exists';
+        throw e;
+    }
+    return 'created';
 }

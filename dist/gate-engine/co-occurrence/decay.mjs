@@ -11,7 +11,7 @@
  * covering, so a lapsed approval re-surfaces).
  */
 const DAY_MS = 86_400_000;
-const DEFAULT_DECAY_DAYS = 7;
+export const DEFAULT_DECAY_DAYS = 7;
 function expiresAt(entry) {
     const decay = entry.decayDays ?? DEFAULT_DECAY_DAYS;
     const approved = new Date(entry.date);

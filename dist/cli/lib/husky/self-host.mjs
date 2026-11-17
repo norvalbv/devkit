@@ -23,38 +23,13 @@ import { join } from 'node:path';
 import { defaultSelection, RECOMMENDED_GUARD_IDS } from '../components.mjs';
 import { readJson } from '../fs-helpers.mjs';
 import { BIN_DIRS, REVIEW_FAILURE_FINALIZER, shipRehearsalHint, } from './gate-policy/block-helpers.mjs';
+import { DIFF_STDIN_CAP_BYTES, STAGED_DIFF_CMD, STAGED_DIFF_ENV, } from './gate-policy/fallow-staged.mjs';
 import { markEnd } from './husky.mjs';
 import { buildFullHook, buildGuardBlock, extractGuardBlock, replaceGuardBlock, } from './husky-block.mjs';
 import { FORMAT_EXTENSION_FILTER, FORMAT_FAILURE_REPORT, FORMAT_TOOL_SETUP, } from './format-fragment.mjs';
-// Structure-lint and the hard Oxlint gate fold into the deterministic orchestrator via
-// `--extra`. Self-host-only for formatting: its SCOPE (proven allowlist) and hard FAILURE POLICY.
+// Structure-lint folds into the deterministic orchestrator via `--structure`; devkit's other
+// command gates live in guard.config.json `extraGates`, the way a consumer declares them.
 export const SELF_HOST_STRUCTURE_CMD = 'guard-structure staged';
-// Extras follow guard.config.example.json's //extraGates contract. A node extra reads the index
-// via commitIndexEnv(root), salts env inputs in prefixCacheScope; a GUARD_*_OK needs GATE_BYPASSES.
-export const SELF_HOST_EXTRAS = [
-    { label: 'lint', cmd: 'bun run lint' },
-    // sc-2198. Both are pure content comparisons — no spawn, no tmp dir, no model call — and both
-    // already ran, in the 11-minute pre-push suite, which is where they caught a generator edit that
-    // had been sitting on main for five hours. Running them here makes the author who breaks parity
-    // the one who pays, instead of the next person to push. Two labels, not one: runDeterministic
-    // attributes gate_result per label, so a merged label makes a blocked commit unattributable.
-    // Self-host only: a consumer generates their hook from THEIR devkit version, so comparing it
-    // against this generator is meaningless, and `guard-decisions integrity` already ships as a bin
-    // for consumers who want the whole-corpus check.
-    { label: 'hook-parity', cmd: 'node cli/lib/husky/hook-parity.mts --gate' },
-    // sc-2701: the consumer formatter's identity, decided here instead of by the completeness judge.
-    {
-        label: 'formatter-identity',
-        cmd: 'node cli/lib/husky/format-identity/formatter-identity.mts --gate',
-    },
-    { label: 'decisions-integrity', cmd: 'node gate-engine/decisions/cli.mts integrity --staged' },
-    // CI's release-only dist check, run by the ship worktree's own copy so a stale caller can't skip it.
-    { label: 'release-only-dist', cmd: 'node cli/lib/ship/dist-integrity.mts --ship-staged' },
-    { label: 'benchmarks', cmd: 'bun run benchmarks:check -- --mode staged' },
-    // sc-2496: the structural half of `bench.mts validate` (0 model calls, ~1 s); nothing in the
-    // benchmark stage opened a cases-*.jsonl before. The deep validate stays manual until sharded.
-    { label: 'corpus-lint', cmd: 'bun run benchmarks:corpus' },
-];
 // The hand hook ended with an ADVISORY fallow audit (dead-code / duplication / complexity on the
 // changed set; command-v-guarded so it no-ops without fallow, `|| true` so it never blocks). The
 // builders below pin `fallow: false`, so the generator's BLOCKING staged gate is never emitted here
@@ -67,7 +42,7 @@ export const SELF_HOST_EXTRAS = [
 // It stays LAST deliberately (sc-2526): the CHANNEL, not the position, is what made its findings
 // unreadable. Reasoning and the rejected move in fallow-gate-owned-by-fallow.
 const FALLOW_FRAGMENT = `# devkit:fallow-advisory
-# fallow audit — dead-code / duplication / complexity on the changed set; advisory, never blocks.
+# fallow audit — dead-code / duplication / complexity on the staged set; advisory, never blocks.
 if [ "\${DEVKIT_RUN_MODE:-}" = "review" ]; then
     __dk_review_baseline_gate fallow || true
 else
@@ -75,26 +50,43 @@ else
     FALLOW_BASE_ARGS=""
     [ -n "\${DEVKIT_SHIP_BASE_SHA:-}" ] && FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"
     if command -v fallow >/dev/null 2>&1; then
-        # The JSON pass ALWAYS runs: it carries fallow's own verdict and introduced counters, which
-        # the exit code does not — a duplication-only changeset returns verdict=warn and EXIT 0
-        # while still reporting the clone group. The HUMAN report re-runs only when that verdict is
-        # non-clean, so a clean commit still pays for one audit. fallow 3.10.0 offers no single-run
-        # tee: --output-file REPLACES stdout, and --sarif-file is a no-op on \`audit\`.
-        DK_FALLOW_JSON="$(mktemp)" || DK_FALLOW_JSON=""
-        DK_FALLOW_RC=0
-        if [ -n "$DK_FALLOW_JSON" ]; then
-            # __dk_no_git_env: fallow's audit base-snapshot is itself a git worktree, and it has
-            # clobbered a ship worktree before (see commit-with-gate-capture.sh's
-            # worktree_head_clobbered banner).
-            __dk_no_git_env fallow audit $FALLOW_BASE_ARGS --format json --output-file "$DK_FALLOW_JSON" >/dev/null 2>&1 || DK_FALLOW_RC=$?
+        # A base ref alone counts unstaged and untracked files as introduced, and a ship worktree
+        # holds both (its refreshed managed assets), so attribution is scoped to the staged diff.
+        DK_FALLOW_DIFF="$(mktemp 2>/dev/null)" || DK_FALLOW_DIFF=""
+        DK_FALLOW_SKIP=""
+        if [ -z "$DK_FALLOW_DIFF" ] || ! ${STAGED_DIFF_ENV} ${STAGED_DIFF_CMD} >"$DK_FALLOW_DIFF"; then
+            DK_FALLOW_SKIP="could not capture the staged diff"
+        elif [ "$(($(wc -c <"$DK_FALLOW_DIFF")))" -gt ${DIFF_STDIN_CAP_BYTES} ]; then
+            # Above the cap fallow drops the line filter and attributes the whole project.
+            DK_FALLOW_SKIP="the staged diff exceeds fallow's 10 MiB --diff-stdin cap"
         fi
-        # Runs even when mktemp failed (an unset, unwritable or full TMPDIR), and is handed the exit
-        # code so a clean verdict from a FAILED audit is refused rather than believed.
-        DK_FALLOW_STATE="$(node gate-engine/judge/advisory/emit.mts fallow-advisory "$DK_FALLOW_JSON" "$DK_FALLOW_RC" 2>/dev/null || echo unreadable)"
-        rm -f "$DK_FALLOW_JSON" 2>/dev/null || true
-        # Anything but a clean verdict prints the report. A crashed emitter lands here too, so a
-        # broken narrator makes the hook say MORE rather than swallow a finding.
-        [ "$DK_FALLOW_STATE" = "clean" ] || __dk_no_git_env fallow audit $FALLOW_BASE_ARGS || true
+        if [ -n "$DK_FALLOW_SKIP" ]; then
+            echo "devkit fallow advisory: $DK_FALLOW_SKIP — audit skipped."
+            node gate-engine/judge/advisory/emit.mts fallow-advisory --skipped "$DK_FALLOW_SKIP — the advisory verified nothing" >/dev/null 2>&1 || true
+        elif [ -s "$DK_FALLOW_DIFF" ]; then
+            # The JSON pass ALWAYS runs: it carries fallow's own verdict and introduced counters, which
+            # the exit code does not — a duplication-only changeset returns verdict=warn and EXIT 0
+            # while still reporting the clone group. The HUMAN report re-runs only when that verdict
+            # is non-clean, so a clean commit still pays for one audit. fallow 3.10.0 offers no
+            # single-run tee: --output-file REPLACES stdout, and --sarif-file is a no-op on \`audit\`.
+            DK_FALLOW_JSON="$(mktemp)" || DK_FALLOW_JSON=""
+            DK_FALLOW_RC=0
+            if [ -n "$DK_FALLOW_JSON" ]; then
+                # __dk_no_git_env: fallow's audit base-snapshot is itself a git worktree, and it has
+                # clobbered a ship worktree before (see commit-with-gate-capture.sh's
+                # worktree_head_clobbered banner).
+                __dk_no_git_env fallow audit $FALLOW_BASE_ARGS --diff-stdin --format json --output-file "$DK_FALLOW_JSON" <"$DK_FALLOW_DIFF" >/dev/null 2>&1 || DK_FALLOW_RC=$?
+            fi
+            # Runs even when mktemp failed (an unset, unwritable or full TMPDIR), and is handed the
+            # exit code so a clean verdict from a FAILED audit is refused rather than believed. Its
+            # stderr stays in the log: it lists the findings fallow's own report prints unmarked.
+            DK_FALLOW_STATE="$(node gate-engine/judge/advisory/emit.mts fallow-advisory "$DK_FALLOW_JSON" "$DK_FALLOW_RC" || echo unreadable)"
+            rm -f "$DK_FALLOW_JSON" 2>/dev/null || true
+            # Anything but a clean verdict prints the report. A crashed emitter lands here too, so a
+            # broken narrator makes the hook say MORE rather than swallow a finding.
+            [ "$DK_FALLOW_STATE" = "clean" ] || __dk_no_git_env fallow audit $FALLOW_BASE_ARGS --diff-stdin <"$DK_FALLOW_DIFF" || true
+        fi
+        rm -f "$DK_FALLOW_DIFF" 2>/dev/null || true
     else
         # A gate that verified NOTHING must not read like a gate that found nothing
         # (gate-opt-out-is-visible-and-detectable).
@@ -119,15 +111,16 @@ fi
 const PACKAGE_GUARD_RE = /"\$__dk_package_bin_dir\/(guard-[a-z-]+)"/g;
 // Devkit formats with its own pinned Oxfmt unconditionally, so the consumer's config detection is
 // replaced outright rather than left to resolve — no dead arm reaches Devkit's own hook.
-const SELF_HOST_TOOL_SETUP = `    FMT_TOOL=Oxfmt; FMT_BIN=node_modules/.bin/oxfmt
-    __dk_fmt_run() { xargs -0 node_modules/.bin/oxfmt --threads 1 --write; }`;
-// Swapping the WHOLE report branch (not appending `|| exit 1`) also drops the 127 message, the
+const SELF_HOST_TOOL_SETUP = `    FMT_TOOL=Oxfmt; FMT_BIN=node_modules/.bin/oxfmt; FMT_FIX_ARGS='--write'
+    __dk_fmt_run() { xargs -0 node_modules/.bin/oxfmt --threads 1 --write; }
+    __dk_fmt_stdin() { node_modules/.bin/oxfmt --threads 1 --stdin-filepath="$1"; }`;
+// Swapping the WHOLE report function (not appending `|| exit 1`) also drops the 127 message, the
 // fragment's only other `$__dk_package_bin_dir` mention; the rewritten hook must contain none.
-const SELF_HOST_FORMAT_FAILURE = `        if [ "$FMT_RC" -ne 0 ]; then
-            echo "🎨 Oxfmt failed over $FMT_N staged file(s) (xargs exit $FMT_RC) — blocking: devkit formats its own staged set hard." >&2
-${shipRehearsalHint('            ')}
-            exit 1
-        fi`;
+const SELF_HOST_FORMAT_FAILURE = `__dk_fmt_failed() {
+    echo "🎨 Oxfmt failed over $2 ($3 $1) — blocking: devkit formats its own staged set hard." >&2
+${shipRehearsalHint('    ')}
+    exit 1
+}`;
 // Keep the staged hook on the same authored-file boundary as package.json's format scripts. A
 // broad extension-only filter would let Oxfmt rewrite evidence, fixtures, vendored sources, or
 // generated output that the adopted 558-file parity experiment never selected.
@@ -182,7 +175,7 @@ export function toSelfHost(hookText, cwd) {
 /**
  * The canonical devkit-dogfood selection: every recommended component + guard, PLUS `review` (the
  * in-chain reviewer fleet — the whole point of self-host is that devkit gates its own commits with
- * its own reviewers). structureCmd/extras are added at hook-build time (constants above), not here.
+ * its own reviewers). structureCmd is added at hook-build time (constants above), not here.
  */
 export function selfHostSelection(recorded) {
     return {
@@ -238,7 +231,6 @@ export function installSelfHostHook(gitRoot, pkgRel, sel, dryRun, cwd) {
     const hookSel = {
         ...sel,
         structureCmd: SELF_HOST_STRUCTURE_CMD,
-        extras: SELF_HOST_EXTRAS,
     };
     const hookPath = join(gitRoot, '.husky', 'pre-commit');
     const exists = existsSync(hookPath);

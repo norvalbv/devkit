@@ -48,24 +48,6 @@ unset DEVKIT_MANAGED_SIGNAL_ROOT
 export GIT_TERMINAL_PROMPT=0
 export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
 
-# Bound branch-source advertisement/fetch before the already-bounded gate runner starts. The shared
-# supervisor terminates the complete Git/helper process group on expiry (portable on macOS/Linux).
-bounded_remote_git() {
-  # .mts in source, built .mjs in an installed consumer (the gate-config-paths dual-ext idiom).
-  local supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mts" out status
-  [ -f "$supervisor" ] || supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
-  # A silent 124 is a stall a fresh connection clears; output means git answered, so never re-run it.
-  for _ in 1 2; do
-    status=0
-    # -c: a detached auto-gc/maintenance inherits the supervisor's ownership token and is reaped as a
-    # leaked tree, turning a finished fetch into 124 (sc-3761). Remote git never needs maintenance.
-    out=$(node "$supervisor" "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git -c gc.auto=0 -c maintenance.auto=false "$@") || status=$?
-    [ "$status" -eq 124 ] && [ -z "$out" ] || break
-  done
-  [ -z "$out" ] || printf '%s\n' "$out"
-  return "$status"
-}
-
 # `--resume <branch>` replays the invocation the previous attempt recorded (ship-intent.mts). A
 # gate block deletes the ephemeral worktree AND branch, so before the manifest existed every retry
 # re-supplied title + full path list + multi-KB body verbatim — and the landed-commit resume below
@@ -110,7 +92,7 @@ NO_STACK=0         # --no-stack skips registering the PR in its base PR's GitHub
 RESUME_READY=0     # --ready seen under --resume, before the record reveals ship-vs-reship mode
 WAIT_CI=0          # --wait-ci polls the PR's checks after everything else is durable
 WAIT_CI_STRICT=0   # --wait-ci-strict: exit 5 unless the verdict is passed
-WAIT_CI_TIMEOUT=900
+WAIT_CI_TIMEOUT=""   # defaults to SHIP_WAIT_CI_DEFAULT_S once wait-ci/args.sh is sourced
 WAIT_CI_TIMEOUT_SET=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -168,6 +150,7 @@ done
 # A real ship already runs the reviewers, so the modifier alone is a mistaken command, not a no-op.
 [ "$WITH_REVIEWERS" -eq 0 ] || [ "$DRY_GATES" -eq 1 ] || { echo "--with-reviewers requires --dry-gates (a real ship already runs the reviewers)" >&2; exit 1; }
 . "$SCRIPT_DIR/wait-ci/args.sh"
+[ "$WAIT_CI_TIMEOUT_SET" -eq 1 ] || WAIT_CI_TIMEOUT=$SHIP_WAIT_CI_DEFAULT_S
 ship_validate_wait_ci "$WAIT_CI" "$WAIT_CI_TIMEOUT" "$WAIT_CI_TIMEOUT_SET" "${WAIT_CI_REQUIRED:-0}" "$DRY_GATES" || exit 1
 
 # Hoisted above the --resume load (which needs it); everything below the worktree ceremony reads it.
@@ -298,37 +281,17 @@ LINK_DIRS=()
 . "$SCRIPT_DIR/closed-pr-remedy.sh"
 PREFLIGHT_HINT=
 PREFLIGHT_SELF=   # set when the branch's holder is THIS worktree; changes the closing advice below
+ship_prequeue_defer_if_ahead "$BR"
 # SHIP_RESOLVE_ONLY promises no side effects, so it must not reclaim anything.
 [ -n "${SHIP_RESOLVE_ONLY:-}" ] || ship_reclaim_orphan_worktrees "$PWD" "$BR" || exit 1
 
-# A non-dry retry may legitimately find the branch created by its previous attempt: the supervised
-# commit can land, then return 124 while reaping a leaked descendant. Defer that collision until the
-# base, body and scoped snapshot are known so we can distinguish the exact preserved commit from an
-# unrelated local branch. Dry runs deliberately keep their worktree for inspection and never publish,
-# so they retain the strict new-branch precondition.
-LOCAL_BRANCH_EXISTS=
-REMOTE_HOLDS_PRESERVED=
-if git show-ref --verify -q "refs/heads/$BR"; then
-  if [ -n "${SHIP_DRY_RUN:-}" ] || [ "$DRY_GATES" -eq 1 ]; then
-    echo "branch already exists: $BR" >&2; exit 1
-  fi
-  LOCAL_BRANCH_EXISTS=1
-fi
-SELF_DEFER=
-if [ -n "$LOCAL_BRANCH_EXISTS" ] && [ "$FROM_BRANCH" -eq 1 ] && [ "$RESUME" -eq 0 ] && [ -n "$PREFLIGHT_SELF" ]; then
-  # The rename remedy is already printed; run the ancestry and hook-dir checks so one attempt names all.
-  SELF_DEFER=1; LOCAL_BRANCH_EXISTS=
-elif [ -n "$LOCAL_BRANCH_EXISTS" ] && [ "$FROM_BRANCH" -eq 1 ] && [ "$RESUME" -eq 0 ]; then
-  echo "branch already exists: $BR" >&2
-  echo "  a fresh --from-branch invocation cannot adopt a prior receipt; use devkit ship --resume '$BR' to replay its recorded v3 branch source, or choose a new branch name" >&2
-  exit 1
-fi
 if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ] && ! command -v gh >/dev/null 2>&1; then
   echo "gh not installed (needed to open the PR)" >&2; exit 1
 fi
 # Also reject an existing REMOTE branch — otherwise `push -u` fast-forwards onto it,
 # silently appending this commit to someone else's branch/PR. (Skipped under dry-run:
 # no push happens, and it avoids a network round-trip.)
+REMOTE_HOLDS_PRESERVED=
 if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; then
   set +e
   # Fully-qualified, NOT a bare `$BR`: a bare pattern tail-matches on path segments, so shipping `x`
@@ -341,11 +304,17 @@ if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; then
   case "$remote_check" in
     0) # A merged or closed PR's branch reaches no base, so --pr would only refuse in turn.
        REPO=$( (git config --get remote.origin.url || git remote get-url origin) | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git$##')
-       PR_CLOSED=; ! read_pr_state || [ "$PR_SEEN_STATE" = OPEN ] || PR_CLOSED=1
+       PR_CLOSED=; PR_UNREAD=
+       if read_pr_state; then [ "$PR_SEEN_STATE" = OPEN ] || PR_CLOSED=1; else PR_UNREAD=1; fi
        # A preserved commit already on origin (lost push response, manual push) is adopted; the
        # receipt checks below still decide whether it may be published.
-       if [ -z "$PR_CLOSED" ] && [ -n "$LOCAL_BRANCH_EXISTS" ] &&
-         [ "${remote_line%%[[:space:]]*}" = "$(git rev-parse -q --verify "refs/heads/$BR")" ]; then
+       if [ -z "$PR_CLOSED" ] &&
+         [ "${remote_line%%[[:space:]]*}" = "$(git rev-parse -q --verify "refs/heads/$BR" 2>/dev/null)" ]; then
+         if [ -n "$PR_UNREAD" ] && ! pr_absent; then
+           echo "could not confirm origin/$BR has no merged or closed PR (gh could not read its PR state) — refusing to adopt it" >&2
+           echo "  re-run once gh answers, or check by hand: gh pr view $(ship_shell_quote "$BR") --repo $(ship_shell_quote "$REPO")" >&2
+           exit 1
+         fi
          REMOTE_HOLDS_PRESERVED=1
        else
          echo "remote branch already exists: origin/$BR" >&2
@@ -391,11 +360,38 @@ REPO=$(git remote get-url origin | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git
 [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || {
   echo "could not resolve origin to owner/repo: '$REPO'" >&2; exit 1
 }
+ship_prequeue_defer_if_ahead "$BASE_REF"
 
 # Test seam: print the resolved PR target + repo, then exit before any side effect
 # (no worktree, no stdin read, no push). Lets the regression test that guards the
 # fork-repo-resolution bug run hermetically. Never set in normal use.
 [ -n "${SHIP_RESOLVE_ONLY:-}" ] && { printf 'BASE_REF=%s\nREPO=%s\n' "$BASE_REF" "$REPO"; exit 0; }
+
+# A stopped ship can strand its branch with no worktree to carry a record; drop it when the base
+# contains it, unless the orphan preflight already ruled on it or this is a dry run.
+[ -n "${SHIP_DRY_RUN:-}" ] || [ "$DRY_GATES" -eq 1 ] || [ -n "$PREFLIGHT_HINT" ] ||
+  ship_reclaim_empty_branch "$PWD" "$BR" "$BASE_REF"
+# A non-dry retry may legitimately find the branch created by its previous attempt: the supervised
+# commit can land, then return 124 while reaping a leaked descendant. Defer that collision until the
+# base, body and scoped snapshot are known so we can distinguish the exact preserved commit from an
+# unrelated local branch. Dry runs deliberately keep their worktree for inspection and never publish,
+# so they retain the strict new-branch precondition.
+LOCAL_BRANCH_EXISTS=
+if git show-ref --verify -q "refs/heads/$BR"; then
+  if [ -n "${SHIP_DRY_RUN:-}" ] || [ "$DRY_GATES" -eq 1 ]; then
+    echo "branch already exists: $BR" >&2; exit 1
+  fi
+  LOCAL_BRANCH_EXISTS=1
+fi
+SELF_DEFER=
+if [ -n "$LOCAL_BRANCH_EXISTS" ] && [ "$FROM_BRANCH" -eq 1 ] && [ "$RESUME" -eq 0 ] && [ -n "$PREFLIGHT_SELF" ]; then
+  # The rename remedy is already printed; run the ancestry and hook-dir checks so one attempt names all.
+  SELF_DEFER=1; LOCAL_BRANCH_EXISTS=
+elif [ -n "$LOCAL_BRANCH_EXISTS" ] && [ "$FROM_BRANCH" -eq 1 ] && [ "$RESUME" -eq 0 ]; then
+  echo "branch already exists: $BR" >&2
+  echo "  a fresh --from-branch invocation cannot adopt a prior receipt; use devkit ship --resume '$BR' to replay its recorded v3 branch source, or choose a new branch name" >&2
+  exit 1
+fi
 
 # The CALLER's worktree HEAD, pinned BEFORE the first thing that reasons about it: in a shared
 # parallel-agent checkout $ROOT can be switched or reset mid-run, and both the base hint below and
@@ -463,6 +459,7 @@ elif [ -n "$BASE_FLAG" ]; then
   # head is not a licence to judge a live one — the check is skipped, like every other cannot-tell.
   if [ -n "$CALLER_HEAD" ]; then
     ship_base_contains_branch_point "$ROOT" "$BASE_REF" "$BASE" "$CALLER_HEAD" || exit 1
+    ship_base_inbound_note "$ROOT" "$BASE" "$CALLER_HEAD" "${PATHS[@]}"
   fi
 
   # Which of the paths being shipped ALSO moved on the base since this branch diverged (sc-2297).
@@ -491,39 +488,14 @@ elif [ -n "$BASE_FLAG" ]; then
   # incapable of failing the ship: the same fail-open polarity ship_size_preflight uses.
   BASE_DRIFT="$SCRIPT_DIR/base-drift/cli.mts"
   [ -f "$BASE_DRIFT" ] || BASE_DRIFT="$SCRIPT_DIR/base-drift/cli.mjs"
-  if [ -f "$BASE_DRIFT" ]; then
+  if [ -f "$BASE_DRIFT" ] && ! ship_prequeue_active; then
     node "$BASE_DRIFT" --root "$ROOT" --base "$BASE_REF" --ship --exit-zero -- "${PATHS[@]}" || true
   fi
 else
   BASE=$(git rev-parse HEAD)   # pin once: shared HEAD may advance mid-run
 fi
 
-# Lists index/worktree/untracked/ignored overlays on the NUL-separated members; 1 when any, 2 when
-# unlisted. Callers sit in `||`, where errexit is off, so every listing failure returns explicitly.
-ship_refuse_overlays() {  # <root> <source-head> <members-file> [header-prefix]
-  local root=$1 head=$2 members=$3 prefix=${4:-} found=0 kind p listed
-  local sel=()
-  while IFS= read -r -d '' p; do sel+=(":(top,literal)$p"); done < "$members"
-  [ "${#sel[@]}" -gt 0 ] || return 0
-  listed=$(mktemp "${TMPDIR:-/tmp}/ship-branch-overlays.XXXXXX") || return 2
-  for kind in index worktree untracked ignored; do
-    case "$kind" in
-      index) git -C "$root" diff --cached --name-only -z "$head" -- "${sel[@]}" ;;
-      worktree) git -C "$root" diff --name-only -z -- "${sel[@]}" ;;
-      untracked) git -C "$root" ls-files -o --exclude-standard -z -- "${sel[@]}" ;;
-      ignored) git -C "$root" ls-files -o -i --exclude-standard -z -- "${sel[@]}" ;;
-    esac | node "$SHIP_INTENT" filter-membership --members-file "$members" > "$listed" \
-      || { echo "--from-branch: could not list $kind overlays on --from-branch paths" >&2; rm -f "$listed"; return 2; }
-    while IFS= read -r -d '' p; do
-      [ "$found" -eq 1 ] || echo "${prefix}--from-branch refuses uncommitted overlays on --from-branch paths; commit or remove these exact overlays:" >&2
-      found=1
-      printf '  %q (%s)\n' "$p" "$kind" >&2
-    done < "$listed"
-  done
-  rm -f "$listed"
-  [ "$found" -eq 0 ]
-}
-
+. "$(dirname "${BASH_SOURCE[0]}")/ship-branch/staging-and-record.sh"
 if [ "$FROM_BRANCH" -eq 1 ]; then
   if [ -z "$LOCAL_BRANCH_EXISTS" ]; then
     set +e
@@ -681,62 +653,33 @@ fi
 #
 # --from-branch is skipped outright: it diffs a pinned COMMIT PAIR whose ancestry was already proven
 # above, so its merge base IS BASE and the classification would be pure cost. Everywhere else
-# ship_patch_base echoes BASE unchanged unless the base genuinely moved under this checkout, which
-# keeps the default arm and every in-sync ship byte-identical to before.
+# ship_patch_base echoes BASE unchanged unless the base genuinely moved under this checkout (or no
+# fork point is visible, which refuses below), keeping the default arm and in-sync ships unchanged.
 . "$SCRIPT_DIR/patch-anchor.sh"
+. "$SCRIPT_DIR/gate-owned-baseline.sh"
 WHOLE_POSITIVES=()
 WHOLE_SELECTORS=()
 WHOLE_EXCLUDES=()
 PATCH_BASE=$BASE
 if [ "$FROM_BRANCH" -eq 0 ]; then
-  PATCH_BASE=$(ship_patch_base "$ROOT" "$BASE")
+  # No fork point (shallow graft or git error): refuse rather than stage base-only work as a revert.
+  if ! PATCH_BASE=$(ship_patch_base "$ROOT" "$BASE"); then
+    echo "ship: cannot find where this checkout forked from origin/$BASE_REF (${BASE:0:7}) — shallow clone or git error." >&2
+    echo "  Staging against the base tip would commit every base-only change in the briefed paths as a revert." >&2
+    echo "  Run \`git fetch --unshallow\` (or \`git fetch --deepen=<n>\` until \`git merge-base ${BASE:0:7} HEAD\` succeeds), then retry." >&2
+    [ -n "$LOCAL_BRANCH_EXISTS" ] || echo "ship: preflight — blocked before creating a branch or worktree; nothing was staged or gated." >&2
+    exit 1
+  fi
   # Only this invocation's argv: recorded paths passed when recorded, and a preserved commit is staged.
   if [ -z "$LOCAL_BRANCH_EXISTS" ]; then
     if [ "$RESUME" -eq 1 ]; then ARGV_PATHS=(${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}); else ARGV_PATHS=("${PATHS[@]}"); fi
-    ship_refuse_unmatched_paths "$ROOT" "$PATCH_BASE" "$BASE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1
+    ship_refuse_unmatched_paths "$ROOT" "$PATCH_BASE" "$BASE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1; RESUME_EXTRAS_VALIDATED=1
   fi
   if [ "$PATCH_BASE" != "$BASE" ]; then
     ship_classify_whole_file "$ROOT" "$BASE" "$PATCH_BASE" -- "${GIT_PATHS[@]}"
     echo "ship: origin/$BASE_REF moved to ${BASE:0:7} since this checkout forked at ${PATCH_BASE:0:7} — staging is anchored at the fork point and three-way merged." >&2
   fi
 fi
-
-# Take staging's hunk-level verdict BEFORE any branch or worktree exists (sc-3496). The same function
-# staging calls below, pointed at a throwaway index holding BASE instead of the ephemeral worktree,
-# so the two cannot disagree about what conflicts or how it is named. It used to run only after the
-# worktree claim, so a conflict the base-drift advisory had already named cost a branch+worktree
-# created and deleted for nothing; it now runs first among the blocking preflights. Still hunk-level,
-# never path-level: base-drift-surfaced-at-read-time Rejected(a) is untouched.
-#
-# Staging stays AUTHORITATIVE. $ROOT is a shared checkout, so a clean trial does not promise a clean
-# apply later; the rare conflict a concurrent edit would have dissolved is an accepted false block.
-# Skipped when the branch already exists, so a preserved-commit --resume still reaches its own
-# refusal. Fails OPEN on anything but a named conflict — it is a preflight, not the payload.
-ship_text_arm_trial() {
-  local idx patch err rc=0
-  idx=$(mktemp "${TMPDIR:-/tmp}/ship-trial-index.XXXXXX") || return 0
-  rm -f "$idx" # read-tree must create it; an empty file is not a valid index
-  patch=$(mktemp "${TMPDIR:-/tmp}/ship-trial.XXXXXX") || return 0
-  err=$(mktemp "${TMPDIR:-/tmp}/ship-trial-err.XXXXXX") || { rm -f "$patch"; return 0; }
-  if GIT_INDEX_FILE=$idx git -C "$ROOT" read-tree "$BASE" 2>/dev/null; then
-    ship_apply_text_arm "$ROOT" "$BASE" "$PATCH_BASE" "$BASE_REF" "$patch" "$err" --index "$idx" || rc=$?
-  fi
-  rm -f "$idx" "$idx.lock" "$patch" "$err"
-  [ "$rc" -ne 1 ] && return 0
-  echo "ship: preflight — blocked before creating a branch or worktree; nothing was staged or gated." >&2
-  return 1
-}
-
-# Both base-conflict refusals as one blocking preflight, a no-op unless the base moved past the fork
-# point. A preserved-commit retry only warns, so it still reaches the --resume recovery check.
-ship_base_conflict_preflight() {
-  [ "$FROM_BRANCH" -eq 0 ] && [ "$PATCH_BASE" != "$BASE" ] || return 0
-  if ! ship_refuse_whole_file_drift "$ROOT" "$BASE" "$PATCH_BASE" "$BASE_REF" ${LOCAL_BRANCH_EXISTS:+--advise}; then
-    echo "ship: preflight — blocked before creating a branch or worktree; nothing was staged or gated." >&2
-    return 1
-  fi
-  [ -n "$LOCAL_BRANCH_EXISTS" ] || ship_text_arm_trial
-}
 
 # Nothing to commit → say so NOW. Staging (below) has exactly three inputs: the tracked diff vs
 # BASE, the untracked files in scope, and the untracked-but-IGNORED files in scope (a briefed path
@@ -790,17 +733,16 @@ if [ "$DRY_GATES" -eq 1 ]; then BODY=""
 elif [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
 elif [ "$BODY_FILE_SET" -eq 1 ] && [ "$BODY_FILE_PREREAD_SET" -eq 1 ]; then BODY="$BODY_FILE_PREREAD" # the bytes the --resume banner sized
 elif [ "$BODY_FILE_SET" -eq 1 ] && [ "$BODY_FILE_PREREAD_SET" -eq 2 ]; then
-  echo "--body-file: $BODY_FILE_PREREAD_ERR: $BODY_FILE_FLAG" >&2; exit 1 # as the banner said; never re-read
+  echo "--body-file: $BODY_FILE_PREREAD_ERR: $BODY_FILE_FLAG" >&2; ship_exit_donating 1 # as the banner said; never re-read
 elif [ "$BODY_FILE_SET" -eq 1 ]; then
-  [ -f "$BODY_FILE_FLAG" ] || { echo "--body-file: no such file: $BODY_FILE_FLAG" >&2; exit 1; }
+  [ -f "$BODY_FILE_FLAG" ] || { echo "--body-file: no such file: $BODY_FILE_FLAG" >&2; ship_exit_donating 1; }
   # cat + sentinel, never $(<file): command substitution strips EVERY trailing newline, silently
   # altering a deliberately-authored body before it is recorded.
-  BODY=$(cat -- "$BODY_FILE_FLAG" && printf x) || { echo "--body-file: unreadable: $BODY_FILE_FLAG" >&2; exit 1; }
+  BODY=$(cat -- "$BODY_FILE_FLAG" && printf x) || { echo "--body-file: unreadable: $BODY_FILE_FLAG" >&2; ship_exit_donating 1; }
   BODY=${BODY%x}
 elif [ "$RESUME" -eq 1 ]; then BODY="$RESUME_BODY"
-  # Replaying recorded bytes: say so if the --body-file they came from has since been edited
-  # (sc-2527). Here — past the mode hand-off, before any worktree or gate — so it prints once.
-  node "$SHIP_INTENT" body-drift --root "$ROOT" --branch "$BR" --generation "$RESUME_GENERATION" || true
+  # Replaying recorded bytes: warn now, before any gate, if --body-file has since been edited.
+  BODY_DRIFT_TAIL=$(node "$SHIP_INTENT" body-drift --root "$ROOT" --branch "$BR" --generation "$RESUME_GENERATION") || BODY_DRIFT_TAIL=
 elif [ -t 0 ]; then BODY=""
 else ship_read_stdin_body; fi
 # The body is the ONLY thing ship reads from stdin, and it has been read. Hand every descendant
@@ -822,7 +764,8 @@ export DEVKIT_SHIP_FROM_BRANCH="$FROM_BRANCH"
 export DEVKIT_SHIP_RESUMED=$RESUME
 # Advisory judge reachability, after the exports above so its telemetry row carries this ship's id.
 # A plain --dry-gates runs no judge, so its report is informational; a rehearsal labels its row as one.
-if [ "$DRY_GATES" -eq 0 ]; then ship_judge_preflight "$ROOT"
+if ship_prequeue_active; then :
+elif [ "$DRY_GATES" -eq 0 ]; then ship_judge_preflight "$ROOT"
 elif [ "$WITH_REVIEWERS" -eq 1 ]; then DEVKIT_SHIP_MODE=dry-gates ship_judge_preflight "$ROOT"
 else DEVKIT_SHIP_MODE=dry-gates ship_judge_preflight "$ROOT" --informational; fi
 SHIP_INTENT_GENERATION=""
@@ -863,40 +806,6 @@ if [ "$DRY_GATES" -eq 0 ]; then
     SHIP_INTENT_START_GENERATION=
 fi
 
-record_ship_intent() {
-  RESUME_EXTRAS_UNRECORDED=0
-  [ "$DRY_GATES" -eq 0 ] || return 0
-  # Capture the record's ownership token (write prints a per-attempt random generation): success may delete ONLY the
-  # record this attempt wrote — a concurrent attempt's newer record must survive for ITS --resume.
-  SHIP_INTENT_GENERATION=$(printf '%s' "$BODY" | node "$SHIP_INTENT" "${SHIP_INTENT_ARGS[@]}" -- "${PATHS[@]}") \
-    || { SHIP_INTENT_GENERATION=""; echo "ship: invocation not recorded — the retry needs the full command (non-fatal)" >&2; }
-  [ -n "$SHIP_INTENT_GENERATION" ] || SHIP_SOURCE_ATTEMPT_ID=
-  # Exported flag (not the token itself) so the SUBPROCESS gate runner's timeout banner can tell a
-  # recorded attempt (--resume works) from an unrecorded one (--resume would refuse by name).
-  export DEVKIT_SHIP_INTENT_RECORDED=$([ -n "$SHIP_INTENT_GENERATION" ] && echo 1 || echo 0)
-  if [ "$FROM_BRANCH" -eq 1 ] && [ -n "$SHIP_INTENT_GENERATION" ]; then
-    if [ -z "$SHIP_SOURCE_ATTEMPT_ID" ]; then
-      if [ "$RESUME" -eq 1 ] && [ -n "$LOCAL_BRANCH_EXISTS" ]; then SHIP_SOURCE_ATTEMPT_ID=$RESUME_SOURCE_ATTEMPT_ID
-      else SHIP_SOURCE_ATTEMPT_ID=$SHIP_INTENT_GENERATION
-      fi
-    fi
-  fi
-}
-
-# A blocking preflight refused: record this attempt unless it already recorded, then exit with the
-# preflight's own status, naming it as the ship_end cause. record_ship_intent is a no-op under
-# --dry-gates; a resume already CASes the generation it read, and a fresh attempt CASes its snapshot.
-ship_abort_resumable() {
-  local rc=$1
-  SHIP_END_CAUSE=$2
-  if [ "$DEVKIT_SHIP_INTENT_RECORDED" -ne 1 ]; then
-    [ -z "$SHIP_INTENT_START_GENERATION" ] ||
-      SHIP_INTENT_ARGS+=(--expect-generation "$SHIP_INTENT_START_GENERATION")
-    record_ship_intent
-  fi
-  exit "$rc"
-}
-
 # A preserved-commit resume must win its intent CAS before the receipt/source-owner comparison
 # below. Fresh attempts wait for atomic branch creation instead, so a losing creator never records.
 [ -z "$LOCAL_BRANCH_EXISTS" ] || record_ship_intent
@@ -929,12 +838,6 @@ RECOVERY_RECEIPT_INTENT_BLOB=
 RECOVERY_GATE_ADDS_REF="refs/devkit/ship-gate-adds/$BR"
 GATE_ADDS_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-gate-adds.XXXXXX")
 BRANCH_CREATED= # only this invocation's branch may be auto-deleted on an empty/failed commit
-# The ship's one terminal row; a rehearsal writes none. Silent and best-effort: it never fails a ship.
-ship_end_record() {
-  [ "$DRY_GATES" -eq 0 ] && [ -z "${SHIP_END_RECORDED:-}" ] || return 0
-  SHIP_END_RECORDED=1
-  node "$SHIP_EVENT" end "$1" "$SHIP_END_CAUSE" >/dev/null 2>&1 || true
-}
 cleanup() {
   local rc=$?
   ship_resume_extras_notice "$rc"
@@ -967,12 +870,12 @@ cleanup() {
   # EVERY exit, incl. DRY and the fail-closed preflight exits — otherwise a failed dry-run leaks a
   # devkit-ship-* worktree + branch (they then show as "checked out in a linked worktree" and block
   # deletion). An absent branch (worktree add failed) is treated the same. Keying on the commit —
-  # not on SHIP_DRY_RUN — is what the sibling reship.sh already does. Worktree first: a branch
-  # checked out in a worktree can't be deleted.
+  # not on SHIP_DRY_RUN — is what the sibling reship.sh already does. Branch FIRST (a CAS ref delete
+  # works while checked out): a kill between the two then leaves a recorded, reclaimable worktree.
   local tip; tip=$(git rev-parse -q --verify "$BR" 2>/dev/null || true)
   if [ -z "$tip" ] || [ "$tip" = "$BASE" ]; then
+    [ -n "$tip" ] && [ -n "$BRANCH_CREATED" ] && git update-ref -d "refs/heads/$BR" "$BASE" 2>/dev/null || true
     git worktree remove --force "$WT" 2>/dev/null || true
-    [ -n "$tip" ] && [ -n "$BRANCH_CREATED" ] && git branch -D "$BR" 2>/dev/null || true
     return
   fi
   # A commit DID land beyond BASE.
@@ -1005,7 +908,7 @@ ship_base_conflict_preflight || ship_abort_resumable 1 base_conflict
 
 # Advisory raw-line preview against BASE: it measures the caller's pre-merge bytes, so it never blocks.
 # The in-worktree guard-size reports an overrun together with the other deterministic gates.
-if [ "$FROM_BRANCH" -eq 0 ] || [ -z "$LOCAL_BRANCH_EXISTS" ]; then
+if { [ "$FROM_BRANCH" -eq 0 ] || [ -z "$LOCAL_BRANCH_EXISTS" ]; } && ! ship_prequeue_active; then
   ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 fi
 # Before `git worktree add -b` (sc-3883): a missing hook dir used to surface only inside
@@ -1024,6 +927,8 @@ node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
 DIST_INTEGRITY_STATUS=$?
 set -e
 [ "$DIST_INTEGRITY_STATUS" -eq 0 ] || ship_abort_resumable "$DIST_INTEGRITY_STATUS" dist_integrity
+# The pre-queue pass ends here: the preserved-commit checks below read this attempt's intent record.
+ship_prequeue_done
 
 if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   # Resume only when the existing branch proves it is the exact output this invocation would have
@@ -1041,13 +946,8 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   RECOVERY_LINE=$(git rev-list --parents -n 1 "$RECOVERY_COMMIT" 2>/dev/null || true)
   RECOVERY_PARENTS=()
   read -r -a RECOVERY_PARENTS <<< "$RECOVERY_LINE"
-  # sc-2273: name the simplest shape FIRST. A branch whose tip the base already contains carries
-  # nothing to resume, and both arms below describe that state as a topology puzzle — the parent-count
-  # arm as "its tip is not a single commit" (the root-commit case, which short-circuits before the
-  # merge-base arm is ever reached), the diverges arm as three speculative causes. Neither says the
-  # one fact that decides it. This REFUSES exactly as they did; it is the wording that changes, so the
-  # two shapes ship-branch-resume.test.mts pins as unresumable ($BASE == the tip, and a base that has
-  # already absorbed the commit) are still refused — they are both instances of this very state.
+  # Name the simplest shape first. ship_reclaim_empty_branch already dropped this state unless a
+  # guard kept it (upstream, reflog, a holder), so what reaches here is refused with that one fact.
   if [ -n "$RECOVERY_COMMIT" ] && git merge-base --is-ancestor "$RECOVERY_COMMIT" "$BASE" 2>/dev/null; then
     RECOVERY_REASON="it carries no commit of its own over $BASE_REF (${BASE:0:7}) — ${RECOVERY_COMMIT:0:7} is already contained in that base"
   # $BASE is re-resolved every invocation, so on a retry it has usually MOVED. Demand the PR's merge-base
@@ -1120,11 +1020,13 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   # receipt minted by an older devkit) leaves the array empty, and an empty exclude list makes the
   # comparison below byte-identical to the strict one it replaces — fail closed by construction.
   GATE_ADD_EXCLUDE=()
+  GATE_REMOVED=()
   if [ -z "$RECOVERY_REASON" ]; then
     RECOVERY_GATE_ADDS_BLOB=$(git rev-parse -q --verify "$RECOVERY_GATE_ADDS_REF^{blob}" 2>/dev/null || true)
     if [ -n "$RECOVERY_GATE_ADDS_BLOB" ]; then
       while IFS= read -r -d '' gate_path; do
         GATE_ADD_EXCLUDE+=(":(top,exclude,literal)$gate_path")
+        git cat-file -e "$RECOVERY_COMMIT:$gate_path" 2>/dev/null || GATE_REMOVED+=(":(top,literal)$gate_path")
       done < <(git cat-file blob "$RECOVERY_GATE_ADDS_BLOB")
     fi
   fi
@@ -1224,6 +1126,10 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
     # skip. Nothing is lost by skipping: read-tree's index already IS the commit's tree.
     if [ "${#RECOVERY_ADD_PATHS[@]}" -gt 0 ]; then
       GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" add -f -A -- "${RECOVERY_ADD_PATHS[@]}"
+    fi
+    # A gate-removed path is still in the caller's checkout; the gated commit, not that copy, wins.
+    if [ "${#GATE_REMOVED[@]}" -gt 0 ]; then
+      GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" rm -q --cached --ignore-unmatch -- "${GATE_REMOVED[@]}"
     fi
     RECOVERY_TREE=$(GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" write-tree)
     BRANCH_TREE=$(git rev-parse "$RECOVERY_COMMIT^{tree}")
@@ -1472,21 +1378,22 @@ else
     if [ "$WITH_REVIEWERS" -eq 1 ]; then
       # Completeness stays off without a guard here: commit-with-gate-capture.sh never exports a
       # message file under dry-gates, and the hook refuses to arm the judge in this mode anyway.
-      export DEVKIT_REVIEW_GUARDS=comments,review
+      export DEVKIT_REVIEW_GUARDS=comments,review,ui-evidence
       export DEVKIT_SHIP_DRY_REVIEWERS=1
-      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included), and the domain reviewers." >&2
-      echo "   Skipping decision, completeness, commit, push, and PR creation." >&2
+      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included), the path-only UI screenshot reminder, and the domain reviewers." >&2
+      echo "   Skipping the decision judge (regex smells shown as advisory), completeness, commit, push, and PR creation." >&2
     else
-      export DEVKIT_REVIEW_GUARDS=comments
+      export DEVKIT_REVIEW_GUARDS=comments,ui-evidence
       unset DEVKIT_SHIP_DRY_REVIEWERS
-      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included)." >&2
-      echo "   Skipping decision, domain reviewer, completeness, commit, push, and PR creation." >&2
+      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included), and the path-only UI screenshot reminder." >&2
+      echo "   Skipping the decision judge (regex smells shown as advisory), domain reviewer, completeness, commit, push, and PR creation." >&2
     fi
   else
     export DEVKIT_SHIP_MODE=ship   # tags the ship_attempt telemetry (new-ship vs reship retry)
     export DEVKIT_RUN_MODE=ship    # never inherit a caller's review allowlist into a real ship
     unset DEVKIT_SHIP_DRY_GATES DEVKIT_SHIP_DRY_REVIEWERS
   fi
+  ship_decision_smell_advisory "$WT" "$ROOT" || true   # read-only; the assertion below proves it
 # Preflight: nothing since staging is allowed to have touched the index. Cheap, and it fails BEFORE
 # the operator pays for a multi-minute gate chain.
   ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { ship_run_keep "staged set changed before the commit"; exit 1; }
@@ -1548,6 +1455,12 @@ EOF
   GATE_SIGNAL_DEFER_EXIT=
   [ "$REQUESTED_SIGNAL_STATUS" -eq 0 ] || exit "$REQUESTED_SIGNAL_STATUS"
   [ "$COMMIT_STATUS" -eq 0 ] || { SHIP_END_CAUSE=$SHIP_BLOCKED_GATE; exit "$COMMIT_STATUS"; }
+  # Before the push, so a push-failure --resume rebuilds from caller bytes that match this commit.
+  if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$SHIP_COMMIT" != "$BASE" ]; then
+    SYNC_MODE=write; [ "$FROM_BRANCH" -eq 0 ] || SYNC_MODE=hint
+    ship_sync_gate_rewrites "$ROOT" "$STAGED_STATE" "$SHIP_COMMIT" "$SYNC_MODE" ||
+      echo "ship: could not sync gate-rewritten files into your working copy (non-fatal)" >&2
+  fi
 fi
 
 if [ "$DRY_GATES" -eq 1 ]; then
@@ -1564,7 +1477,7 @@ if [ "$DRY_GATES" -eq 1 ]; then
   fi
   # Last on purpose: a rehearsal is read by tailing, and the head may have scrolled away.
   [ -z "${SHIP_JUDGE_REMEDY:-}" ] ||
-    echo "⚠️  ship: the judge preflight found a dark judge — the real ship's uncached judges will fail closed. To ship inside this window, $SHIP_JUDGE_REMEDY." >&2
+    echo "⚠️  ship: the judge preflight found a dark judge — the real ship's uncached judges will fail closed. $SHIP_JUDGE_REMEDY" >&2
   exit 0
 fi
 
@@ -1613,7 +1526,7 @@ else
 fi
 PR_NUM=""
 if [ -z "$PR_CREATE_FAILED" ]; then
-  echo "$PR_URL"   # surface the PR URL (we captured gh's stdout to recover the PR number below)
+  ship_print_pr_url "$PR_URL" # surface the PR URL (we captured gh's stdout to recover the PR number below)
   # The PR number is the trailing path segment of the URL gh just printed (one gh call, not two).
   PR_NUM=${PR_URL##*/}
   [[ "$PR_NUM" =~ ^[0-9]+$ ]] || PR_NUM=""
@@ -1621,22 +1534,15 @@ if [ -z "$PR_CREATE_FAILED" ]; then
   # agent reached for `gh run watch`, which needs a run id and redraws the whole job every 3s.
   if [ "$WAIT_CI" -eq 0 ] && [ -n "$PR_NUM" ]; then
     echo "  checks so far: gh pr checks $PR_NUM --repo $REPO --json bucket,name,state,link" >&2
-    echo "  or wait for a bounded verdict next time: devkit ship … --wait-ci" >&2
+    echo "  or wait for a bounded verdict with attribution: devkit ci-verdict $PR_NUM" >&2
   fi
   # Telemetry: tie this ship's id to the PR it opened, so the usage tracker links a ship row to its
   # PR directly (no gh-by-branch lookup needed). ship_result already fired during the gate chain —
   # before the PR existed — so this is a separate line the collector upserts onto the ship. Reuses
   # DEVKIT_SHIP_ID/DEVKIT_GATE_EVENTS; best-effort (`|| true`) so telemetry can never fail a ship.
-  # pr_number is a bare JSON number, else null. telemetry.sh is sourced HERE, not inherited: a resumed
-  # ship never ran commit_with_gate_capture (the only other place it is sourced), and under `set -u`
-  # its unset DEVKIT_TELEMETRY_VERSION aborted the resume after the PR was already open.
   if [ -n "${DEVKIT_GATE_EVENTS:-}" ] && [ -n "${DEVKIT_SHIP_ID:-}" ]; then
-    . "$(dirname "${BASH_SOURCE[0]}")/telemetry.sh"
-    printf '{"type":"ship_pr","ship_id":"%s","devkit_version":"%s"%s,"pr_url":"%s","pr_number":%s,"ts":"%s"}\n' \
-      "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" \
-      "$(devkit_parent_session_json)" \
-      "$(devkit_json_escape "$PR_URL")" "${PR_NUM:-null}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
+    SHIP_EVENT="$SCRIPT_DIR/ship-intent-event.mts"; [ -f "$SHIP_EVENT" ] || SHIP_EVENT="$SCRIPT_DIR/ship-intent-event.mjs"
+    node "$SHIP_EVENT" pr "pr_url=$PR_URL" "pr_number=${PR_NUM:-}" >/dev/null 2>&1 || true
   fi
 fi
 
@@ -1745,6 +1651,9 @@ git update-ref -d "$RECOVERY_GATE_ADDS_REF" 2>/dev/null || true
 # Joins the PR to its base PR's GitHub stack; best-effort, so it runs only once nothing is at stake.
 STACK_LINK="$SCRIPT_DIR/stack/link.mts"; [ -f "$STACK_LINK" ] || STACK_LINK="$SCRIPT_DIR/stack/link.mjs"
 [ "$NO_STACK" -eq 1 ] || [ -z "$PR_NUM" ] || node "$STACK_LINK" "$REPO" "$PR_NUM" || true
+# Only a gate-skipped recovery leaves the PR body without its UI item: every other run wrote it.
+GATES_SKIPPED_COMMIT=${LOCAL_BRANCH_EXISTS:+${RECOVERY_COMMIT:-}}
+[ -z "$PR_NUM" ] || [ -z "$GATES_SKIPPED_COMMIT" ] || publish_ui_item "$ROOT" "$PR_NUM" "$REPO" "$GATES_SKIPPED_COMMIT"
 # After every ref is settled, so a ship killed during the bounded test runs loses no recovery state.
 [ -z "$PR_NUM" ] || publish_reviewer_notes "$PR_NUM" "$REPO" "${RECOVERY_COMMIT:-$SHIP_COMMIT}" "$ROOT"
 [ -z "$PR_NUM" ] || publish_evidence_block "$WT" "$PR_NUM" "$REPO" "${RECOVERY_COMMIT:-$SHIP_COMMIT}" "$ROOT"

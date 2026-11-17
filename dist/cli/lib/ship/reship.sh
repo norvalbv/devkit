@@ -85,7 +85,7 @@ UPDATE_PR_BODY=0   # explicit body flag? Refresh the existing PR too; recorded a
 READY=0            # --ready marks the PR ready-for-review after the push lands
 WAIT_CI=0          # --wait-ci polls the PR's checks after the re-push is durable
 WAIT_CI_STRICT=0   # --wait-ci-strict: exit 5 unless the verdict is passed
-WAIT_CI_TIMEOUT=900
+WAIT_CI_TIMEOUT=""   # defaults to SHIP_WAIT_CI_DEFAULT_S once wait-ci/args.sh is sourced
 WAIT_CI_TIMEOUT_SET=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -121,6 +121,7 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$BODY_SET" -eq 0 ] || [ "$BODY_FILE_SET" -eq 0 ] || { echo "--body and --body-file are mutually exclusive" >&2; exit 1; }
 . "$(dirname "${BASH_SOURCE[0]}")/wait-ci/args.sh"
+[ "$WAIT_CI_TIMEOUT_SET" -eq 1 ] || WAIT_CI_TIMEOUT=$SHIP_WAIT_CI_DEFAULT_S
 ship_validate_wait_ci "$WAIT_CI" "$WAIT_CI_TIMEOUT" "$WAIT_CI_TIMEOUT_SET" "${WAIT_CI_REQUIRED:-0}" || exit 1
 # Every git selector below is built as `:(literal)<path>` (sc-2425). Ambient Git pathspec modes
 # either reinterpret that prefix as plain text or conflict with it, so they are not inputs.
@@ -212,6 +213,7 @@ rewrite_remote() {
   node "$REWRITE_REMOTE_SUPERVISOR" 60 -- "$@"
 }
 . "$SCRIPT_DIR/closed-pr-remedy.sh"
+. "$SCRIPT_DIR/origin-base.sh"
 # An append onto a MERGED or CLOSED PR's branch reaches no base, so it must never report success.
 # Fail-open when gh cannot answer: the append path has always treated gh as best-effort.
 # usage: reship_refuse_closed_pr <when> <outcome>
@@ -223,6 +225,11 @@ reship_refuse_closed_pr() {
   echo "ship --pr: PR #$PR_SEEN_NUM for origin/$BR is $PR_SEEN_STATE$1 — a push there never reaches $PR_SEEN_BASE; $2" >&2
   print_closed_pr_remedy "$PR_SEEN_BASE" "--$paths" "then re-run this command"
   return 1
+}
+# The copyable append-mode form of this invocation: the same branch, title and paths, minus --base.
+reship_append_command() {
+  printf 'devkit ship %q %q --pr --' "$BR" "$TITLE"
+  printf ' %q' "${PATHS[@]}"
 }
 # Resolve owner/repo from origin (best-effort — only used for the final PR-URL print, which falls
 # back to a plain message; a non-GitHub origin still re-pushes fine).
@@ -268,6 +275,8 @@ if [ -n "$BASE_FLAG" ]; then
 fi
 # The unmatched-path guard judges only this invocation's argv; recorded paths passed when recorded.
 if [ "$RESUME" -eq 1 ]; then ARGV_PATHS=(${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}); else ARGV_PATHS=("${PATHS[@]}"); fi
+ship_prequeue_defer_if_ahead "$BR"
+ship_prequeue_defer_if_ahead "${BASE_REF:-}"
 
 # Announced AFTER the rewrite canonicalisation above, never before it: that pass strips `./` and
 # dedupes, so a brief printed earlier would name a count and a path set the gates never receive —
@@ -327,71 +336,8 @@ rewrite_ref_cleanup() {
 # process. The branch is hashed because a sanitised name maps a/b and a-b to one lock.
 REWRITE_PUBLISH_LOCK_CLI="$SCRIPT_DIR/reship/publish-lock.mts"
 [ -f "$REWRITE_PUBLISH_LOCK_CLI" ] || REWRITE_PUBLISH_LOCK_CLI="$SCRIPT_DIR/reship/publish-lock.mjs"
-rewrite_publish_lock_acquire() {
-  local lock_root rc=0
-  lock_root=$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
-    [ -n "$lock_root" ] || {
-    echo "reship rejected: could not resolve the git common dir for the publication lock" >&2
-    return 1
-  }
-  lock_root="$lock_root/devkit/reship-publish"
-  # Checked: an uncreatable root would otherwise spin the whole wait and blame a phantom publisher.
-  mkdir -p "$lock_root" 2>/dev/null || {
-    echo "reship rejected: cannot create the publication lock directory $lock_root" >&2
-    return 1
-  }
-  # .mutex, not the old .lock: a pre-nonce `holder`-format lock left there could never be reaped.
-  REWRITE_PUBLISH_LOCK="$lock_root/$(printf '%s' "$BR" | git hash-object --stdin).mutex"
-  REWRITE_PUBLISH_NONCE=$(node "$REWRITE_PUBLISH_LOCK_CLI" acquire "$$" "$REWRITE_PUBLISH_LOCK") ||
-    rc=$?
-  case $rc in
-    0) REWRITE_PUBLISH_OWNED=1 ;;
-    75)
-      echo "reship rejected: another publisher still owns origin/$BR; resume after it finishes" >&2
-      return 1
-      ;;
-    *) return 1 ;; # publish-lock.mts already named the cause
-  esac
-}
-
-rewrite_publish_lock_release() {
-  [ "$REWRITE_PUBLISH_OWNED" -eq 1 ] || return 0
-  node "$REWRITE_PUBLISH_LOCK_CLI" release "$REWRITE_PUBLISH_LOCK" "$REWRITE_PUBLISH_NONCE" || true
-  REWRITE_PUBLISH_OWNED=0
-}
-
+. "$(dirname "${BASH_SOURCE[0]}")/reship/publish-lock.sh"
 . "$SCRIPT_DIR/publish-evidence.sh"
-# The Git commit is already remote at every call site. Treat the GitHub mutation as a truthful
-# partial-success boundary and name only a manual recovery command: normal successful pushes spend
-# their retry intent before this runs, while the no-delta recovery arm spends it immediately after.
-publish_requested_pr_body() {
-  local published_commit=$1 carried
-  if [ -z "$PR_URL" ]; then
-    echo "reship: PR body was not updated: could not resolve the open PR after the push" >&2
-    echo "  the commit is already on origin/$BR at $published_commit; no rollback was attempted" >&2
-    echo "  resolve the PR, then pipe the intended body to: gh pr edit <url> --repo '$REPO' --body-file -" >&2
-    return 1
-  fi
-  # The caller owns the text, ship owns the evidence block: carry the PR's current block across.
-  if ! carried=$(printf '%s' "$BODY" | evidence_caller_body "$REPO" "$PR_URL" && printf .); then
-    echo "reship: PR body was not updated: ship could not carry the PR's evidence block (see the evidence: error above)" >&2
-    echo "  the commit is already on origin/$BR at $published_commit; no rollback was attempted" >&2
-    echo "  once gh pr view '$PR_URL' works, re-run the same devkit ship command; only the body is updated" >&2
-    return 1
-  fi
-  if ! printf '%s' "${carried%.}" | gh pr edit "$PR_URL" --repo "$REPO" --body-file - >/dev/null; then
-    echo "reship: PR body was not updated after the push" >&2
-    echo "  the commit is already on origin/$BR at $published_commit; no rollback was attempted" >&2
-    echo "  pipe the intended body to: gh pr edit '$PR_URL' --repo '$REPO' --body-file -" >&2
-    return 1
-  fi
-}
-
-body_receipt_delete() {
-  [ -z "$BODY_RECEIPT_REF" ] || git update-ref -d "$BODY_RECEIPT_REF" 2>/dev/null || true
-  [ -z "$BODY_PAYLOAD_REF" ] || git update-ref -d "$BODY_PAYLOAD_REF" 2>/dev/null || true
-}
-
 # --ready: mark the PR ready for review. A FUNCTION, not an inline block, because this script has
 # several terminating paths that exit 0 (a body-only update, a resume whose content is already
 # remote) — and an early exit that reported success while silently skipping a requested flip would
@@ -421,28 +367,6 @@ reship_mark_ready() {
   echo "Mark it ready by hand:" >&2
   echo "  gh pr ready '$pr_ref' --repo '$REPO'" >&2
   return 1
-}
-
-# A killed rewrite can leave either half of its pre-push proof while origin still names the old
-# head. A resume cannot recover that unpublished commit, so remove every direct commit-keyed proof
-# for this exact branch except the remote head it may still need for post-push reconciliation.
-body_orphan_proofs_prune() {
-  local keep_commit=$1 prefix refs ref suffix value status=0 empty_oid oid_width
-  empty_oid=$(git hash-object --stdin </dev/null) || return 1
-  oid_width=${#empty_oid}
-  for prefix in "$BODY_RECEIPT_PREFIX" "$BODY_PAYLOAD_PREFIX"; do
-    refs=$(git for-each-ref --format='%(refname)' "$prefix/$BR/") || return 1
-    while IFS= read -r ref; do
-      suffix=${ref#"$prefix/$BR/"}
-      [ "$suffix" != "$ref" ] || continue
-      [ "${#suffix}" -eq "$oid_width" ] || continue
-      case "$suffix" in *[!0-9a-f]*) continue ;; esac
-      [ "$suffix" != "$keep_commit" ] || continue
-      value=$(git rev-parse -q --verify "$ref" 2>/dev/null || true)
-      [ -z "$value" ] || git update-ref -d "$ref" "$value" || status=1
-    done <<< "$refs"
-  done
-  return "$status"
 }
 
 # Exit 0 = this generation is spent/absent; 2 = a concurrent attempt donated unshipped paths and
@@ -491,7 +415,7 @@ if [ "$REWRITE" -eq 1 ]; then
   EXPECTED_REMOTE=$(git rev-parse "$REWRITE_HEAD_REF")
   BASE=$(git rev-parse "$REWRITE_BASE_REF")
   # A PR-added file the rewrite drops is briefed (required scope, below) yet lives only in the PR head.
-  ship_refuse_unmatched_paths "$ROOT" "$BASE" "$EXPECTED_REMOTE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1
+  ship_refuse_unmatched_paths "$ROOT" "$BASE" "$EXPECTED_REMOTE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1; RESUME_EXTRAS_VALIDATED=1
   REWRITE_BASE_PIN=$BASE
   if [ "$RESUME" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ]; then
     BODY_RECEIPT_REF="$BODY_RECEIPT_PREFIX/$BR/$EXPECTED_REMOTE"
@@ -551,8 +475,7 @@ if [ "$REWRITE" -eq 1 ]; then
   if [ "${#MISSING_SCOPE[@]}" -gt 0 ] && [ "$REWRITE_RECEIPT_PROVEN" -eq 0 ]; then
     echo "rewrite brief omits paths from the existing PR:" >&2
     for p in "${MISSING_SCOPE[@]}"; do printf '  %q\n' "$p" >&2; done
-    brief_paths=; for p in "${PATHS[@]}"; do brief_paths="$brief_paths $(printf '%q' "$p")"; done
-    echo "  to ADD a commit on top of the PR instead, drop --base: devkit ship $(printf '%q' "$BR") $(printf '%q' "$TITLE") --pr --$brief_paths" >&2
+    echo "  to ADD a commit on top of the PR instead, drop --base: $(reship_append_command)" >&2
     echo "  to REWRITE the PR as one commit, re-run with every listed path added to the brief" >&2
     exit 1
   fi
@@ -574,12 +497,15 @@ if [ "$REWRITE" -eq 1 ]; then
       exit 1
     fi
   done
+  # Before any preflight or gate: a title written for an appended delta fails completeness here.
+  if [ "$REWRITE_RECEIPT_PROVEN" -eq 0 ]; then
+    echo "ship --pr --base: REWRITE — replaces PR #$PR_NUM's $(git rev-list --count "$OLD_MERGE_BASE..$EXPECTED_REMOTE") commit(s) on origin/$BR with ONE commit on origin/$BASE_REF; the title and body are judged against the whole PR diff, not just your new change" >&2
+    echo "  to ADD a commit on top of the PR instead, drop --base: $(reship_append_command)" >&2
+  fi
 else
-  git fetch origin "$BR" 2>/dev/null || {
-    echo "no remote branch origin/$BR to re-push to — open the PR first (ship without --pr)" >&2; exit 1
-  }
-  BASE=$(git rev-parse FETCH_HEAD)
-  ship_refuse_unmatched_paths "$ROOT" "$BASE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1
+  BASE=$(ship_pin_origin_base "$ROOT" "$BR" "ship --pr" \
+    "no remote branch origin/$BR to re-push to — open the PR first (ship without --pr)") || exit 1
+  ship_refuse_unmatched_paths "$ROOT" "$BASE" -- ${ARGV_PATHS[@]+"${ARGV_PATHS[@]}"} || exit 1; RESUME_EXTRAS_VALIDATED=1
   # Before the intent write too: no later push can reach a non-open PR, so nothing is worth resuming.
   [ -n "${SHIP_DRY_RUN:-}" ] || reship_refuse_closed_pr "" "nothing pushed" || exit 1
   PR_MERGE_BASE=$(pr_merge_base "$BASE")
@@ -613,17 +539,16 @@ WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
 if [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
 elif [ "$BODY_FILE_SET" -eq 1 ] && [ "$BODY_FILE_PREREAD_SET" -eq 1 ]; then BODY="$BODY_FILE_PREREAD" # the bytes the --resume banner sized
 elif [ "$BODY_FILE_SET" -eq 1 ] && [ "$BODY_FILE_PREREAD_SET" -eq 2 ]; then
-  echo "--body-file: $BODY_FILE_PREREAD_ERR: $BODY_FILE_FLAG" >&2; exit 1 # as the banner said; never re-read
+  echo "--body-file: $BODY_FILE_PREREAD_ERR: $BODY_FILE_FLAG" >&2; ship_exit_donating 1 # as the banner said; never re-read
 elif [ "$BODY_FILE_SET" -eq 1 ]; then
-  [ -f "$BODY_FILE_FLAG" ] || { echo "--body-file: no such file: $BODY_FILE_FLAG" >&2; exit 1; }
+  [ -f "$BODY_FILE_FLAG" ] || { echo "--body-file: no such file: $BODY_FILE_FLAG" >&2; ship_exit_donating 1; }
   # cat + sentinel, never $(<file): command substitution strips EVERY trailing newline, silently
   # altering a deliberately-authored body before it is recorded.
-  BODY=$(cat -- "$BODY_FILE_FLAG" && printf x) || { echo "--body-file: unreadable: $BODY_FILE_FLAG" >&2; exit 1; }
+  BODY=$(cat -- "$BODY_FILE_FLAG" && printf x) || { echo "--body-file: unreadable: $BODY_FILE_FLAG" >&2; ship_exit_donating 1; }
   BODY=${BODY%x}
 elif [ "$RESUME" -eq 1 ]; then BODY="$RESUME_BODY"
-  # Replaying recorded bytes: say so if the --body-file they came from has since been edited
-  # (sc-2527). Here — past the mode hand-off, before any worktree or gate — so it prints once.
-  node "$SHIP_INTENT" body-drift --root "$ROOT" --branch "$BR" --generation "$RESUME_GENERATION" || true
+  # Replaying recorded bytes: warn now, before any gate, if --body-file has since been edited.
+  BODY_DRIFT_TAIL=$(node "$SHIP_INTENT" body-drift --root "$ROOT" --branch "$BR" --generation "$RESUME_GENERATION") || BODY_DRIFT_TAIL=
 elif [ -t 0 ]; then BODY=""
 else ship_read_stdin_body; fi
 # Match new-ship: the body is the only stdin read, so hand descendants /dev/null and make credential
@@ -638,51 +563,54 @@ export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${BR//\/
 export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$BR"
 export DEVKIT_SHIP_FROM_BRANCH="${FROM_BRANCH:-0}"
 export DEVKIT_SHIP_RESUMED=$RESUME
-# See ship-branch.sh: advisory judge reachability, placed after the exports so its row carries the
-# ship id. Fail-open; the BLOCKING preflights run after the intent write below (sc-2535).
-ship_judge_preflight "$ROOT"
-SHIP_INTENT_ARGS=(write --root "$ROOT" --branch "$BR" --mode reship --title "$TITLE")
-[ "$REWRITE" -eq 0 ] || SHIP_INTENT_ARGS+=(--base "$BASE_REF")
-for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done
-[ "$UPDATE_PR_BODY" -eq 0 ] || SHIP_INTENT_ARGS+=(--update-pr-body)
-# See ship-branch.sh: the body file's path rides the record for the resume drift warning (sc-2527).
-[ "$BODY_FILE_SET" -eq 0 ] || SHIP_INTENT_ARGS+=(--body-file-path "$BODY_FILE_FLAG")
-[ "$RESUME" -eq 0 ] || [ "$BODY_SET" -eq 1 ] || [ "$BODY_FILE_SET" -eq 1 ] || SHIP_INTENT_ARGS+=(--keep-body-file)
-if [ "$RESUME" -eq 1 ]; then
-  SHIP_INTENT_ARGS+=(--resumed --merge-paths --expect-generation "$RESUME_GENERATION")
-  for p in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do SHIP_INTENT_ARGS+=(--donate "$p"); done
-fi
-# Capture the record's generation stamp — success deletes only what this attempt wrote (see
-# ship-branch.sh's twin). Serialize this lineage replacement with recovery's locked ownership check:
-# once a recovery proves ownership, no fresher invocation can replace the record before its edit.
-rewrite_publish_lock_acquire || exit 1
-RESUME_EXTRAS_UNRECORDED=0
-SHIP_INTENT_GENERATION=$(printf '%s' "$BODY" | node "$SHIP_INTENT" "${SHIP_INTENT_ARGS[@]}" -- "${PATHS[@]}") \
-  || SHIP_INTENT_GENERATION=""
-if [ -z "$SHIP_INTENT_GENERATION" ]; then
-  if [ "$UPDATE_PR_BODY" -eq 1 ] && [ -z "${SHIP_DRY_RUN:-}" ]; then
-    rewrite_publish_lock_release
-    echo "reship: explicit PR-body publication requires a recorded invocation; no gates, push, or PR edit attempted" >&2
-    echo "  run 'devkit doctor --fix', then re-run the full devkit ship --pr command" >&2
-    exit 1
+# The pre-queue pass records nothing: no judge row, no publish lock, no intent write.
+if ! ship_prequeue_active; then
+  # See ship-branch.sh: advisory judge reachability, placed after the exports so its row carries the
+  # ship id. Fail-open; the BLOCKING preflights run after the intent write below (sc-2535).
+  ship_judge_preflight "$ROOT"
+  SHIP_INTENT_ARGS=(write --root "$ROOT" --branch "$BR" --mode reship --title "$TITLE")
+  [ "$REWRITE" -eq 0 ] || SHIP_INTENT_ARGS+=(--base "$BASE_REF")
+  for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done
+  [ "$UPDATE_PR_BODY" -eq 0 ] || SHIP_INTENT_ARGS+=(--update-pr-body)
+  # See ship-branch.sh: the body file's path rides the record for the resume drift warning (sc-2527).
+  [ "$BODY_FILE_SET" -eq 0 ] || SHIP_INTENT_ARGS+=(--body-file-path "$BODY_FILE_FLAG")
+  [ "$RESUME" -eq 0 ] || [ "$BODY_SET" -eq 1 ] || [ "$BODY_FILE_SET" -eq 1 ] || SHIP_INTENT_ARGS+=(--keep-body-file)
+  if [ "$RESUME" -eq 1 ]; then
+    SHIP_INTENT_ARGS+=(--resumed --merge-paths --expect-generation "$RESUME_GENERATION")
+    for p in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do SHIP_INTENT_ARGS+=(--donate "$p"); done
   fi
-  echo "reship: invocation not recorded — the retry needs the full command (non-fatal)" >&2
+  # Capture the record's generation stamp — success deletes only what this attempt wrote (see
+  # ship-branch.sh's twin). Serialize this lineage replacement with recovery's locked ownership check:
+  # once a recovery proves ownership, no fresher invocation can replace the record before its edit.
+  rewrite_publish_lock_acquire || exit 1
+  RESUME_EXTRAS_UNRECORDED=0
+  SHIP_INTENT_GENERATION=$(printf '%s' "$BODY" | node "$SHIP_INTENT" "${SHIP_INTENT_ARGS[@]}" -- "${PATHS[@]}") \
+    || SHIP_INTENT_GENERATION=""
+  if [ -z "$SHIP_INTENT_GENERATION" ]; then
+    if [ "$UPDATE_PR_BODY" -eq 1 ] && [ -z "${SHIP_DRY_RUN:-}" ]; then
+      rewrite_publish_lock_release
+      echo "reship: explicit PR-body publication requires a recorded invocation; no gates, push, or PR edit attempted" >&2
+      echo "  run 'devkit doctor --fix', then re-run the full devkit ship --pr command" >&2
+      exit 1
+    fi
+    echo "reship: invocation not recorded — the retry needs the full command (non-fatal)" >&2
+  fi
+  if [ "$REWRITE" -eq 1 ] && [ "$RESUME" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ] &&
+     [ -n "$SHIP_INTENT_GENERATION" ]; then
+    body_orphan_proofs_prune "$EXPECTED_REMOTE" || {
+      rewrite_publish_lock_release
+      echo "reship: could not retire unpublished rewrite proof; no gates or publication attempted" >&2
+      exit 1
+    }
+  fi
+  rewrite_publish_lock_release
+  # Same exported flag as ship-branch.sh: the subprocess timeout banner must not advertise --resume
+  # for an attempt that was never recorded.
+  export DEVKIT_SHIP_INTENT_RECORDED=$([ -n "$SHIP_INTENT_GENERATION" ] && echo 1 || echo 0)
 fi
-if [ "$REWRITE" -eq 1 ] && [ "$RESUME" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ] &&
-   [ -n "$SHIP_INTENT_GENERATION" ]; then
-  body_orphan_proofs_prune "$EXPECTED_REMOTE" || {
-    rewrite_publish_lock_release
-    echo "reship: could not retire unpublished rewrite proof; no gates or publication attempted" >&2
-    exit 1
-  }
-fi
-rewrite_publish_lock_release
-# Same exported flag as ship-branch.sh: the subprocess timeout banner must not advertise --resume
-# for an attempt that was never recorded.
-export DEVKIT_SHIP_INTENT_RECORDED=$([ -n "$SHIP_INTENT_GENERATION" ] && echo 1 || echo 0)
 
 # Advisory raw-line preview; it never refuses (the in-worktree guard-size decides).
-ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
+ship_prequeue_active || ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 # The blocking preflights, after recording like new-ship's (sc-2389, sc-2535): a refusal leaves this
 # invocation replayable via `devkit ship --resume <branch>`, and each still runs against the caller
 # checkout before the detached worktree exists. See ship-branch.sh (sc-3883) for the hook-dir check.
@@ -692,6 +620,7 @@ gate_hook_source_preflight "$ROOT" "$BASE" shipping || exit 1
 DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
 [ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
 node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" ${DRIFT_TARGET:+--target "$DRIFT_TARGET"} -- "${PATHS[@]}"
+ship_prequeue_done
 
 STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/reship-staged.XXXXXX")
 BODY_RECOVERY_INDEX=
@@ -781,11 +710,21 @@ fi
 # Nothing to add? Abort before an empty commit (a re-push with no delta is a no-op, not a commit).
 if git -C "$WT" diff --cached --quiet; then
   reship_refresh_anchors "$SCRIPT_DIR"
-  # A lost push response leaves the exact body-bearing intent in place even though the remote now
-  # contains its commit. Resume must finish that recorded metadata mutation before spending the
-  # intent. The same arm makes an explicit no-delta invocation a safe body-only repair. Serialize
-  # it with body-bearing pushes and re-check the fetched head under the lock so an older repair can
-  # never overwrite the description after a newer publisher advanced the branch.
+  # A fresh explicit body with nothing to commit is refused before any PR mutation: body-only edits
+  # belong to devkit pr-body, which keeps the evidence block and never touches a --resume record.
+  if [ "$UPDATE_PR_BODY" -eq 1 ] && [ "$RESUME" -eq 0 ]; then
+    REFUSED_DELETE_STATUS=0
+    [ -z "${SHIP_INTENT_GENERATION:-}" ] || rewrite_delete_intent || REFUSED_DELETE_STATUS=$?
+    if [ "$REWRITE" -eq 1 ]; then NO_DELTA_REF="origin/$BASE_REF"; else NO_DELTA_REF="origin/$BR"; fi
+    echo "reship: no changes vs $NO_DELTA_REF — nothing to commit, so the PR body was NOT updated" >&2
+    [ "$REFUSED_DELETE_STATUS" -eq 0 ] || echo "  this refused body is still recorded — do NOT --resume it, or it is published; clear the exact file named above" >&2
+    [ "$READY" -eq 0 ] || echo "  the PR was not marked ready either; re-run without --body/--body-file to flip it" >&2
+    echo "  to change only the description: devkit pr-body '$BR' --body-file <file>" >&2
+    [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" nothing-was-pushed
+    exit 1
+  fi
+  # A lost push response leaves the body intent although the remote has its commit: resume finishes
+  # that edit under the publish lock, re-checking the head so it never overwrites a newer publisher.
   BODY_ONLY_UPDATE=0
   BODY_UPDATE_STATUS=0
   if [ "$UPDATE_PR_BODY" -eq 1 ] && [ -z "${SHIP_DRY_RUN:-}" ]; then
@@ -799,7 +738,7 @@ if git -C "$WT" diff --cached --quiet; then
     fi
     if [ -z "${SHIP_INTENT_GENERATION:-}" ]; then
       echo "reship: PR body was not updated: this no-delta attempt does not own a recorded intent" >&2
-      echo "  no PR metadata was changed; run the full command again or use gh pr edit manually" >&2
+      echo "  no PR metadata was changed; run the full command again or use devkit pr-body" >&2
       BODY_UPDATE_STATUS=1
     else
       rewrite_publish_lock_acquire || exit 1
@@ -809,7 +748,7 @@ if git -C "$WT" diff --cached --quiet; then
     if [ "$BODY_UPDATE_STATUS" -eq 0 ] && \
        ! node "$SHIP_INTENT" owns --root "$ROOT" --branch "$BR" --generation "$SHIP_INTENT_GENERATION"; then
       echo "reship: PR body was not updated: the recorded intent was superseded" >&2
-      echo "  no PR metadata was changed; resume the current record or use gh pr edit manually" >&2
+      echo "  no PR metadata was changed; resume the current record or use devkit pr-body" >&2
       BODY_UPDATE_STATUS=1
     fi
     REMOTE_BODY_HEAD=""
@@ -820,7 +759,7 @@ if git -C "$WT" diff --cached --quiet; then
     if [ "$BODY_UPDATE_STATUS" -eq 0 ] && [ "$REMOTE_BODY_HEAD" != "$REMOTE_BODY_EXPECTED" ]; then
       echo "reship: PR body was not updated: origin/$BR changed after the recovery fetch" >&2
       echo "  the recorded commit is already remote; no rollback was attempted" >&2
-      echo "  resolve the current PR, then pipe the intended body to: gh pr edit <url> --repo '$REPO' --body-file -" >&2
+      echo "  resolve the current PR, then pipe the intended body to: devkit pr-body <url> --body-file -" >&2
       BODY_UPDATE_STATUS=1
     elif [ "$BODY_UPDATE_STATUS" -eq 0 ]; then
       PR_URL=$(gh pr view "$BR" --repo "$REPO" --json url -q .url 2>/dev/null) || PR_URL=""
@@ -890,7 +829,8 @@ if git -C "$WT" diff --cached --quiet; then
     fi
     body_receipt_delete
     rewrite_publish_lock_release
-    echo "$PR_URL"
+    echo "no Git change to push — published the recorded PR body" >&2
+    ship_print_pr_url "$PR_URL"
     exit "$WAIT_CI_STATUS"
   fi
   if [ "$RESUME" -eq 1 ]; then
@@ -977,6 +917,7 @@ if [ "$REWRITE" -eq 1 ]; then export DEVKIT_SHIP_PR_BASE_SHA="$BASE"; elif [ -n 
 export DEVKIT_SHIP_SOURCE_HEAD="$CALLER_HEAD"   # pinned above, before staging (sc-2480)
 export DEVKIT_SHIP_MODE=reship   # tags the ship_attempt telemetry (retry onto an existing branch)
 export DEVKIT_RUN_MODE=ship      # never inherit a caller's review allowlist into a real ship
+ship_decision_smell_advisory "$WT" "$ROOT" || true   # read-only; the assertion below proves it
 # Preflight before the multi-minute chain, then prove the commit still holds the briefed work before
 # anything leaves the machine. Same invariants as new-ship (assert-staged-set.sh).
 ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { ship_run_keep "staged set changed before the commit"; exit 1; }
@@ -1007,6 +948,8 @@ fi
 # it skips its typecheck + test:run for this one commit (CI re-runs both on the PR); any other ref fails
 # closed to the full suite.
 SHIP_COMMIT=$(git -C "$WT" rev-parse HEAD)
+ship_sync_gate_rewrites "$ROOT" "$STAGED_STATE" "$SHIP_COMMIT" ||
+  echo "reship: could not sync gate-rewritten files into your working copy (non-fatal)" >&2
 if { [ "$REWRITE" -eq 1 ] || [ "$UPDATE_PR_BODY" -eq 1 ]; } &&
    [ "$REWRITE_PUBLISH_OWNED" -eq 0 ]; then
   # A body-bearing append shares the rewrite publisher's per-branch lock from push through metadata
@@ -1213,8 +1156,11 @@ if [ -n "$PR_URL" ]; then
   # durable — a gh failure here can never cost work that already landed.
   READY_STATUS=0
   reship_mark_ready "${PR_NUM:-}" || READY_STATUS=1
-  echo "$PR_URL"
+  ship_print_pr_url "$PR_URL"
+  # A body flag already wrote the UI item, unless this run resumed a rewrite past its gates.
   if [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then
+    if [ "$REWRITE_ALREADY_PUBLISHED" -eq 1 ]; then publish_ui_item "$ROOT" "$PR_NUM" "$REPO" "$SHIP_COMMIT"
+    elif [ "$UPDATE_PR_BODY" -eq 0 ]; then publish_ui_item "$ROOT" "$PR_NUM" "$REPO"; fi
     publish_reviewer_notes "$PR_NUM" "$REPO" "$SHIP_COMMIT" "$ROOT" "$NOTES_MODE"
     publish_evidence_block "$WT" "$PR_NUM" "$REPO" "$SHIP_COMMIT" "$ROOT"
   fi

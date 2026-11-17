@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:f
 import { join, relative } from 'node:path';
 import { withLock, writeFileAtomic } from '../../atomic-write.mjs';
 import { digest, packageDir } from '../../fs-helpers.mjs';
-import { adoptBaselineRuleFindings, readBaseline, writeBaseline } from './baseline.mjs';
-import { ANTI_SLOP_BASELINE_LOCK_REL, ANTI_SLOP_BASELINE_REL, ANTI_SLOP_BASELINE_UPGRADE_REL, ANTI_SLOP_CONFIG_REL, ANTI_SLOP_LOCK_REL, ANTI_SLOP_MANIFEST_REL, ANTI_SLOP_PLUGIN_API_VERSION, ANTI_SLOP_RULE_IDS, ANTI_SLOP_UPSTREAM, antiSlopBaselineMigrationId, parseAntiSlopManifestEnvelope, parseAntiSlopManagedActivationEvidence, renderAntiSlopConfig, } from './constants.mjs';
+import { adoptBaselineRuleFindings, hasCurrentIdentity, readBaseline, rekeySummary, writeBaseline, } from './baseline.mjs';
+import { ANTI_SLOP_BASELINE_LOCK_REL, ANTI_SLOP_BASELINE_REL, ANTI_SLOP_BASELINE_UPGRADE_REL, ANTI_SLOP_CONFIG_REL, ANTI_SLOP_LOCK_REL, ANTI_SLOP_MANIFEST_REL, ANTI_SLOP_PLUGIN_API_VERSION, ANTI_SLOP_RULE_IDS, ANTI_SLOP_RULE_NAMES, ANTI_SLOP_UPSTREAM, antiSlopBaselineMigrationId, parseAntiSlopManifestEnvelope, parseAntiSlopManagedActivationEvidence, renderAntiSlopConfig, } from './constants.mjs';
 function moduleFiles(root, ext) {
     return readdirSync(root, { recursive: true, withFileTypes: true })
         .filter((entry) => entry.isFile() && entry.name.endsWith(ext))
@@ -15,6 +15,11 @@ function sameUpstream(pkg) {
     const built = join(pkg, 'dist', 'anti-slop', 'UPSTREAM.md');
     const source = join(pkg, 'anti-slop', 'UPSTREAM.md');
     return existsSync(built) && readFileSync(built).equals(readFileSync(source));
+}
+/** A release-built index lacks any rule added since that release, even once its module is tracked. */
+function builtIndexRegistersEveryRule(built) {
+    const index = readFileSync(join(built, 'index.js'), 'utf8');
+    return ANTI_SLOP_RULE_NAMES.every((name) => index.includes(`"${name}":`));
 }
 export function antiSlopPluginSource(pkg = packageDir()) {
     const root = join(pkg, 'anti-slop', 'src');
@@ -27,7 +32,8 @@ export function antiSlopPluginSource(pkg = packageDir()) {
     const built = join(pkg, 'dist', 'anti-slop', 'src');
     if (existsSync(join(built, 'index.js')) &&
         moduleFiles(built, '.js').join('\0') === moduleFiles(root, '.ts').join('\0') &&
-        sameUpstream(pkg)) {
+        sameUpstream(pkg) &&
+        builtIndexRegistersEveryRule(built)) {
         return { root: built, entry: './plugin/index.js' };
     }
     if (existsSync(join(root, 'index.ts')))
@@ -118,8 +124,24 @@ export function clearPendingAntiSlopBaselineActivation(cwd, migrationId) {
     rmSync(join(cwd, ANTI_SLOP_BASELINE_UPGRADE_REL), { force: true });
     return true;
 }
+/** Move a line-identity baseline to span identity BEFORE adoption, so adopted debt is never re-keyed away. */
+function rekeyLegacyBaseline(cwd, dryRun, rekey) {
+    withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
+        const baseline = readBaseline(cwd);
+        if (baseline === null || hasCurrentIdentity(baseline))
+            return;
+        if (dryRun) {
+            console.log(`  [dry-run] would re-key ${ANTI_SLOP_BASELINE_REL} to span identity`);
+            return;
+        }
+        const next = rekey(baseline);
+        writeBaseline(cwd, next);
+        console.log(`  ✓ anti-slop baseline: ${rekeySummary(baseline, next)}`);
+    });
+}
 /** Finish one captured activation while holding the baseline lock through collection and receipt. */
-export function adoptActivatedAntiSlopFindings(cwd, previewActivation, dryRun, collectGroups) {
+export function adoptActivatedAntiSlopFindings(cwd, previewActivation, dryRun, collectGroups, rekey) {
+    rekeyLegacyBaseline(cwd, dryRun, rekey);
     if (previewActivation === null) {
         if (dryRun)
             return true;

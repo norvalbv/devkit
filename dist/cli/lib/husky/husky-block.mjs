@@ -10,7 +10,7 @@
  * brittle regex against shell prose.
  */
 import { GUARD_FRAGMENTS } from './ai-guard-fragments.mjs';
-import { BIN_DIRS, DK_DETERMINISTIC_GATE_HELPER, gateBlockPrelude, REVIEW_FAILURE_FINALIZER, shipRehearsalHint, } from './gate-policy/block-helpers.mjs';
+import { BIN_DIRS, CHEAP_GATE_FLUSH, DK_DETERMINISTIC_GATE_HELPER, gateBlockPrelude, REVIEW_FAILURE_FINALIZER, shipRehearsalHint, } from './gate-policy/block-helpers.mjs';
 import { buildPreCommitExit, PRE_COMMIT_PASS_EXIT } from './gate-policy/commit-gate-log.mjs';
 import { FALLOW_STAGED, FALLOW_STAGED_BLOCK, indent } from './gate-policy/fallow-staged.mjs';
 import { CONSUMER_FORMATTER, formatFragment, OXFMT_STEP, } from './format-fragment.mjs';
@@ -26,9 +26,9 @@ import { DETERMINISTIC } from '../../../gate-engine/deterministic/registry.mjs';
 // code — the hook just propagates it. `--structure "<cmd>"` joins the stack-resolved structure
 // lint to the same aggregated set through Devkit's `guard-structure staged` runner. The old
 // hand-rolled DK_PREFIX_SKIP/DK_DET_FAILS shell protocol is gone.
-const deterministicFragment = (structureCmd, extras = []) => `# devkit:deterministic
+const deterministicFragment = (structureCmd) => `# devkit:deterministic
 echo "🚧 Deterministic gates (aggregated)..."
-__dk_gate_deterministic "$__dk_package_bin_dir/guard-deterministic" --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''}${extras.map((e) => ` --extra "${e.label}=${e.cmd}"`).join('')}
+__dk_gate_deterministic "$__dk_package_bin_dir/guard-deterministic" --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''}
 # /devkit:deterministic`;
 // Guard run order: the deterministic orchestrator first (one aggregated report), AI gates last so
 // a doomed commit never pays for a judge. The orchestrator owns its own order (the registry).
@@ -91,11 +91,12 @@ export function buildGuardBlock(selection, pkgRel = '', { binDir = 'package', pr
     if (!pkgRel)
         pieces.push(formatFragment(BIN_DIRS[binDir].formatter, formatChain));
     if (wantsDeterministic(selection))
-        pieces.push(DK_DETERMINISTIC_GATE_HELPER, deterministicFragment(selection.structureCmd, selection.extras));
+        pieces.push(DK_DETERMINISTIC_GATE_HELPER, deterministicFragment(selection.structureCmd));
     if (selection.fallow)
         pieces.push(FALLOW_STAGED_BLOCK);
     if (preAi)
         pieces.push(preAi);
+    pieces.push(CHEAP_GATE_FLUSH);
     for (const id of AI_GUARD_IDS) {
         if (selection.guards?.includes(id))
             pieces.push(selectedFragment(id, GUARD_FRAGMENTS[id]));
@@ -218,8 +219,8 @@ export function chainExec(target, gitRuns = false) {
         ? `[ -f ${w} ] && [ -x ${w} ] && exec ${w} "$@"`
         : `[ -f ${w} ] && exec sh ${w} "$@"`;
 }
-/** Linked-worktree chain word for the repo's own hook: `.git` is a FILE there, so a `.git/hooks/*`
- * target resolves through the common dir. Anything else stays single-quoted (never executes). */
+/** A `.git/hooks/*` target, hooksPath set or unset, runs from the common dir, though git alone runs
+ * nothing for an explicit one in a linked worktree. Anything else stays single-quoted (inert). */
 export function chainWord(target) {
     const hook = /^(?:\.\/)?\.git\/hooks\/+([^/]+)$/.exec(target)?.[1];
     return hook
@@ -281,6 +282,7 @@ export function removeFragment(hookContent, id) {
 const INFRA_SENTINELS = new Set([
     'commit-index',
     'commit-terminal',
+    'cheap-gate-flush',
     'gate-log',
     'review-failure-finalizer',
 ]);

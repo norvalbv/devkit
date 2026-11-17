@@ -8,7 +8,10 @@ description: Step-0 problem validation BEFORE any plan exists. Given a problem s
 <architecture_context>
 The repo's architecture and trust model are **consumer-defined, not assumed** — read them at the
 start of every validation. Read `guard.config.json` at the repo root (the cwd; in a monorepo, the
-package dir) and derive context from these fields (all optional, with conservative defaults):
+package dir). When the cwd is a LINKED worktree with no `guard.config.json` and
+`git check-ignore -q guard.config.json` succeeds there, read the copy in the same directory of the
+main worktree instead: the consumer keeps it untracked, and devkit links that copy in at commit.
+Derive context from these fields (all optional, with conservative defaults):
 - `scanRoots` — the source roots (the implementation tree). Defaults to `["src"]`.
 - `decisionsDir` — where the decision log lives (default `docs/decisions`); see `<sources>`.
 - `research.referenceCheckouts` — glob patterns naming **locally cloned reference repositories**
@@ -22,7 +25,7 @@ package dir) and derive context from these fields (all optional, with conservati
 - `review.trustBoundaries` (optional prose) — the repo's own description of its trust model.
 - `searchTool` / `graphTool` / `testCommand` — repo tooling, when wired.
 
-When `guard.config.json` is absent, fall back to the defaults above and treat any concrete directory
+When neither location holds a `guard.config.json`, fall back to the defaults above and treat any concrete directory
 names you see as a **labelled example, not a universal layout** — never assume one stack's tree.
 </architecture_context>
 
@@ -86,11 +89,12 @@ Reading existing code to understand a still-unplanned problem is valid step-0 wo
 1. Read `guard.config.json` (see `<architecture_context>`). Resolve `research.referenceCheckouts`
    globs and COUNT them: `declaredCheckouts` = number of non-blank string patterns declared,
    `resolvedCheckouts` = number of existing directories they resolve to. Run
-   `guard-review reference-checkouts --json` from the config's directory FIRST and copy its
+   `guard-review reference-checkouts --json` from the cwd FIRST and copy its
    `declaredCheckouts`, `resolvedCheckouts` and `resolved` paths verbatim — it applies the rule
-   below deterministically. Only when that command is absent or exits non-zero, resolve by hand:
-   resolve each pattern against the config's directory first. If it matches nothing and the cwd
-   is a LINKED worktree, retry that pattern once against the same directory inside the main
+   below deterministically, and its `resolved` list is the set you may read. Only when that
+   command is absent or exits non-zero, resolve by hand: read the config the
+   `<architecture_context>` rule names, and resolve each pattern against that config's directory.
+   If it matches nothing, the config is the cwd's own, and the cwd is a LINKED worktree, retry that pattern once against the same directory inside the main
    worktree — the first `worktree` entry of `git worktree list --porcelain`, skipped when that
    entry is `bare` — since sibling clones sit beside the main checkout, not beside a worktree. A
    pattern matching from neither base is skipped silently and counts only as declared. These
@@ -101,7 +105,16 @@ Reading existing code to understand a still-unplanned problem is valid step-0 wo
 ### Phase 1: Restate and interrogate the frame
 
 Restate the problem in your own words. List the **assumed constraints** baked into its framing —
-the things the problem statement treats as fixed. Then work through the seven research questions.
+the things the problem statement treats as fixed.
+
+**Step back to the layer** (Step-Back Prompting, arXiv 2310.06117). A narrow bug inherits the frame
+of the layer it sits in, and that layer's own history is invisible from inside the bug. Name the
+integration seam the problem sits in — a client, adapter, transport, runner or protocol bridge
+between this repo and an external system — in `restatedFrame`, by its vendor-neutral class ("a
+desktop host driving coding-agent CLIs", not "our Codex client"). UI and domain code have no
+seam: skip the layer clauses in Q5 and Q7.
+
+Then work through the seven research questions.
 Each gets an id; every id appears in the response with a status, even when NOT_APPLICABLE:
 
 - **Q1 — Peer consumers.** Who else consumes this same dependency/SDK/API, and how do THEY handle
@@ -116,12 +129,20 @@ Each gets an id; every id appears in the response with a status, even when NOT_A
   changelog entry, or documentation you actually read that shows it does not exist — rather than
   merely "I did not find it"? Absence of evidence from an unreached leg is NEVER evidence of absence.
 - **Q5 — Peer class solutions.** How do comparable projects (peers solving the same class of
-  problem, not necessarily consumers of the same dependency) solve it?
+  problem, not necessarily consumers of the same dependency) solve it? When a seam was named,
+  include peers connecting to the same class of external system.
 - **Q6 — Cost symmetry.** What does the failure actually cost (frequency × severity), and what new
   failure surface would each candidate fix add? A repeat-patch history on one axis is itself
-  evidence the frame is wrong.
+  evidence the frame is wrong. When evidence cites an earlier PR, branch or commit that attempted
+  the same problem, read its description: quote any sentence recording review rounds, rewrites or
+  lines spent on a sub-feature as an evidence item, and state that cost in this finding.
 - **Q7 — Upstream choice.** Is this problem downstream of an earlier, unexamined decision — an
-  architecture choice that, revisited, makes the problem vanish?
+  architecture choice that, revisited, makes the problem vanish? When a seam was named, always run
+  one search, even when the problem is already solved, and quote it in this finding:
+  `open protocol for <seam class>` with no words from the narrow feature (not "hook
+  standard", not "session resume"), and ask whether a protocol it finds would replace the
+  hand-built code. Report one you find even when it does not bear on this problem, as the
+  `Layer:` sentence Phase 3 defines.
 
 ### Phase 2: Research legs (MANDATED order; attest every leg)
 
@@ -168,6 +189,14 @@ set `frameChallenge.framing: "NARROWS"` and return `GENUINE_NEW_WORK` scoped to 
 or `github` evidence item, and name both the residual path and that fix in the first `summary`
 sentence and in `suggestedNextStep.detail`. A residual buried in a Q finding while the headline
 says solved closes real work: callers act on the verdict alone.
+
+**A layer standard is a note, not a verdict.** A standard found for the named seam never by itself
+changes the verdict of a problem stated below the layer; `DISSOLVE_FRAME` on that ground is for a
+problem stated at the layer ("how should we connect to X"). When one is found, the `summary`
+sentence right after the verdict basis reads `Layer: <seam> — <standard> (<url>)`, and
+`suggestedNextStep.detail` ends with the same sentence. With no standard found, or when a Settled
+Axis or decision Target already rules on adopting it, write no `Layer:` sentence; cite the ruling
+in Q7 instead.
 
 Then apply the **burden-of-proof coupling** (the response contract enforces these; violating them
 makes the response invalid):

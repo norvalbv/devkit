@@ -9,15 +9,19 @@ import { spawnSync } from 'node:child_process';
 import { delimiter, dirname } from 'node:path';
 import { claudeFamilyEnvLine, JUDGE_MODEL_ENVS, judgeEnvUnsetLine, } from '../../gate-engine/judge/outage/family-override.mjs';
 import { findsFlag } from '../lib/help/wants-help.mjs';
-import { enterShipQueue } from '../lib/ship/queue/enter.mjs';
+import { enterShipQueue, prequeueEnv, queueAhead } from '../lib/ship/queue/enter.mjs';
+import { listBranchAdvisories } from '../lib/ship/digest/advisory/advisories.mjs';
 import { formatShipQueue, readShipQueue } from '../lib/ship/queue/status.mjs';
 import { reportShipRuntimeProvenance } from '../lib/ship/runtime-provenance.mjs';
-import { runManagedPackagedScript } from '../lib/ship/run-packaged-script.mjs';
+import { runManagedPackagedScript, runPackagedScriptQuiet, } from '../lib/ship/run-packaged-script.mjs';
 const DEFAULT_DEPENDENCIES = {
     reportRuntimeProvenance: reportShipRuntimeProvenance,
     runManagedScript: runManagedPackagedScript,
     enterQueue: enterShipQueue,
+    queueAhead: () => queueAhead(),
+    runPrequeue: runPackagedScriptQuiet,
     showQueue: () => formatShipQueue(readShipQueue()),
+    listAdvisories: listBranchAdvisories,
 };
 /** Value flags the bash parsers refuse under --resume (it replays WHAT ships). */
 export const RESUME_REFUSED_VALUE_FLAGS = ['--base', '--link'];
@@ -48,7 +52,7 @@ export const meta = {
     valueFlags: ['--base', '--body', '--body-file', '--link', '--wait-ci-timeout'],
     // An argv the dispatcher rejects never reaches a parser, so none of its tokens is consumed.
     valueFlagsFor(args) {
-        if (args[0] === '--queue')
+        if (args[0] === '--queue' || args[0] === '--advisories')
             return [];
         const flags = parserValueFlags(args);
         return dispatchRejection(args, routeFlagsOf(args, flags)) ? [] : flags;
@@ -58,9 +62,10 @@ export const meta = {
 
 Usage:
   devkit ship <branch> "<title>" [--dry-gates [--with-reviewers]] [--base <b>] [--from-branch] [--body "<text>"] [--body-file <f>] [--draft] [--no-stack] [--link <d>]... [--] <path...>
-  devkit ship --pr <branch> "<title>" [--ready] [--body "<text>"] [--link <d>]... [--] <path...>
+  devkit ship --pr <branch> "<title>" [--ready] [--body "<text>"] [--body-file <f>] [--link <d>]... [--] <path...>
   devkit ship --resume <branch> [--body-file <f>] [--] <extra-path...>
   devkit ship --queue
+  devkit ship --advisories <branch>
                           bare positional paths (no --) are accepted.
 
   <branch> and "<title>" are POSITIONAL and must come FIRST, before any flag. The bracketed flags
@@ -100,6 +105,9 @@ Usage:
                       the recorded body differ). Mutually exclusive with --body; wins over stdin.
                       With --pr, only these two explicit flags refresh the EXISTING PR description;
                       omitting both preserves it (piped stdin remains commit-only for compatibility).
+                      That same text is the NEW commit's message, judged against its diff alone, so
+                      on a --pr follow-up (no --base) it must describe only the new commit: pipe a
+                      commit-scoped body on stdin to keep the whole-PR description.
   --resume <branch>   Replay the invocation recorded by the previous attempt for <branch> (title,
                       base, body, links, paths — every attempt records itself), instead of re-typing
                       them. LEADING position only. For an explicit-path ship, extra paths after [--]
@@ -109,8 +117,9 @@ Usage:
                       --body-file override the recorded body — note an amended body re-pays the
                       completeness judge, while an unchanged one replays its cached PASS. Works for
                       both a blocked new ship and a blocked --pr re-push (the record knows which it
-                      was). A pushed ship deletes its record; a stale (>6h) or foreign record is
-                      refused by name.
+                      was). A pushed ship deletes its record; a foreign record is refused by name.
+                      A stale (>6h) record is refused too, but the refusal prints the full command
+                      (which re-records) and saves the recorded body to a temp file it names.
   --draft             Open the PR as a DRAFT instead of ready-for-review. New ships only — a --pr
                       re-push targets a PR that already exists (convert one back with
                       \`gh pr ready --undo <branch>\`). Recorded with the invocation, so a
@@ -152,7 +161,8 @@ Usage:
                       record the push deleted.
                       Grep the line, or read the ship_ci telemetry row. Valid for a new ship and for
                       --pr. NOT replayed by --resume: it observes a PR that already exists rather
-                      than describing what shipped, so re-request it on the retry.
+                      than describing what shipped, so re-request it on the retry. For a PR that is
+                      already open, \`devkit ci-verdict <pr>\` prints the same line.
   --wait-ci-required  With --wait-ci only: wait on the branch-protection REQUIRED checks alone, so
                       an advisory check (a review bot) neither holds the wait open nor turns it red.
                       gh lists only required checks that have already REPORTED (cli/cli#8855), so
@@ -166,15 +176,19 @@ Usage:
                       wait. Exit 5 means the PR is open (or SHIP_DRY_RUN committed) and CI is not
                       known green: do NOT --resume. For \`devkit ship … --wait-ci --wait-ci-strict &&
                       <merge>\`. NOT replayed by --resume.
-  --wait-ci-timeout <s>  Bound for --wait-ci, 60..7200, default 900. The floor exists because below
+  --wait-ci-timeout <s>  Bound for --wait-ci, 60..7200, default 3600. The floor exists because below
                       it a "this repo has no checks" verdict is unreachable and would surface as a
                       timeout instead. A terminal result is confirmed over ~30s before it is
                       reported, so a workflow_run-chained job that registers late cannot be missed.
+                      On timed-out, the next line names the gh one-shot that reads the checks so far.
+                      A backgrounded ship needs a tool timeout covering the gates plus this bound.
   --dry-gates         Rehearse the exact ship base + selected source staging in an ephemeral worktree.
                       Runs the formatter, configured deterministic/structure/extra gates, and the
-                      deterministic comment budget gate; skips decisions, domain/completeness
-                      review, commit, push, and PR creation. With --base, refreshes and uses the
-                      current origin tip just like ship.
+                      deterministic comment budget gate; skips the decision judge,
+                      domain/completeness review, commit, push, and PR creation. With --base,
+                      refreshes and uses the current origin tip just like ship. Like every gated
+                      ship, it first prints the decision gate's regex smells (e.g. legacy-deletion)
+                      as an advisory with this repo's remedy; they never change the exit code.
                       Never leaves a local branch or commit. Cannot be combined with --resume.
   --with-reviewers    With --dry-gates only: also run the configured domain reviewers on that same
                       staging. Decisions and completeness stay off (there is no commit
@@ -184,6 +198,9 @@ Usage:
                       SHIP_DRY_RUN=1 run first.
   --queue             Print the machine-wide ship queue — the running ship (branch, repo, elapsed,
                       last gate line) and the waiters, next up first — then exit. Takes no slot.
+  --advisories <branch>  Print every distinct reviewer ADVISORY the ship attempts on <branch> raised,
+                      once each, with the attempts that raised it — a single PASS shows only a
+                      sample. <branch> is the ship branch, not the worktree's. Takes no slot.
   --link <d>          Extra gitignored gate-dep dir to symlink into the worktree (repeatable;
                       the base .husky/_ + node_modules are always linked).
   --pr                Re-push: add changes to the EXISTING PR on <branch> as a new commit
@@ -238,10 +255,14 @@ A commit that never lands auto-deletes the empty branch.
 Ships queue machine-wide: every ship waits for a slot, first come first served, before its first
 gate, and holds it until it exits — or until --wait-ci starts polling, which needs no slot. One slot
 by default; ~/.devkit/ship-queue/config.json {"slots": N} (1..4) lets N ships run at once. A
-waiting ship prints its position once. A slot frees itself when its ship (and that ship's whole
-process group) is gone. There is no way to skip it; \`devkit ship --queue\` names the running ship
-with the \`ps\` that inspects it if it looks stuck. Every blocked attempt records its
-invocation — retry with \`devkit ship --resume <branch>\` instead of re-typing the command.`,
+waiting ship prints its position once, then runs its own pre-worktree refusals without a slot and
+exits there, unrecorded and dequeued, instead of failing on them after the wait. A slot frees
+itself when its ship (and that ship's whole process group) is gone. There is no way to skip it;
+\`devkit ship --queue\` names the running ship with the \`ps\` that inspects it if it looks stuck.
+Every attempt prints one
+\`attempt <id> <branch>: queued Ns · setup Ns · gates Ns …\` line above its gate digest, also kept in
+~/.devkit/telemetry/logs/<id>.log. Every blocked attempt records its invocation — retry with \`devkit ship --resume <branch>\` instead
+of re-typing the command.`,
 };
 /** reship.sh strips the whole leading --pr/--resume run; ship-branch.sh strips one leading --resume. */
 function parserValueFlags(args) {
@@ -279,6 +300,21 @@ export default function ship(args, cwd, dependencies = DEFAULT_DEPENDENCIES) {
         }
         catch (cause) {
             console.error(`ship: could not read the queue: ${cause instanceof Error ? cause.message : String(cause)}`);
+            return 1;
+        }
+    }
+    if (args[0] === '--advisories') {
+        if (args.length !== 2) {
+            console.error('Usage: devkit ship --advisories <branch>');
+            return 1;
+        }
+        try {
+            const { text, code } = dependencies.listAdvisories(cwd, args[1]);
+            console.log(text);
+            return code;
+        }
+        catch (cause) {
+            console.error(`ship: could not read the advisories: ${cause instanceof Error ? cause.message : String(cause)}`);
             return 1;
         }
     }
@@ -363,13 +399,32 @@ function repoRoot(cwd) {
     const result = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8' });
     return result.status === 0 ? result.stdout.trim() : cwd;
 }
+const PREQUEUE_REFUSAL = 'ship: refused before queueing — nothing was queued or recorded, so --resume has nothing to replay; fix the cause above and re-run the full command (add any new path to it).';
 /** One machine-wide slot before the first gate (sc-3785); see ../lib/ship/queue/ship-queue.mts. */
 async function queueThenRun(args, cwd, mode, queueMode, env, dependencies) {
     // <branch> is the first positional in every form (`--resume <branch>`, `--pr <branch>`, `<branch> …`).
     const branch = args.find((arg) => !arg.startsWith('--')) ?? '(unknown)';
+    // Not awaited yet: entering publishes this ship's ticket synchronously, so the pass below cannot
+    // cost it its place, and a ship arriving during the pass still sees it as ahead.
+    const enqueuedAt = Date.now();
+    const entering = dependencies.enterQueue({ env, repo: repoRoot(cwd), branch, mode: queueMode });
+    const ahead = dependencies.queueAhead();
+    if (ahead) {
+        console.error(`ship: ${ahead.length} ship(s) ahead — checking this ship's own refusals first`);
+        const status = dependencies.runPrequeue(`${mode}.sh`, args, {
+            command: 'devkit ship',
+            cwd,
+            env: prequeueEnv(env, ahead),
+        });
+        if (status !== 0) {
+            entering.catch(() => { }); // the ticket drops at exit; a late queue error has nothing to add
+            console.error(PREQUEUE_REFUSAL);
+            return status;
+        }
+    }
     let queued;
     try {
-        queued = await dependencies.enterQueue({ env, repo: repoRoot(cwd), branch, mode: queueMode });
+        queued = await entering;
     }
     catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
@@ -377,11 +432,17 @@ async function queueThenRun(args, cwd, mode, queueMode, env, dependencies) {
         console.error('  Fix the cause above and re-run; the queue cannot be skipped.');
         return 1;
     }
+    const grantedAt = Date.now();
+    // The shell prints these on its `attempt …` line, so a queue wait never reads as gate time.
+    const timing = {
+        DEVKIT_SHIP_QUEUED_S: String(Math.round((grantedAt - enqueuedAt) / 1000)),
+        DEVKIT_SHIP_GRANTED_AT: String(Math.floor(grantedAt / 1000)),
+    };
     try {
         return await dependencies.runManagedScript(`${mode}.sh`, args, {
             command: 'devkit ship',
             cwd,
-            env: { ...env, ...queued.env },
+            env: { ...env, ...queued.env, ...timing },
         });
     }
     finally {

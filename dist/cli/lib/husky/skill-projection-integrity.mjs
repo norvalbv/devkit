@@ -2,7 +2,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { emitAdvisoryResult } from '../../../gate-engine/judge/advisory/emit.mjs';
-import { indexTreeRef, isGitWorktree, treeTextAtRef, } from '../../../gate-engine/ratchets/git-index.mjs';
+import { indexTreeRef, isGitWorktree, stagedTouchedSet, treeTextAtRef, } from '../../../gate-engine/ratchets/git-index.mjs';
 import { treeBlobsAtRef } from '../../../gate-engine/ratchets/tree-blobs.mjs';
 import { decodeAgentAssetManifestBytes } from '../install/agent-asset-manifest/reader.mjs';
 import { agentAssetDir } from '../install/agent-assets/agent-assets.mjs';
@@ -13,13 +13,16 @@ import { isDevkitPackageJson, isDevkitRepo } from './self-host.mjs';
 const MANIFEST = '.devkit/skills-manifest.json';
 // A finding is `<kind> <path>`; anchor on the path so a provider file named `x dist/skills/y` is not dist.
 const DIST_FINDING_RE = /^\S+ dist\/skills\//;
+// The classes sync-skills or a delete repairs; `unchecked`/`unreadable` judged nothing, so never block.
+const REPAIRABLE_FINDING_RE = /^(?:missing|stale|orphan) /;
 const CONFIG = '.devkit/config.json';
+const PROVIDER_SKILL_DIRS = SUPPORTED_AGENT_PROVIDERS.map((provider) => agentAssetDir(provider, 'skills'));
 // Every path the advisory reads. Provider dirs come from the one registry the writers use.
 const SNAPSHOT_PATHS = [
     'package.json',
     'skills',
     'dist/skills',
-    ...SUPPORTED_AGENT_PROVIDERS.map((provider) => agentAssetDir(provider, 'skills')),
+    ...PROVIDER_SKILL_DIRS,
     MANIFEST,
     CONFIG,
 ];
@@ -140,13 +143,18 @@ export function printSkillProjectionWarning(report) {
         console.error(report.source === 'index'
             ? '  Judged: the staged commit index (unstaged working-tree edits are not counted).'
             : '  Judged: the working tree (no git repository).');
-    const orphans = report.findings.filter((finding) => finding.startsWith('orphan '));
-    const repairs = report.findings.filter((finding) => !finding.startsWith('orphan '));
+    printRepairs(report.findings, report.source);
+    return 0;
+}
+/** Each finding, then the repair its class needs: re-sync for missing/stale, deletion for orphans. */
+function printRepairs(findings, source) {
+    const orphans = findings.filter((finding) => finding.startsWith('orphan '));
+    const repairs = findings.filter((finding) => !finding.startsWith('orphan '));
     for (const finding of repairs)
         console.error(`  ${finding}`);
     const isDist = (finding) => DIST_FINDING_RE.test(finding);
     if (repairs.some((finding) => !isDist(finding))) {
-        const stage = report.source === 'index' ? ', then `git add` the result' : '';
+        const stage = source === 'index' ? `, then \`git add\` the result and ${MANIFEST}` : '';
         console.error(`  Repair missing/stale provider files with \`${selfHostCommand(SYNC_SKILLS)}\`${stage}.`);
     }
     // Never a rebuild: CI refuses a PR that rewrites a tracked dist file.
@@ -157,7 +165,36 @@ export function printSkillProjectionWarning(report) {
         for (const finding of orphans)
             console.error(`    ${finding}`);
     }
-    return 0;
+}
+/** The skill a repo path belongs to: `skills/<name>/…` or `<provider skills dir>/<name>/…`. */
+function skillNameOf(path) {
+    const dir = ['skills', ...PROVIDER_SKILL_DIRS].find((prefix) => path.startsWith(`${prefix}/`));
+    return dir ? path.slice(dir.length + 1).split('/')[0] : null;
+}
+/** Provider drift this commit caused: under a skill it touched, or all of it when it staged config. */
+export function blamedFindings(findings, staged) {
+    const blameAll = staged.has(CONFIG) || staged.has(MANIFEST);
+    const touched = new Set([...staged].map(skillNameOf));
+    return findings.filter((finding) => !DIST_FINDING_RE.test(finding) &&
+        REPAIRABLE_FINDING_RE.test(finding) &&
+        (blameAll || touched.has(skillNameOf(finding.slice(finding.indexOf(' ') + 1)))));
+}
+/** Block only on provider drift the staged change caused; dist and pre-existing drift stay advisory. */
+export function runSkillProjectionGate(root) {
+    const report = inspectSkillProjectionIntegrity(root);
+    if (!report.active)
+        return 0;
+    const staged = stagedTouchedSet(root);
+    if (!staged || report.findings.some((finding) => finding.startsWith('unchecked '))) {
+        console.log('⚠ Skill projection gate could not read the staged change — nothing was judged.');
+        return 0;
+    }
+    const blamed = blamedFindings(report.findings, staged);
+    if (!blamed.length)
+        return 0;
+    console.error(`🚫 Skill projection drift caused by this commit — ${blamed.length} provider file(s) do not match skills/:`);
+    printRepairs(blamed, report.source);
+    return 1;
 }
 function parseRoot(args) {
     const index = args.indexOf('--root');
@@ -174,7 +211,19 @@ function emitProjectionAdvisory(report) {
         return;
     emitAdvisoryResult('skill-projection', 'finding', `${report.findings.length} projection drift finding(s) — read the skill-projection section of the log`);
 }
+// `--extra` blocks on any non-zero exit, so a crash in the gate must pass rather than block.
+function gateMain(args) {
+    try {
+        process.exitCode = runSkillProjectionGate(parseRoot(args));
+    }
+    catch (error) {
+        console.log(`⚠ Skill projection gate did not run (${error instanceof Error ? error.message : String(error)}) — nothing was judged.`);
+        process.exitCode = 0;
+    }
+}
 function main() {
+    if (process.argv.includes('--gate'))
+        return gateMain(process.argv.slice(2));
     try {
         const report = inspectSkillProjectionIntegrity(parseRoot(process.argv.slice(2)));
         process.exitCode = printSkillProjectionWarning(report);

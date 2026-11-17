@@ -3,8 +3,9 @@
 import { z } from 'zod';
 import { envBool, envVar } from '../../../../gate-engine/config.mjs';
 import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mjs';
-import { readShipEvents } from '../digest/gate-digest.mjs';
+import { ATTEMPT, readShipEvents } from '../digest/gate-digest.mjs';
 import { scanBackward } from '../digest/tail.mjs';
+import { SKIP_CONTROLS } from '../digest/skip-controls.mjs';
 /** One-run controls that skip a gate, each read as GUARD_<name> or FRINK_<name>. */
 export const BYPASS_FLAGS = [
     'NO_LOG',
@@ -28,11 +29,6 @@ export const BYPASS_FLAGS = [
 export const REAIM_FLAGS = ['REVIEW_SKIP', 'DECISIONS_DIR', 'ALLOWLIST_PATH'];
 /** Hard by default; an explicit =0 softens the gate to a warning. */
 export const SOFTEN_FLAGS = ['COMPLETENESS_HARD', 'SENTRY_HARD'];
-/** review_skipped reasons a one-run control causes, under the control's own name. */
-const SKIP_CONTROLS = new Map([
-    ['gate_disabled', 'GUARD_NO_REVIEW'],
-    ['GUARD_REVIEW_SKIP', 'GUARD_REVIEW_SKIP'],
-]);
 // Untrusted JSONL from several emitters: a wrong-typed field reads as absent, the row is kept.
 const text = z.string().optional().catch(undefined);
 const list = z.array(z.unknown()).optional().catch(undefined);
@@ -68,10 +64,10 @@ function rowBypasses(rows) {
 }
 /** This attempt's bypasses, or undefined when its gate chain has not passed. */
 export function attemptBypasses(sink, shipId) {
-    const all = readShipEvents(sink, shipId).map((event) => rowSchema.parse(event));
-    const opened = all.map((row) => row.type).lastIndexOf('ship_attempt');
-    const rows = opened < 0 ? [] : all.slice(opened);
-    if (!rows.some((row) => row.type === 'ship_result' && row.exit_code === 0))
+    const rows = readShipEvents(sink, shipId).map((event) => rowSchema.parse(event));
+    // The reader slices to the newest attempt; rows with no ship_attempt ahead of them have no record.
+    const passed = rows.some((row) => row.type === 'ship_result' && row.exit_code === 0);
+    if (rows[0]?.type !== ATTEMPT || !passed)
         return undefined;
     return [...new Set([...envBypasses(), ...rowBypasses(rows)])];
 }

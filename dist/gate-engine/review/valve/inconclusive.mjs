@@ -1,19 +1,33 @@
 /** Reports the reviewers that stayed inconclusive. Under strict ship each row fails closed, and
  * rows needing the same Remedy share ONE copy, so an outage cannot bury the log in repeats. */
+import { FAMILY_ENV_KEYS } from '../../judge/outage/family-override.mjs';
+import { printRemedyOnce } from '../../judge/outage/remedy-once.mjs';
 import { strictRemedy } from '../../judge/run-judge.mjs';
-import { ENGINE_ERROR_REMEDY, RESPONSE_CONTRACT_REMEDY } from '../contracts/response.mjs';
-function remedyText(r, resetsAt) {
+import { CONTRACT_MISS, ENGINE_ERROR_REMEDY, RESPONSE_CONTRACT_REMEDY, } from '../contracts/response.mjs';
+const MODEL_KEYS = FAMILY_ENV_KEYS.filter((k) => k.key !== 'correctnessChunkLoc');
+/** A refused-call miss has no finding to fix; the levers are a re-run and the judge's model. */
+function refusedCallsRemedy(strict) {
+    const envs = MODEL_KEYS.map((k) => k.env).join(' / ');
+    const keys = MODEL_KEYS.map((k) => `review.${k.key}`).join(' / ');
+    return ('the judge was refused tool call(s) (listed above), which can leave its checklist unfinished ' +
+        `without any finding in the diff; ${strict ? 're-run devkit ship, and if it repeats' : 'if it repeats,'} ` +
+        `move that judge to another model (${envs}, or ${keys})`);
+}
+function remedyText(r, strict, resetsAt) {
     const cause = r.inconclusiveCause ?? 'outage';
-    if (cause === 'response-contract')
-        return RESPONSE_CONTRACT_REMEDY;
+    if (cause === 'response-contract') {
+        if (r.refusedCalls)
+            return refusedCallsRemedy(strict);
+        return strict ? RESPONSE_CONTRACT_REMEDY : CONTRACT_MISS;
+    }
     if (cause === 'engine')
         return ENGINE_ERROR_REMEDY;
     return strictRemedy(cause, r.outageBin, resetsAt);
 }
-/** One group's remedy. An outage group names its latest reset: the conservative wait. */
-function remedyFor(group) {
+/** An outage group names its latest reset: the conservative wait. */
+function latestReset(group) {
     const resets = group.flatMap((r) => r.outageResetsAt ?? []);
-    return remedyText(group[0], resets.length ? Math.max(...resets) : undefined);
+    return resets.length ? Math.max(...resets) : undefined;
 }
 export function reportInconclusive(rows, strict) {
     const groups = new Map();
@@ -25,14 +39,20 @@ export function reportInconclusive(rows, strict) {
             : `guard-review: ${r.name} inconclusive — ${r.reason} (fail-open, not cached)`);
         if (cause === 'response-contract' && r.transcript)
             console.error(r.transcript.trim());
+        // Fail-open stays quiet on an outage; a contract miss still names what the author can do.
+        if (!strict && cause !== 'response-contract')
+            continue;
         // Keyed on the wording minus its reset: a binary splits groups only where the remedy names it.
-        const key = remedyText(r);
+        const key = remedyText(r, strict);
         groups.set(key, [...(groups.get(key) ?? []), r]);
     }
-    if (!strict)
-        return;
-    for (const group of groups.values()) {
-        console.error(`   Remedy: ${remedyFor(group)} (completed verdicts are cached).`);
+    for (const [key, group] of groups) {
+        if (!strict) {
+            console.error(`   Remedy: ${key}.`);
+            continue;
+        }
+        const resetsAt = latestReset(group);
+        printRemedyOnce(key, remedyText(group[0], true, resetsAt), 'completed verdicts are cached', resetsAt);
     }
 }
 /** A judge that answered without a VERDICT line, worded as the fleet's; returns the gate exit. */

@@ -1,12 +1,12 @@
 // What execJudge and execJudgeAsync share: preparing a judge spawn, classifying how it settled, and
 // the judge_exec telemetry line. The twins in run-judge.mts differ only in how the child runs.
 import { parsePriorArtResponse } from '../../prior-art/response-contract.mjs';
-import { parseJudgeUsage, recordPermissionDenials, unwrapClaudeResult, withResultArgs, } from '../claude-result.mjs';
-import { saveCodexCommands } from '../codex/commands.mjs';
+import { claudeFailure, parseJudgeUsage, recordPermissionDenials, saveClaudeCommands, unwrapClaudeResult, withResultArgs, } from '../claude-result.mjs';
+import { codexGateDenials, saveCodexCommands } from '../codex/commands.mjs';
 import { codexFailure, judgeBinFor, judgeCliFor, parseClaudeArgv, parseCodexUsage, unwrapCodexResult, } from '../codex/result.mjs';
 import { prepareCodexSandbox, } from '../codex/workspace.mjs';
 import { emitGateEvent } from '../gate-events.mjs';
-import { withoutGitEnv } from '../judge-isolation.mjs';
+import { CLAUDE_JUDGE_ARGS, CLAUDE_JUDGE_ENV, JUDGE_MAX_BUFFER, withoutGitEnv, } from '../judge-isolation.mjs';
 import { prepareJudgeMcpProfile, spawnDegradedCause, } from '../mcp/profile.mjs';
 import { classifyJudgeOutage, } from '../outage/classify.mjs';
 import { unavailableMessage, warnNoOutput } from '../outage/wording.mjs';
@@ -87,11 +87,12 @@ outageDetail, stdout) {
     // On the ledger the outage detail is queryable: which outage, and until when.
     if (outageDetail !== undefined)
         extra.outage_detail = outageDetail;
-    const commandsRef = saveCodexCommands(opts.label, stdout, opts.lens);
+    const save = judgeBinFor(opts.args) === 'claude' ? saveClaudeCommands : saveCodexCommands;
+    const commandsRef = save(opts.label, stdout, opts.lens);
     if (commandsRef)
         extra.commands_ref = commandsRef;
-    Object.assign(extra, recordPermissionDenials(opts, stdout));
-    recordAgentRun({
+    Object.assign(extra, recordPermissionDenials(opts, stdout, codexGateDenials(opts.label, stdout)));
+    const { ref } = recordAgentRun({
         label: opts.label,
         output,
         input: opts.input,
@@ -101,19 +102,20 @@ outageDetail, stdout) {
         transcript: opts.transcript,
         extra: Object.keys(extra).length > 0 ? extra : undefined,
     });
+    if (ref)
+        opts.onTranscript?.(ref);
 }
 // Verdict text and spend come from ONE parse of the same bytes, by the binary that produced them.
-// A codex stream with a terminal failure event reads as a FAILURE, never as verdict text.
+// A failed stream (codex failure event, claude with no result) reads as a FAILURE, never as verdict text.
 function readJudgeOutput(stdout, cli) {
-    if (cli.codex) {
-        const failure = codexFailure(stdout);
-        // A failed turn's stream can still carry its usage event — those tokens were burned whether or
-        // not a verdict arrived, and dropping them under-counts exactly the most expensive failures.
-        if (failure !== null)
-            return { failure: { providerFailure: failure, stdout }, usage: parseCodexUsage(stdout) };
-        return { text: unwrapCodexResult(stdout) ?? stdout, usage: parseCodexUsage(stdout) };
-    }
-    return { text: unwrapClaudeResult(stdout) ?? stdout, usage: parseJudgeUsage(stdout) };
+    const failure = cli.codex ? codexFailure(stdout) : claudeFailure(stdout);
+    // A failed turn's stream can still carry its usage event — those tokens were burned whether or
+    // not a verdict arrived, and dropping them under-counts exactly the most expensive failures.
+    const usage = cli.codex ? parseCodexUsage(stdout) : parseJudgeUsage(stdout);
+    if (failure !== null)
+        return { failure: { providerFailure: failure, stdout }, usage };
+    const text = cli.codex ? unwrapCodexResult(stdout) : unwrapClaudeResult(stdout);
+    return { text: text ?? stdout, usage };
 }
 // Salvage the spend from a FAILED spawn's partial stdout (a timeout kill or non-zero exit).
 // Unparseable or absent is null, never a zero row, which would read as a free judge.
@@ -126,7 +128,10 @@ function salvageUsage(text, args) {
 // into native `-c mcp_servers.*` config, secrets forwarded through the spawn env by name.
 function spawnFor(args, mcp, ws) {
     const cli = judgeCliFor(args, mcp.servers, ws.codexReadOnly, ws.workspace);
-    return cli.codex ? cli : { ...cli, argv: withResultArgs([...mcp.args, ...args]) };
+    if (cli.codex)
+        return cli;
+    const argv = withResultArgs([...mcp.args, ...CLAUDE_JUDGE_ARGS, ...args]);
+    return { ...cli, argv, extraEnv: { ...cli.extraEnv, ...CLAUDE_JUDGE_ENV } };
 }
 export function prepareJudgeRun(opts) {
     // Started before MCP preparation, so judge_exec duration_ms covers it.
@@ -146,20 +151,20 @@ export function cleanupJudgeRun(run) {
 /** Route the argv to its binary and build the spawn options. Callers run it inside their try, so
  *  an argv a codex model cannot express settles as ONE outage instead of throwing. */
 export function routeJudge(opts, run) {
-    run.ws = prepareCodexSandbox(opts.args, opts, opts.cwd ?? process.cwd());
+    run.ws = prepareCodexSandbox(opts.args, opts, opts.cwd ?? process.cwd(), opts.env);
     const cli = spawnFor(opts.args, run.mcp, run.ws);
     opts.onMcpPrepared?.(run.mcp.capabilityFingerprint, spawnDegradedCause(run.mcp, cli.mcpInjected));
     const spawnOptions = {
         cwd: opts.cwd,
         // Never the caller's env verbatim: git leaks an absolute GIT_INDEX_FILE/GIT_DIR into hooks in a
         // linked worktree, and a judge touching another repo would write over the staged diff.
-        env: { ...withoutGitEnv(opts.env), ...cli.extraEnv },
+        env: { ...withoutGitEnv(opts.env), ...cli.extraEnv, ...run.ws.env },
         encoding: 'utf8',
         timeout: opts.timeout,
         // SIGTERM can be trapped by the child; SIGKILL cannot, so the timeout always terminates.
         killSignal: 'SIGKILL',
         // stderr is piped and counts against maxBuffer; a judge's tool transcript can exceed 1 MB.
-        maxBuffer: 10 * 1024 * 1024,
+        maxBuffer: JUDGE_MAX_BUFFER,
     };
     return { cli, spawnOptions };
 }

@@ -5,12 +5,16 @@ import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mjs';
 import { processStartIdentity } from '../../../../gate-engine/judge/process/identity.mjs';
 import { readProcessTable } from '../review/process/process-table.mjs';
 import { acquireShipSlot, DEFAULT_PROBE, ensureRoot, holderAlive, queueRoot, findHolder, SLOT_ENV, setGuest, withSlotLock, writeGuestLocked, } from './ship-queue.mjs';
+import { readShipQueue } from './status.mjs';
 export { SLOT_ENV };
 /** Retired: neither skips nor redirects the queue any more (see ship-machine-wide-queue). */
 export const RETIRED_ENVS = ['DEVKIT_SHIP_NO_QUEUE', 'DEVKIT_SHIP_QUEUE_DIR'];
 export const SLOT_DIR_ENV = 'DEVKIT_SHIP_SLOT_DIR';
 /** Set only by the acquirer: tells its bash that IT may release the slot before --wait-ci. */
 export const SLOT_RELEASE_ENV = 'DEVKIT_SHIP_SLOT_RELEASE';
+/** Marks the slot-free pass that runs a waiting ship's own refusals (queue/slot.sh). */
+export const PREQUEUE_ENV = 'DEVKIT_SHIP_PREQUEUE';
+export const PREQUEUE_AHEAD_ENV = 'DEVKIT_SHIP_PREQUEUE_AHEAD';
 /** An inherited token counts only while its holder lives and is an ancestor (by pid or group), so a
  * token leaked into an unrelated shell is never a silent bypass. Joins as a guest in the same lock. */
 export function joinAncestorSlot(token, root, probe, table) {
@@ -113,4 +117,31 @@ export async function enterShipQueue(options) {
         handle,
         env: { [SLOT_ENV]: handle.token, [SLOT_DIR_ENV]: handle.slotDir, [SLOT_RELEASE_ENV]: '1' },
     };
+}
+/** Branches of every ship ahead of this process's waiting ticket; undefined when it is not waiting
+ *  (it claimed at once, joined as a guest, or the queue could not be read). */
+export function queueAhead(pid = process.pid, read = readShipQueue) {
+    let view;
+    try {
+        view = read();
+    }
+    catch {
+        return undefined;
+    }
+    const mine = view.waiters.find((ticket) => ticket.pid === pid);
+    if (!mine)
+        return undefined;
+    const earlier = view.waiters.filter((ticket) => ticket.seq < mine.seq);
+    return [...view.running, ...earlier].map((ship) => ship.branch);
+}
+/** The pre-queue pass holds no slot, so it must never see (and register under) one. */
+export function prequeueEnv(env, ahead) {
+    const next = {
+        ...env,
+        [PREQUEUE_ENV]: '1',
+        [PREQUEUE_AHEAD_ENV]: ahead.join('\n'),
+    };
+    for (const name of [SLOT_ENV, SLOT_DIR_ENV, SLOT_RELEASE_ENV])
+        delete next[name];
+    return next;
 }

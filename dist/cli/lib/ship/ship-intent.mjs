@@ -8,8 +8,9 @@ import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSyn
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { devkitVersion } from '../../../gate-engine/devkit-version.mjs';
-import { emitShipIntentEvent } from './ship-intent-event.mjs';
+import { emitShipIntentEvent, printStaleRecovery } from './ship-intent-event.mjs';
 import { fail, parseArgs } from './ship-intent-args.mjs';
+import { appendPathsInPlace, donateIntent } from './intent/donate.mjs';
 import { advisoryBodyFile, bindSourceMembershipForWrite, cleanupDeletedSourceMembershipRefs, cleanupFailedSourceMembership, cleanupReplacedSourceMembership, emitFields, handlePathCodecCommand, NO_RECORD, originRepo, printGeneration, provenString, provenStrings, reportBodyDrift, } from './ship-intent-codec.mjs';
 import { withLock } from '../atomic-write.mjs';
 import { BRANCH_SCHEMA_VERSION, EXPLICIT_SCHEMA_VERSION, intentFile, readIntent, relIntentPath, } from './intent/record.mjs';
@@ -90,20 +91,8 @@ export function writeIntent(opts, paths) {
                 superseded = true;
                 // A losing resume contributes only its explicitly briefed donatePaths. Its stale recorded
                 // list must not leak into a newer full invocation; a deleted record stays deleted.
-                if (opts.mergePaths && onDisk !== null) {
-                    const ownerPaths = provenStrings(onDisk.paths) ?? [];
-                    const merged = [...ownerPaths];
-                    for (const p of opts.donatePaths ?? [])
-                        if (!merged.includes(p))
-                            merged.push(p);
-                    if (merged.length !== ownerPaths.length) {
-                        const tmp = `${file}.${process.pid}.tmp`;
-                        writeFileSync(tmp, `${JSON.stringify({ ...onDisk, paths: merged }, null, 2)}\n`, {
-                            mode: 0o600,
-                        });
-                        renameSync(tmp, file);
-                    }
-                }
+                if (opts.mergePaths && onDisk !== null)
+                    appendPathsInPlace(file, onDisk, opts.donatePaths ?? []);
                 return;
             }
             // Past the CAS, so onDisk is the record this resume read: its path is the one to carry.
@@ -135,7 +124,7 @@ export function writeIntent(opts, paths) {
         return fail(e instanceof Error ? e.message : String(e)); // lock contention → record nothing
     }
     process.stdout.write(`${intent.generation}\n`);
-    emitShipIntentEvent(intent, opts.resumed);
+    emitShipIntentEvent(intent, opts.resumed, opts.root);
     return 0;
 }
 /**
@@ -243,8 +232,12 @@ function main() {
     }
     if (sub === 'read') {
         const result = readIntent(root, branch);
-        if ('reason' in result)
-            return fail(result.reason);
+        if ('reason' in result) {
+            fail(result.reason);
+            if (result.stale)
+                printStaleRecovery(result.stale, relIntentPath(branch));
+            return 1;
+        }
         emitFields(result.intent);
         return 0;
     }
@@ -252,6 +245,8 @@ function main() {
         return reportBodyDrift(readIntent(root, branch), values.get('generation'));
     if (sub === 'generation')
         return printGeneration(intentFile(root, branch));
+    if (sub === 'donate')
+        return donateIntent(intentFile(root, branch), values.get('expect-generation'), paths);
     if (sub === 'owns') {
         const generation = values.get('generation');
         if (!generation)
@@ -260,7 +255,7 @@ function main() {
     }
     if (sub === 'delete')
         return deleteIntent(root, branch, values.get('generation'), paths.length > 0 ? paths : undefined);
-    return fail(`unknown subcommand '${String(sub)}' (write|read|body-drift|generation|owns|delete|validate-paths|validate-membership|filter-membership|frozen-drift)`);
+    return fail(`unknown subcommand '${String(sub)}' (write|read|body-drift|generation|donate|owns|delete|validate-paths|validate-membership|filter-membership|frozen-drift)`);
 }
 // CLI entrypoint only; realpath keeps the guard correct through a symlinked module directory.
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
