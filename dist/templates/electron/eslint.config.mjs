@@ -27,7 +27,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   createFolderStructure,
@@ -45,26 +45,6 @@ import {
 // Reason: electron and react-app are SEPARATE shipped eslint templates, each a standalone file copied into a consumer repo (no devkit import to share a base) - intentional per-stack duplication
 // fallow-ignore-next-line code-duplication
 const HERE = dirname(fileURLToPath(import.meta.url));
-
-// The package being linted: this config's own dir, unless cwd neither holds it nor sits inside it
-// (review's merge-base run lints a sibling checkout with this config).
-function isOutside(from, to) {
-  const path = relative(from, to);
-  return path === '..' || path.startsWith(`..${sep}`) || isAbsolute(path);
-}
-const ROOT =
-  isOutside(process.cwd(), HERE) && isOutside(HERE, process.cwd()) ? process.cwd() : HERE;
-
-// The plugin roots its paths above the FIRST node_modules in its own resolved path (else at cwd).
-function structurePluginRoot() {
-  const entry = fileURLToPath(import.meta.resolve('eslint-plugin-project-structure'));
-  const parts = dirname(entry).split(sep);
-  const at = parts.indexOf('node_modules');
-  return at === -1 ? process.cwd() : parts.slice(0, at).join(sep);
-}
-
-// independent-modules has no projectRoot option; a relative baseUrl/packageRoot re-roots it at ROOT.
-const ROOT_OFFSET = relative(structurePluginRoot(), ROOT) || '.';
 
 // The structure lane parses SYNTAX only — imports, names, file/function size — never types, so
 // either parser serves it. Which one this repo can RUN is decided by its compiler:
@@ -284,7 +264,6 @@ const folderStructure = createFolderStructure({
     // Seals the frozen legacy dirs (matches nothing).
     frozen_dir_migrate_to_lib: '^$',
   },
-  projectRoot: ROOT,
   structureRoot: 'src/renderer',
   ignorePatterns: [
     'assets/**',
@@ -374,7 +353,6 @@ const mainStructure = createFolderStructure({
     kebab_test: '^[a-z][a-z0-9-]*\\.(test|spec)\\.ts$',
     main_lib_domain: MAIN_LIB_DOMAINS.length ? `^(${MAIN_LIB_DOMAINS.join('|')})$` : '^$',
   },
-  projectRoot: ROOT,
   structureRoot: 'src/main',
   ignorePatterns: [...mainStructureBaseline, ...mainStructureExempt],
   structure: {
@@ -430,7 +408,6 @@ const sharedStructure = createFolderStructure({
     kebab_ts: '^[a-z][a-z0-9-]*\\.ts$',
     kebab_test: '^[a-z][a-z0-9-]*(\\.[a-z0-9-]+)*\\.(test|spec)\\.ts$',
   },
-  projectRoot: ROOT,
   structureRoot: 'src/shared',
   ignorePatterns: [...sharedStructureBaseline],
   structure: {
@@ -454,7 +431,6 @@ const preloadStructure = createFolderStructure({
     kebab_ts: '^[a-z][a-z0-9-]*\\.ts$',
     kebab_test: '^[a-z][a-z0-9-]*(\\.[a-z0-9-]+)*\\.(test|spec)\\.ts$',
   },
-  projectRoot: ROOT,
   structureRoot: 'src/preload',
   ignorePatterns: [...preloadStructureBaseline],
   structure: {
@@ -502,7 +478,6 @@ const socketStructure = createFolderStructure({
     kebab_test: '^[a-z][a-z0-9-]*(\\.[a-z0-9-]+)*\\.(test|spec)\\.ts$',
     socket_lib_domain: SOCKET_LIB_DOMAINS.length ? `^(${SOCKET_LIB_DOMAINS.join('|')})$` : '^$',
   },
-  projectRoot: ROOT,
   structureRoot: 'socket-server/src',
   ignorePatterns: [...socketStructureBaseline],
   structure: {
@@ -569,7 +544,6 @@ const vercelStructure = createFolderStructure({
     vercel_route: '^([a-z][a-z0-9-]*|\\[[a-zA-Z][a-zA-Z0-9]*\\])\\.ts$',
     vercel_lib_domain: VERCEL_LIB_DOMAINS.length ? `^(${VERCEL_LIB_DOMAINS.join('|')})$` : '^$',
   },
-  projectRoot: ROOT,
   structureRoot: 'vercel-serverless',
   ignorePatterns: [...vercelStructureBaseline],
   structure: {
@@ -640,8 +614,7 @@ const IMPORT_WALL_SCAN = process.env.DEVKIT_IMPORTS_BASELINE_SCAN === '1';
 // Reason: electron and react-app are SEPARATE shipped eslint templates, each a standalone file copied into a consumer repo (no devkit import to share a base) - intentional per-stack duplication
 // fallow-ignore-next-line code-duplication
 const importWalls = createIndependentModules({
-  pathAliases: { baseUrl: ROOT_OFFSET, paths: { '@/*': ['src/renderer/*'] } },
-  packageRoot: ROOT_OFFSET,
+  pathAliases: { baseUrl: '.', paths: { '@/*': ['src/renderer/*'] } },
   debugMode: IMPORT_WALL_SCAN,
   reusableImportPatterns: {
     renderer_base: [

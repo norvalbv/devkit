@@ -17,7 +17,6 @@
  * Consumers install prebuilt .mjs — no build on their side.
  */
 import { readFileSync } from 'node:fs';
-import { crashExit, GATE_REASON_ENV } from '../gate-engine/deterministic/reason.mjs';
 import { assertGit } from './lib/guard/require-git.mjs';
 import { renderCommandHelp, renderTopLevelHelp } from './lib/help/render.mjs';
 import { wantsCommandHelp } from './lib/help/wants-help.mjs';
@@ -44,8 +43,6 @@ const COMMANDS = {
     'anti-slop': () => import('./commands/oxc/anti-slop.mjs'),
     reconcile: () => import('./commands/reconcile.mjs'),
     ship: () => import('./commands/ship.mjs'),
-    'pr-body': () => import('./commands/pr/pr-body.mjs'),
-    'pr-evidence': () => import('./commands/pr/pr-evidence.mjs'),
     review: () => import('./commands/review.mjs'),
     'guard-branch': () => import('./commands/guard-branch.mjs'),
     'base-status': () => import('./commands/base-drift/base-status.mjs'),
@@ -53,28 +50,18 @@ const COMMANDS = {
     machine: () => import('./commands/machine/machine.mjs'),
     'coverage-run': () => import('./commands/coverage/run.mjs'),
     'coverage-diff': () => import('./commands/coverage/diff.mjs'),
-    'test-redundancy': () => import('./commands/test-redundancy/test-redundancy.mjs'),
     'test-report-run': () => import('./commands/baseline/test-report-run.mjs'),
     'baseline-status': () => import('./commands/baseline/status.mjs'),
-    'ci-probe': () => import('./commands/baseline/ci-probe.mjs'),
     'prove-regression': () => import('./commands/baseline/prove-regression.mjs'),
-    'subtraction-trial': () => import('./commands/baseline/subtraction-trial.mjs'),
-    'ci-verdict': () => import('./commands/baseline/ci-verdict.mjs'),
 };
 // The subcommands that shell out to git — they get a friendly missing-git preflight (require-git).
 const GIT_COMMANDS = new Set([
     'baseline-status',
-    'ci-probe',
-    'ci-verdict',
     'coverage-diff',
-    'test-redundancy',
     'base-status',
     'prove-regression',
-    'subtraction-trial',
     'ship',
     'machine',
-    'pr-body',
-    'pr-evidence',
     'review',
     'move',
     'release',
@@ -156,9 +143,6 @@ async function main() {
     process.exit(code ?? 0);
 }
 main().catch((e) => {
-    // Run as a gate (anti-slop), a throw is a crash, never the exit 1 that means a finding.
-    if (process.env[GATE_REASON_ENV] !== undefined)
-        crashExit(e);
     console.error(`devkit: ${e.message}`);
     process.exit(1);
 });

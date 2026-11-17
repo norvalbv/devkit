@@ -128,7 +128,9 @@ export function parseSeverityFindings(raw: string): string[] {
 /** A judged verdict's advisories. A FAIL's count too: the prompt asks for them on every verdict,
  *  and a fixed blocker's re-ship never shows them again. INCONCLUSIVE/error judged nothing. */
 export function verdictAdvisories(res: { status: string; transcript?: string }): string[] {
-  return res.status === 'pass' || res.status === 'fail' ? parseAdvisories(res.transcript ?? '') : [];
+  return res.status === 'pass' || res.status === 'fail'
+    ? parseAdvisories(res.transcript ?? '')
+    : [];
 }
 
 /** Remedy for a cascade that THREW: the gate failed before or around the judge, so pointing the

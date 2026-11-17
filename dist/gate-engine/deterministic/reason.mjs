@@ -4,7 +4,6 @@ import { appendFileSync, closeSync, mkdtempSync, openSync, readSync, rmSync } fr
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
-import { CRASH_EXIT, CRASHED } from './registry.mjs';
 export const GATE_REASON_ENV = 'DEVKIT_GATE_REASON_FILE';
 /** Reason lines repeated under the verdict; the rest stay in the full log. */
 export const REASON_LINES = 20;
@@ -13,8 +12,6 @@ const REASON_BYTES = 64 * 1024;
 /** The gate_result detail cap every self-describing stage uses (sc-2526, judge/advisory/emit.mts). */
 export const DETAIL_CAP = 500;
 const NEWLINE_RE = /\r?\n/;
-// The preload every node gate runs under, as a file URL so a path with spaces still resolves.
-const CRASH_PRELOAD = new URL(`./crash-exit${import.meta.url.endsWith('.mts') ? '.mts' : '.mjs'}`, import.meta.url).href;
 const WHITESPACE_RUN_RE = /\s+/g;
 // Control bytes a 64KB cut can strand mid-sequence, where stripVTControlCharacters no longer matches.
 const isControl = (ch) => {
@@ -89,27 +86,6 @@ export function exitGate(code, lines) {
     if (code !== 0)
         writeGateReason(lines);
     process.exit(code);
-}
-/** A gate threw instead of reaching a verdict: keep the stack in the log, record its first line. */
-export function crashExit(error) {
-    console.error(error);
-    // A thrown non-Error (a string, a rejected plain value) arrives here as-is.
-    const message = String(error?.message ?? error);
-    writeGateReason([message.split(NEWLINE_RE)[0]]);
-    process.exit(CRASH_EXIT);
-}
-/** A node gate's spawn argv under the crash preload, and its exit labels with `(crashed)` added. */
-export function crashGuarded(argv, rcLabels) {
-    return {
-        argv: [argv[0], '--import', CRASH_PRELOAD, ...argv.slice(1)],
-        rcLabels: { [CRASH_EXIT]: CRASHED, ...rcLabels },
-    };
-}
-/** The remedy under the aggregated verdict: a run where no gate reached a verdict needs no code fix. */
-export function fixLine(failed, someNotRun = false) {
-    return failed.every((f) => !f.verdict)
-        ? '   No gate above judged your diff — act on the error each printed (a setup step or a tool bug), not on your code.'
-        : `   Fix every failure above together, then commit ${someNotRun ? 'again' : 'once'}.`;
 }
 /** The reason a gate recorded: ANSI stripped, blank lines dropped. Empty when it recorded none. */
 export function readGateReason(file) {

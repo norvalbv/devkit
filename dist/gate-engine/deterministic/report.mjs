@@ -1,8 +1,8 @@
 /** The end-of-run reports of guard-deterministic: gates that opted out, and gates that failed. */
 import { emitGateEvent } from '../judge/gate-events.mjs';
 import { GUARD_PREFIX_RE } from './command-gates.mjs';
-import { appendReviewNotice, fixLine, reasonDetail, reasonReport, } from './reason.mjs';
-import { printFailureFooter } from './recheck.mjs';
+import { appendReviewNotice, reasonDetail, reasonReport } from './reason.mjs';
+import { printRecheckFooter } from './recheck.mjs';
 /** The blocked_gate token the ship script publishes for this whole chain. */
 export const DETERMINISTIC_FAMILY = 'deterministic';
 // Exit 127 means the gate's binary never resolved: a dependency problem, not a code finding.
@@ -27,7 +27,7 @@ export function reportOptedOut(skipped) {
     console.error('   `devkit doctor` reports whether that is a misconfiguration; GUARD_DETERMINISTIC_STRICT=1 makes it fatal.');
 }
 /** One gate_result per failing gate, then the summary line ship's capture script greps and remedies. */
-export function reportFailures(fails, failed, rechecks, notRun = []) {
+export function reportFailures(fails, failed, rechecks) {
     // A gate that never reached a verdict (`(unexpected:rc)`, `(could-not-run)`) is not a `fail`.
     // `family` lets a reader join this per-gate chain to the family-level blocked_gate.
     for (const [i, { label, reason }] of fails.entries()) {
@@ -42,7 +42,9 @@ export function reportFailures(fails, failed, rechecks, notRun = []) {
     console.error(`✗ deterministic gates failed:${fails.map((f) => ` ${f.label}`).join('')}`);
     for (const line of reasonReport(fails))
         console.error(line);
-    printFailureFooter(rechecks, fixLine(failed, notRun.length > 0), notRun);
+    console.error('   Fix every failure above together, then commit once.');
+    console.error('   On commit or ship, decision and reviewer gates run only after these pass.');
+    printRecheckFooter(rechecks);
     if (fails.some((f) => f.label.startsWith('structure-lint'))) {
         console.error('   guard-structure blocks only violations your change adds, or all when');
         console.error('   it edits structure policy or deletes/renames. Fix those.');

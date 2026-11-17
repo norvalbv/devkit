@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { advisoryBodyFile, recordStampAge, originRepo, provenBool, provenString, provenStrings, sourceMembershipMatches, } from '../ship-intent-codec.mjs';
+import { advisoryBodyFile, freshRecordStamp, originRepo, provenBool, provenString, provenStrings, sourceMembershipMatches, } from '../ship-intent-codec.mjs';
 const LEGACY_EXPLICIT_SCHEMA_VERSION = 1;
 export const EXPLICIT_SCHEMA_VERSION = 2;
 export const BRANCH_SCHEMA_VERSION = 3;
@@ -16,7 +16,7 @@ export const relIntentPath = (branch) => {
 export const intentFile = (root, branch) => path.join(root, relIntentPath(branch));
 /** The one refusal wording for a record field that failed its shape check. */
 const malformedField = (f) => `recorded invocation is malformed (${f}) — run the full command, which re-records`;
-/** Parse + validate the stored manifest, or refuse; only a stale-only refusal carries the record. */
+/** Parse + validate the stored manifest, or return a refusal string (never both). */
 export function readIntent(root, branch, nowMs = Date.now()) {
     const file = intentFile(root, branch);
     let raw;
@@ -151,10 +151,10 @@ export function readIntent(root, branch, nowMs = Date.now()) {
             reason: `recorded branch-source frozen membership failed its Git binding — run the full command, which re-records`,
         };
     const createdAt = provenString(r.createdAt) ?? '';
-    const age = recordStampAge(createdAt, nowMs);
-    const staleReason = `recorded invocation is stale or misdated (recorded ${String(r.createdAt)}; every live attempt re-records) — run the full command`;
-    if (age === 'misdated')
-        return { reason: staleReason };
+    if (!freshRecordStamp(createdAt, nowMs))
+        return {
+            reason: `recorded invocation is stale or misdated (recorded ${String(r.createdAt)}; every live attempt re-records) — run the full command`,
+        };
     const intent = {
         version: storedVersion,
         mode,
@@ -176,6 +176,5 @@ export function readIntent(root, branch, nowMs = Date.now()) {
     if (sourceAttemptId)
         intent.sourceAttemptId = sourceAttemptId;
     intent.bodyFile = advisoryBodyFile(r.bodyFile);
-    // Stale is the last check, so `stale` carries a record that passed every other one.
-    return age === 'stale' ? { reason: staleReason, stale: intent } : { intent };
+    return { intent };
 }

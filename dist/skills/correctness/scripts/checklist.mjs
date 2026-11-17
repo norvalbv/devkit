@@ -17,11 +17,11 @@
  * discarded returns ride the recovery half of the state lens (see the brief's category text).
  */
 
+import { execFileSync } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import { createChecklistStore } from '../../_devkit/checklist-store.mjs';
 import {
   authoritativeStagedFilesOverride,
-  gitOutput,
   isNonEmptyStringArray,
   normalizeReviewPaths,
   normalizeReviewRoots,
@@ -158,7 +158,9 @@ function getStagedFiles() {
   if (override) return override;
   let output;
   try {
-    output = gitOutput(['diff', '--cached', '--name-only', '-z']);
+    output = execFileSync('git', ['diff', '--cached', '--name-only', '-z'], {
+      encoding: 'utf-8',
+    });
   } catch (e) {
     // A git FAILURE (not-a-repo, corrupt index, bad plumbing) must never masquerade as "nothing
     // staged" — that would send generate() down its clean skip/exit(0) path and wave the commit

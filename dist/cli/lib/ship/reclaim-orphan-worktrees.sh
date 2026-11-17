@@ -37,7 +37,7 @@
 # telling it to delete the branch it is re-pushing would be wrong twice over.
 ship_reclaim_orphan_worktrees() {
   local repo=$1 br=$2 mode=${3:-ship}
-  local common record status= refuse=0 reclaim_pending=
+  local common record status= refuse=0
   local path= wt_branch= locked= lock_reason= entry_n=0
   local paths=() branches=() locks=() lock_reasons=()
   local self_admin= self_top=
@@ -90,9 +90,7 @@ ship_reclaim_orphan_worktrees() {
     i=$((i + 1))
   done
 
-  [ "$refuse" -eq 0 ] || return 1
-  # A pre-queue pass ends once every entry is judged: all later checks read the reclaimed state.
-  [ -z "$reclaim_pending" ] || exit 0
+  [ "$refuse" -eq 0 ]
 }
 
 # _ship_orphan_consider <repo> <common> <branch> <path> <wt-branch> <locked> <lock-reason> [mode]
@@ -218,8 +216,6 @@ _ship_orphan_consider() {
     return 1
   fi
 
-  # The pre-queue pass never mutates; the queued run reclaims (sets the caller's reclaim_pending).
-  [ -z "${DEVKIT_SHIP_PREQUEUE:-}" ] || { reclaim_pending=1; return 0; }
   _ship_orphan_reclaim "$repo" "$br" "$path" "$r_pid" "$r_identity" "$r_base" "$r_created"
   return 0
 }
@@ -424,26 +420,4 @@ _ship_orphan_reclaim() {
   echo "ship: its commit ${tip:0:7} is still on $br — checking whether this run can resume it." >&2
   PREFLIGHT_HINT="this branch is what a killed ship left behind (pid $pid); its worktree was reclaimed, but its commit was never published"
   return 0
-}
-
-# ship_reclaim_empty_branch <repo> <branch> <base-ref>
-# Drops a leftover branch that no record names but whose loss is provably nil: the base already
-# contains its tip, no checkout holds it, it has no upstream and no history beyond its creation.
-# A kill can strand such a branch with no worktree left to carry a record, so this arm needs none.
-ship_reclaim_empty_branch() {
-  local repo=$1 br=$2 base_ref=$3 tip record status= held=
-  tip=$(git -C "$repo" rev-parse -q --verify "refs/heads/$br^{commit}" 2>/dev/null) || return 0
-  git -C "$repo" merge-base --is-ancestor "$tip" "refs/remotes/origin/$base_ref" 2>/dev/null || return 0
-  ! git -C "$repo" show-ref --verify -q "refs/remotes/origin/$br" || return 0
-  [ -z "$(git -C "$repo" config --get "branch.$br.merge" 2>/dev/null)" ] || return 0
-  [ "$(git -C "$repo" reflog show --format=%H "refs/heads/$br" -- 2>/dev/null | wc -l | tr -d ' ')" = 1 ] || return 0
-  while IFS= read -r -d '' record; do
-    case "$record" in
-      'devkit-worktree-list-status '*) status=${record#devkit-worktree-list-status } ;;
-      "branch refs/heads/$br") held=1 ;;
-    esac
-  done < <(worktree_registry_stream "$repo")
-  [ "$status" = 0 ] && [ -z "$held" ] || return 0
-  git -C "$repo" update-ref -d "refs/heads/$br" "$tip" 2>/dev/null || return 0
-  echo "ship: $br held no commit of its own over origin/$base_ref (tip ${tip:0:7}) and no checkout holds it — deleted; creating it fresh (restore: git branch $(ship_shell_quote "$br") ${tip:0:7})" >&2
 }

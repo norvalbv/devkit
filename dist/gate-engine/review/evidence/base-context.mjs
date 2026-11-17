@@ -4,7 +4,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
-import { emitAdvisoryResult } from '../../judge/advisory/emit.mjs';
+import { emitAdvisoryResult, FINDING_SEPARATOR } from '../../judge/advisory/emit.mjs';
 import { emitGateEvent } from '../../judge/gate-events.mjs';
 import { ADVISORY_CAP } from '../contracts/response.mjs';
 import { headHash } from './staged-git.mjs';
@@ -204,48 +204,37 @@ export function degradedSuffix(res) {
 export function reportMcpDegraded(name, cause, cached = false) {
     const detail = cached ? `${cause} — ${MCP_DEGRADED_REMEDY}` : cause;
     console.error(`⚠️  guard-review: ${name} — DEGRADED: ${detail}`);
-    emitGateEvent({ type: 'gate_degraded', judge: name, cause, detail, kind: 'mcp-missing' });
+    emitGateEvent({ type: 'gate_degraded', judge: name, cause, detail });
 }
 const storedAdvisories = z.array(z.string().min(1));
 /** The advisories the cached PASS entries stored (every part of a split); malformed reads as none. */
 export function cachedAdvisories(...metas) {
     const all = metas.flatMap((m) => storedAdvisories.safeParse(m.advisories).data ?? []);
-    return all.length ? [...new Set(all)] : undefined;
+    return all.length ? [...new Set(all)].slice(0, ADVISORY_CAP) : undefined;
 }
-/** A PASS's non-blocking findings: self-labelled lines printed whole (a split merge prints no
- * verdict line to sit under), where the full reasoning lives, and one advisory_result EACH. */
+/** A PASS's `ADVISORY:` findings: self-labelled lines (a split merge prints no verdict line to sit
+ * under), where the full reasoning lives, and ONE advisory_result — the digest keeps one per gate. */
 export function reportAdvisories(name, advisories, ref) {
     if (!advisories?.length)
         return;
     printAdvisories(name, advisories, ref);
-    // One row per finding: a joined detail hits the sink's 500-char cap and drops the later ones.
-    for (const a of advisories)
-        emitAdvisoryResult(`review:${name}`, 'finding', a);
+    emitAdvisoryResult(`review:${name}`, 'finding', advisories.join(FINDING_SEPARATOR));
 }
-/** The screen half of reportAdvisories, for a caller that emits its rows across several labels. */
+/** The screen half of reportAdvisories, for a caller that emits one row across several labels. */
 export function printAdvisories(label, advisories, ref) {
-    for (const a of advisories.slice(0, ADVISORY_CAP))
+    for (const a of advisories)
         console.error(`guard-review: ${label} — advisory (non-blocking): ${a}`);
-    if (advisories.length > ADVISORY_CAP)
-        console.error(`guard-review: ${label} — ${advisories.length} findings, ${ADVISORY_CAP} shown; the rest are in the transcript`);
     if (ref)
         console.error(`guard-review: ${label} — full reasoning: guard-review transcript ${ref}`);
 }
 /** Why a PASS on an earlier diff stands and how to re-open it, linked so it resolves outside devkit. */
 export const STICKY_RULING = 'by design, devkit ruling judge-verdict-cache-scope: https://github.com/norvalbv/devkit/blob/main/docs/decisions/judge-verdict-cache-scope.md — reword the commit message to re-judge';
-/** A non-PASS verdict's evidence: its stored transcript holds the diff the reviewer judged. */
-export function reportVerdictTranscript(name, status, ref) {
-    if (status !== 'pass' && ref)
-        console.error(`guard-review: ${name} — reviewed diff: guard-review transcript ${ref}`);
-}
-/** A cached PASS line (`tail` = its provenance), marked and reported when it replays MCP-degraded,
- * followed by the findings the PASS stored. */
+/** A cached PASS line (`tail` = its provenance), marked and reported when it replays MCP-degraded. */
 export function printCachedPass(name, meta, tail) {
     const cause = cachedMcpDegradation(meta);
     console.error(`guard-review: ${name} — cached PASS${cause ? ' (DEGRADED)' : ''} ${tail}`);
     if (cause)
         reportMcpDegraded(name, cause, true);
-    reportAdvisories(name, cachedAdvisories(meta));
 }
 export function cachedBaseState(cwd, judgedBases, reviewedFiles, env = process.env) {
     const current = reviewBaseContext(cwd, env).baseSha;

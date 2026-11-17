@@ -15,22 +15,10 @@
  *     primary's next commit is then gated against a branch it never saw.
  */
 import { execFileSync, execSync } from 'node:child_process';
-import { existsSync, realpathSync, statSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
-import { usableChunkCount } from './chunk-index.mjs';
-import { sourceMatchers } from '../config.mjs';
-import { reasonDetail } from '../deterministic/reason.mjs';
-import { emitGateEvent } from '../judge/gate-events.mjs';
-import { underRoot } from '../review/scope/policy.mjs';
 const MTIME_TOLERANCE_MS = 1;
 const BACKSLASH_RE = /\\/g;
-const SAMPLE = 6;
-const TESTS_DIR = '__tests__/';
-/** The first SAMPLE paths, comma-joined, with a `(+k more)` tail. */
-const sampleFiles = (files) => {
-    const more = files.length - SAMPLE;
-    return `${files.slice(0, SAMPLE).join(', ')}${more > 0 ? ` (+${more} more)` : ''}`;
-};
 /** The primary checkout's working root, shared by every linked worktree (null outside git). A
  * submodule names it by core.worktree, relative to its common dir under .git/modules. */
 export function primaryCheckout(cwd) {
@@ -44,71 +32,6 @@ export function primaryCheckout(cwd) {
     catch {
         return null;
     }
-}
-/** `path` at the same place under the primary checkout, relative to this linked worktree's toplevel.
- * Null in the primary itself, outside git, or for a path outside this worktree. */
-function primaryCounterpart(path, cwd) {
-    try {
-        const top = execFileSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], {
-            encoding: 'utf-8',
-            stdio: ['ignore', 'pipe', 'ignore'],
-        }).trim();
-        const primary = primaryCheckout(cwd);
-        if (!top || !primary || realpathSync(top) === realpathSync(primary))
-            return null;
-        const rel = relative(realpathSync(top), resolve(realpathSync(cwd), relative(cwd, path)));
-        return rel.startsWith('..') || isAbsolute(rel) ? null : resolve(primary, rel);
-    }
-    catch {
-        return null;
-    }
-}
-/** The index's usable chunk count, read-only; null when it is missing, unreadable or a foreign schema.
- * sqlite loads lazily so importers that only want `primaryCheckout` never pay for it. */
-export function usableChunksAt(dbPath) {
-    if (!existsSync(dbPath))
-        return null;
-    const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
-    let db;
-    try {
-        db = new DatabaseSync(dbPath, { readOnly: true });
-        return usableChunkCount(db);
-    }
-    catch {
-        return null;
-    }
-    finally {
-        db?.close();
-    }
-}
-/** The primary checkout's populated index when this linked worktree's own is missing or empty — what
- * `devkit ship` links into its gate worktree. Null whenever the local index is the one to read. */
-export function primaryIndexFallback(indexPath, cwd) {
-    if (existsSync(indexPath) && usableChunksAt(indexPath) !== 0)
-        return null;
-    const primary = primaryCounterpart(indexPath, cwd);
-    return primary && (usableChunksAt(primary) ?? 0) > 0 ? primary : null;
-}
-/** The index doctor inspects for a configured `indexPath`, and how to name it: a linked worktree
- * without a usable one inspects the primary checkout's, as the matcher reads it. */
-export function indexToInspect(indexPath, cwd) {
-    const local = resolve(cwd, indexPath);
-    const fallback = primaryIndexFallback(local, cwd);
-    if (!fallback)
-        return { indexPath: local, reads: indexPath };
-    return { indexPath: fallback, reads: `${fallback} (the primary checkout's)` };
-}
-/** The index the matcher reads: the configured one, or (when `borrow`) the primary's when a linked
- * worktree has none usable. A caller that writes the index passes false: it must own what it writes. */
-export function linkedWorktreeIndex(cfg, borrow) {
-    if (cfg.indexPath == null)
-        return null;
-    const local = resolve(cfg.cwd, cfg.indexPath);
-    const primary = borrow ? primaryIndexFallback(local, cfg.cwd) : null;
-    if (!primary)
-        return local;
-    process.stderr.write(`guard-dup: this linked worktree has no usable index — reading the primary checkout's ${primary}, as \`devkit ship\` does.\n`);
-    return primary;
 }
 /**
  * True only when the index file physically lives INSIDE this checkout — the exact invariant the
@@ -142,11 +65,11 @@ export function indexSourceRoot(indexPath, cfg) {
             return realpathSync(cfg.cwd);
         if (!cfg.indexPath)
             return null;
-        const counterpart = primaryCounterpart(resolve(cfg.cwd, cfg.indexPath), cfg.cwd);
-        const root = primaryCounterpart(cfg.cwd, cfg.cwd);
-        if (!counterpart || !root)
+        const primary = primaryCheckout(cfg.cwd);
+        if (!primary)
             return null;
-        return realpathSync(indexPath) === realpathSync(counterpart) ? realpathSync(root) : null;
+        const expected = realpathSync(resolve(primary, cfg.indexPath));
+        return realpathSync(indexPath) === expected ? realpathSync(primary) : null;
     }
     catch {
         return null;
@@ -240,21 +163,26 @@ export function inspectIndexFreshness(db, indexPath, cfg) {
     };
 }
 export function staleIndexMessage(freshness) {
-    const files = sampleFiles(freshness.staleFiles);
+    const sample = freshness.staleFiles.slice(0, 6);
+    const more = freshness.staleFiles.length - sample.length;
+    const files = `${sample.join(', ')}${more > 0 ? ` (+${more} more)` : ''}`;
     return (`search-code index is STALE — ${freshness.staleFiles.length}/${freshness.checkedFiles} indexed file(s) changed or disappeared in ${freshness.sourceRoot ?? 'its source checkout'}.\n` +
         `  ${files}\n` +
         '  Refresh affected files with `touch <files> && search-code index --seed-files "<files>"`.');
 }
-/** Reached when no checkout holds a usable index, or when a command that writes the index declined to
- * borrow the primary's. Names the checkout to build in, or to run the writing command in. */
+/**
+ * What to tell someone whose checkout has no index. The common case by far is a linked worktree,
+ * where the gate is not broken and not fixable by "build an index" — the primary checkout already
+ * has one, and linking it is both cheaper and what `devkit ship` does. So name that path with a
+ * command they can paste, rather than leaving a bare "no index" to be read as a hang or a bug.
+ */
 export function missingIndexMessage(indexPath, cfg) {
-    const primary = primaryCounterpart(indexPath, cfg.cwd);
-    const head = `No index at ${indexPath} — dup gate opted out (fail-open).\n`;
-    if (!primary)
-        return `${head}  Build one with your indexer.`;
-    if ((usableChunksAt(primary) ?? 0) > 0)
-        return `${head}  This command writes the index, so it never borrows the primary checkout's ${primary}: run it in the primary checkout.`;
-    return `${head}  A linked worktree reads the primary checkout's index automatically, but ${primary} has no usable index either: build it there with your indexer.`;
+    const indexDir = dirname(cfg.indexPath ?? '.search-code/index.db');
+    const primary = primaryCheckout(cfg.cwd) ?? '<primary-checkout>';
+    return (`No index at ${indexPath}. This checkout has no index — dup gate opted out (fail-open).\n` +
+        `  Build one with your indexer, or in a LINKED WORKTREE reuse the primary checkout's:\n` +
+        `    ln -s ${primary}/${indexDir} .\n` +
+        `  (devkit ship --link ${indexDir} does this for you.)`);
 }
 /**
  * Run the configured indexer, or do nothing. Never throws, never blocks: one attempt, hard
@@ -275,42 +203,4 @@ export function refreshIndex(indexPath, cfg) {
     catch {
         // Timeout, missing binary, a concurrent writer holding the DB — all non-fatal by design.
     }
-}
-/** Staged scan-root source files present on disk with no usable chunk in the index, sorted. */
-export function unindexedStaged(changed, indexed, scope) {
-    const { isSource, isTest } = sourceMatchers(scope.sourceExtensions);
-    return [...changed]
-        .filter((f) => !indexed.has(f) &&
-        isSource(f) &&
-        (scope.includeTests || !(isTest(f) || f.includes(TESTS_DIR))) &&
-        scope.scanRoots.some((root) => underRoot(f, root)) &&
-        existsSync(resolve(scope.cwd, f)))
-        .sort();
-}
-/** The lines naming the uncompared files, with a remedy that depends on who owns the index. */
-export function unindexedNotice(files, ownsIndex) {
-    if (files.length === 0)
-        return [];
-    return [
-        `${files.length} staged file(s) have no usable (embedded) chunks in the index — not compared: ${sampleFiles(files)}`,
-        ownsIndex
-            ? '  Run `search-code index` to embed them; a file the indexer excludes or cannot chunk stays uncompared.'
-            : '  The index is shared from another checkout and cannot cover files new on this branch.',
-    ];
-}
-/** The clean-run line: honest about scope when some staged files were not compared. */
-export const cleanLine = (skipped) => `No new duplication ${skipped.length ? 'among the compared files' : 'since the last baseline'}. ✓`;
-/** Name the staged files `rows` cannot compare, as a degraded run; advisory, the gate still exits 0. */
-export function reportUnindexed(changed, rows, scope) {
-    if (!changed)
-        return [];
-    const files = unindexedStaged(changed, new Set(rows.map((r) => r.file_path)), scope);
-    const notice = unindexedNotice(files, indexIsInThisCheckout(scope.indexPath, scope.cwd));
-    if (notice.length === 0)
-        return notice;
-    for (const line of notice)
-        console.log(line);
-    const detail = reasonDetail('dup', notice);
-    emitGateEvent({ type: 'gate_degraded', judge: 'dup', cause: 'unindexed_staged', detail });
-    return notice;
 }

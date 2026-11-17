@@ -3,7 +3,6 @@
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, matchesGlob, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse } from 'yaml';
 import { z } from 'zod';
 import { shellWord } from '../review/valve/shell-word.mjs';
 /** Only the names matter; a non-object section is still an error, as it always was. */
@@ -11,12 +10,11 @@ const manifestSchema = z.object({
     dependencies: z.record(z.string(), z.unknown()).optional(),
     devDependencies: z.record(z.string(), z.unknown()).optional(),
 });
-const PNPM_INSTALL = 'pnpm install --frozen-lockfile';
 /** Lockfiles in precedence order, each with its frozen install. agents-hooks' resolve_pm mirrors it. */
 const LOCKFILE_LADDER = [
     ['bun.lock', 'bun install --frozen-lockfile'],
     ['bun.lockb', 'bun install --frozen-lockfile'],
-    ['pnpm-lock.yaml', PNPM_INSTALL],
+    ['pnpm-lock.yaml', 'pnpm install --frozen-lockfile'],
     ['yarn.lock', 'yarn install --immutable'],
     ['package-lock.json', 'npm ci'],
     ['npm-shrinkwrap.json', 'npm ci'],
@@ -105,26 +103,10 @@ function declaresPackage(manifest, name) {
     const { dependencies, devDependencies, peerDependencies, optionalDependencies } = manifest;
     return [dependencies, devDependencies, peerDependencies, optionalDependencies].some((section) => section !== undefined && Object.hasOwn(section, name));
 }
-const pnpmWorkspaceSchema = z.object({ packages: globs.optional() });
-/** The member globs of the install at `dir`. pnpm reads only pnpm-workspace.yaml; every other
- * manager reads only package.json `workspaces`. */
-function workspacePatterns(dir, manifest) {
-    if (dependencyInstallRemedy(dir) !== PNPM_INSTALL) {
-        const { workspaces = [] } = manifest ?? {};
-        return Array.isArray(workspaces) ? workspaces : (workspaces.packages ?? []);
-    }
-    try {
-        const text = readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8');
-        const parsed = pnpmWorkspaceSchema.safeParse(parse(text, { logLevel: 'error' }));
-        return parsed.data?.packages ?? [];
-    }
-    catch {
-        return [];
-    }
-}
-/** Whether the install at `dir` lists the package at `member` (relative, posix) as a workspace. */
-function listsWorkspace(dir, manifest, member) {
-    const patterns = workspacePatterns(dir, manifest).map((pattern) => pattern.replace(/^(!?)\.\//, '$1').replace(/\/+$/, ''));
+/** Whether `manifest`'s `workspaces` globs list the package at `member` (relative, posix). */
+function listsWorkspace(manifest, member) {
+    const { workspaces = [] } = manifest;
+    const patterns = (Array.isArray(workspaces) ? workspaces : (workspaces.packages ?? [])).map((pattern) => pattern.replace(/\/+$/, ''));
     const matches = (pattern) => matchesGlob(member, pattern);
     return (patterns.some((pattern) => !pattern.startsWith('!') && matches(pattern)) &&
         !patterns.some((pattern) => pattern.startsWith('!') && matches(pattern.slice(1))));
@@ -138,8 +120,6 @@ export const canonicalPath = (p) => {
         return resolve(p);
     }
 };
-/** Whether `dir` lies in a node_modules inside `top`: where the checkout itself sits does not count. */
-const underNodeModules = (top, dir) => relative(top, dir).split(/[\\/]/).includes('node_modules');
 /** Whether node would resolve package `name` from `dir`: some node_modules at or above it holds it. */
 function resolvesFrom(dir, name) {
     for (let at = dir;; at = dirname(at)) {
@@ -161,15 +141,14 @@ export function installDirFor(missing, root) {
     if (resolvesFrom(dir, name))
         return null;
     // An installed package's own imports are its install's business, whoever declares them.
-    const installed = underNodeModules(top, dir);
+    const installed = dir.split(/[\\/]/).includes('node_modules');
     let declarer = null;
     while (!relative(top, dir).startsWith('..')) {
-        // A pnpm workspace root needs no package.json: pnpm-workspace.yaml alone lists its members.
-        if (!underNodeModules(top, dir)) {
-            const manifest = readDeclarations(dir);
-            const declares = manifest !== null && (installed || declaresPackage(manifest, name));
+        const manifest = dir.split(/[\\/]/).includes('node_modules') ? null : readDeclarations(dir);
+        if (manifest) {
+            const declares = installed || declaresPackage(manifest, name);
             const member = declarer && relative(dir, declarer).replaceAll('\\', '/');
-            const provides = declares || (member !== null && listsWorkspace(dir, manifest, member));
+            const provides = declares || (member !== null && listsWorkspace(manifest, member));
             if (provides && LOCKFILES.some((lock) => hasLockfile(dir, lock)))
                 return dir;
             if (declares)
@@ -190,21 +169,6 @@ export function collectionRemedy(message, cwd) {
     const rel = relative(canonicalPath(cwd), dir);
     const install = dependencyInstallRemedy(dir);
     return rel ? `(cd ${shellWord(rel)} && ${install})` : install;
-}
-/** Each distinct install command the collection errors call for, mapped to the first file that needs it. */
-export function collectionRemedies(errors, cwd) {
-    const remedies = new Map();
-    // One broken shared import fails every file with the same message: walk the tree once for it.
-    const walked = new Set();
-    for (const { file, message } of errors) {
-        if (walked.has(message))
-            continue;
-        walked.add(message);
-        const remedy = collectionRemedy(message, cwd);
-        if (remedy && !remedies.has(remedy))
-            remedies.set(remedy, file);
-    }
-    return remedies;
 }
 /** Said before the suite: a declared dependency resolves from no node_modules at or above `cwd`.
  * Warns, never blocks. */

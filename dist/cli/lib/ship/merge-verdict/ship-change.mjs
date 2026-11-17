@@ -9,7 +9,7 @@ import { VERDICT_LABEL, verdictUnavailable } from '../evidence/block.mjs';
 import { prBase } from '../evidence/red-ref.mjs';
 import { errorMessage, gitEnvironment } from '../review/shared/common.mjs';
 import { shipBypasses } from './bypasses.mjs';
-import { mergeVerdict, VERDICT_MARK, verdictEnabled, verdictReasons, } from './verdict.mjs';
+import { mergeVerdict, VERDICT_MARK, verdictReasons } from './verdict.mjs';
 const git = (cwd, args) => execFileSync('git', ['-C', cwd, ...args], {
     encoding: 'utf8',
     env: gitEnvironment(),
@@ -53,16 +53,12 @@ function policyText(cwd, base) {
         }
     }
 }
-/** Undefined when the policy sets `mergeVerdict.enabled: false`: the block then has no verdict line. */
 export function printVerdict(input) {
     const { cwd, head, baseRefOid, title, outcome, env } = input;
     try {
-        const base = prBase(cwd, baseRefOid, head);
-        const policy = policyText(cwd, base);
-        if (!verdictEnabled(policy))
-            return undefined;
         if (title === undefined)
             throw new Error('the PR title was not read');
+        const base = prBase(cwd, baseRefOid, head);
         const change = {
             headSha: head,
             subject: title,
@@ -70,7 +66,7 @@ export function printVerdict(input) {
             bypasses: shipBypasses(telemetrySink(env), prCommits(cwd, base, head)),
             evidence: outcome,
         };
-        const verdict = mergeVerdict(change, policy);
+        const verdict = mergeVerdict(change, policyText(cwd, base));
         const mark = `${VERDICT_MARK[verdict.verdict]} ${verdict.verdict}`;
         const line = `${VERDICT_LABEL} ${mark} · advisory, at \`${head.slice(0, 12)}\``;
         return { line, reasons: verdictReasons(verdict), verdict };

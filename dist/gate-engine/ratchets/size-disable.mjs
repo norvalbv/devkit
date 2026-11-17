@@ -13,7 +13,7 @@ import { fanoutSplitHints } from './folder-fanout.mjs';
 import { hasStagedFiles, indexTreeRef, mergeBaseRef, pullRequestScope, stagedSet, } from './git-index.mjs';
 import { freezeLinesBaseline } from './size-lines-freeze.mjs';
 import { lineBaselineForGate, lineCountsAtRef, lineViolationReport, measureLines, tightenLineBaseline, } from './size-line-authority.mjs';
-import { LINES_BASELINE, lineMatchers, SIZE_SKIP_DIRS } from './size-policy.mjs';
+import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mjs';
 import { runPreflightCli } from './size-preflight.mjs';
 const BASELINE = SIZE_BASELINE;
 // Only an actual directive comment counts — a line that merely MENTIONS the phrase
@@ -75,7 +75,7 @@ export function countOversized(root = process.cwd(), scanRoots, maxLines, match,
     const testCap = maxTestLines ?? cfg.maxTestLines;
     if (!sourceCap && !testCap)
         return [];
-    const m = match ?? lineMatchers(cfg);
+    const m = match ?? sourceMatchers(cfg.sourceExtensions);
     const files = (scanRoots ?? cfg.scanRoots).flatMap((r) => walk(root, r, [], m, testCap > 0));
     const over = [];
     for (const f of files) {
@@ -100,8 +100,8 @@ export function freezeLines(root = process.cwd(), mode = 'shrink-only') {
 export const LINE_CAP = 500;
 export const TEST_LINE_CAP = 2000;
 // The //-comment sibling written next to `maxLines` (guard.config.json keeps guidance in "//" keys).
-const MAXLINES_DOC = `Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only in ${LINES_BASELINE}). 0 = off. Per-FUNCTION caps need a parser — not yet.`;
-const MAXTESTLINES_DOC = `Loose raw line cap per test file; existing oversized tests are grandfathered shrink-only in ${LINES_BASELINE}. 0 = off.`;
+const MAXLINES_DOC = 'Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only). 0 = off. Per-FUNCTION caps need a parser — not yet.';
+const MAXTESTLINES_DOC = 'Loose raw line cap per test file; existing oversized tests are grandfathered shrink-only. 0 = off.';
 /** Does guard.config.json explicitly configure both line caps, including 0 = off? */
 export function hasLineCap(cwd) {
     const cfgPath = join(cwd, 'guard.config.json');
@@ -179,7 +179,7 @@ function runLinesGate(root, cfg, ciScope) {
     const over = countOversized(root);
     const staged = stagedSet(root);
     const inCommit = staged !== null && hasStagedFiles(root);
-    const match = lineMatchers(cfg);
+    const match = sourceMatchers(cfg.sourceExtensions);
     const cap = (f) => (match.isTest(f) ? cfg.maxTestLines : cfg.maxLines);
     // A PR supplies an exact base scope; local commits use the index; audits use the whole tree.
     const selected = ciScope ?? (inCommit ? staged : null);

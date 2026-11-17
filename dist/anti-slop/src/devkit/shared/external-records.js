@@ -12,7 +12,7 @@ export function unwrapExpression(expression) {
         current = current.expression;
     return current;
 }
-export function resolveVariable(sourceCode, identifier) {
+function resolveVariable(sourceCode, identifier) {
     let scope = sourceCode.getScope(identifier);
     while (scope !== null) {
         const variable = scope.set.get(identifier.name);
@@ -22,7 +22,7 @@ export function resolveVariable(sourceCode, identifier) {
     }
     return null;
 }
-export function stableConstInitializer(variable) {
+function stableConstInitializer(variable) {
     if (variable.defs.length !== 1)
         return null;
     const definition = variable.defs[0];

@@ -1,10 +1,13 @@
+/**
+ * Repo-supplied command gates: the hook's `--structure` / `--extra` flags and guard.config.json
+ * `extraGates`. guard-deterministic runs each one beside the built-in gates; non-zero blocks.
+ */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { CONFIG_FILENAME, coverageBypassed, envFlag, envVar, resolveGuardConfig } from '../config.mjs';
-import { emitGateBypass, emitGateEvent } from '../judge/gate-events.mjs';
+import { CONFIG_FILENAME, envFlag, resolveGuardConfig } from '../config.mjs';
+import { emitGateBypass } from '../judge/gate-events.mjs';
 import { gitPrefix, stagedSet } from '../ratchets/git-index.mjs';
-import { crashGuarded, gateEnv } from './reason.mjs';
 import { recheckCommand } from './recheck.mjs';
 import { DETERMINISTIC } from './registry.mjs';
 // In dev the tree is .mts; in the shipped dist it is .mjs, so derive the extension from THIS module.
@@ -23,18 +26,10 @@ const labelSchema = z
     .string()
     .regex(/^[a-z0-9][\w.-]*$/i)
     .refine((l) => !RESERVED.has(l) && !l.startsWith('guard-'), 'is a built-in gate name');
-const commandSchema = z.string().trim().min(1);
-const extraGatesSchema = z
-    .record(labelSchema, z.union([
-    commandSchema.transform((cmd) => ({ cmd })),
-    z.object({ cmd: commandSchema, afterGreen: z.literal(true) }).strict(),
-], {
-    error: 'must be a command string or { "cmd": "<command>", "afterGreen": true }',
-}))
-    .optional();
+const extraGatesSchema = z.record(labelSchema, z.string().trim().min(1)).optional();
 /**
- * The gates guard.config.json `extraGates` declares (label → command, or → { cmd, afterGreen }), in
- * declaration order. A malformed block becomes one command-less spec, so a gate never vanishes.
+ * The gates guard.config.json `extraGates` declares (label → command), in declaration order. A
+ * malformed block becomes one command-less spec, so a gate the repo meant to run never vanishes.
  */
 export function configExtraGates(cwd) {
     let raw;
@@ -57,29 +52,7 @@ export function configExtraGates(cwd) {
         console.error(`✗ ${CONFIG_FILENAME} extraGates${at}: ${issue.message}`);
         return [{ label: 'extraGates' }];
     }
-    return Object.entries(parsed.data ?? {}).map(([label, spec]) => ({ label, ...spec }));
-}
-/**
- * The hook's `--extra` gates, then the config's. A name both record under runs neither: it blocks as
- * one command-less `<name>(duplicate)`, a name no config key can take, so no reader pairs it with a command.
- */
-export function extraGatesFor(flagExtras, cwd) {
-    const config = configExtraGates(cwd);
-    const flagged = new Set(flagExtras.map((g) => g.label.replace(GUARD_PREFIX_RE, '')));
-    const clashes = new Set(config.filter((g) => flagged.has(g.label)).map((g) => g.label));
-    for (const label of clashes) {
-        console.error(`✗ gate '${label}' is declared by both the hook's --extra and ${CONFIG_FILENAME} extraGates — rename one`);
-    }
-    const reported = new Set();
-    return [...flagExtras, ...config].flatMap((g) => {
-        const name = g.label.replace(GUARD_PREFIX_RE, '');
-        if (!clashes.has(name))
-            return [g];
-        if (reported.has(name))
-            return [];
-        reported.add(name);
-        return [{ label: `${name}(duplicate)` }];
-    });
+    return Object.entries(parsed.data ?? {}).map(([label, cmd]) => ({ label, cmd }));
 }
 /**
  * Is structure lint bypassed for THIS run? The orchestrator owns this predicate rather than
@@ -158,88 +131,5 @@ export function commandGate(label, cwd, cmd) {
     const argv = structure ? ['node', STRUCTURE_RUN, ...x.argv.slice(1)] : x.argv;
     // The tokens that RUN, quoted. An expanded path list would go stale once the fix is staged.
     const recheck = usesStaged ? undefined : recheckCommand(argv, structure ? cwd : undefined);
-    return { label, ...(structure ? crashGuarded(argv) : { argv }), failOpen2: structure, recheck };
-}
-/** Did this gate exit 0 only because its own one-run bypass flag told it to skip? */
-function selfBypassed(gate) {
-    if (gate === 'coverage')
-        return coverageBypassed();
-    return Object.entries(GATE_BYPASSES).some(([name, suffix]) => name === gate && envFlag(suffix));
-}
-/**
- * One `gate_step` row per spawned gate: status in gate_result's vocabulary, exit code, duration.
- * `failure` is the failure this gate recorded, if any; `optedOut` that it failed open. A gate that
- * never reached an exit code (killed or failed to spawn) has no `exit_code`.
- */
-export function emitGateStep(label, rc, startedAt, failure, optedOut) {
-    const gate = label.replace(GUARD_PREFIX_RE, '');
-    const unverified = failure ? !failure.verdict : optedOut || selfBypassed(gate);
-    emitGateEvent({
-        type: 'gate_step',
-        gate,
-        family: 'deterministic',
-        status: unverified ? 'could_not_run' : failure ? 'fail' : 'pass',
-        exit_code: typeof rc === 'number' ? rc : undefined,
-        duration_ms: Math.max(0, Date.now() - startedAt),
-    });
-}
-/** What runArgv returns for a gate that produced no exit within its deadline. */
-export const TIMED_OUT = 'timed-out';
-// A hang detector, not a performance budget: a slow gate on a loaded machine is still legitimate.
-const DEFAULT_GATE_TIMEOUT_MS = 1_800_000;
-// Node throws on a fractional timeout, and that throw would read as a failure of every gate.
-const deadlineSchema = z.number().int().positive();
-/**
- * The per-gate deadline in ms: GUARD_GATE_TIMEOUT_MS, then guard.config.json `gateTimeoutMs`, then
- * the default. An unusable value falls through; configExtraGates reports an unreadable config.
- */
-export function gateTimeoutMs(cwd) {
-    let file;
-    try {
-        file = resolveGuardConfig(cwd).gateTimeoutMs;
-    }
-    catch {
-        file = undefined;
-    }
-    return (deadlineSchema.safeParse(Number(envVar('GATE_TIMEOUT_MS'))).data ??
-        deadlineSchema.safeParse(file).data ??
-        DEFAULT_GATE_TIMEOUT_MS);
-}
-/** Why a timed-out gate blocked: printed under its label and carried in its telemetry detail. */
-export function timeoutReason(ms) {
-    return [
-        `no exit within ${ms / 1000}s: its process was signalled, and work it started may still be running.`,
-        'This is not a code finding. Re-run; if the gate is legitimately this slow, raise',
-        `gateTimeoutMs in ${CONFIG_FILENAME} (commit it) or export GUARD_GATE_TIMEOUT_MS=<ms>.`,
-    ];
-}
-// What execFileSync throws: `status` when the child exited, `signal` when one ended it, `code` when
-// the spawn itself failed (ENOENT, EACCES, EAGAIN) or the deadline passed (ETIMEDOUT).
-const spawnErrorSchema = z.object({
-    status: z.number().optional().catch(undefined),
-    signal: z.string().optional().catch(undefined),
-    code: z.string().optional().catch(undefined),
-});
-/**
- * Run one gate as a subprocess: its exit code (0 on success), TIMED_OUT at the deadline, or
- * `killed:<SIG>` / `spawn-failed:<CODE>` when it never reached one. stdio is inherited; the gate's
- * failure reason returns via `reasonFile`.
- */
-export function runArgv(cwd, argv, exec, reasonFile, timeoutMs) {
-    try {
-        const env = gateEnv(reasonFile);
-        exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit', env, timeout: timeoutMs });
-        return 0;
-    }
-    catch (e) {
-        const { status, signal, code } = spawnErrorSchema.safeParse(e).data ?? {};
-        // Read before `status`: a child that exits 0 from its SIGTERM handler still timed out.
-        if (code === 'ETIMEDOUT')
-            return TIMED_OUT;
-        if (status !== undefined)
-            return status;
-        if (signal)
-            return `killed:${signal}`;
-        return code ? `spawn-failed:${code}` : 1;
-    }
+    return { label, argv, failOpen2: structure, recheck };
 }

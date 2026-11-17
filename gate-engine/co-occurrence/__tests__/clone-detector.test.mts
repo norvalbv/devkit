@@ -20,7 +20,10 @@ const HEX16 = /^[0-9a-f]{16}$/;
 const MARK = 'jscpd:ignore';
 // A no-op jscpd that reports the pinned version, so the version guard passes and the marker scan runs.
 const PINNED_JSCPD = JSON.parse(
-  readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'package.json'), 'utf8'),
+  readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'package.json'),
+    'utf8',
+  ),
 ).optionalDependencies.jscpd;
 const STUB_JSCPD = `#!/bin/sh\n[ "$1" = --version ] && echo "jscpd ${PINNED_JSCPD}"\nexit 0\n`;
 
@@ -474,7 +477,8 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
       'b.ts': SHARED,
     });
     // --changed baselines against HEAD, so jscpd needs the fixture inside a git repo with a commit.
-    const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { stdio: 'ignore' });
+    const git = (...args: string[]) =>
+      execFileSync('git', ['-C', dir, ...args], { stdio: 'ignore' });
     git('init', '-q');
     git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init');
     const gate = (changedFiles: string) =>

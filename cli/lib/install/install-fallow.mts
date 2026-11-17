@@ -185,7 +185,9 @@ export function ensureFallow({ cwd, dryRun }: FallowCommandOptions = {}): Fallow
  */
 export function resolveOverlayFallow(cwd: string, dryRun: boolean): boolean {
   if (dryRun) {
-    console.log('  [dry-run] fallow: keep an installed fallow >= pin, else install it → gate in hook');
+    console.log(
+      '  [dry-run] fallow: keep an installed fallow >= pin, else install it → gate in hook',
+    );
     return true;
   }
   const r = ensureFallow({ cwd });

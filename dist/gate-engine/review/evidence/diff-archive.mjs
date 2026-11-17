@@ -14,12 +14,12 @@
  * eval/conventions/bench.mts) calls directly. Keeping the write in runReviewGate only, not in the
  * cascade both call, is what keeps bench runs from ever archiving anything.
  */
-import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { telemetrySink } from '../../judge/run-context.mjs';
-const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 // Independent of, and deliberately larger than, the judge-facing EVIDENCE_TOTAL_CAP
 // (diff-evidence.mts, 60000 chars) — that cap sizes what a JUDGE reads on stdin; this sizes
 // worst-case disk use for an ARCHIVAL copy. gitCached's 64 MiB maxBuffer (run-review.mts) is the
@@ -39,40 +39,31 @@ const ARCHIVE_MAX_BYTES = 8 * 1024 * 1024; // 8 MiB raw, pre-gzip
  * (run-review.mts) therefore invokes this purely for its side effect and discards the return value;
  * it stays a return (not void) so the archive's fs behaviour is directly unit-testable here.
  *
- * Content-addressed dedup: a file already under the hash is treated
+ * Content-addressed dedup: the file is created with the exclusive flag (`wx`); an EEXIST is treated
  * as an already-archived success (same hash ⇒ identical bytes) rather than bumped to a new name —
  * unlike `saveTranscriptUnique`'s collision handling, which is for DIFFERENT content sharing a label.
  */
 export function archiveFailedDiff(diffText) {
-    if (Buffer.byteLength(diffText, 'utf8') > ARCHIVE_MAX_BYTES)
-        return null; // before any copy
-    return archiveBytes(Buffer.from(diffText, 'utf8'), 'diffs', '.diff.gz').ref;
-}
-/** Gzip raw bytes to `<telemetry-dir>/<dir>/<sha256(bytes)><ext>`; same contract as archiveFailedDiff. */
-export function archiveBytes(bytes, dir, ext) {
     const sink = telemetrySink();
     if (!sink)
-        return { status: 'disabled', ref: null };
-    if (bytes.length > ARCHIVE_MAX_BYTES)
-        return { status: 'too_large', ref: null };
+        return null;
+    if (Buffer.byteLength(diffText, 'utf8') > ARCHIVE_MAX_BYTES)
+        return null;
     try {
-        const rel = path.join(dir, `${sha256(bytes)}${ext}`);
+        const rel = path.join('diffs', `${sha256(diffText)}.diff.gz`);
         const abs = path.join(path.dirname(sink), rel);
-        const tmp = `${abs}.${randomUUID()}.tmp`;
         mkdirSync(path.dirname(abs), { recursive: true });
-        if (existsSync(abs))
-            return { status: 'archived', ref: rel }; // same hash ⇒ same bytes
-        // A temp file renamed into place: a crash mid-write never leaves a truncated archive behind.
         try {
-            writeFileSync(tmp, gzipSync(bytes));
-            renameSync(tmp, abs); // atomic; a racing writer of the same hash renames identical bytes
+            writeFileSync(abs, gzipSync(Buffer.from(diffText, 'utf8')), { flag: 'wx' });
         }
-        finally {
-            rmSync(tmp, { force: true });
+        catch (e) {
+            if (e.code !== 'EEXIST')
+                throw e;
+            // Already archived under this hash — same bytes, nothing to rewrite.
         }
-        return { status: 'archived', ref: rel };
+        return rel;
     }
     catch {
-        return { status: 'failed', ref: null }; // best-effort — never fail a gate over archiving
+        return null; // best-effort — never fail a gate over archiving
     }
 }

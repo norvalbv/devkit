@@ -11,17 +11,17 @@
  *   status                Show progress summary
  *   check-file <path>     Mark file as reviewed (--pass or --fail "reason")
  *   finalize              Verify every item was resolved; refuses if any are pending or failed
- *                         --retrieval ok | --retrieval skipped|unavailable --cause "why" records
- *                         whether semantic duplicate retrieval ran (the gate reports anything but
- *                         ok as DEGRADED)
+ *                         --retrieval ok | --retrieval unavailable --cause "why" records whether
+ *                         semantic duplicate retrieval ran (the gate reports an unrecorded or
+ *                         unavailable retrieval as DEGRADED — sc-2317)
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   assertStagedSetSane,
   resolveConfigRoots,
-  stagedAcmrNames,
   stagedFilesOverride,
   toGitPathspecs,
 } from '../../_devkit/review-roots.mjs';
@@ -42,7 +42,11 @@ function getStagedFiles() {
   if (override) return override;
   const pathspecs = toGitPathspecs(scanRoots());
   try {
-    const output = stagedAcmrNames(pathspecs);
+    const output = execFileSync(
+      'git',
+      ['diff', '--cached', '--name-only', '--diff-filter=ACMR', '--', ...pathspecs],
+      { encoding: 'utf-8' },
+    );
     // ACMR hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
     // that as zero items — a reviewer that examined nothing must not read as a pass.
     if (!output.trim()) assertStagedSetSane(pathspecs, 'commit-guard');
@@ -166,8 +170,8 @@ function finalize(retrieval) {
   if (retrieval) {
     data.retrieval = retrieval;
     saveChecklist(data);
-    if (retrieval.status !== 'ok')
-      log(`⚠️  Semantic retrieval ${retrieval.status}: ${retrieval.cause}`);
+    if (retrieval.status === 'unavailable')
+      log(`⚠️  Semantic retrieval unavailable: ${retrieval.cause}`);
   }
   // Automatic tidy — same contract as checklist-store.mjs finalize: env guards keep gate/review artifacts.
   tidy();
@@ -183,9 +187,7 @@ function tidy() {
   }
 }
 
-const FINALIZE_USAGE =
-  'Usage: finalize [--retrieval ok | --retrieval skipped|unavailable --cause "why"]';
-const CAUSED = new Set(['skipped', 'unavailable']);
+const FINALIZE_USAGE = 'Usage: finalize [--retrieval ok | --retrieval unavailable --cause "why"]';
 
 // Reason: strict finalize grammar for the retrieval flag the gate reads back (sc-2317): null = no --retrieval (interactive runs stay valid; the gate reads absent as DEGRADED), undefined = refused; each branch rejects one malformed or contradictory shape
 // fallow-ignore-next-line complexity
@@ -202,7 +204,7 @@ function parseRetrieval(argv) {
   const cause = flags.get('--cause');
   if (status === undefined) return cause === undefined ? null : undefined;
   if (status === 'ok') return cause === undefined ? { status: 'ok' } : undefined;
-  return CAUSED.has(status) && cause ? { status, cause } : undefined;
+  return status === 'unavailable' && cause ? { status: 'unavailable', cause } : undefined;
 }
 
 // ============ MAIN ============
@@ -243,8 +245,6 @@ switch (cmd) {
     log('  init                         Create checklist from staged files');
     log('  status                       Show progress');
     log('  check-file <path> --pass|--fail  Mark file reviewed');
-    log(
-      '  finalize [--retrieval ok|skipped|unavailable --cause "why"]  Verify every item was resolved',
-    );
+    log('  finalize [--retrieval ok|unavailable --cause "why"]  Verify every item was resolved');
     process.exit(1);
 }

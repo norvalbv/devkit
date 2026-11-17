@@ -20,19 +20,9 @@ function repositoryFile(cwd, filename) {
     }
     return { absolute, relative: rel.split(sep).join('/') };
 }
-function lineContext(source, line) {
-    const lines = source.toString('utf8').replace(/\r\n?/gu, '\n').split('\n');
+function sourceContext(path, line) {
+    const lines = readFileSync(path, 'utf8').replace(/\r\n?/gu, '\n').split('\n');
     return normalizeText(lines[Math.max(0, line - 1)] ?? '');
-}
-/** The first line of the reported span, so a formatter reflowing the line around it keeps the
- * identity. Oxlint offsets count UTF-8 bytes, so the slice is taken from the raw bytes. */
-function spanContext(source, span, line) {
-    const offset = span?.offset ?? -1;
-    const length = span?.length ?? 0;
-    if (offset < 0 || length < 1)
-        return lineContext(source, line);
-    const text = source.subarray(offset, offset + length).toString('utf8');
-    return normalizeText(text.split(/\r\n?|\n/u)[0] ?? '');
 }
 function fingerprintFor(parts) {
     return createHash('sha256')
@@ -51,7 +41,6 @@ export function parseAntiSlopFindings(cwd, json) {
     if (!Array.isArray(payload.diagnostics))
         throw new Error('Oxlint JSON has no diagnostics array');
     const findings = [];
-    const sources = new Map();
     for (const diagnostic of payload.diagnostics) {
         const id = ruleId(diagnostic.code);
         if (!id)
@@ -61,19 +50,11 @@ export function parseAntiSlopFindings(cwd, json) {
         const line = typeof span?.line === 'number' && span.line > 0 ? span.line : 1;
         const column = typeof span?.column === 'number' && span.column > 0 ? span.column : 1;
         const message = typeof diagnostic.message === 'string' ? normalizeText(diagnostic.message) : 'diagnostic';
-        let source = sources.get(location.absolute);
-        if (!source)
-            sources.set(location.absolute, (source = readFileSync(location.absolute)));
-        const stable = {
-            ruleId: id,
-            file: location.relative,
-            diagnostic: message,
-            context: spanContext(source, span, line),
-        };
+        const context = sourceContext(location.absolute, line);
+        const stable = { ruleId: id, file: location.relative, diagnostic: message, context };
         findings.push({
             ...stable,
             fingerprint: fingerprintFor(stable),
-            legacyFingerprint: fingerprintFor({ ...stable, context: lineContext(source, line) }),
             severity: diagnostic.severity === 'warning' ? 'warning' : 'error',
             line,
             column,
@@ -87,9 +68,8 @@ export function groupFindings(findings) {
     for (const finding of findings) {
         const current = groups.get(finding.fingerprint);
         if (!current) {
-            const { legacyFingerprint: _legacy, ...group } = finding;
             const locations = [{ line: finding.line, column: finding.column }];
-            groups.set(finding.fingerprint, { ...group, count: 1, locations });
+            groups.set(finding.fingerprint, { ...finding, count: 1, locations });
             continue;
         }
         current.count += 1;

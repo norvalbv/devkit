@@ -51,21 +51,21 @@ import { ALLOWLIST_CLI, loadAllowlist as loadAllowlistFile, saveAllowlist, symFi
 import { flagReader } from './argv.mjs';
 import { loadChangedSet } from './changed-files.mjs';
 import { buildVectors, canVerify, chunkColumns, dot, emptyIndexMessage, freshnessNotice, orderKey, partitionFresh, USABLE_CHUNK_WHERE, verifierForIndex, } from './chunk-index.mjs';
-import { scoreLabels, symKey } from './bench/score-labels.mjs';
 import { classifyPair } from './classify.mjs';
 import { isExpired } from './decay.mjs';
-import { cleanLine, linkedWorktreeIndex, missingIndexMessage, refreshIndex, reportUnindexed, } from './index-refresh.mjs';
+import { missingIndexMessage, refreshIndex } from './index-refresh.mjs';
 const pairName = (p) => `${p.symbolA} <> ${p.symbolB}`; // a blocked pair, in the gate's reason
-// The allowlist entry shape (AllowlistPair), its order-insensitive key (symFileKey), and
-// the corruption-refusing loader/atomic writer now live in ./allowlist-io.mts — shared with
-// the clone detector and the guard-dup-allowlist CRUD CLI (imported above).
 // Hoisted per useTopLevelRegex — this runs once per index row in the normalize loop.
 const BACKSLASH_RE = /\\/g;
-// Package-relative ONLY for labels.json (bench fixtures); CONSUMER paths resolve from cfg.cwd.
+// Package-relative ONLY for labels.json (engine-shipped bench fixtures). Every
+// CONSUMER path is resolved from cfg.cwd below, never from here.
 const here = dirname(fileURLToPath(import.meta.url));
 const labelsPath = resolve(here, 'labels.json');
 // Resolve config against the consumer cwd (W-3). All thresholds + paths flow from here.
 const cfg = resolveGuardConfig(process.cwd());
+// Index path: SEARCH_CODE_DB env (fixtures/tests) wins; else config.indexPath
+// resolved to the consumer cwd. null => no index configured => matcher opt-out.
+const dbPath = process.env.SEARCH_CODE_DB ?? resolveFromCwd(cfg, 'indexPath');
 // Allowlist: CO_OCCURRENCE_ALLOWLIST env (fixtures/tests) wins; else config.allowlistPath.
 const allowlistPathRaw = process.env.CO_OCCURRENCE_ALLOWLIST ?? resolveFromCwd(cfg, 'allowlistPath');
 // Approval-hint CLI shown on a gate block (a human/agent pastes it to allowlist a dup).
@@ -76,11 +76,9 @@ const allowlistPathRaw = process.env.CO_OCCURRENCE_ALLOWLIST ?? resolveFromCwd(c
 const CO_SCRIPT = process.env.GUARD_ALLOWLIST_CLI || ALLOWLIST_CLI;
 const argv = process.argv.slice(2);
 const mode = argv[0] ?? 'scan';
-// SEARCH_CODE_DB (fixtures/tests) wins; else config.indexPath, or the primary checkout's in a linked
-// worktree without a usable one. baseline writes the index, so it never borrows. null => opt-out.
-const dbPath = process.env.SEARCH_CODE_DB ?? linkedWorktreeIndex(cfg, mode !== 'baseline');
 const flag = flagReader(argv);
-// Knob defaults come from the resolved config thresholds, with per-run --flag overrides on top.
+// Knob defaults come from the resolved config thresholds (consumer-tunable), with
+// per-run --flag overrides on top.
 const KNOBS = {
     nearCode: Number(flag('--near-code', cfg.thresholds.nearCode)),
     driftCode: Number(flag('--drift-code', cfg.thresholds.driftCode)),
@@ -95,7 +93,8 @@ const ONLY_NEW = argv.includes('--new');
 // 2 = could-not-run (no index / read error). The pre-commit hook blocks ONLY on
 // 1 and fails OPEN on 2, so an infra failure (or no index) never bricks a commit.
 const GATE = argv.includes('--gate');
-// scan --changed: only pairs touching a staged file — the dups THIS commit introduces.
+// scan --changed: restrict to pairs touching a staged file — the dups THIS commit
+// introduces, not pre-existing drift.
 const CHANGED = argv.includes('--changed');
 // reconcile --apply: actually write the pruned allowlist. Default is dry-run.
 const APPLY = argv.includes('--apply');
@@ -118,7 +117,6 @@ if (!existsSync(dbPath))
 // Judge the code being COMMITTED, not the last indexed state. Silently no-ops unless refreshing
 // is safe here — index-refresh.mts documents the two ways an unconditional refresh goes wrong.
 refreshIndex(dbPath, cfg);
-const unindexedScope = { ...cfg, includeTests: INCLUDE_TESTS, indexPath: dbPath };
 // allowlistPath resolves from DEFAULTS (a non-null string) so this never fires at
 // runtime, but resolveFromCwd's contract is string|null — guard it (fail-open, like
 // the index) so every downstream read/write sees a definite string.
@@ -263,9 +261,8 @@ function runScan() {
     // "nothing there" when it really means "the index disagrees with the disk".
     for (const l of freshnessNotice(dropped, { verified: verifier.enabled, blocking: false }))
         console.log(l);
-    const skipped = reportUnindexed(changedSet, rows, unindexedScope);
     if (ONLY_NEW && pairs.length === 0) {
-        console.log(cleanLine(skipped));
+        console.log('No new duplication since the last baseline. ✓');
         if (GATE)
             process.exit(0);
         return;
@@ -306,12 +303,45 @@ function runScan() {
     if (GATE)
         exitGate(0, []);
 }
+// Reason: the branches ARE the confusion-matrix algorithm: the TP/FP/FN/TN four-way classification plus precision/recall/F1 derivation over labels.json; CRAP-flagged because this is dev-only bench tooling exercised end-to-end against fixtures, not unit-tested
+// fallow-ignore-next-line complexity
 function runBench() {
     const { pairs: labels } = JSON.parse(readFileSync(labelsPath, 'utf8'));
     const pairs = detect(KNOBS);
     const flagged = new Set(pairs.map((p) => symKey(p.symbolA, p.symbolB)));
-    for (const line of scoreLabels(labels, flagged, JSON.stringify(KNOBS)))
-        console.log(line);
+    let tp = 0;
+    let fp = 0;
+    let fn = 0;
+    let tn = 0;
+    const misses = [];
+    const falseAlarms = [];
+    for (const l of labels) {
+        const predicted = flagged.has(symKey(l.a, l.b));
+        const actual = l.label === 'dup';
+        if (predicted && actual)
+            tp++;
+        else if (predicted && !actual) {
+            fp++;
+            falseAlarms.push(`${l.a} <> ${l.b}  (${l.note})`);
+        }
+        else if (!predicted && actual) {
+            fn++;
+            misses.push(`${l.a} <> ${l.b}  (${l.note})`);
+        }
+        else
+            tn++;
+    }
+    const prec = tp + fp ? tp / (tp + fp) : 1;
+    const rec = tp + fn ? tp / (tp + fn) : 1;
+    const f1 = prec + rec ? (2 * prec * rec) / (prec + rec) : 0;
+    console.log(`Knobs: ${JSON.stringify(KNOBS)}`);
+    console.log(`Labeled pairs: ${labels.length}  (dup ${labels.filter((l) => l.label === 'dup').length} | noise ${labels.filter((l) => l.label === 'noise').length})`);
+    console.log(`Confusion: TP ${tp}  FP ${fp}  FN ${fn}  TN ${tn}`);
+    console.log(`Precision ${(prec * 100).toFixed(1)}%  Recall ${(rec * 100).toFixed(1)}%  F1 ${(f1 * 100).toFixed(1)}%`);
+    if (misses.length)
+        console.log(`\nMissed dups (FN):\n  ${misses.join('\n  ')}`);
+    if (falseAlarms.length)
+        console.log(`\nFalse alarms (FP):\n  ${falseAlarms.join('\n  ')}`);
 }
 // Reason: flat baseline orchestration: detect → idempotent drop-prior-baseline/keep-human → append-new pairs → atomic allowlist write → DB allowlisted-flag reset+re-mark → tier-count report, sequential steps; high branch COUNT, each trivial, CRAP-flagged as a dev-only freeze command run end-to-end not unit-tested
 // fallow-ignore-next-line complexity
@@ -398,6 +428,9 @@ function runReconcile() {
     db.close();
 }
 // ── helpers ──────────────────────────────────────────────────────────────────
+function symKey(a, b) {
+    return a < b ? `${a} ${b}` : `${b} ${a}`;
+}
 // Retrofit rangeA/rangeB onto existing symbol pairs by looking up each symbol's
 // chunk line range in the index. Rough (one chunk per symbol); findability metadata.
 // Reason: thin one-off maintenance script: build a symbol→range lookup, then per-allowlist-pair fill rangeA/rangeB and tally filled/missed; CRAP-flagged as a dev-only retrofit run end-to-end not unit-tested

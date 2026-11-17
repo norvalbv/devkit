@@ -16,7 +16,7 @@ import { emitGateBypass } from '../../../gate-engine/judge/gate-events.mjs';
 import { detectGitRoot } from '../detect-git-root.mjs';
 import { readJson } from '../fs-helpers.mjs';
 import { extractGuardBlock } from './husky-block.mjs';
-import { buildSelfHostBlock, isDevkitRepo, SELF_HOST_STRUCTURE_CMD, selfHostSelection, } from './self-host.mjs';
+import { buildSelfHostBlock, isDevkitRepo, SELF_HOST_EXTRAS, SELF_HOST_STRUCTURE_CMD, selfHostSelection, } from './self-host.mjs';
 /** The hook devkit's guard block lives in, relative to the git root. */
 export const HOOK_REL = '.husky/pre-commit';
 /**
@@ -77,6 +77,7 @@ export function selfHostHookParity(cwd, opts = {}) {
     const expectedBlock = buildSelfHostBlock({
         ...selfHostSelection(components),
         structureCmd: SELF_HOST_STRUCTURE_CMD,
+        extras: SELF_HOST_EXTRAS,
     }, pkgRel, cwd);
     const currentBlock = extractGuardBlock(content, pkgRel);
     if (currentBlock === null)
@@ -100,7 +101,7 @@ export function selfHostHookParity(cwd, opts = {}) {
 /*
  * `--gate`: the pre-commit half.
  *
- * Command gates run with failOpen2:false in the deterministic orchestrator, so EVERY non-zero exit
+ * `--extra` gates run with failOpen2:false in the deterministic orchestrator, so EVERY non-zero exit
  * blocks the commit. Non-zero is therefore reserved for a hook that is genuinely absent, or drifted
  * because of this change; every environmental condition returns 0.
  */
@@ -124,9 +125,6 @@ export const HOOK_GENERATOR_FILES = [
     'gate-engine/deterministic/recheck.mts',
     'gate-engine/deterministic/registry.mts',
     'gate-engine/judge/judge-isolation.mts',
-    'gate-engine/judge/process/identity.mts',
-    'gate-engine/judge/process/process-lock.mts',
-    'gate-engine/review/valve/shell-word.mts',
 ];
 /** Directory prefixes with the same effect. */
 export const HOOK_GENERATOR_PREFIXES = ['cli/lib/husky/'];

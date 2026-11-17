@@ -4,8 +4,8 @@
  */
 import { emitGateEvent } from '../../judge/gate-events.mjs';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mjs';
-import { ADVISORY_CAP, verdictAdvisories } from '../contracts/response.mjs';
-import { reportAdvisories, reportMcpDegraded, reportVerdictTranscript, } from '../evidence/base-context.mjs';
+import { parseAdvisories } from '../contracts/response.mjs';
+import { reportAdvisories, reportMcpDegraded } from '../evidence/base-context.mjs';
 import { itemFields, mergeItemVectors } from '../evidence/items.mjs';
 import { coverageFields } from '../evidence/packet/coverage.mjs';
 import { lensGroupId } from './groups.mjs';
@@ -21,10 +21,8 @@ export function emitMergedLensResults(splitParts, firstModel) {
             .filter((p) => p.res.transcript)
             .map((p) => p.res.transcript)
             .join('\n\n');
-        // A chunk part holds only its slice; the un-chunked part carries the reviewer's whole diff.
-        const whole = parts.find((p) => !p.task.chunk) ?? parts[0];
         const transcriptRef = transcript
-            ? saveTranscript(`review-${name}`, composeTranscript(whole.task.diffText, transcript))
+            ? saveTranscript(`review-${name}`, composeTranscript(parts[0].task.diffText, transcript))
             : null;
         // Item fields rebuilt ACROSS the parts, or a four-way split reads as a single-lens reviewer.
         // SAFETY: the same parts as above; mergeItemVectors touches only the optional item fields.
@@ -50,8 +48,6 @@ export function emitMergedLensResults(splitParts, firstModel) {
                 row.model = p.res.model;
             if (p.retried)
                 row.retried = true;
-            if (p.cached)
-                row.cached = true;
             return row;
         });
         const event = {
@@ -82,10 +78,8 @@ export function emitMergedLensResults(splitParts, firstModel) {
         // Once per reviewer, not per group: the digest renders one unverified row per event.
         if (mcpCause)
             reportMcpDegraded(name, mcpCause, mcp?.mcpDegraded?.cached === true);
-        reportVerdictTranscript(name, merged.status, transcriptRef);
         // Live parts only: a cached part's advisories replay with its own cache line.
-        // Per part, so a FAIL merge keeps PASS lenses' advisories but not an inconclusive part's.
-        const advisories = [...new Set(parts.flatMap((p) => verdictAdvisories(p.res)))];
-        reportAdvisories(name, advisories.slice(0, ADVISORY_CAP), transcriptRef);
+        if (merged.status === 'pass')
+            reportAdvisories(name, parseAdvisories(transcript), transcriptRef);
     }
 }

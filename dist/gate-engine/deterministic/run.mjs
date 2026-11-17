@@ -23,8 +23,8 @@
  * aggregated report:
  *   --structure "<cmd>"   run <cmd> as the `structure-lint` gate. A `guard-structure …` command
  *                         runs as the sibling module with the full trichotomy (2 = fail-open);
- *                         any other command (electron's `bunx eslint src`, a repo's own
- *                         lint script) spawns via PATH and BLOCKS on every non-zero
+ *                         any other command (electron's `bunx eslint src`, devkit's own
+ *                         `bun run lint:structure`) spawns via PATH and BLOCKS on every non-zero
  *                         code (eslint's exit 2 is a fatal config error, not an opt-out).
  *   --extra "<label>=<cmd>"  (repeatable) an arbitrary deterministic gate; non-zero blocks. A
  *                         repo declares more the same way in guard.config.json `extraGates`.
@@ -43,16 +43,16 @@ import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { z } from 'zod';
 import { coverageBypassed, deterministicStrict } from '../config.mjs';
 import { emitGateBypass, finishGateTiming } from '../judge/gate-events.mjs';
 import { markGateRun } from '../judge/run-context.mjs';
 import { reportOlderOverlayRunner } from '../overlay-mode.mjs';
 import { describeCachedPrefix, prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mjs';
-import { crashGuarded, readGateReason, withReasonFiles } from './reason.mjs';
-import { bypassedSuffixes, commandGate, emitGateStep, extraGatesFor, gateTimeoutMs, GUARD_PREFIX_RE, reportCachedBypasses, runArgv, structureBypassed, TIMED_OUT, timeoutReason, } from './command-gates.mjs';
-import { parseOpts } from './parse-opts.mjs';
+import { gateEnv, readGateReason, withReasonFiles } from './reason.mjs';
+import { bypassedSuffixes, commandGate, configExtraGates, GUARD_PREFIX_RE, reportCachedBypasses, structureBypassed, } from './command-gates.mjs';
 import { recheckLines, registryRecheck } from './recheck.mjs';
-import { COULD_NOT_RUN, DETERMINISTIC } from './registry.mjs';
+import { DETERMINISTIC } from './registry.mjs';
 import { reportFailures, reportOptedOut } from './report.mjs';
 import { canonicalIds, resolveSelection, reviewIds } from './selection.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -60,10 +60,39 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // the repo root); in the shipped dist it is compiled .mjs. Derive the runtime extension from THIS
 // module so the same literals resolve in both — string-literal paths are NOT rewritten by tsc emit.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
+// The suffix a STRICT run appends to a gate that opted out. Distinct from `(unexpected:2)`, which
+// stays reserved for a gate whose exit 2 was never an opt-out (an `--extra` command's fatal config
+// error): both are could-not-run for telemetry, but only this one is an opt-out we chose to reject.
+const COULD_NOT_RUN = '(could-not-run)';
 const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 // Rewrites a sibling gate module's `.mjs` literal to the runtime extension. Hoisted (perf: no
 // per-gate regex compile).
 const MJS_EXT_RE = /\.mjs$/;
+export function parseOpts(argv) {
+    const opts = { extra: [] };
+    for (let i = 0; i < argv.length; i++) {
+        if (argv[i] === '--hook' && argv[i + 1])
+            opts.hookPath = argv[++i];
+        else if (argv[i] === '--scope' && argv[i + 1])
+            opts.scope = argv[++i];
+        else if (argv[i] === '--structure' && argv[i + 1])
+            opts.structure = argv[++i];
+        else if (argv[i] === '--only' && argv[i + 1]) {
+            opts.only = argv[++i]
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean);
+        }
+        else if (argv[i] === '--extra' && argv[i + 1]) {
+            const v = argv[++i];
+            const eq = v.indexOf('=');
+            // A malformed --extra (no `=`) must BLOCK, not vanish: an unparseable gate spec means the
+            // hook intended a gate that will never run — fail closed like every other unexpected shape.
+            opts.extra.push(eq > 0 ? { label: v.slice(0, eq), cmd: v.slice(eq + 1) } : { label: v });
+        }
+    }
+    return opts;
+}
 export function prefixCacheScope(scope, effectiveIds) {
     const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
     const mergeBase = process.env.DEVKIT_REVIEW_MERGE_BASE;
@@ -105,13 +134,13 @@ export function prefixCacheScope(scope, effectiveIds) {
     const structureBase = structureBypassed()
         ? `${coverageBase ?? 'devkit-guards'}:structure-bypassed`
         : coverageBase;
-    // Same hazard once more, for devkit's own command gates. Sorted and joined so two runs that
+    // Same hazard once more, for the self-host `--extra` gates. Sorted and joined so two runs that
     // bypass the same set share a key regardless of the order the flags were exported in.
     const extraBypassed = bypassedSuffixes();
     const extraBase = extraBypassed.length
         ? `${structureBase ?? 'devkit-guards'}:${extraBypassed.join('+')}-bypassed`
         : structureBase;
-    // devkit's release-only-dist command gate judges the tree against the PR base and exempts only a
+    // The self-host release-only dist extra judges the tree against the PR base and exempts only a
     // release branch, so a tree's PASS under one base or branch must not authorize another.
     const prBase = process.env.DEVKIT_SHIP_PR_BASE_SHA;
     const prScope = prBase
@@ -120,6 +149,29 @@ export function prefixCacheScope(scope, effectiveIds) {
     // guard-structure judges edited-file debt against HEAD (the ship base), so a PASS is base-bound.
     const shipBase = process.env.DEVKIT_SHIP_BASE_SHA;
     return shipBase ? `${prScope ?? 'devkit-guards'}:ship-base:${shipBase}` : prScope;
+}
+// What execFileSync throws: `status` when the child exited, `signal` when one ended it, `code` when
+// the spawn itself failed (ENOENT, EACCES, EAGAIN).
+const spawnErrorSchema = z.object({
+    status: z.number().optional().catch(undefined),
+    signal: z.string().optional().catch(undefined),
+    code: z.string().optional().catch(undefined),
+});
+// Run one gate as a subprocess: its exit code (0 on success), or `killed:<SIG>` / `spawn-failed:<CODE>`
+// when it never reached one. stdio is inherited; the gate's failure reason returns via `reasonFile`.
+function runArgv(cwd, argv, exec, reasonFile) {
+    try {
+        exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit', env: gateEnv(reasonFile) });
+        return 0;
+    }
+    catch (e) {
+        const { status, signal, code } = spawnErrorSchema.safeParse(e).data ?? {};
+        if (status !== undefined)
+            return status;
+        if (signal)
+            return `killed:${signal}`;
+        return code ? `spawn-failed:${code}` : 1;
+    }
 }
 // A cache hit names the gates it did not re-run and every bypass; otherwise a structure bypass is loud.
 function narrateRun(plan) {
@@ -144,8 +196,9 @@ function registryGate(g, cwd, reviewMode) {
     return {
         id: g.id,
         label: `guard-${g.id}`,
+        argv,
         failOpen2: !('failOpen2' in g) || (g.failOpen2 === 'review' ? reviewMode : g.failOpen2 !== false),
-        ...crashGuarded(argv, 'rcLabels' in g ? g.rcLabels : undefined),
+        rcLabels: 'rcLabels' in g ? g.rcLabels : undefined,
         ...registryRecheck(g, argv, cwd),
     };
 }
@@ -157,15 +210,10 @@ function buildGates(plan) {
     const gates = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => registryGate(g, cwd, plan.reviewMode));
     if (skip)
         return gates;
-    for (const x of plan.extra.filter((g) => !g.afterGreen)) {
+    for (const x of plan.extra)
         gates.push(commandGate(x.label, cwd, x.cmd));
-    }
     if (plan.structure && !plan.bypassStructure) {
         gates.push(commandGate('structure-lint', cwd, plan.structure));
-    }
-    // afterGreen gates are slow, and their verdict on an already-red tree is discarded by the fix.
-    for (const x of plan.extra.filter((g) => g.afterGreen)) {
-        gates.push({ ...commandGate(x.label, cwd, x.cmd), afterGreen: true });
     }
     return gates;
 }
@@ -175,15 +223,10 @@ function recordFailure(out, gate, suffix = '', verdict = suffix === '', reason =
     out.failed.push({ gate: gate.label.replace(GUARD_PREFIX_RE, ''), verdict });
     out.rechecks.push(...recheckLines(`${gate.label}${suffix}`, gate));
 }
-function runGates(cwd, gates, exec, reviewMode) {
-    const out = { fails: [], failed: [], rechecks: [], skipped: [], notRun: [] };
-    const timeoutMs = gateTimeoutMs(cwd);
+function runGates(cwd, gates, exec) {
+    const out = { fails: [], failed: [], rechecks: [], skipped: [] };
     withReasonFiles((fileFor) => {
         gates.forEach((gate, i) => {
-            if (gate.afterGreen && out.fails.length > 0 && !reviewMode) {
-                out.notRun.push(gate.label);
-                return;
-            }
             if (gate.notRun)
                 console.log(`${gate.label}: ${gate.notRun}`);
             else if (!gate.argv) {
@@ -192,16 +235,7 @@ function runGates(cwd, gates, exec, reviewMode) {
             if (!gate.argv)
                 return;
             const reasonFile = fileFor(i);
-            const startedAt = Date.now();
-            console.log(`▶ deterministic: ${gate.label}`);
-            const rc = runArgv(cwd, gate.argv, exec, reasonFile, timeoutMs);
-            const [nFailed, nSkipped] = [out.failed.length, out.skipped.length];
-            // Its own outcome, not an exit code: no rcLabel, opt-out or strict rule applies to it.
-            if (rc === TIMED_OUT) {
-                recordFailure(out, gate, `(timed-out:${timeoutMs / 1000}s)`, false, timeoutReason(timeoutMs));
-                emitGateStep(gate.label, rc, startedAt, out.failed[nFailed], false);
-                return;
-            }
+            const rc = runArgv(cwd, gate.argv, exec, reasonFile);
             // Not an exit code, so no rcLabel, opt-out or strict rule applies: it blocks as could-not-run.
             if (typeof rc === 'string') {
                 const next = rc.startsWith('killed:')
@@ -210,30 +244,23 @@ function runGates(cwd, gates, exec, reviewMode) {
                 recordFailure(out, gate, `(${rc})`, false, [
                     `${rc}: the gate never reached a verdict, so this is not a code finding. ${next}`,
                 ]);
-                emitGateStep(gate.label, rc, startedAt, out.failed[nFailed], false);
                 return;
             }
             const failRc = (suffix = '') => recordFailure(out, gate, suffix, undefined, readGateReason(reasonFile));
             // failOpen2 belongs to the GATE (exit 2 = opt-out), strict to the RUN: so an `--extra`'s
             // fatal exit 2 (never an opt-out) stays `(unexpected:2)` under strict, not a skip.
-            // `finally`, so an early return added to this classification still records the gate's step.
-            try {
-                if (rc === 1)
-                    failRc();
-                else if (gate.rcLabels && Object.hasOwn(gate.rcLabels, rc))
-                    failRc(gate.rcLabels[rc]);
-                else if (rc === 2 && gate.failOpen2) {
-                    if (deterministicStrict())
-                        failRc(COULD_NOT_RUN);
-                    else
-                        out.skipped.push(gate.label);
-                }
-                else if (rc !== 0)
-                    failRc(`(unexpected:${rc})`);
+            if (rc === 1)
+                failRc();
+            else if (gate.rcLabels && Object.hasOwn(gate.rcLabels, rc))
+                failRc(gate.rcLabels[rc]);
+            else if (rc === 2 && gate.failOpen2) {
+                if (deterministicStrict())
+                    failRc(COULD_NOT_RUN);
+                else
+                    out.skipped.push(gate.label);
             }
-            finally {
-                emitGateStep(gate.label, rc, startedAt, out.failed[nFailed], out.skipped.length > nSkipped);
-            }
+            else if (rc !== 0)
+                failRc(`(unexpected:${rc})`);
         });
     });
     return out;
@@ -243,7 +270,7 @@ function runGates(cwd, gates, exec, reviewMode) {
 function finishRun(plan, startedAt, cache, gates, out) {
     const { skip, cachedPrefix } = plan;
     if (out.fails.length > 0) {
-        reportFailures(out.fails, out.failed, out.rechecks, out.notRun);
+        reportFailures(out.fails, out.failed, out.rechecks);
         return finishGateTiming('deterministic', startedAt, 1, skip ? 'partial' : 'none');
     }
     if (!skip) {
@@ -261,7 +288,7 @@ function finishRun(plan, startedAt, cache, gates, out) {
  */
 export function runDeterministic(cwd = process.cwd(), opts = {}) {
     const startedAt = Date.now();
-    const extra = extraGatesFor(opts.extra ?? [], cwd);
+    const extra = [...(opts.extra ?? []), ...configExtraGates(cwd)];
     const selection = resolveSelection(cwd, opts.only);
     if (!selection || reportOlderOverlayRunner(cwd))
         return finishGateTiming('deterministic', startedAt, 1, 'none');
@@ -290,7 +317,7 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
     };
     narrateRun(plan);
     const gates = buildGates(plan);
-    const out = runGates(cwd, gates, opts.exec ?? execFileSync, reviewMode);
+    const out = runGates(cwd, gates, opts.exec ?? execFileSync);
     // Before the failure report: a GREEN run names its opt-outs too, as does review's verdict line.
     reportOptedOut(out.skipped);
     return finishRun(plan, startedAt, { hookPath: opts.hookPath, scope: cacheScope }, gates, out);

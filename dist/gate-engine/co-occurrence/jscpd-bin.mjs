@@ -5,8 +5,7 @@
  * resolution the clone gate uses into the cache key — so "jscpd newly present / upgraded" invalidates
  * a prior PASS. This module is pure: no top-level config read, no process.cwd(), no side effects.
  */
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // devkit's own root (gate-engine/co-occurrence → ../.. → devkit root), for the bundled-jscpd probe.
@@ -34,20 +33,4 @@ export function resolveJscpdBin({ env, exists = existsSync, ownRoot, repoRoot, }
             resolve(repoRoot, 'node_modules', '.bin', 'jscpd'), // consumer's own (package mode)
         ].find((p) => exists(p)) ??
         JSCPD_PATH_TERMINAL);
-}
-/**
- * Null when `bin` is the jscpd version devkit pins, else the remedy line. Exact, because similarity
- * scores move between releases; throws when the binary cannot run at all.
- */
-export function jscpdVersionMismatch(bin, ownRoot = JSCPD_OWN_ROOT) {
-    const pkg = JSON.parse(readFileSync(resolve(ownRoot, 'package.json'), 'utf8'));
-    const want = pkg.optionalDependencies.jscpd;
-    const out = execFileSync(bin, ['--version'], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    const got = out.trim().split(/\s+/).at(-1);
-    if (got === want)
-        return null;
-    return `devkit expects jscpd ${want} but ${bin} reports ${got || 'no version'}: reinstall devkit, or upgrade or remove a stray global jscpd.`;
 }

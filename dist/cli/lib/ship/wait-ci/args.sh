@@ -8,8 +8,6 @@ SHIP_WAIT_CI_MIN_S=60
 SHIP_WAIT_CI_MAX_S=7200
 # The caller's exit after the wait: 0, or under WAIT_CI_STRICT=1 a 5 (not passed) or a signal status.
 WAIT_CI_STATUS=0
-# Sized to cover a ~55-minute CI run, devkit's own gate workflow included.
-SHIP_WAIT_CI_DEFAULT_S=3600
 
 # ship_validate_wait_ci <wait-ci> <timeout> <timeout-was-set> <required> [<dry-gates>]
 ship_validate_wait_ci() {

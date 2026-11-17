@@ -14,8 +14,7 @@ import { normalizeReviewRoots } from '../../skills/_devkit/review-roots.mjs';
 import { devkitVersion } from '../devkit-version.mjs';
 import { JUDGE_READ_TOOLS, LIGHT_JUDGE_MODEL } from '../judge/judge-isolation.mjs';
 import { withNamedAgentMcpTools } from '../judge/mcp/profile.mjs';
-import { PASS_ADVISORY_RULE } from './contracts/response.mjs';
-import { checklistContractFor, gateBrief, scriptCommand } from './lens/split.mjs';
+import { checklistContractFor } from './lens/split.mjs';
 import { reviewerFilesAcrossPolicies } from './scope/policy.mjs';
 export { declaredRoots, rootsFor, underRoot } from './scope/policy.mjs';
 export { parseReviewVerdict } from './contracts/response.mjs';
@@ -181,19 +180,19 @@ export function resolveEscalationModel(cfg) {
     return envModel('GUARD_REVIEW_ESCALATION_MODEL') ?? cfg.review.escalationModel;
 }
 /** Comma-joined --allowedTools for one reviewer: the read-only base, its exact-path checklist
- *  script, the consumer's search tool where wired (commit-guard also gets the read-only
- *  `guard-dup-allowlist check:*`), and named-agent MCP tools. */
+ *  script, the consumer's search tool where wired, and named-agent MCP tools. */
 export function allowedToolsFor(reviewer, cfg, assetRoot = '.claude') {
     // A claude judge cannot write, stage, or commit. A codex judge's shell is confined to a scratch cwd
     // plus `.claude/`: tamper detection catches staged-tree writes; only instruction holds execution.
     // A skill-less reviewer has no checklist script; its evidence is pre-rendered onto stdin/prompt.
     if (!hasChecklist(reviewer))
         return withNamedAgentMcpTools(JUDGE_READ_TOOLS);
-    const tools = `${JUDGE_READ_TOOLS},Bash(${scriptCommand(checklistScriptAt(reviewer, assetRoot))}:*)`;
+    const tools = `${JUDGE_READ_TOOLS},Bash(node ${checklistScriptAt(reviewer, assetRoot)}:*)`;
     if (reviewer.domain === 'code')
-        return withNamedAgentMcpTools(`${tools},Bash(guard-dup-allowlist check:*)`, cfg.searchTool);
-    // The correctness reviewer gets semantic search only when the consumer wired an index
-    // (indexPath set): else cfg.searchTool names an MCP tool the judge lacks, and Grep is the mechanism.
+        return withNamedAgentMcpTools(tools, cfg.searchTool);
+    // The correctness reviewer's writer/reader-contract lens benefits from semantic search, but
+    // only when the consumer actually wired an index (indexPath set) — otherwise cfg.searchTool is
+    // a generic default naming an MCP tool the judge doesn't have, and Grep is the core mechanism.
     if (reviewer.domain === 'all' && cfg.indexPath)
         return withNamedAgentMcpTools(tools, cfg.searchTool);
     return withNamedAgentMcpTools(tools);
@@ -219,8 +218,10 @@ export function loadAgentSource(mdPath) {
  * postamble pins the machine-parseable verdict line.
  */
 export function wrapPrompt(agentBody, reviewer, files, assetRoot, checklistRecoveryReason, { targetsBlock = '', commitMsgBlock = '', alsoStagedBlock = '' } = {}, checklistRoot = assetRoot ?? '.claude') {
-    const script = checklistScriptAt(reviewer, checklistRoot);
-    const brief = gateBrief(stripFrontmatter(agentBody), script);
+    const effectiveAssetRoot = checklistRoot;
+    const skillPrefix = `${effectiveAssetRoot.replace(TRAILING_SLASH_RE, '')}/skills/`;
+    const brief = ['.agents/skills/', '.claude/skills/', '.cursor/skills/'].reduce((body, providerPrefix) => body.replaceAll(providerPrefix, skillPrefix), stripFrontmatter(agentBody));
+    const script = checklistScriptAt(reviewer, effectiveAssetRoot);
     const checklistContract = checklistContractFor(reviewer, script, assetRoot);
     return ('You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
         `Review ONLY the STAGED changes (domain: ${reviewer.domain}). Staged files in scope: ${files.join(', ')}.\n` +
@@ -253,7 +254,8 @@ export function wrapPrompt(agentBody, reviewer, files, assetRoot, checklistRecov
         'Judge ONLY the staged diff; pre-existing issues in code this commit does not touch are not ' +
         'findings. List findings (file:line, one line each), then END with exactly one line:\n' +
         'VERDICT: PASS | FAIL — <one-line reason>\n' +
-        PASS_ADVISORY_RULE);
+        'FAIL only for a finding that must block THIS commit. A non-blocking finding to resolve ' +
+        'before merge goes on its own line before the verdict: ADVISORY: <file:line> — <finding>');
 }
 /** Checklist-free counterpart to `wrapPrompt`: pre-capped evidence rides on stdin, and the judge reads
  *  a capped file or rule itself without changing verdict or override-fingerprint contracts. */
@@ -285,6 +287,17 @@ export function wrapConventionsPrompt(agentBody, files, claudeMdBlock, { commitM
         'one line:\n' +
         'VERDICT: PASS | FAIL — <one-line reason>\n' +
         'FAIL only for a clear, quotable violation that must block THIS commit.');
+}
+/** Escalation prompt: the escalation model independently re-verifies a first-pass FAIL
+ * (check-alignment shape). */
+export function escalatePrompt(wrappedPrompt, firstPass) {
+    return (`${wrappedPrompt}\n\n` +
+        'A first-pass reviewer judged FAIL. Its full notes:\n' +
+        '─────\n' +
+        `${firstPass}\n` +
+        '─────\n' +
+        'Independently verify its evidence with your own investigation — confirm or overturn. ' +
+        'Your verdict is final; a FAIL blocks the commit.');
 }
 /**
  * Cache key for a PASS verdict: reviewer identity + devkit version + the exact bytes of its staged

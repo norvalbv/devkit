@@ -5,7 +5,7 @@
  */
 import { resolveGuardConfig } from '../../config.mjs';
 import { diffCacheIdentity } from '../../judge/diff-focus.mjs';
-import { chunkDiffText, chunkFilesSha, chunkPlanHash, identityBytesByPath, packDiffIntoChunks, } from './chunk.mjs';
+import { chunkDiffText, chunkFilesSha, chunkPlanHash, identityBytesByPath, packDiffIntoChunks, unquoteGitPath, } from './chunk.mjs';
 import { deriveLensReviewer, lensGroupId } from './groups.mjs';
 /**
  * The correctness chunk cap in LOC, or null when chunking is off. Resolution: the env var wins
@@ -77,8 +77,10 @@ export function planChunkedParts(sel, diffText, wholeIdText, salt, keyOf, groups
         const sub = chunkDiffText(diffText, files);
         const subId = diffCacheIdentity(sub);
         let chunkBytes = 0;
+        // Same unquote fallback as packDiffIntoChunks: a git-quoted staged name misses the raw key
+        // and would zero this chunk's telemetry bytes.
         for (const f of files)
-            chunkBytes += packed.bytesByPath.get(f) ?? 0;
+            chunkBytes += packed.bytesByPath.get(f) ?? packed.bytesByPath.get(unquoteGitPath(f)) ?? 0;
         planEntries.push({ index, files_sha: filesSha, file_count: files.length, bytes: chunkBytes });
         const chunk = {
             index,

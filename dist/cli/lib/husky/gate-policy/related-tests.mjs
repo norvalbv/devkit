@@ -3,13 +3,9 @@
  * commit's staged paths (its argv, from extraGates' `{staged}`), so a broken test blocks early.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { realpathSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { runVitestDetailed } from '../../../../gate-engine/coverage/vitest-cli.mjs';
-import { displayPath, readDiagnosis, RESULTS_NAME, UNHANDLED_REPORTER, } from '../../../../gate-engine/coverage/failures.mjs';
-import { GATE_REASON_ENV, writeGateReason } from '../../../../gate-engine/deterministic/reason.mjs';
 import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mjs';
 // Runs with every selection: it fails when a module is left unreachable to `vitest related` itself.
 const REACH_TEST = 'cli/__tests__/test-graph-reach.test.mts';
@@ -21,18 +17,13 @@ const SCRUB_INPUT_RE = /^cli\/lib\/ship\/[^/]+\.sh$|^vitest\.setup\.mjs$|^vitest
 export function forcedTests(staged) {
     return [...staged].some((p) => SCRUB_INPUT_RE.test(p)) ? [SCRUB_TEST] : [];
 }
-import { errorMessage } from '../../ship/review/shared/common.mjs';
 // vitest's forceRerunTriggers (**/package.json, **/{vitest,vite}.config.*, setupFiles) select the
 // whole suite, which CI already runs.
 const RERUN_TRIGGER_RE = /(^|\/)(package\.json|(vitest|vite)\.config\.[^/]*)$|^vitest\.setup\.mjs$/;
-/** Failing tests named in the reason; the rest stay in vitest's own output above it. */
-const NAMED_TESTS = 5;
-/** The staged paths the related-test listing starts from, sorted, minus the full-suite triggers. */
+/** The staged paths handed to `vitest related`, sorted, minus the full-suite triggers. */
 export function relatedPaths(staged) {
     return [...staged].filter((p) => !RERUN_TRIGGER_RE.test(p)).sort();
 }
-// Source modules whose reachability the reach test guards.
-const SOURCE_RE = /\.[cm]?[jt]sx?$/;
 // Extensions vite can hold in its module graph; any other staged path never selects a test.
 const MODULE_RE = /\.[cm]?[jt]sx?$|\.json$/;
 /** Staged paths `vitest related` cannot map to a test, such as shell scripts and templates. */
@@ -104,124 +95,29 @@ export function noteUnmapped(root, paths, grep = gitGrepTests) {
         // Disclosure only: a failed lookup never changes the gate's verdict.
     }
 }
-/** The test files `vitest related` would select, resolved in-process so no queued vitest CLI starts. */
-export async function listRelated(root, paths) {
-    const { createVitest } = await import('vitest/node');
-    const related = paths.map((p) => join(root, p));
-    const ctx = await createVitest({ root, related, watch: false, run: true });
-    try {
-        const specs = await ctx.getRelevantTestSpecifications();
-        return [...new Set(specs.map((s) => s.moduleId))].sort();
-    }
-    finally {
-        await ctx.close();
-    }
-}
-/** Why a failed run blocked: the failing tests by file and title, or why vitest never reported. */
-export function relatedTestsReason(result, diagnosis, root) {
-    if (result.error || result.status === null) {
-        const why = result.error?.message ?? 'it was killed before exiting';
-        return [`related-tests could not run vitest: ${why}`];
-    }
-    if (!diagnosis) {
-        return [
-            `vitest exited ${result.status} without a test report — its output is in the full log above`,
-        ];
-    }
-    if (diagnosis.unhandled) {
-        return [
-            'No test failed; the run ended on:',
-            ...diagnosis.unhandled.map((e) => e.file ? `${displayPath(e.file, root)}: ${e.message}` : e.message),
-        ];
-    }
-    const named = [
-        ...(diagnosis.failures?.tests ?? []).map((t) => `${displayPath(t.file, root)} > ${t.name}`),
-        ...(diagnosis.collection ?? []).map((c) => `${displayPath(c.file, root)} — failed to load: ${c.message.split('\n')[0]}`),
-    ];
-    const hidden = named.length - NAMED_TESTS;
-    return [
-        `${diagnosis.failedFiles.length} test file(s) failed:`,
-        ...named.slice(0, NAMED_TESTS),
-        ...(hidden > 0 ? [`(${hidden} more in the full log above)`] : []),
-    ];
-}
-/** A private directory for vitest's json report; '' when none can be made, and the run goes unnarrated. */
-function reportDir() {
-    try {
-        return mkdtempSync(join(tmpdir(), 'devkit-related-tests-'));
-    }
-    catch {
-        return '';
-    }
-}
-/** Record the failure reason. Narration only: nothing here may throw into the verdict. */
-function narrate(result, report, root) {
-    try {
-        const diagnosis = report ? readDiagnosis(report, result.status ?? 1) : null;
-        writeGateReason(relatedTestsReason(result, diagnosis, root));
-    }
-    catch {
-        // The exit code already carries the verdict.
-    }
-}
-// Grouped, so a signal to this gate also ends vitest's fork workers rather than orphaning them.
-const runGrouped = (bin, args, cwd, env) => runVitestDetailed(bin, args, cwd, env, { group: true });
-/** The related-tests run: code 0 when nothing is selected, vitest's outcome otherwise. */
-export async function runRelatedTests(root, opts) {
+/** Exit code of the related-tests run: 0 when nothing is selected, vitest's status otherwise. */
+export function runRelatedTests(root, opts) {
     const staged = [...opts.staged];
     const paths = relatedPaths(staged);
     // From the raw set: relatedPaths drops vitest.setup.mjs, which the env-scrub test binds.
     const forced = forcedTests(staged);
     if (!paths.length && !forced.length) {
         console.log('related-tests: none selected');
-        return { code: 0, interrupted: false };
+        return 0;
     }
-    let files = [];
-    try {
-        if (paths.length)
-            files = await (opts.list ?? listRelated)(root, paths);
-    }
-    catch (err) {
-        console.error(`✗ related-tests could not list related tests: ${errorMessage(err)}`);
-        return { code: 1, interrupted: false };
-    }
-    // The reach test only answers for source modules, so a config-only commit skips the queue.
-    if (!files.length && !forced.length && !paths.some((p) => SOURCE_RE.test(p))) {
-        console.log(`related-tests: no test relates to the ${paths.length} staged path(s)`);
-        return { code: 0, interrupted: false };
-    }
-    // listRelated returns absolute paths, so absolutise the rest for the set to dedupe.
-    const tests = [...new Set([...files, ...[...forced, REACH_TEST].map((t) => join(root, t))])];
-    console.log(`related-tests: ${tests.length} test file(s) for ${paths.length} staged path(s)${forced.length ? `, ${forced.length} forced` : ''}`);
+    console.log(`related-tests: ${paths.length} staged path(s)${forced.length ? `, ${forced.length} forced` : ''}`);
     const vitest = join(root, 'node_modules', '.bin', 'vitest');
-    const dir = reportDir();
-    const report = dir && join(dir, RESULTS_NAME);
-    const reporters = report
-        ? ['--reporter=json', `--outputFile.json=${report}`, `--reporter=${UNHANDLED_REPORTER}`]
-        : [];
-    // A passing ship or reviewer test's console output would echo the ship's own progress lines.
-    const args = ['run', '--reporter=dot', '--silent=passed-only', ...reporters, ...tests];
-    // A test that drives gate code must not write into this gate's own reason file.
-    const env = { ...process.env };
-    delete env[GATE_REASON_ENV];
-    try {
-        const run = await (opts.exec ?? runGrouped)(vitest, args, root, env);
-        // A signalled gate blocks, even when vitest still exits 0 after the forwarded signal.
-        const code = run.interrupted && run.code === 0 ? 1 : run.code;
-        // A null status reads as "killed before exiting" in the reason.
-        if (code !== 0)
-            narrate({ status: run.interrupted ? null : code }, report, root);
-        return { ...run, code };
-    }
-    finally {
-        try {
-            if (dir)
-                rmSync(dir, { recursive: true, force: true });
-        }
-        catch {
-            // A leftover temp dir never outranks the verdict.
-        }
-    }
+    const args = [
+        'related',
+        '--run',
+        '--reporter=dot',
+        ...new Set([...paths, ...forced, REACH_TEST]),
+    ];
+    const result = (opts.exec ?? spawnSync)(vitest, args, { cwd: root, stdio: 'inherit' });
+    if (result.error)
+        console.error(`✗ related-tests could not run vitest: ${result.error.message}`);
+    // A null status is a signal kill or a failed spawn: nothing passed, so block.
+    return result.status ?? 1;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     const staged = process.argv.slice(2);
@@ -231,10 +127,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
         process.exitCode = 1;
     }
     else {
-        const run = await runRelatedTests(process.cwd(), { staged });
+        process.exitCode = runRelatedTests(process.cwd(), { staged });
         // The raw set, not relatedPaths: a staged vitest.setup.mjs must still mark its forced test as run.
-        if (!run.interrupted)
-            noteUnmapped(process.cwd(), staged);
-        process.exitCode = run.code;
+        noteUnmapped(process.cwd(), staged);
     }
 }

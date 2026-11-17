@@ -244,9 +244,7 @@ describe('deterministic gate cost against the staged-set size', () => {
   it('runs the linked decision Check on an in-scope fixture, so its due path is measured', () => {
     const gate = MEASURED.find((g) => g.id === 'decision-checks');
     if (!gate) throw new Error('decision-checks is no longer a measured registry gate');
-    expect(runGate(stagedRepo('rename-in-scope', 1), gate, {})).toContain(
-      'decision-checks: demo',
-    );
+    expect(runGate(stagedRepo('rename-in-scope', 1), gate, {})).toContain('decision-checks: demo');
   });
 
   it.each(['delete-out-of-scope', 'rename-out-of-scope', 'modify-out-of-scope'] as const)(
@@ -259,7 +257,8 @@ describe('deterministic gate cost against the staged-set size', () => {
       // reads every renamed or edited file once. comments takes one whole-set patch diff, which
       // reads each renamed or edited blob once.
       if (change !== 'delete-out-of-scope') {
-        for (const id of ['whitespace', 'anti-slop', 'comments']) expected[id] = { starts: 0, blobs: 1 };
+        for (const id of ['whitespace', 'anti-slop', 'comments'])
+          expected[id] = { starts: 0, blobs: 1 };
       }
       expect(slopes(change)).toEqual(expected);
     },

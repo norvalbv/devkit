@@ -12,11 +12,10 @@ import { spawnSync } from 'node:child_process';
 const PROCESS_TABLE_MAX_BYTES = 16 * 1024 * 1024;
 const PROCESS_LINE_PATTERN = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+\S+\s+(.+?)\s*$/;
 const PROCESS_PID_PATTERN = /^\s*(\d+)/;
-export function processTableOutput(args, timeout) {
+function processTableOutput(args) {
     const result = spawnSync('/bin/ps', args, {
         encoding: 'utf8',
         maxBuffer: PROCESS_TABLE_MAX_BYTES,
-        timeout,
     });
     if (result.error)
         throw new Error('could not inspect the gate process tree', { cause: result.error });

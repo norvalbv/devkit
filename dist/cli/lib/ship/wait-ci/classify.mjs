@@ -16,15 +16,14 @@ export function classifyChecksFailure(e) {
     // an empty check set — an answer — not a failure to reach gh.
     if (/no (required )?checks reported/i.test(stderr))
         return { kind: 'rows', rows: [] };
-    // Before the auth test: gh echoes the branch, and a branch name may contain "authentication".
-    if (/could not resolve to a pullrequest|no pull requests found/i.test(stderr))
-        return { kind: 'unavailable', reason: 'pr-not-found', message: msg };
     if (/gh auth login|authentication|not logged/i.test(stderr))
         return {
             kind: 'unavailable',
             reason: 'gh-unauthenticated',
             message: `gh is not authenticated: ${msg}`,
         };
+    if (/could not resolve to a pullrequest|no pull requests found/i.test(stderr))
+        return { kind: 'unavailable', reason: 'pr-not-found', message: msg };
     if (/no git remotes|not a git repository|could not determine|none of the git remotes/i.test(stderr))
         return {
             kind: 'unavailable',

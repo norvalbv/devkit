@@ -4,13 +4,9 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { CONFIG_FILENAME } from '../../../gate-engine/config.mjs';
 const argv = z.array(z.string().min(1)).min(1);
-export const DEVTOOLS_NEEDS_LIGHT = '"devtools" needs light mode: it attaches to an app on this Mac, and a full machine\'s page is its own desktop browser';
-const machineRecipe = z.strictObject({
+const machineSchema = z.strictObject({
     /** light: a headless browser slot on this Mac; full: a desktop computer per agent in a container. */
     mode: z.enum(['light', 'full']).default('light'),
-    /** The app serves Chrome DevTools on its slot port (Electron started with
-     * --remote-debugging-port={port}), so a flow drives and records the app's own window. */
-    devtools: z.boolean().optional(),
     command: argv.optional(),
     seed: argv.optional(),
     env: z
@@ -18,9 +14,6 @@ const machineRecipe = z.strictObject({
         error: 'guard.config.json may be committed, so it holds no env: set app variables in the argv (["env", "K={data}/x", "next", "dev"]) and keep secrets in your own environment',
     })
         .optional(),
-});
-const machineSchema = machineRecipe.refine((recipe) => !(recipe.devtools && recipe.mode === 'full'), {
-    error: DEVTOOLS_NEEDS_LIGHT,
 });
 const fileSchema = z.object({ machine: z.unknown().optional() });
 /** The recipe at `root`; an absent file or key is an empty recipe, a malformed one throws. */

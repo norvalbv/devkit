@@ -237,7 +237,6 @@ export function serverFilesSeenOnlyByFrontend(
   });
 }
 
-
 // devkit's synced agent assets and build output: every template's review.paths.exclude carries these.
 export const SYNCED_ASSET_EXCLUDES = [
   '.agents/**',

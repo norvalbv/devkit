@@ -237,7 +237,8 @@ export async function publish(args: PublishArgs): Promise<Published | null> {
     return { ...nothing, publish: 'head-moved' };
   }
   const current = readEvidenceBlock(pull.body, head);
-  const redo = args.recapture === true && current?.stale === false && current.status === 'inconclusive';
+  const redo =
+    args.recapture === true && current?.stale === false && current.status === 'inconclusive';
   if (current?.stale === false && !redo) {
     const hint =
       current.status === 'inconclusive' ? `; re-capture it with devkit pr-evidence ${pr}` : '';
@@ -396,7 +397,9 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
   if (command !== 'publish')
-    throw new Error('usage: run.mts budget <dir> | publish … | publish-media … | notes … | body … | ui-item …');
+    throw new Error(
+      'usage: run.mts budget <dir> | publish … | publish-media … | notes … | body … | ui-item …',
+    );
   // The step's start, from the shell, so a fallback run after a killed one times the whole step.
   const started = Number(values.started) * 1000;
   const run = {

@@ -20,11 +20,7 @@ function pkgWith(files: string[], builtIndex = REGISTERS_EVERY_RULE): string {
 }
 
 const SOURCE = ['anti-slop/UPSTREAM.md', 'anti-slop/src/index.ts', 'anti-slop/src/rules/a.ts'];
-const BUILT = [
-  'dist/anti-slop/UPSTREAM.md',
-  BUILT_INDEX,
-  'dist/anti-slop/src/rules/a.js',
-];
+const BUILT = ['dist/anti-slop/UPSTREAM.md', BUILT_INDEX, 'dist/anti-slop/src/rules/a.js'];
 
 afterEach(() => {
   for (const pkg of roots.splice(0)) rmSync(pkg, { recursive: true, force: true });

@@ -258,7 +258,13 @@ function runGates(
       const [nFailed, nSkipped] = [out.failed.length, out.skipped.length];
       // Its own outcome, not an exit code: no rcLabel, opt-out or strict rule applies to it.
       if (rc === TIMED_OUT) {
-        recordFailure(out, gate, `(timed-out:${timeoutMs / 1000}s)`, false, timeoutReason(timeoutMs));
+        recordFailure(
+          out,
+          gate,
+          `(timed-out:${timeoutMs / 1000}s)`,
+          false,
+          timeoutReason(timeoutMs),
+        );
         emitGateStep(gate.label, rc, startedAt, out.failed[nFailed], false);
         return;
       }

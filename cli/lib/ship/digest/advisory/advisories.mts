@@ -5,8 +5,14 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { telemetrySink } from '../../../../../gate-engine/judge/run-context.mts';
-import { OUTPUT_HEADER, readTranscript } from '../../../../../gate-engine/judge/transcript-store.mts';
-import { issueLocations, parseAdvisories } from '../../../../../gate-engine/review/contracts/response.mts';
+import {
+  OUTPUT_HEADER,
+  readTranscript,
+} from '../../../../../gate-engine/judge/transcript-store.mts';
+import {
+  issueLocations,
+  parseAdvisories,
+} from '../../../../../gate-engine/review/contracts/response.mts';
 import { scanBackward } from '../tail.mts';
 import {
   type Attempt,

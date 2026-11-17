@@ -1,5 +1,4 @@
 /** The `ship_ci` telemetry row `wait.mts` appends after its verdict line. */
-import { devkitVersion } from '../../../../gate-engine/devkit-version.mjs';
 import { appendShipRow } from '../telemetry/row.mjs';
 /**
  * The queryable half of the verdict, beside ship_pr on the same JSONL stream. Best-effort: telemetry
@@ -13,7 +12,7 @@ export function recordCiEvent(result, pr, env = process.env) {
     const row = {
         type: 'ship_ci',
         ship_id: shipId,
-        devkit_version: devkitVersion(),
+        devkit_version: env.DEVKIT_TELEMETRY_VERSION ?? null,
         pr_number: /^\d+$/.test(pr) ? Number(pr) : null,
         outcome: result.outcome,
         failing: result.failures.map((f) => f.name),

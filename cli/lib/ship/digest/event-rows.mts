@@ -1,6 +1,11 @@
 // One module-scope classifier per gate event type, so summarise() only dispatches and attributes.
 import { blockingFindings, judgeFinding } from './blocking.mts';
-import { baseDriftDetail, earlierDiffDetail, partialPacket, partialPacketDetail } from './cache-detail.mts';
+import {
+  baseDriftDetail,
+  earlierDiffDetail,
+  partialPacket,
+  partialPacketDetail,
+} from './cache-detail.mts';
 import { oneLine, textOf } from './fields.mts';
 import type { DigestRow, GateEvent } from './gate-digest.mts';
 import { SKIP_CONTROLS } from './skip-controls.mts';

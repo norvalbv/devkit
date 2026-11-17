@@ -165,13 +165,12 @@ const MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const FUTURE_SKEW_MS = 5 * 60 * 1000;
 /** Two-sided replay window, and canonical ISO only: the round-trip refuses rollover dates
  * (2026-02-30 parses as March 2), since the writer never emits one. */
-export function recordStampAge(createdAt, nowMs) {
+export function freshRecordStamp(createdAt, nowMs) {
     const created = Date.parse(createdAt);
-    if (!Number.isFinite(created) || new Date(created).toISOString() !== createdAt)
-        return 'misdated';
-    if (created - nowMs > FUTURE_SKEW_MS)
-        return 'misdated';
-    return nowMs - created <= MAX_AGE_MS ? 'fresh' : 'stale';
+    return (Number.isFinite(created) &&
+        new Date(created).toISOString() === createdAt &&
+        nowMs - created <= MAX_AGE_MS &&
+        created - nowMs <= FUTURE_SKEW_MS);
 }
 /** An absolute, non-stream (/dev, /proc) path free of line-breaking characters, else undefined —
  * dropped, never refused. Writers resolve it from the invoker's cwd (ship scripts never cd). */
@@ -183,9 +182,9 @@ export function advisoryBodyFile(v) {
         return undefined;
     return p;
 }
-/** Warn when the recorded body no longer matches its `--body-file`: an early line, and a tail for
- * the PR URL. Never re-reads the file into the body (the completeness PASS keys on exact bytes). */
-export function bodyDrift(intent) {
+/** sc-2527: warn when the recorded body no longer matches its `--body-file`. Never re-reads the
+ * file into the body (the completeness PASS keys on exact bytes); every unknown is silence. */
+export function bodyDriftWarning(intent) {
     if (!intent.bodyFile)
         return null;
     let onDisk;
@@ -208,32 +207,21 @@ export function bodyDrift(intent) {
     const recorded = Buffer.from(intent.bodyB64, 'base64');
     if (recorded.equals(onDisk))
         return null;
-    const file = shQuote(intent.bodyFile);
-    const refresh = `devkit ship --resume ${shQuote(intent.branch)} --body-file ${file}`;
-    // The intent is spent once the PR URL prints; a no-delta --pr run swaps only the description and
-    // keeps ship's evidence block. --base on --pr means a rewrite, so it is never carried.
-    const sync = [intent.branch, intent.title, '--body-file', intent.bodyFile, '--', ...intent.paths];
-    return {
-        warning: `ship: ${intent.bodyFile} changed since this invocation was recorded ` +
-            `(${recorded.length} bytes recorded, ${onDisk.length} on disk) — replaying the RECORDED body. ` +
-            (intent.mode === 'reship'
-                ? 'Using the file also rewrites the PR description: '
-                : 'To use the file: ') +
-            refresh,
-        tail: `ship: the PR description is the RECORDED body (${recorded.length} bytes), not ${file} ` +
-            `(${onDisk.length} bytes when this run started). To publish the file without a new commit, ` +
-            `run while those paths are unchanged: devkit ship --pr ${sync.map(shQuote).join(' ')}`,
-    };
+    const refresh = `devkit ship --resume ${shQuote(intent.branch)} --body-file ${shQuote(intent.bodyFile)}`;
+    return (`ship: ${intent.bodyFile} changed since this invocation was recorded ` +
+        `(${recorded.length} bytes recorded, ${onDisk.length} on disk) — replaying the RECORDED body. ` +
+        (intent.mode === 'reship'
+            ? 'Using the file also rewrites the PR description: '
+            : 'To use the file: ') +
+        refresh);
 }
-/** `ship-intent body-drift`: the early line on stderr, the PR-URL tail on stdout; exit 0 always.
- * Pinned to the generation the resume replays — a newer record holds some other attempt's body. */
+/** `ship-intent body-drift`: print the drift line, if any; exit 0 always. Pinned to the generation
+ * the resume replays — a record replaced since then holds some other attempt's body. */
 export function reportBodyDrift(result, generation) {
     const replayed = 'intent' in result && result.intent.generation === generation;
-    const drift = replayed ? bodyDrift(result.intent) : null;
-    if (drift) {
-        console.error(drift.warning);
-        console.log(drift.tail);
-    }
+    const warning = replayed ? bodyDriftWarning(result.intent) : null;
+    if (warning)
+        console.error(warning);
     return 0;
 }
 /** Emit the NUL-delimited field order consumed by the Bash resume readers. */

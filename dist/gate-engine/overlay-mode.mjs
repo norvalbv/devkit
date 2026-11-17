@@ -14,18 +14,14 @@ export function overlayConfigured(root) {
     const config = JSON.parse(readFileSync(join(root, '.devkit/config.json'), 'utf8'));
     return config.overlay === true;
 }
-/** The root's own overlay flag; undefined only when this checkout has no config.json at all. Any
- * other failure throws: guessing "not overlay" would let a gate rewrite a shared baseline. */
+/** The root's own overlay flag; undefined only when this checkout has no config.json at all. */
 function configuredOverlay(root) {
     try {
         return overlayConfigured(root);
     }
     catch (error) {
         // SAFETY: Node filesystem failures carry ErrnoException.code; a parse error carries none.
-        const { code } = error;
-        if (code === 'ENOENT' || code === 'ENOTDIR')
-            return undefined; // ENOTDIR: `.devkit` is a file
-        throw new Error(`${join(root, '.devkit/config.json')} could not be read (${String(error)}): devkit cannot tell whether this is an overlay install, so no baseline was changed. Repair or restore the file by hand.`, { cause: error });
+        return error.code === 'ENOENT' ? undefined : false;
     }
 }
 export function overlayInstall(root) {

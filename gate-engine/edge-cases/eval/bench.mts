@@ -27,21 +27,8 @@ import { execJudgeAsync } from '../../judge/run-judge.mts';
 import { readCases } from './counts.mts';
 import { anchorFilesOf, matchFindings, overlapCount } from './lib/match.mts';
 import { CATEGORIES, sha8 } from './lib/schema.mts';
-import {
-  betaSamplerGrid,
-  clopperPearson,
-  mean,
-  mulberry32,
-  sd,
-} from './lib/stats.mts';
-import {
-  ARMS,
-  buildJudgeInput,
-  FOOTER,
-  PROMPT_SHAS,
-  systemAppend,
-  WRAPPERS,
-} from './prompts.mts';
+import { betaSamplerGrid, clopperPearson, mean, mulberry32, sd } from './lib/stats.mts';
+import { ARMS, buildJudgeInput, FOOTER, PROMPT_SHAS, systemAppend, WRAPPERS } from './prompts.mts';
 
 isolateBenchTelemetry();
 export const here = path.dirname(fileURLToPath(import.meta.url));

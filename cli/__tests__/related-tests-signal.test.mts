@@ -101,6 +101,8 @@ describe('related-tests gate run to completion in its own process group', () => 
       encoding: 'utf8',
     });
     expect(r.status).toBe(code);
-    expect(r.stdout).toContain('related-tests: 1 test file(s) for 1 staged path(s)\nfake vitest ran\n');
+    expect(r.stdout).toContain(
+      'related-tests: 1 test file(s) for 1 staged path(s)\nfake vitest ran\n',
+    );
   });
 });

@@ -3,10 +3,9 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync, } from 'node:fs';
 import { join } from 'node:path';
-import { isProcessId, processOwnerIsProvablyGone, processStartIdentity } from './identity.mjs';
+import { processOwnerIsProvablyGone, processStartIdentity } from './identity.mjs';
 const WAIT_MS = 5_000;
 const RETRY_MS = 10;
-const LEGACY_HOLDER = 'holder'; // the `pid:uuid` stamp file an older devkit's mkdir lock wrote
 const REAP_EVERY_MS = 250; // a liveness check can fork `ps`, so a contended wait does not run one per retry
 /** A contended lock that stayed held past the wait. `holderPid` is null when no holder was readable. */
 export class LockHeldError extends Error {
@@ -32,13 +31,7 @@ function readHolder(dir) {
         const [nonce] = readdirSync(dir);
         if (!nonce)
             return undefined;
-        const text = readFileSync(join(dir, nonce), 'utf8');
-        // A legacy stamp carries no start identity, so only a dead pid can ever prove it gone.
-        if (nonce === LEGACY_HOLDER) {
-            const legacyPid = Number(text.split(':')[0]);
-            return isProcessId(legacyPid) ? { nonce, pid: legacyPid, identity: 'legacy' } : undefined;
-        }
-        const [pid, identity] = text.split('\n');
+        const [pid, identity] = readFileSync(join(dir, nonce), 'utf8').split('\n');
         return Number.isSafeInteger(Number(pid)) && identity
             ? { nonce, pid: Number(pid), identity }
             : undefined;
@@ -123,23 +116,6 @@ export function acquireProcessLock(dir, { label, waitMs = WAIT_MS, isGone = proc
     }
     return attempt.nonce;
 }
-/** acquireProcessLock with timer retries, so an awaiting caller keeps the event loop free. */
-async function acquireProcessLockAsync(dir, { label, waitMs = WAIT_MS, isGone = processOwnerIsProvablyGone, owner }) {
-    const attempt = {
-        nonce: randomUUID(),
-        owner: owner ?? { pid: process.pid, identity: ownIdentity() },
-    };
-    const deadline = Date.now() + waitMs;
-    let reapedAt = Number.NEGATIVE_INFINITY;
-    for (let step = poll(dir, attempt, isGone, reapedAt); step !== 'taken';) {
-        reapedAt = step;
-        if (Date.now() > deadline)
-            throw heldError(dir, label);
-        await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
-        step = poll(dir, attempt, isGone, reapedAt);
-    }
-    return attempt.nonce;
-}
 /** Release only the acquisition `nonce` names; a lock re-taken by anyone else is untouched. */
 export const releaseProcessLock = removeHolder;
 /** Run `fn` under the lock at `dir`. Throws LockHeldError rather than ever running unlocked. */
@@ -157,16 +133,6 @@ export function withProcessLock(dir, fn, options) {
     }
     finally {
         held.delete(dir);
-        releaseProcessLock(dir, nonce);
-    }
-}
-/** withProcessLock for an awaiting critical section. */
-export async function withProcessLockAsync(dir, fn, options) {
-    const nonce = await acquireProcessLockAsync(dir, options);
-    try {
-        return await fn();
-    }
-    finally {
         releaseProcessLock(dir, nonce);
     }
 }

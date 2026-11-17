@@ -264,12 +264,10 @@ gate_rebase_coverage() {
   out=$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null) || return 0
   out="$out/devkit-fallow-coverage.json"
   root=$(node "$tool" "$wt" "$source" "$out") || root=''
-  [ -n "$root" ] && [ -f "$out" ] || return 0
-  export FALLOW_COVERAGE="$out"
-  case "$root" in
-    scoped\ *) echo "  ↳ $purpose: fallow scores CRAP from static estimates — the linked coverage came from a scoped run (devkit coverage-run ${root#scoped })" >&2 ;;
-    *) echo "  ↳ $purpose: fallow reads coverage rekeyed from $root (FALLOW_COVERAGE); the coverage gate reads coverage/ unchanged" >&2 ;;
-  esac
+  if [ -n "$root" ] && [ -f "$out" ]; then
+    export FALLOW_COVERAGE="$out"
+    echo "  ↳ $purpose: fallow reads coverage rekeyed from $root (FALLOW_COVERAGE); the coverage gate reads coverage/ unchanged" >&2
+  fi
   return 0
 }
 
@@ -287,6 +285,7 @@ gate_rebase_coverage() {
 # caller may also name the main checkout through an alias (macOS /var → /private/var), which must not
 # read as "a linked worktree borrowing main".
 #
+# <rel> is a normalized path whose first component is `coverage` (gate_normalize_rel).
 # Physical path of a FILE: follow its symlink chain (bounded), then resolve the final parent with
 # `pwd -P`. `cd -P` alone resolves directories only, so it cannot see a symlinked report.
 gate_physical_file() {
@@ -303,42 +302,27 @@ gate_physical_file() {
   printf '%s/%s\n' "$dir" "$(basename -- "$path")"
 }
 
-# <rel> is a normalized path (gate_normalize_rel): root `coverage[/…]`, a package's `…/coverage`, or
-# that dir's coverage-final.json. <cov_dir> is the coverage dir compared against main's.
 gate_coverage_source() {
-  local root=$1 main_root=$2 rel=${3:-coverage} cov_dir real_root real_main real_main_cov real_cov borrowed
+  local root=$1 main_root=$2 rel=${3:-coverage} real_root real_main real_main_cov real_cov borrowed
   [ -e "$root/$rel" ] || return 1
-  case /$rel/ in
-    /coverage/*) cov_dir=coverage ;;
-    *) cov_dir=$rel ;;
-  esac
   real_root=$(cd -P "$root" 2>/dev/null && pwd) || real_root=$root
   real_main=$(cd -P "$main_root" 2>/dev/null && pwd) || real_main=$main_root
-  real_main_cov=$(cd -P "$main_root/$cov_dir" 2>/dev/null && pwd) || real_main_cov=
+  real_main_cov=$(cd -P "$main_root/coverage" 2>/dev/null && pwd) || real_main_cov=
   if [ "$real_root" != "$real_main" ] && real_cov=$(cd -P "$root/$rel" 2>/dev/null && pwd); then
     borrowed="$root/$rel/ is the MAIN checkout's ($real_cov)"
     # A local coverage/ can still hold a report symlinked into main, so the gate reads the FILE's path.
-    if [ "$rel" = "$cov_dir" ] && [ -L "$root/$rel/coverage-final.json" ]; then
+    if [ "$rel" = coverage ] && [ -L "$root/$rel/coverage-final.json" ]; then
       real_cov=$(gate_physical_file "$root/$rel/coverage-final.json") || real_cov=
       borrowed="$root/$rel/coverage-final.json is the MAIN checkout's ($real_cov)"
     fi
     case "$real_cov/" in
-      "$real_main/$cov_dir/"* | "${real_main_cov:-/nonexistent-main-coverage}/"*)
+      "$real_main/coverage/"* | "${real_main_cov:-/nonexistent-main-coverage}/"*)
         echo "  ⚠️  $borrowed, not this worktree's — the coverage" >&2
         echo "     gate will judge another tree's numbers. Remove the link and run \`devkit coverage-run\` here." >&2
         ;;
     esac
   fi
   printf '%s\n' "$root/$rel"
-}
-
-# Is this normalized link path a coverage artifact? Matches the last component only, so a
-# `packages/coverage/node_modules` stays an ordinary dependency link.
-gate_is_coverage_rel() {
-  case /$1 in
-    /coverage | /coverage/* | */coverage | */coverage/coverage-final.json) return 0 ;;
-    *) return 1 ;;
-  esac
 }
 
 # Lexically normalize a relative link path: drop empty and `.` components, fold `..` (an unmatched one
@@ -379,7 +363,58 @@ gate_dependency_preflight_tool() {
   printf '%s\n' "$tool"
 }
 
-. "$(dirname "${BASH_SOURCE[0]}")/prepare-gate-worktree/node-modules-source.sh"
+# Pick the first available install that satisfies the BASE package.json in the ephemeral worktree.
+# "Populated" is only a fast preference: a real but stale install can miss a dependency added by the
+# base after that checkout last installed. Try the linked root first, then the main worktree fallback.
+gate_node_modules_source() {
+  local wt=$1 root=$2 main_root=$3 tool candidate missing rc remedy
+  local candidates=("$root/node_modules")
+  local rejected=()
+  [ "$main_root" = "$root" ] || candidates+=("$main_root/node_modules")
+  tool=$(gate_dependency_preflight_tool)
+  [ -f "$tool" ] || {
+    echo "devkit ship: dependency preflight helper is unavailable" >&2
+    return 1
+  }
+
+  # Preserve the existing populated-first preference, then its existence fallback. The second pass
+  # matters for dependency-free repos whose node_modules contains only tool caches.
+  local pass
+  for pass in populated exists; do
+    for candidate in "${candidates[@]}"; do
+      if [ "$pass" = populated ]; then
+        gate_dir_is_populated "$candidate" || continue
+      else
+        [ -e "$candidate" ] || continue
+      fi
+      if missing=$(node "$tool" "$wt/package.json" "$candidate"); then
+        printf '%s\n' "$candidate"
+        return 0
+      else
+        rc=$?
+      fi
+      [ "$rc" -eq 1 ] || return "$rc"
+      missing=${missing//$'\n'/, }
+      rejected+=("$candidate"$'\t'"$missing")
+    done
+    [ "${#rejected[@]}" -eq 0 ] || break
+  done
+
+  # No install existed before this change either: preserve the old "nothing to link" result so
+  # non-JS repos and hermetic ship fixtures continue without a new precondition.
+  [ "${#rejected[@]}" -gt 0 ] || return 1
+  echo "devkit ship: no node_modules satisfies the ship base package.json:" >&2
+  local rejection path packages
+  for rejection in "${rejected[@]}"; do
+    path=${rejection%%$'\t'*}
+    packages=${rejection#*$'\t'}
+    echo "  - $path (missing: $packages)" >&2
+  done
+  remedy=$(node "$tool" --remedy "$wt")
+  echo "run \`$remedy\` in the checkout, then retry the same ship command." >&2
+  return 2
+}
+
 # The linked install is the ENGINE the worktree hook runs. One older than `.devkit/baselines`
 # (< 0.53.0) misjudges every grandfathered ratchet entry in a repo that stores baselines there, so
 # stop before any commit with the remedy (sc-1934). Exit 2 or a missing helper is a diagnostic that
@@ -560,7 +595,7 @@ prepare_gate_worktree() {
     else
       rel=$(gate_normalize_rel "$d" && printf .) && rel=${rel%.}
       case "$d" in /*) rel= ;; esac
-      if gate_is_coverage_rel "$rel"; then
+      if [ "$rel" = coverage ] || [[ "$rel" == coverage/* ]]; then
         source=$(gate_coverage_source "$root" "$main_root" "$rel" && printf .) || continue
         d=$rel
       elif [ "$rel" = .devkit ] && [ -n "$overlay_root" ]; then
@@ -612,14 +647,14 @@ prepare_gate_worktree() {
 ship_judge_preflight() {
   local root=${1:?root} tool rc
   local script_dir
-  # Global, not local: the gate-capture and dry-gates tails repeat this remedy line verbatim.
+  # Global, not local: the gate-capture tail repeats this family move when a gate blocks the attempt.
   SHIP_JUDGE_REMEDY=""
   script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
   tool="$script_dir/preflight/judge.mts"
   [ -f "$tool" ] || tool="$script_dir/preflight/judge.mjs"
   # A package built without this tool is not a reason to say anything at all.
   [ -f "$tool" ] || return 0
-  # The report streams on stderr; stdout carries only the remedy line; ship's stdout stays the PR URL.
+  # The report streams on stderr; stdout carries only the remedy, so ship's stdout stays the PR URL.
   # $2 is an optional --informational, for a rehearsal that runs no judge.
   if SHIP_JUDGE_REMEDY=$(cd "$root" && node "$tool" "$root" ${2:+"$2"}); then
     rc=0

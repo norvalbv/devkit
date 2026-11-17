@@ -7,9 +7,7 @@ description: Use when working with `.co-occurrence-allowlist.json` — fixing a 
 
 ## Overview
 
-Frink catches code duplication at commit via two detectors writing one allowlist (`.co-occurrence-allowlist.json` at repo root): the **embedding matcher** (semantic, symbol-level) and the **clone detector** (jscpd: verbatim token clones, plus whole functions copied under new names). Entries are keyed by `symFileKey` (pairs) or `fragmentHash` (clones: the file pair plus the fragment); ranges/similarity/lines are findability metadata only.
-
-The clone detector's `min-tokens` floor counts code tokens only: imports and comments never enter the token stream, so a comment pasted into a copy neither splits the clone nor pads it over the floor.
+Frink catches code duplication at commit via two detectors writing one allowlist (`.co-occurrence-allowlist.json` at repo root): the **embedding matcher** (semantic, symbol-level) and the **clone detector** (verbatim, jscpd, token-level). Entries are keyed by `symFileKey` (pairs) or `fragmentHash` (clones); ranges/similarity/lines are findability metadata only.
 
 ## When to use
 
@@ -17,8 +15,6 @@ The clone detector's `min-tokens` floor counts code tokens only: imports and com
 - A commit was just blocked by the matcher gate or clone gate (the gate printed a pre-filled `add` / `add-clone` command).
 - You're burning down baseline entries (~460 pairs frozen pre-gate).
 - Before adding code that might already exist somewhere — check allowlist coverage first.
-
-**jscpd ignore markers are not a suppression.** The clone gate blocks any `jscpd:ignore-start` in a gated file, because jscpd would hide the wrapped clone from it. Remove the marker and approve the clone it hid with `add-clone`.
 
 **Full mode list:** `guard-dup --help` (scan/reconcile/baseline) and `guard-dup-allowlist --help` (add/add-clone/remove/remove-clone/check/list/prune).
 
@@ -66,32 +62,27 @@ Some pairs are **intentional deploy artifacts**, not real dups: one path is a *g
 | Command | What | When |
 |---|---|---|
 | `guard-dup-allowlist add <symA> <fileA> <symB> <fileB> --description "..."` | Approve a pair | Gate blocked + dup is intentional. **Prefer the gate's pre-filled command** (has `--similarity` + `--range-a/-b` filled). `--description` is required. |
-| `guard-dup-allowlist add-clone <hash> <fileA> <fileB> --description "..."` | Approve a clone | Same — copy gate's command. Lasts until the duplicated code changes; add `--decay-days N` only for a temporary waiver. |
+| `guard-dup-allowlist add-clone <hash> <fileA> <fileB> --description "..."` | Approve a clone | Same — copy gate's command. |
 | `guard-dup-allowlist remove <symA> <fileA> <symB> <fileB>` | Retire an approval | After refactoring the dup away. |
 | `guard-dup-allowlist remove-clone <hash>` | Retire a clone approval | After refactoring. |
 | `guard-dup-allowlist check <symA> <fileA> <symB> <fileB>` | exit 0 if allowlisted | Before duplicating something — coverage check. |
-| `guard-dup-allowlist prune` | **Time-based**: drops entries past `date + decayDays` | Deliberate allowlist maintenance, run by hand — no reviewer or gate runs it. |
+| `guard-dup-allowlist prune` | **Time-based**: drops entries past `date + decayDays` | Periodic; commit-guard runs it in step 2 setup. |
 | `guard-dup-allowlist list` | List entries | Picking a burn-down target. |
 | `guard-dup scan --new --changed` | **Pre-flight check** (this commit's dups vs the allowlist) | Before declaring a dup-fix done. |
 | `guard-dup reconcile [--apply]` | **Detection-based**: drops entries `detect()` no longer produces (dead) | After bulk refactors; periodic sweep. Dry-run by default. |
-| `guard-clone reconcile [--apply]` | **Detection-based, clones**: drops clone approvals whose hash the current scan no longer produces | Same, on a clean tree. Dry-run by default; refuses if jscpd fails or the scan is empty. |
 | `guard-dup baseline` | Freeze every current candidate | One-shot freeze-the-past (already done). |
 
 `reconcile` vs `prune` — easy to confuse:
 
-- `prune` asks "is this entry past its expiry?" (calendar). Drops 7-day `add` entries and `add-clone` entries given `--decay-days`. **Doesn't hit baseline or default `add-clone` approvals** (decayDays 3650): retire those with `remove-clone`.
-- `reconcile` (`guard-dup reconcile` for pairs, `guard-clone reconcile` for clones) asks "does this dup still exist?" (detection). Drops dead baseline entries. **Doesn't care about expiry.**
+- `prune` asks "is this entry past its expiry?" (calendar). Drops 7-day `add` entries. **Doesn't hit baseline** (decayDays 3650).
+- `reconcile` asks "does this dup still exist?" (detection). Drops dead baseline entries. **Doesn't care about expiry.**
 
 ## Burning down the baseline
-
-Clone debt is not in the allowlist: the clone gate blocks only clones absent from HEAD, so a
-`clones[]` entry approves the commit that introduced its clone and nothing after it. List clone debt
-with `guard-clone scan` and refactor it with the workflow above. The steps below are for matcher pairs.
 
 1. `guard-dup-allowlist list` — pick a target. **Skip `src/shared ↔ _shared` mirrors** (gotcha above).
 2. `guard-dup-allowlist remove …` the entry.
 3. Next commit touching that code → gate re-surfaces it → refactor (use the workflow above).
-4. Periodically `guard-dup reconcile --apply` and `guard-clone reconcile --apply` to sweep entries that died incidentally (someone else's refactor killed the dup without removing the entry).
+4. Periodically `guard-dup reconcile --apply` to sweep entries that died incidentally (someone else's refactor killed the dup without removing the entry).
 
 ## Common mistakes
 

@@ -36,7 +36,6 @@ import { emitReviewCacheHit } from '../judge/gate-events.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
 import { reportFleetMcp } from '../judge/mcp/profile.mjs';
 import { execJudgeAsync } from '../judge/run-judge.mjs';
-import { treeBlobsAtRef } from '../ratchets/tree-blobs.mjs';
 import { loadCache } from './cache.mjs';
 import { runCascade } from './cascade/reviewer.mjs';
 import { reportCachedHitNotes } from './contracts/checklist.mjs';
@@ -53,14 +52,12 @@ import { reviewerTargetSalts } from './evidence/targets-block.mjs';
 import { emitMergedLensResults } from './lens/merge-results.mjs';
 import { reportInconclusive } from './valve/inconclusive.mjs';
 import { narrowSelection, narrowTasks, printRemedy, reportLensPartAdvisories, } from './valve/recheck.mjs';
-import { planReviewWork, resolveChunkCap, resolveLensGroups, taskLabel, } from './lens/split.mjs';
-import { mapLimit } from './lens/map-limit.mjs';
+import { mapLimit, planReviewWork, resolveChunkCap, resolveLensGroups, taskLabel, } from './lens/split.mjs';
 import { clearProgress, writeProgress } from './progress.mjs';
 import { retryableReason, runDeferredRecoveries, settleReviewOutcome, } from './recovery/settle.mjs';
 import { cacheKey, effectiveReviewConfig, REVIEWERS, resolveEscalationModel, resolveReviewModel, } from './reviewers.mjs';
 import { selectRepositoryReviewers } from './scope/repository.mjs';
-import { gateJudgeEnv, passAssetVerifier, preflightReviewAssets, resolveReviewerIdentities, } from './runtime.mjs';
-import { skippedReviewers } from './overrides.mjs';
+import { gateJudgeEnv, passAssetVerifier, preflightReviewAssets, resolveReviewerIdentities, skippedReviewers, } from './runtime.mjs';
 import { ReviewGateTiming, reviewConcurrency } from './telemetry/timing.mjs';
 export { runCascade };
 /** The running header's per-reviewer models (sc-3446): a pinned reviewer runs single-pass at its
@@ -184,8 +181,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         if (only)
             selected = narrowSelection(selected, only, knobDropped);
         // Before the early return: name what an empty domain root dropped, then record every non-run.
-        const readStaged = (paths) => preJudgeTree ? treeBlobsAtRef(cwd, preJudgeTree, paths) : null;
-        reportNonRuns(staged, cfg, selected, knobDropped, skip, only ? [] : routing, readStaged);
+        reportNonRuns(staged, cfg, selected, knobDropped, skip, only ? [] : routing);
         if (selected.length === 0)
             return finish(only ? 1 : 0); // an empty recheck is never a PASS
         if (reviewMode) {

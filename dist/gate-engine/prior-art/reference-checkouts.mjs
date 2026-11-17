@@ -3,9 +3,9 @@
  * directories they name out. Declared-only — it never scans an undeclared sibling (W-3).
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, globSync, realpathSync, statSync } from 'node:fs';
+import { globSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { CONFIG_FILENAME, resolveGuardConfig } from '../config.mjs';
+import { resolveGuardConfig } from '../config.mjs';
 import { parsePriorArtResponse } from './response-contract.mjs';
 function git(cwd, args) {
     try {
@@ -46,36 +46,22 @@ function matchDirs(pattern, base, own) {
         .map((match) => realDir(path.resolve(base, match)))
         .filter((dir) => dir !== null && !own.has(dir));
 }
-/** The repository's own roots, and cwd's same directory in the main worktree when cwd is linked. */
-function worktreeRoots(cwd) {
+/**
+ * Config directory first, then (linked worktree only) the same directory in the main worktree.
+ * An unreadable guard.config.json throws: a 0 from a broken config is not an honest 0.
+ */
+export function resolveReferenceCheckouts(cwd = process.cwd()) {
+    const declared = resolveGuardConfig(cwd).research.referenceCheckouts;
+    if (!declared.length)
+        return { declared, resolved: [] };
     const top = realDir(git(cwd, ['rev-parse', '--show-toplevel'])?.trim() ?? '');
     const main = top && mainWorktreeRoot(cwd);
     const here = realDir(cwd);
     const own = new Set([top, main].filter((root) => Boolean(root)));
-    const counterpart = top && main && here && main !== top ? path.join(main, path.relative(top, here)) : null;
-    return { own, counterpart };
-}
-/** cwd's roots when it lacks its git-ignored guard.config.json, so the main worktree's copy is read. */
-function borrowedRoots(cwd) {
-    if (existsSync(path.join(cwd, CONFIG_FILENAME)))
-        return null;
-    return git(cwd, ['check-ignore', '-q', CONFIG_FILENAME]) === null ? null : worktreeRoots(cwd);
-}
-/**
- * A linked worktree without its git-ignored guard.config.json reads the main worktree's, as
- * projection links it. A broken config throws: its 0 would not be an honest 0.
- */
-export function resolveReferenceCheckouts(cwd = process.cwd()) {
-    const borrowed = borrowedRoots(cwd);
-    const base = borrowed?.counterpart ?? cwd;
-    const declared = resolveGuardConfig(base).research.referenceCheckouts;
-    if (!declared.length)
-        return { declared, resolved: [] };
-    const { own, counterpart } = borrowed ?? worktreeRoots(cwd);
-    const retryBase = base === cwd ? counterpart : null;
+    const retryBase = top && main && here && main !== top ? path.join(main, path.relative(top, here)) : null;
     const resolved = new Set();
     for (const pattern of declared) {
-        const dirs = matchDirs(pattern, base, own);
+        const dirs = matchDirs(pattern, cwd, own);
         for (const dir of dirs.length || !retryBase ? dirs : matchDirs(pattern, retryBase, own))
             resolved.add(dir);
     }

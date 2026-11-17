@@ -1,6 +1,6 @@
 // Staged structure attribution: a violation in a file the change only edits already existed at
 // HEAD when nothing staged could have changed its verdict, so it is reported, not blocked.
-import { headSha } from '../coverage/provenance.mjs';
+import { headSha } from '../coverage/failures.mjs';
 import { preExisting } from './verdict.mjs';
 /** Added and edited files lint in separate runs: the plugin reports a repeated message once per
  * run, so an added file in a broken folder could otherwise hide behind an edited one. */

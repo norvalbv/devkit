@@ -1,4 +1,3 @@
-import { lineAnchors } from '../markdown/referenced-paths.mjs';
 import { validateCategory } from './recall/categories.mjs';
 const FM_ORDER = ['slug', 'created'];
 const INDEX_HEADER = '# Decision Index\n\n' +
@@ -147,7 +146,7 @@ export function renderDecision(fm, body) {
     ];
     return `---\n${keys.map((key) => `${key}: ${fm[key]}`).join('\n')}\n---\n${body}`;
 }
-export function firstClause(value) {
+function firstClause(value) {
     const text = String(value).trim();
     const cut = text.search(TITLE_CUT_RE);
     const clause = cut > 0 ? text.slice(0, cut) : text;
@@ -157,15 +156,6 @@ export function firstClause(value) {
     const capped = clause.slice(0, 100);
     const lastSpace = capped.lastIndexOf(' ');
     return lastSpace > 60 ? capped.slice(0, lastSpace) : capped;
-}
-/** Refuse prose citing `<file>:<line>`: the record is append-only, so a rotted anchor is permanent. */
-export function assertNoLineAnchors(text) {
-    const anchors = lineAnchors(text);
-    if (anchors.length === 0)
-        return;
-    throw new Error(`line anchor(s) ${anchors.join(', ')}: a line number rots on the next edit and records are ` +
-        'append-only. Cite the function, test or variable name instead; for an upstream source give ' +
-        'its version and a SHA-pinned permalink (…/blob/<sha>/path#L12).');
 }
 export function renderTarget(date, options) {
     warnIfFolded('--title', options.title);
@@ -207,13 +197,10 @@ export function renderTarget(date, options) {
     // `**Evidence-change:**` line, which parseTargetFields reads back as an empty (not absent) field.
     if (options.evidenceChange?.trim())
         lines.push(`**Evidence-change:** ${options.evidenceChange.trim()}`);
-    const block = lines.join('\n');
-    assertNoLineAnchors(block);
-    return block;
+    return lines.join('\n');
 }
 export function renderNote(date, text) {
     warnIfFolded('--note', text);
-    assertNoLineAnchors(text);
     return `- ${date} — ${foldLines(text)}`;
 }
 /**

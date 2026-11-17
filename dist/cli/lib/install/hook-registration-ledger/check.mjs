@@ -1,42 +1,11 @@
 import { AGENT_TARGETS } from '../../components.mjs';
-import { isTracked } from '../../git-tracked.mjs';
 import { isSafeAgentAssetPath } from '../agent-asset-manifest/lifecycle.mjs';
 import { requireAgentProviders } from '../agent-assets/agent-providers.mjs';
-import { hookRegistrationDestination, } from './codec.mjs';
-import { adoptExactLegacy, handlerLocation, ledgerOf, otherScopeFile, otherScopePass, providerDocument, stripReclaimedCommands, unrecognisedFallowGates, } from './install-support.mjs';
+import { hookRegistrationDestination } from './codec.mjs';
+import { adoptExactLegacy, handlerLocation, ledgerOf, otherClaudeSettings, providerDocument, retiredElsewhere, stripReclaimedCommands, unrecognisedFallowGates, } from './install-support.mjs';
 import { reconcileLegacyHookCommands } from './legacy-commands.mjs';
 import { checkProjectedHookRegistrations, projectHookRegistrations, readHookRegistrationLedger, } from './lifecycle.mjs';
 import { dataRecord } from './plain-data.mjs';
-function unrecognisedAdvisories(provider, file) {
-    if (!file)
-        return [];
-    return unrecognisedFallowGates(dataRecord(file.document), provider).map((handler) => `${provider}:unrecognised-fallow-gate ${handlerLocation(file.rel, handler)}: ${handler.command}`);
-}
-/** devkit's leftovers in the file the other scope writes, sorted by who can remove them. */
-function otherScopeFindings(root, provider, scope, entries) {
-    const found = { missing: [], advisories: [] };
-    const elsewhere = otherScopePass(root, provider, scope, entries);
-    if (!elsewhere)
-        return found;
-    const into = elsewhere.repairable ? found.missing : found.advisories;
-    if (elsewhere.retiredFound)
-        into.push(`${provider}:retired-registration:${elsewhere.rel}`);
-    if (elsewhere.switched)
-        into.push(`${provider}:scope-switch:${elsewhere.rel}`);
-    else if (elsewhere.stranded)
-        found.advisories.push(`${provider}:scope-switch:${elsewhere.rel}`);
-    return found;
-}
-/** Install never writes a tracked overlay destination, so everything found in it is report-only. */
-function trackedAdvisories(root, provider, rel) {
-    const found = [`${provider}:tracked:${rel}`];
-    if (!isSafeAgentAssetPath(root, rel, true))
-        return found;
-    const document = providerDocument(root, provider, rel);
-    if (stripReclaimedCommands(document, provider).changed)
-        found.push(`${provider}:retired-registration:${rel}`);
-    return [...found, ...unrecognisedAdvisories(provider, { rel, document })];
-}
 /** Doctor's read-only view of hook registrations. `advisories` are findings devkit must not repair,
  * so they never make `ok` false: an unrecognised fallow-gate.sh spelling is reported, never deleted. */
 export function checkHookRegistrations(root, componentIds, { overlay = false, targets = AGENT_TARGETS, legacyOwnedComponentIds, } = {}) {
@@ -46,15 +15,6 @@ export function checkHookRegistrations(root, componentIds, { overlay = false, ta
     const advisories = [];
     for (const provider of requireAgentProviders(targets)) {
         const rel = hookRegistrationDestination(provider, scope);
-        advisories.push(...unrecognisedAdvisories(provider, otherScopeFile(root, provider, scope)));
-        // Mirrors skipProvider: install never registers into a tracked overlay file, so this can't be fixed.
-        if (overlay && isTracked(root, rel)) {
-            advisories.push(...trackedAdvisories(root, provider, rel));
-            const elsewhere = otherScopeFindings(root, provider, scope, ledger?.entries ?? []);
-            missing.push(...elsewhere.missing);
-            advisories.push(...elsewhere.advisories);
-            continue;
-        }
         if (!isSafeAgentAssetPath(root, rel, true)) {
             missing.push(`${provider}:unsafe-config`);
             continue;
@@ -65,10 +25,16 @@ export function checkHookRegistrations(root, componentIds, { overlay = false, ta
         const legacy = reconcileLegacyHookCommands(ledger?.entries ?? [], provider, rel);
         if (stripReclaimedCommands(document, provider).changed)
             missing.push(`${provider}:retired-registration`);
-        advisories.push(...unrecognisedAdvisories(provider, { rel, document }));
-        const elsewhere = otherScopeFindings(root, provider, scope, ledger?.entries ?? []);
-        missing.push(...elsewhere.missing);
-        advisories.push(...elsewhere.advisories);
+        const other = otherClaudeSettings(root, provider, scope);
+        const elsewhere = retiredElsewhere(root, provider, scope, other);
+        if (elsewhere)
+            (elsewhere.repairable ? missing : advisories).push(`${provider}:retired-registration:${elsewhere.rel}`);
+        for (const file of [{ rel, document }, other]) {
+            if (!file)
+                continue;
+            for (const handler of unrecognisedFallowGates(dataRecord(file.document), provider))
+                advisories.push(`${provider}:unrecognised-fallow-gate ${handlerLocation(file.rel, handler)}: ${handler.command}`);
+        }
         if (legacy.ledgerChanged)
             missing.push(`${provider}:superseded-registration`);
         const effectiveLedger = legacyOwnedComponentIds?.length

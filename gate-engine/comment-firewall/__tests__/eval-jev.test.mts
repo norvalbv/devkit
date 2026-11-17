@@ -3,11 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  CONTEXT_LINES,
-  contextFor,
-  paragraphCommentTokens,
-} from '../detect.mts';
+import { CONTEXT_LINES, contextFor, paragraphCommentTokens } from '../detect.mts';
 import { applyVariant, QUESTION_SETS } from '../eval/arms.mts';
 import { loadCorpus, readCorpusFile } from '../eval/corpus.mts';
 import { scanCommentTokens } from '../staged/scan.mts';

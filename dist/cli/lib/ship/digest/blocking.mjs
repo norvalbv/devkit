@@ -2,7 +2,7 @@
 // first, so waiving it still left the ship blocked. See the gate-verdict-attribution note.
 import { waiveCommand } from '../../../../gate-engine/review/valve/shell-word.mjs';
 import { count, oneLine, textOf } from './fields.mjs';
-import { issuesUnder } from './trend/trend.mjs';
+import { issuesUnder } from './trend.mjs';
 import { FINGERPRINT } from './waived.mjs';
 /** The detail of each row a review_result FAIL contributes, with the fingerprint it names. */
 export function blockingFindings(e) {

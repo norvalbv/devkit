@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { writeFile } from 'node:fs';
 import { constants } from 'node:os';
 import { runDirectReviewCli } from '../run-direct.mjs';
 import { readProcessTable } from './process-table.mjs';
-import { writeReapNotice } from './reap-notice.mjs';
 const KILL_GRACE_MS = 10_000;
 const FORCED_CLEANUP_MAX_MS = KILL_GRACE_MS * 2;
 // The leader has exited but something in its group still holds the gate's stdio. Waiting for that to
@@ -353,8 +353,9 @@ export function superviseGateCommand(timeoutMs, command, inspectProcesses = read
             if (childDone && forcedStatus === undefined && lingerTimer === undefined) {
                 lingerTimer = setTimeout(() => {
                     lingerTimer = undefined;
+                    // Async, so a failed write can never stop the reap; the banner then reads as a ceiling.
                     if (lingerStatus() === 124 && reapNoticeFile)
-                        writeReapNotice(reapNoticeFile, lastProcessTable, ownedProcesses);
+                        writeFile(reapNoticeFile, '', () => { });
                     beginForcedCleanup(lingerStatus());
                 }, LINGER_GRACE_MS);
             }

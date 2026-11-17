@@ -1,6 +1,6 @@
 ---
 name: commit-gates
-description: Use when a Devkit-managed commit or ship gate blocks, before considering a GUARD_* bypass, or when sizing how often a reviewer finding or false-block class recurs. Diagnose the exact gate and apply its intended remediation without weakening unrelated verification.
+description: Use when a Devkit-managed commit or ship gate blocks, or before considering a GUARD_* bypass. Diagnose the exact gate and apply its intended remediation without weakening unrelated verification.
 ---
 
 # Commit gates
@@ -16,8 +16,7 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
    fix that adds a NEW file rides along as a trailing path: `--resume <branch> -- <new-path>`;
    committed-branch mode freezes membership, refuses a resume whose fix committed a path outside it,
    and prints the fresh full `--from-branch` invocation to run instead); a plain commit re-runs the
-   identical commit command. A ship "refused before queueing" recorded nothing: re-run the full
-   command, adding any new path to it. Ship checkpoints successful
+   identical commit command. Ship checkpoints successful
    stages and `--resume` replays the
    recorded invocation byte-identically, so restarting with different flags or a re-typed body
    usually wastes work and can discard useful evidence.
@@ -41,25 +40,9 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
    further. If a finding names a file absent from the brief, brief it on the retry
    (`--resume <branch> -- <path>`) instead of chasing the finding. Each briefed path is one literal file
    from the repo root; a glob is not expanded, so brief every file by name.
-   For a failed `guard.config.json` `extraGates` command, ship re-runs that command at the commit the
-   gate worktree was cut from. A line `ship: <label> also exits 1 at <sha> … Base run output: <path>`
-   means the same command fails there too: read that file, and get the findings it lists fixed on
-   the base (or rebase onto a base that has them fixed) before chasing them in your change. The base
-   run links the untracked entries the gate worktree held before its gates ran, as they stand when it
-   reruns; an entry a gate added during the run is not linked, so a gate that reads an earlier gate's
-   output can fail there for that reason. No line
-   is not evidence either way: the base run passed, ended some other way, ran out of its 120-second
-   budget, or the gate is not a root-config `extraGates` entry. Start from your own change.
 4. Treat a bypass as an explicit operator decision. Never use `--no-verify`, silently disable a
    selected guard, freeze a baseline to absorb new debt, or invent an environment variable. A
    `guard-review waive` backed by a reproduction (see the reviewer gates below) is a dispute, not a bypass.
-
-**A past ship's evidence.** The first line of every gate log is `devkit-ship-hook-start:<ship-id>`.
-That attempt's full log, ending with its findings digest, is kept at
-`~/.devkit/telemetry/logs/<ship-id>.log` (beside the `DEVKIT_GATE_EVENTS` sink when that is set);
-`ls -t` there lists the newest. Its reviewer transcripts sit under `transcripts/<ship-id>/` in the
-same directory, kept for the newest 300 runs only (`DEVKIT_TELEMETRY_KEEP`), and a PASS line's
-`· transcript <ref>` prints with `guard-review transcript <ref>`.
 
 ## Managed gate families
 
@@ -74,16 +57,12 @@ same directory, kept for the newest 300 runs only (`DEVKIT_TELEMETRY_KEEP`), and
   more changed text lines the first time it is shown. Shorten the comment where possible; a
   paragraph that justifies a workaround means the code is wrong, so fix the code. If every line
   states something the code cannot, retry unchanged: the same paragraph never blocks twice. When
-  `guard.config.json` sets `comments.forbiddenRefs`, `comments.forbidDecisionRefs` or
-  `comments.forbidLineAnchors`, a changed comment citing a ticket, a decision record or a
-  `<file>:<line>` anchor blocks on every attempt until the reference is gone.
+  `guard.config.json` sets `comments.forbiddenRefs` or `comments.forbidDecisionRefs`, a changed
+  comment citing a ticket or decision record blocks on every attempt until the reference is gone.
 - **Decision checks** (`decision-checks`, armed by the `decisions` guard) run the command linked to
   a decision Target when the commit touches its Scope, and print the ruling on failure. Fix the code;
   do not weaken the check. If the ruling itself changed, commit the new Target or the unlink
   (`guard-decisions enforce link <slug> --check none --reason "<why>"`) on its own first.
-  `guard-decision-checks(could-not-run)` means the Check never reached a verdict (not found, killed,
-  or past its 120 s bound, e.g. waiting on a busy test queue): the code is not at fault. Read the
-  Check's own output above it and re-run; re-link the Check only if its command moved.
 - **Local pre-ship loop.** Stage the paths (`git add <paths>`), then run `guard-deterministic`
   (in devkit itself: `node gate-engine/deterministic/run.mts`). It runs the same aggregated set
   a ship attempt runs, without the ship round. Single checks: `guard-comments gate` (reads the
@@ -105,24 +84,14 @@ same directory, kept for the newest 300 runs only (`DEVKIT_TELEMETRY_KEEP`), and
   - `pre-existing`: the defect is real but already on the base; this change did not introduce it.
   - `accepted`: the behaviour is real and deliberate, accepted as a known residual.
   A real defect waived as `false-positive` mislabels the reviewer's benchmark corpus.
-  A failing reviewer also prints `reviewed diff: guard-review transcript <ref>`: that transcript
-  holds the staged diff of the files the reviewer was given, and it outlives the ship's worktree. A
-  path missing from it may sit outside that reviewer's files rather than be unstaged.
   When a correctness or conventions finding names a concrete input and running that input against
   the reviewed code gives the correct result, waive it with the command and its output as the
   rationale. Do not add tests or edits only to change the diff and re-sample the judge: any real
   change voids the waiver and proves nothing. A race that did not reproduce is not disproved.
-  Gate judges read code; they are not meant to run it. A claim about runtime behaviour, above all a
-  third-party tool's, is an inference even when it quotes exact lines from `node_modules` or `dist`:
-  check it with a minimal fixture before you comply. A completeness finding has no waive path. When a
-  fixture refutes one, show the user the command and its output and ask whether to re-run that one
-  commit with `GUARD_COMPLETENESS_HARD=0`, which still records the finding and ship reports as a bypass.
   Before complying with a finding that changes existing behaviour, search the tests for that
   behaviour. A test asserting the opposite is a question, not an answer: read why it exists, then
   either change it with the fix and tell the user, or waive explaining why the finding's premise is
   wrong. A disagreeing test alone is not a rationale.
-  A FAIL on lines the evidence lists under MOVED LINES is pre-existing when `git show <base>:<old
-  path>` has the same defective line and nothing else in the commit reaches it: fix it, or waive with that output.
   A lens PASS is one sample from a nondeterministic judge, not a certificate that its concern is
   clean. A later attempt can fail the same lens on code you did not touch. Treat that as an
   ordinary finding and fix it: it was missed, not caused by your last edit.
@@ -132,14 +101,14 @@ same directory, kept for the newest 300 runs only (`DEVKIT_TELEMETRY_KEEP`), and
   prompt, model and cache key. Its PASS is cached, so the next `devkit ship --resume` skips that lens
   — but only when the same paths ship briefed are staged and the `GUARD_REVIEW_*` model env matches.
 - **Reproduce a codex judge's sandbox before trusting a "the sandbox denies X" claim.** `codex
-  sandbox` applies the same host sandbox as the judge's `codex exec` (Seatbelt on macOS, bubblewrap
-  on Linux), with no model call, and runs the command in your login shell as the judge does. From the
+  sandbox` applies the same host sandbox as the judge's `codex exec` (Seatbelt on macOS, Landlock on
+  Linux), with no model call, and runs the command in your login shell as the judge does. From the
   repo root, a workspace-write (investigating) judge's view is:
-  `r=$(pwd -P) s=$(cd "$(mktemp -d)" && pwd -P); cp AGENTS.md "$s"; (cd "$s" && TMPDIR="$s" TMPPREFIX="$s/zsh" CODEX_HOME=$(mktemp -d) codex sandbox -c 'default_permissions="devkit_judge"' -c "permissions.devkit_judge.filesystem={\":root\"=\"read\",\"$s\"=\"write\",\"$r/.claude/.correctness-review.json\"=\"write\"}" -c 'permissions.devkit_judge.network.enabled=false' -- "$SHELL" -lc '<cmd>'); echo "exit $?"`.
+  `r=$(pwd -P) s=$(cd "$(mktemp -d)" && pwd -P); cp AGENTS.md "$s"; (cd "$s" && CODEX_HOME=$(mktemp -d) codex sandbox -c 'default_permissions="devkit_judge"' -c "permissions.devkit_judge.filesystem={\":root\"=\"read\",\":tmpdir\"=\"write\",\":slash_tmp\"=\"write\",\"$s\"=\"write\",\"$r/.claude/.correctness-review.json\"=\"write\"}" -c 'permissions.devkit_judge.network.enabled=false' -- "$SHELL" -lc '<cmd>'); echo "exit $?"`.
   On macOS, add `--log-denials` after `sandbox` to name each denied operation; Linux has no such
-  flag. A read-only judge runs in the repo root itself: drop the `cd`, the `TMPDIR`/`TMPPREFIX` settings and both `-c` overrides, and
+  flag. A read-only judge runs in the repo root itself: drop the `cd` and both `-c` overrides, and
   pass `-c 'sandbox_mode="read-only"'`. Both modes read the whole disk and have no network.
-  Workspace-write can write only the scratch cwd (also its temp dir) and one checklist state file
+  Workspace-write can write only the scratch cwd, `/tmp`, `$TMPDIR` and one checklist state file
   (above, correctness's; another reviewer's is its own `.claude/.<name>-review.json`). Run the
   bare command, not a pipeline, since a pipe's exit status hides the denial. Cite the output in a
   waive rationale.
@@ -157,15 +126,9 @@ same directory, kept for the newest 300 runs only (`DEVKIT_TELEMETRY_KEEP`), and
 - **A `↻ … not converging` line** under a blocked ship's digest means the same reviewer has blocked
   three or more rounds on this branch with no pass between, and its latest blocking-finding count is
   no better than its best earlier round. It says the count is not falling, not which findings recur.
-  A `↻ review: <file> …` line is the cross-reviewer form: no single reviewer has that streak, but
-  every round since the last pass, whichever reviewer blocked it, cited that one file, and the summed
-  count is not falling. Treat the file as one class.
   Stop re-shipping blind: fix the remaining findings as a class, waive the rest with the
   `guard-review waive` line, the `--kind` that fits and a rationale, or ask the user for the reviewer
   skip the block note names. `--no-verify` is never the landing path.
-- **A `↑ devkit X → Y` line** means devkit was upgraded since this branch's last ship attempt, so a
-  rule may now block code that passed before. The block still stands; the compare URL lists what
-  changed between the two releases.
 - **Sentry gate** judges commit-message intent for newly introduced runtime error classes. Add the
   capture on the named surface, or surface a disputed verdict to the user before any bypass.
 - **UI evidence** (`ui-evidence`) runs on every commit, plain or shipped, and never blocks. It
@@ -178,17 +141,12 @@ same directory, kept for the newest 300 runs only (`DEVKIT_TELEMETRY_KEEP`), and
   machine up` + `run <flow>`, then `devkit machine attach <pr>`, which puts the capture in the PR. A judge outage
   means no advice, and the judge can miss: when a change showed in the UI, attach the screenshots
   even if the reminder stayed silent. `uiEvidence.paths` adds globs to the defaults, for backend or
-  `.ts` files whose output a repo knows the UI renders. `devkit ship --dry-gates` applies the path
-  rule only, with no model call. Once a ship has a PR, a fired reminder becomes an unticked `📸`
-  task item in its body. A ship that skipped its gates (a `--resume` or an adopted PR) applies the
-  path rule to its commit instead. Tick the item once the screenshots or the "nothing visible
-  changed" note are there; re-ships keep it.
+  `.ts` files whose output a repo knows the UI renders.
 
 ## Comment budget
 
 The gate is deterministic: it counts the added or modified text lines of each standalone comment
-paragraph. A block comment is one paragraph, blank ` *` lines included, and same-style
-single-line comments separated only by blank lines are one paragraph; blank lines never count. One- and
+paragraph, treating comment groups separated only by blank lines as one paragraph. One- and
 two-line changes, inline comments after code, untouched comments, deletions, and pure renames pass.
 There is no bypass. Exit 4 (unreadable staged evidence or an unsupported language) is not a
 rejection; follow the printed remedy for that outcome.
@@ -234,43 +192,6 @@ Code moved between files is not new debt, so do not rewrite it to pass. Delete i
 `git add` both files, then run `devkit anti-slop adopt-relocations` for a partial move, or
 `devkit anti-slop adopt-renames` when Git reports a rename, and stage the baseline where it is
 tracked. The FAIL output names the source file when a new finding repeats debt baselined elsewhere.
-A FAIL saying the baseline predates span-anchored identity is a one-time migration: run `devkit
-anti-slop rekey` and stage the baseline (`devkit upgrade` does this itself).
-
-## Sizing how often a reviewer finding recurs
-
-Every gate appends to one per-machine JSONL sink, and only its `review_result` rows carry finding
-text. A plain grep also matches PR bodies (`ship_intent`) and outage causes, and overcounts. Set `P`
-to the phrase; this needs `jq`:
-
-```sh
-P='bun test'
-S="${DEVKIT_GATE_EVENTS:-$HOME/.devkit/telemetry/gate-events.jsonl}"
-[ -f "$S" ] || echo "no sink at $S: telemetry is off here, so this is not a zero"
-echo "$S: $(head -1 "$S" | jq -r .ts) → $(tail -1 "$S" | jq -r .ts)"
-grep -F '"type":"review_result"' "$S" | jq -r --arg p "$P" '
-  select(.type == "review_result") as $r
-  | ([(.items // [])[] | . as $i | ($i.issues // [])[]
-      | {lens: $i.lens, d: ($i.disposition // $i.status), t: .}]
-     + [select(.status == "fail") | {lens: "-", d: .status, t: (.reason // "")}])[]
-  | select(.t | ascii_downcase | contains($p | ascii_downcase))
-  | [$r.ts, $r.repo, $r.reviewer, .lens, $r.model, .d, $r.ship_id, (.t | gsub("\\s+"; " "))]
-  | @tsv' > hits.tsv
-cut -f3,7 hits.tsv | sort -u | cut -f1 | sort | uniq -c   # distinct ships per reviewer
-```
-
-`hits.tsv` holds one row per hit: date, repo, reviewer, lens, model, disposition, ship id, issue.
-
-- Count distinct ship ids, not rows: a failing reviewer re-runs on every attempt of the same ship.
-- `reason` is searched only on `fail` rows: on a pass, inconclusive or error row it is not a finding.
-- A zero covers only the printed date range, and only this machine's ships.
-- `repo` is the committing checkout's directory name, so a worktree logs under its own name and
-  older rows may lack it. Read it, but do not filter on it.
-- Each issue is cut to 200 characters, so a phrase that appears only past the cut never matches.
-  `guard-review transcript <transcript_ref>` prints the full reasoning behind a hit.
-- A row whose findings spilled carries `items_ref` instead of `items`. Search those with
-  `grep -r -l -i -F --include='items-*.txt' "$P" "$(dirname "$S")/transcripts"`; only the newest
-  300 runs are kept.
 
 ## Judge outage: re-targeting, not bypassing
 
@@ -280,11 +201,6 @@ usage limit with the wait it carries. Re-running clears none of those. Exit 3 wi
 `<gate>: could not run — <error>` banner is not a judge outage: the gate itself failed (a git read,
 say), so fix that error instead of re-targeting.
 
-The same move applies before a first attempt pays for the chain. When a ship's opening
-`guard-judge preflight` says `every reviewer that is not already cached will fail closed`, stop
-it, make the move below, and re-run the full `devkit ship` command rather than waiting for exit 3:
-an attempt stopped that early has recorded nothing for `--resume` to replay.
-
 The lever is moving every judge away from the CLI the remedy names. It skips nothing — the same
 reviewers still run, judged elsewhere — so it is not a `GUARD_NO_*` bypass and does not need the
 authorization those require. Run it in the shell the ship runs in.
@@ -292,7 +208,7 @@ authorization those require. Run it in the shell the ship runs in.
 `codex` dark — all four knobs, never a subset, plus any sentry pin:
 
 ```
-export GUARD_REVIEW_MODEL=sonnet GUARD_REVIEW_ESCALATION_MODEL=opus \
+export GUARD_REVIEW_MODEL=haiku GUARD_REVIEW_ESCALATION_MODEL=opus \
   GUARD_CORRECTNESS_MODEL=claude-haiku-5-5 GUARD_CORRECTNESS_CHUNK=off
 unset GUARD_SENTRY_MODEL FRINK_SENTRY_MODEL
 devkit ship --resume <branch>

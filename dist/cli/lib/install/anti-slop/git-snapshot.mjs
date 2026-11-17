@@ -5,9 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mjs';
 import { adoptManagedCapability } from './base-capability.mjs';
-import { hasCurrentIdentity, parseBaseline, rekeyBaseline, } from './baseline.mjs';
+import { parseBaseline } from './baseline.mjs';
 import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_CONFIG_REL, ANTI_SLOP_MANIFEST_REL, parseAntiSlopManagedActivationEvidence, } from './constants.mjs';
-import { collectAntiSlopFindings } from './runner.mjs';
 import { git, layout, MAX_GIT_OUTPUT, resolveRef, symbolicHead, } from './git-index-lock.mjs';
 export { withStableGitIndex } from './git-index-lock.mjs';
 const LINT_SOURCE = /\.(?:[cm]?[jt]sx?)$/u;
@@ -126,18 +125,11 @@ function fileAtTree(layout, tree, relativePath, description) {
         maxBuffer: MAX_GIT_OUTPUT,
     });
 }
-/** A line-identity baseline re-keyed from a lint of the tree it describes; current ones pass. */
-export function rekeyBaselineAtTree(cwd, tree, legacy) {
-    if (hasCurrentIdentity(legacy))
-        return legacy;
-    const files = [...new Set(legacy.entries.map((entry) => entry.file))];
-    return withBaseAntiSlopSnapshot(cwd, cwd, tree, files, ({ cwd: root, paths }) => rekeyBaseline(legacy, paths.length === 0 ? [] : collectAntiSlopFindings(root, paths)));
-}
-/** Every gate reads the committed base here, so a legacy base is compared in today's identity. */
-function baselineAtTree(cwd, layout, tree) {
+function baselineAtTree(layout, tree) {
     const json = fileAtTree(layout, tree, ANTI_SLOP_BASELINE_REL, 'the base baseline');
-    const source = `${tree.slice(0, 12)}:${layout.prefix}${ANTI_SLOP_BASELINE_REL}`;
-    return json === null ? null : rekeyBaselineAtTree(cwd, tree, parseBaseline(json, source));
+    return json === null
+        ? null
+        : parseBaseline(json, `${tree.slice(0, 12)}:${layout.prefix}${ANTI_SLOP_BASELINE_REL}`);
 }
 function activationEvidenceAtTree(layout, tree) {
     const manifest = fileAtTree(layout, tree, ANTI_SLOP_MANIFEST_REL, 'the managed manifest');
@@ -157,7 +149,7 @@ function envelope(cwd, baseRef, candidateTree) {
         baseOid: resolveRef(repo.root, baseRef),
         candidateTree,
         changes,
-        base: baselineAtTree(cwd, repo, baseTree),
+        base: baselineAtTree(repo, baseTree),
         ...packageChanges(changes, repo.prefix),
         activatedRuleIds: activatedRuleIdsBetween(activationEvidenceAtTree(repo, baseTree), candidateActivation),
         candidateMigrationReceipt: candidateActivation?.baselineMigrationId ?? null,
@@ -191,7 +183,7 @@ export function committedBaselineProbe(cwd) {
         if (resolveRef(repo.root, 'HEAD') === null)
             return { kind: 'skip', notice: null };
         const baseTree = treeForRef(repo.root, 'HEAD');
-        const base = baselineAtTree(cwd, repo, baseTree);
+        const base = baselineAtTree(repo, baseTree);
         if (base === null)
             return { kind: 'skip', notice: null };
         const staged = execFileSync('git', ['diff-index', '--cached', '--name-status', '-z', '-M', baseTree], {

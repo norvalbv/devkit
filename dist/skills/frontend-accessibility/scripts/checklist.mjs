@@ -15,12 +15,11 @@
  *   contrast <fg> <bg>          Check WCAG color contrast ratio
  */
 
+import { execFileSync } from 'node:child_process';
 import { createChecklistStore } from '../../_devkit/checklist-store.mjs';
 import {
   assertStagedSetSane,
-  gitOutput,
   resolveReviewRoots,
-  stagedAcmrNames,
   stagedFilesOverride,
   toGitPathspecs,
 } from '../../_devkit/review-roots.mjs';
@@ -218,7 +217,11 @@ function getStagedFiles() {
   if (override) return override.filter((f) => !f.endsWith('.pen'));
   const pathspecs = toGitPathspecs(frontendRoots());
   try {
-    const output = stagedAcmrNames(pathspecs);
+    const output = execFileSync(
+      'git',
+      ['diff', '--cached', '--name-only', '--diff-filter=ACMR', '--', ...pathspecs],
+      { encoding: 'utf-8' },
+    );
     // ACMR hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
     // that as zero items — a reviewer that examined nothing must not read as a pass.
     if (!output.trim()) assertStagedSetSane(pathspecs, 'frontend-accessibility');
@@ -233,7 +236,7 @@ function getStagedFiles() {
 
 function getFileDiff(file) {
   try {
-    return gitOutput(['diff', '--cached', '--', file]);
+    return execFileSync('git', ['diff', '--cached', '--', file], { encoding: 'utf-8' });
   } catch {
     return '';
   }

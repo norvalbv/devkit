@@ -3,25 +3,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-/** Run a packaged ship entrypoint with no stdin, printing its output only when it fails: ship's
- *  pre-queue pass, whose success must stay silent and must leave the caller's stdin unread. */
-export function runPackagedScriptQuiet(scriptName, args, { command, cwd, env }) {
+/** Run one of Devkit's packaged ship/review shell entrypoints with inherited stdio. */
+export function runPackagedScript(scriptName, args, { command, cwd, env }) {
     const script = fileURLToPath(new URL(`./${scriptName}`, import.meta.url));
-    const result = spawnSync('bash', [script, ...args], {
-        cwd,
-        env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        encoding: 'utf8',
-        maxBuffer: 16 * 1024 * 1024,
-    });
+    const result = spawnSync('bash', [script, ...args], { cwd, env, stdio: 'inherit' });
     if (result.error) {
         console.error(`${command}: ${result.error.message}`);
         return 1;
     }
-    if (result.status === 0)
-        return 0;
-    process.stderr.write(result.stderr);
-    process.stdout.write(result.stdout);
     return result.status ?? 1;
 }
 const FORWARDED_SIGNALS = ['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGTERM'];

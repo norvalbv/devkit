@@ -45,7 +45,12 @@ import { join, matchesGlob, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mts';
 import { exitGate, failLine } from '../deterministic/reason.mts';
-import { ALLOWLIST_CLI, type CloneAllowlistEntry, loadAllowlist, saveAllowlist } from './allowlist-io.mts';
+import {
+  ALLOWLIST_CLI,
+  type CloneAllowlistEntry,
+  loadAllowlist,
+  saveAllowlist,
+} from './allowlist-io.mts';
 import { flagReader } from './argv.mts';
 import { loadChangedSet } from './changed-files.mts';
 import { isExpired } from './decay.mts';
@@ -215,7 +220,6 @@ export function relPath(f: string): string {
   }
   return path;
 }
-
 
 /** Stable key: hash the fragment with whitespace collapsed so reformatting
  * doesn't change the key, but real code changes do. */
@@ -390,7 +394,10 @@ if (isMain) {
   // --changed: this commit's clones — touching a staged file and absent from HEAD. Staged set
   // from the hook's staged list / git.
   const staged = changed ? loadChangedSet(repoRoot) : null;
-  if (staged && ![...staged].some((f) => CODE_EXT.test(f) && paths.some((root) => isUnderRoot(f, root)))) {
+  if (
+    staged &&
+    ![...staged].some((f) => CODE_EXT.test(f) && paths.some((root) => isUnderRoot(f, root)))
+  ) {
     console.log('clone gate: no staged code under the clone roots ✓');
     exitGate(0, ['clone gate: no staged code under the clone roots']);
   }

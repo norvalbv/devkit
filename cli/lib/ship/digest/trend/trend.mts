@@ -389,9 +389,7 @@ export function renderVersionChange(rows: TrendRow[], key: ShipKey): string {
 /** The digest's branch-history lines (stalled reviewers, then a devkit upgrade), or ''. */
 export function renderBranchHistory(sink: string, key: ShipKey): string {
   const rows = readBranchHistory(sink, key);
-  return [trendNarration(rows, key), renderVersionChange(rows, key)]
-    .filter(Boolean)
-    .join('\n');
+  return [trendNarration(rows, key), renderVersionChange(rows, key)].filter(Boolean).join('\n');
 }
 
 /** Pure: streaks → at most two lines per reviewer, or '' for silence. */

@@ -76,11 +76,6 @@ export function vacatedDebt(bound, inherited, candidateGroups, sources, inLintSc
     }
     return vacated;
 }
-/** Debt of deleted files, minus any whose finding reappears new elsewhere: a pending move or rename. */
-export function deletedDebt(entries, newGroups, exists) {
-    const pending = new Set(newGroups.map(relocationKey));
-    return entries.filter((entry) => !exists(entry.file) && !pending.has(relocationKey(entry)));
-}
 /** Split new findings into genuinely new ones and ones paired 1:1 with vacated debt elsewhere. */
 export function classifyRelocations(newGroups, vacated) {
     const pool = copyPool(vacated);

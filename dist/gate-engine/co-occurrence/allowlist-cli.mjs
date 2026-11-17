@@ -16,8 +16,6 @@
  *   remove <symA> <fileA> <symB> <fileB>      remove-clone <hash>
  *   check <symA> <fileA> <symB> <fileB>       # exit 0 if a live entry covers it, 1 if not
  *   list [--json]                             prune   # drop entries past date + decayDays
- * Lifetime: `add` expires after 7 days; `add-clone` lasts until the duplicated code changes.
- * `--decay-days N` overrides either.
  *
  * Every mutation is read-`loadAllowlist`-modify-`saveAllowlist`; a corrupt allowlist makes
  * `loadAllowlist` refuse (exit 2) without writing, so no verb can wipe baselined entries.
@@ -158,8 +156,8 @@ function runAddClone({ positionals, flags }) {
         entry.rangeA = rangeA;
     if (rangeB)
         entry.rangeB = rangeB;
-    // The fragment hash already pins the approval to this code, so a calendar is opt-in.
-    entry.decayDays = decayDays ?? BASELINE_DECAY;
+    if (decayDays !== undefined)
+        entry.decayDays = decayDays;
     const existing = clones.some((c) => c.fragmentHash === fragmentHash);
     const next = existing
         ? clones.map((c) => (c.fragmentHash === fragmentHash ? entry : c))
@@ -318,10 +316,6 @@ Modes:
   list [--json]
   prune                                   drop entries past date + decayDays
   baseline-clones [--decay-days N]        freeze every clone on stdin (\`guard-clone json\`)
-
-Lifetime:
-  add        expires 7 days after approval unless --decay-days N.
-  add-clone  lasts until the duplicated code changes; --decay-days N makes it a temporary waiver.
 
 Allowlist path: $CO_OCCURRENCE_ALLOWLIST or guard.config.json allowlistPath (default .co-occurrence-allowlist.json).`);
 }

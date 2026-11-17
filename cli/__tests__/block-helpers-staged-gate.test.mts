@@ -7,7 +7,10 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { CHEAP_GATE_FLUSH, DK_GATE_BLOCK_HELPERS } from '../lib/husky/gate-policy/block-helpers.mts';
+import {
+  CHEAP_GATE_FLUSH,
+  DK_GATE_BLOCK_HELPERS,
+} from '../lib/husky/gate-policy/block-helpers.mts';
 import { DK_NO_GIT_ENV_HELPER } from '../lib/husky/review-fragments.mts';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 

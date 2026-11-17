@@ -48,7 +48,7 @@ export const DEFAULTS = Object.freeze({
     // generates the eslint rule + drives the baseline walk from this SAME spec (no drift). Empty by
     // default → structure-lint is opt-in / no-op. `trees[]` = { name, root, sourceExtensions?, grammar
     // (or preset), libDomains?, frozenDirs?, ignoredDirs?, entryAllowlist? }; `walls[]` = import walls.
-    // See gate-engine/structure/tree/walk.mjs + docs/design/structure/01-generalize-engine.md.
+    // See gate-engine/structure/walk.mjs + docs/design/structure/01-generalize-engine.md.
     structure: Object.freeze({ trees: [], walls: [] }),
     // Append-only decision-log directory (the decisions CLI + smell gate target).
     decisionsDir: 'docs/decisions',
@@ -61,8 +61,6 @@ export const DEFAULTS = Object.freeze({
     maxLines: 0,
     // Separate loose test-file ceiling. 0 = OFF; init/upgrade enables it alongside maxLines.
     maxTestLines: 0,
-    // Extra extensions only the raw-line ratchet governs (e.g. `["sh"]`); no other gate reads them.
-    maxLinesExtensions: [],
     // Flat-by-design folders exempt from the fanout cap (was frink's hardcoded
     // grandfathered roots — now opt-in per consumer).
     fanoutExempt: [],
@@ -76,7 +74,6 @@ export const DEFAULTS = Object.freeze({
         driftDesc: 0.88, // description cosine gate for the drifted tier
         minLoc: 15, // min lines per chunk to qualify as a drifted candidate
         minTokens: 50, // jscpd token-clone floor (clone-detector)
-        similarity: 0.9, // jscpd --similarity floor: same-structure functions under other names
     }),
     // search-code index path for the embedding matcher. null => matcher opt-out:
     // no index configured means the semantic matcher fails open / does nothing
@@ -248,7 +245,6 @@ function resolveLoadedGuardConfig(file, cwd) {
         maxTestLines: typeof file.maxTestLines === 'number' && Number.isFinite(file.maxTestLines)
             ? file.maxTestLines
             : DEFAULTS.maxTestLines,
-        maxLinesExtensions: arr(file.maxLinesExtensions, DEFAULTS.maxLinesExtensions),
         fanoutExempt: arr(file.fanoutExempt, DEFAULTS.fanoutExempt),
         allowlistPath: allowlistEnv ?? file.allowlistPath ?? DEFAULTS.allowlistPath,
         // Shallow-merge thresholds so a consumer can override one knob without restating all.
@@ -294,7 +290,6 @@ function resolveLoadedGuardConfig(file, cwd) {
         uiEvidence: { paths: globs(file.uiEvidence?.paths) },
         extraGates: file.extraGates,
         structureRaw: file.structure,
-        gateTimeoutMs: file.gateTimeoutMs,
         noLog: noLogEnv ?? Boolean(file.noLog ?? DEFAULTS.noLog),
         noLlm: noLlmEnv ?? Boolean(file.noLlm ?? DEFAULTS.noLlm),
         // Echo the resolution base so engines never have to re-derive it (and never reach
@@ -330,7 +325,29 @@ export function resolveFromCwd(cfg, field, value) {
         return null;
     return isAbsolute(raw) ? raw : resolve(cfg.cwd, raw);
 }
-export { TEST_INFIX, JS_TS_SOURCE_RE, sourceMatchers } from './config-source-matchers.mjs';
+// The test-file infix (`.test.` / `.spec.`) — constant, so it lives at module scope; the
+// extension set is what varies, and that's a plain suffix check (no dynamic RegExp needed).
+export const TEST_INFIX = /\.(test|spec)\./;
+/** Any JavaScript or TypeScript file, whatever `sourceExtensions` a repository declares. */
+export const JS_TS_SOURCE_RE = /\.(?:[cm]?[jt]sx?)$/i;
+/**
+ * Build the impl-file matchers for a `sourceExtensions` list (e.g. `['ts','tsx']` or `['mjs','js']`),
+ * so the ratchets are language-agnostic instead of hardcoding `.ts`/`.tsx`. Each returns a predicate:
+ * `isSource(name)` true for an impl file; `isTest(name)` for its test variant (`.test.`/`.spec.`);
+ * `isBarrel(name)` for an `index` barrel. Fan-out and disable debt use non-test implementation
+ * files; the raw-line ratchet also uses `isTest` to apply its separate test ceiling.
+ *
+ * @param extensions bare extensions, no dot (e.g. `['ts','tsx']`)
+ */
+export function sourceMatchers(extensions) {
+    const exts = extensions.map((e) => `.${e.startsWith('.') ? e.slice(1) : e}`);
+    const isSource = (name) => exts.some((x) => name.endsWith(x));
+    return {
+        isSource,
+        isTest: (name) => TEST_INFIX.test(name) && isSource(name),
+        isBarrel: (name) => exts.some((x) => name === `index${x}`),
+    };
+}
 /**
  * A structure tree's effective source extensions: its own `sourceExtensions` override, else the
  * repo-wide `cfg.sourceExtensions`. So a tree can speak `.tsx` in a `.mjs` repo (or vice-versa).

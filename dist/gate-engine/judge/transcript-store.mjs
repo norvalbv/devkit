@@ -99,12 +99,6 @@ export function saveTranscriptUnique(agent, text) {
         return null; // best-effort — never fail a gate over a transcript
     }
 }
-/** A judge's line-list sidecar (`<label>.commands`, `<label>.denied`); null when there is nothing to list. */
-export function saveSidecar(name, lines, lens) {
-    if (lines.length === 0)
-        return null;
-    return saveTranscriptUnique(name, `${lens ? `lens: ${lens}\n` : ''}${lines.join('\n')}\n`);
-}
 /** Best-effort retention: keep the most-recent N run dirs under transcripts/, delete older. Never
  * throws (a prune failure must not fail a gate). Cheap on the common path — only sorts when over cap. */
 function pruneRuns(base) {

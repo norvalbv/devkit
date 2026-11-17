@@ -1,5 +1,5 @@
 import { execFileSync as execSetupSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +11,12 @@ import {
 } from './_helpers.mts';
 import { readIntent } from '../lib/ship/ship-intent.mts';
 
-export { bareSha, localBranchExists, manifestOf, remoteBranchExists } from './_ship-branch-queries.mts';
+export {
+  bareSha,
+  localBranchExists,
+  manifestOf,
+  remoteBranchExists,
+} from './_ship-branch-queries.mts';
 
 export const scriptPath = fileURLToPath(new URL('../lib/ship/ship-branch.sh', import.meta.url));
 export const reshipScript = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));

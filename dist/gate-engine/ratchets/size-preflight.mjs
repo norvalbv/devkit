@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveGuardConfig } from '../config.mjs';
+import { resolveGuardConfig, sourceMatchers } from '../config.mjs';
 import { readRatchetBaseline } from './baseline-paths.mjs';
 import { fanoutSplitHints } from './folder-fanout.mjs';
 import { stagedSet, treeTextAtRef } from './git-index.mjs';
 import { decodeLineBaseline, effectiveLineCeiling, measureLines, normalizeCandidateLineBaseline, normalizeLineBaseline, } from './size-line-authority.mjs';
-import { LINES_BASELINE, lineMatchers, SIZE_SKIP_DIRS } from './size-policy.mjs';
+import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mjs';
 function readLinesBaseline(contents, label) {
     const decoded = decodeLineBaseline(contents, label);
     if (decoded.error)
@@ -32,7 +32,7 @@ function workingText(root, file) {
     }
 }
 function sourcePaths(root, cfg, selected) {
-    const match = lineMatchers(cfg);
+    const match = sourceMatchers(cfg.sourceExtensions);
     return selected.filter((file) => existsSync(join(root, file)) &&
         match.isSource(file) &&
         !file.split('/').some((part) => SIZE_SKIP_DIRS.has(part)) &&
@@ -63,7 +63,7 @@ export function preflightLines(root, ref, requested = []) {
         return 2;
     }
     local = normalizeCandidateLineBaseline(root, local, [ref], (file) => workingText(root, file));
-    const match = lineMatchers(cfg);
+    const match = sourceMatchers(cfg.sourceExtensions);
     const cap = (file) => (match.isTest(file) ? cfg.maxTestLines : cfg.maxLines);
     const selected = requested.length > 0 ? requested : [...(stagedSet(root) ?? [])];
     const baselineIncluded = selected.some((file) => file === LINES_BASELINE);

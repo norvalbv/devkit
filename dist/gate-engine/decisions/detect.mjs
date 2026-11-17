@@ -12,7 +12,6 @@ import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
 import { execJudge } from '../judge/run-judge.mjs';
 import { resolveReviewModel } from '../review/reviewers.mjs';
 import { composeTranscript, saveTranscript } from '../judge/transcript-store.mjs';
-import { loadRecordedTargets, recordStageable, renderBlockRemedy, smellFiles, } from './capture/block-remedy.mjs';
 import { git, stagedFiles } from './git-io.mjs';
 import { saveVerdict, verdictKey, verdictMeta } from './verdict-cache.mjs';
 export const LOCKFILE_RE = /(^|\/)(bun\.lockb?|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/;
@@ -320,8 +319,16 @@ async function runGate() {
             'diff',
             '--cached',
         ]), entries, cfg.boundaries);
-        const recorded = await loadRecordedTargets(entries.map((e) => e.path), cwd);
-        const targets = recorded.text;
+        const targets = await Promise.all([
+            import('./scoped-targets.mjs'),
+            import('../review/evidence/targets-block.mjs'),
+        ])
+            .then(async ([{ scopedTargets }, { renderTargets }]) => renderTargets(await scopedTargets(entries.map((e) => e.path), '', 6, cwd), {
+            header: '## RECORDED TARGETS (current rulings matching changed files)',
+            skipHeader: '## RECORDED TARGETS — NONE',
+            skipNote: 'No scoped Target matches. Judge the diff without assuming prior approval.',
+        }, 8192))
+            .catch(() => '## RECORDED TARGETS — UNAVAILABLE\nDecision log could not be read. Judge the diff without assuming prior approval.');
         // Target context has its own budget so it cannot displace diff evidence.
         const key = verdictKey('detect', input, targets);
         const cachedVerdict = verdictMeta(cwd, key);
@@ -366,15 +373,6 @@ async function runGate() {
             }
         }
         console.error(`decision smells: ${smells.join(', ')}`);
-        try {
-            // Narration only: a throw here must never turn the block into a fail-open exit 2.
-            const files = smellFiles(smellSources(entries, cfg.boundaries));
-            const stageable = recordStageable(cwd, cfg.decisionsDir);
-            const judgeLive = !cfg.noLlm && judged !== 'OUTAGE';
-            const remedy = { files, slugs: recorded.slugs, stageable, judgeLive };
-            console.error(renderBlockRemedy({ ...remedy, decisionsDir: cfg.decisionsDir }).join('\n'));
-        }
-        catch { }
         emitGateEvent({
             type: 'gate_result',
             gate: 'decisions',

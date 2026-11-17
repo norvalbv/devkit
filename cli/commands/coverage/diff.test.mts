@@ -11,7 +11,10 @@ import {
   type Thresholds,
   write,
 } from '../../../gate-engine/coverage/__tests__/_provenance-fixtures.mts';
-import { type ClearMarker, writeClearMarker } from '../../../gate-engine/coverage/clear-marker/store.mts';
+import {
+  type ClearMarker,
+  writeClearMarker,
+} from '../../../gate-engine/coverage/clear-marker/store.mts';
 import { snapshotSource } from '../../../gate-engine/coverage/provenance.mts';
 import coverageDiff from './diff.mts';
 

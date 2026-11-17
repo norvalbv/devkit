@@ -264,7 +264,7 @@ describe('a PASS with several long advisories', () => {
     expect(advisoryRows().map((r) => r.gate)).toEqual(['review:commit-guard']); // reviewer key
   });
 
-  it("gives each chunk part its own transcript, and the reviewer one row per chunk advisory", () => {
+  it('gives each chunk part its own transcript, and the reviewer one row per chunk advisory', () => {
     const task = { ...plan(cwd).tasks[0], splitOf: REVIEWER, group: 'g' };
     const chunk = (index: number): LensPart =>
       // SAFETY: the report reads only res/task (task.chunk.index for the label), supplied here.
@@ -280,11 +280,11 @@ describe('a PASS with several long advisories', () => {
     expect(refs).toHaveLength(2);
     expect(new Set(refs).size).toBe(2);
     // One row per advisory: the digest groups them per reviewer, so none is hidden behind another.
-    expect(advisoryRows().map((r) => r.gate)).toEqual(['review:commit-guard', 'review:commit-guard']);
-    expect(advisoryRows().map((r) => r.detail)).toEqual([
-      'c0.ts:1 — chunk 0',
-      'c1.ts:1 — chunk 1',
+    expect(advisoryRows().map((r) => r.gate)).toEqual([
+      'review:commit-guard',
+      'review:commit-guard',
     ]);
+    expect(advisoryRows().map((r) => r.detail)).toEqual(['c0.ts:1 — chunk 0', 'c1.ts:1 — chunk 1']);
   });
 });
 

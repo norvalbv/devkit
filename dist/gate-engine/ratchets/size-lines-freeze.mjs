@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { sourceMatchers } from '../config.mjs';
 import { readRatchetBaseline, removeRatchetBaseline, writeRatchetBaseline, } from './baseline-paths.mjs';
-import { LINES_BASELINE, lineMatchers } from './size-policy.mjs';
+import { LINES_BASELINE } from './size-policy.mjs';
 import { CURRENT_LINE_COUNT_VERSION, lineBaselineParents, lineBaselineOrExit, normalizeCandidateLineBaseline, } from './size-line-authority.mjs';
 export function freezeLinesBaseline(root, config, oversized, mode) {
     const baseline = readRatchetBaseline(root, LINES_BASELINE);
@@ -14,7 +15,7 @@ export function freezeLinesBaseline(root, config, oversized, mode) {
             return null;
         }
     });
-    const match = lineMatchers(config);
+    const match = sourceMatchers(config.sourceExtensions);
     const cap = (file) => (match.isTest(file) ? config.maxTestLines : config.maxLines);
     const previousCeiling = (file) => previous.files[file.file];
     const unverifiableLegacy = (file) => decodedPrevious.lineCountVersion === 1 &&

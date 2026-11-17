@@ -7,12 +7,11 @@
  * Scope: guard.config.json review.backendRoots (all staged files when unset).
  */
 
+import { execFileSync } from 'node:child_process';
 import { createChecklistStore } from '../../_devkit/checklist-store.mjs';
 import {
   assertStagedSetSane,
-  gitOutput,
   resolveReviewRoots,
-  stagedAcmrNames,
   stagedFilesOverride,
   toGitPathspecs,
 } from '../../_devkit/review-roots.mjs';
@@ -33,8 +32,7 @@ const RE_N_PLUS_ONE_MAP = /\.map\s*\([\s\S]{0,300}?(find|query|await)/i;
 const RE_PAGINATION = /\b(offset|cursor|pagination|paginate)/i;
 // Bare `index` matched the a/…/index.ts paths in every diff header.
 const RE_INDEXING = /\b(createIndex|ensureIndex|orderBy)/i;
-// `(?<!--)` keeps git's `--cached` flag from reading as cache code.
-const RE_CACHING = /(?<!--)\b(cache|redis|memcache|lru|ttl|expire|invalidate)/i;
+const RE_CACHING = /\b(cache|redis|memcache|lru|ttl|expire|invalidate)/i;
 const RE_POOL = /\b(pool|connection)/i;
 // Bare `async|await|Promise` matched every backend diff. What the async-handling lens is
 // actually for is sequential awaits (loop + await) and offload infrastructure — Promise.all
@@ -52,10 +50,6 @@ const RE_LOGGING = /\b(logger|console\.|pino|winston)/i;
 // excluded from the sync-IO trigger: it is cheap and ubiquitous in startup/config code.
 const RE_SYNC_IO =
   /\b(readFileSync|writeFileSync|appendFileSync|execSync|spawnSync|readdirSync|statSync|execFileSync)\b/;
-// A loop beside an argv-array call (`git(cwd, ['show', …])`) is a per-item spawn whose sync call
-// sits in a wrapper the diff doesn't show. Misses multi-line argv arrays and array-less wrappers.
-const RE_LOOP = /\b(for(\s+await)?|while)\s*\(|\.(map|forEach|flatMap)\s*\(/;
-const RE_ARGV_CALL = /\b(?!(?:for|while|if)\b)\w+\s*\([^)]{0,200}\[\s*['"`]/;
 const RE_UNBOUNDED =
   /\b\w*(cache|memo|registry|store|buffer|queue)\w*\s*[:=]\s*(new\s+(Map|Set)\b|\{\}|\[\])/i;
 
@@ -90,7 +84,11 @@ function getStagedFiles() {
   if (override) return override.filter((f) => !RE_PROSE_FILE.test(f));
   const pathspecs = toGitPathspecs(backendRoots());
   try {
-    const output = stagedAcmrNames(pathspecs);
+    const output = execFileSync(
+      'git',
+      ['diff', '--cached', '--name-only', '--diff-filter=ACMR', '--', ...pathspecs],
+      { encoding: 'utf-8' },
+    );
     // ACMR hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
     // that as zero items — a reviewer that examined nothing must not read as a pass.
     if (!output.trim()) assertStagedSetSane(pathspecs, 'backend-performance');
@@ -106,29 +104,10 @@ function getStagedFiles() {
 
 function getFileDiff(file) {
   try {
-    return gitOutput(['diff', '--cached', '--', file]);
+    return execFileSync('git', ['diff', '--cached', '--', file], { encoding: 'utf-8' });
   } catch {
     return '';
   }
-}
-
-// Per file and per hunk, so unrelated code can't pair up; the loop or the call must be added.
-function loopSpawnsPerItem(fileDiff) {
-  return fileDiff
-    .split(/^@@/m)
-    .slice(1)
-    .some((hunk) => {
-      const lines = hunk
-        .split('\n')
-        .slice(1)
-        .filter((l) => !l.startsWith('-'));
-      const hits = lines.filter((l) => RE_LOOP.test(l) || RE_ARGV_CALL.test(l));
-      return (
-        hits.some((l) => RE_LOOP.test(l)) &&
-        hits.some((l) => RE_ARGV_CALL.test(l)) &&
-        hits.some((l) => l.startsWith('+'))
-      );
-    });
 }
 
 function detectPerformancePatterns(_files, diffs) {
@@ -173,7 +152,7 @@ function detectPerformancePatterns(_files, diffs) {
   if (RE_BATCH.test(fullDiff)) {
     items.push({ name: 'batching', category: 'Code Optimization', status: 'pending', issues: [] });
   }
-  if (RE_SYNC_IO.test(fullDiff) || diffs.some(loopSpawnsPerItem)) {
+  if (RE_SYNC_IO.test(fullDiff)) {
     items.push({ name: 'sync-io', category: 'Code Optimization', status: 'pending', issues: [] });
   }
   if (RE_TIMEOUT.test(fullDiff)) {

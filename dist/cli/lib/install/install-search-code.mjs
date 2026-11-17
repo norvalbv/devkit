@@ -9,7 +9,6 @@
 import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withGitignoreLock } from './gitignore-cache.mjs';
-import { writeIfAbsent } from '../fs-helpers.mjs';
 export const SEARCH_CODE_CONFIG = 'search-code.config.json';
 const INDEX_LINE = '.search-code/';
 const INDEX_PATH = '.search-code/index.db';
@@ -74,7 +73,9 @@ function setIndexPath(cwd, dryRun) {
 export function installSearchCode(cwd, dryRun, overlay) {
     console.log('  search-code (opt-in semantic search)');
     const cfgPath = join(cwd, SEARCH_CODE_CONFIG);
-    const existed = !dryRun && writeIfAbsent(cfgPath, STARTER) === 'exists';
+    const existed = existsSync(cfgPath);
+    if (!existed && !dryRun)
+        writeFileSync(cfgPath, STARTER);
     console.log(`  ${dryRun ? '[dry-run] write' : existed ? '• kept' : '✓ wrote'} ${SEARCH_CODE_CONFIG}`);
     if (!overlay)
         ensureGitignoreLine(cwd, INDEX_LINE, dryRun);

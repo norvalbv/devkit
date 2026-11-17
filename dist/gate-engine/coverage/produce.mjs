@@ -29,11 +29,10 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, } from 'node:fs';
 import { basename, join } from 'node:path';
 import { emitGateEvent } from '../judge/gate-events.mjs';
-import { readClearMarker, removeClearMarker, writeClearMarker } from './clear-marker/store.mjs';
-import { formatDiagnosis, formatRerunNotice, formatRerunRescue, markerCause, passEnv, raisedTimeoutMs, readDiagnosis, RESULTS_NAME, RETRY_CONDITION, UNHANDLED_REPORTER, } from './failures.mjs';
+import { formatDiagnosis, formatRerunNotice, formatRerunRescue, headSha, markerCause, passEnv, raisedTimeoutMs, readClearMarker, readDiagnosis, removeClearMarker, RESULTS_NAME, RETRY_CONDITION, stagedFiles, UNHANDLED_REPORTER, writeClearMarker, } from './failures.mjs';
 import { ownsReporter, ownsRetry, ownsTimeoutBudget, resolveVitest, runVitestDetailed, } from './vitest-cli.mjs';
 import { detectVitestVersion, RETRY_MIN_VITEST, supportsRetryCondition, } from './vitest-version.mjs';
-import { headSha, markTouchedDuringRun, publishManifest, snapshotSource, stagedFiles, stageManifest, } from './provenance.mjs';
+import { markTouchedDuringRun, publishManifest, snapshotSource, stageManifest, } from './provenance.mjs';
 export const COVERAGE_DIR = 'coverage';
 export const REPORT_NAME = 'coverage-final.json';
 /** The artifact path the coverage GATE reads. Single source of truth for both sides. */
@@ -218,8 +217,8 @@ export function buildInjectedArgs(vitest, argv, resultsFile, cwd) {
         }
     }
     if (!ownsReporter(argv) && !process.env[NO_DIAGNOSIS_ENV]) {
-        // CLI reporters REPLACE config `reporters`, so `default` keeps vitest's standard console output;
-        // the json reporter writes only into our run directory; ours names unhandled errors beside it.
+        // `default` is kept so console output is byte-for-byte what the consumer already sees; the json
+        // reporter is additive and writes only into our run directory; ours names unhandled errors beside it.
         injected.push('--reporter=default', '--reporter=json', `--outputFile.json=${resultsFile}`, `--reporter=${UNHANDLED_REPORTER}`);
     }
     return injected;
@@ -228,8 +227,9 @@ export function buildInjectedArgs(vitest, argv, resultsFile, cwd) {
  * Say what happened, on stderr, and make the flaky rate measurable.
  *
  * `retrying` is the whole reason this takes the outcome rather than predicting it. Whether devkit's
- * json reporter actually ran cannot be decided from argv: a string `outputFile` in the consumer's
- * vitest.config (or a json reporter's own) diverts it while the injected retry still fires. Deciding
+ * json reporter actually ran cannot be decided from argv: a consumer who sets `reporters` in their
+ * vitest.config — which is where reporters are normally set — silently WINS over the CLI flag, so the
+ * report never appears while the injected retry still fires. Verified against vitest 4.1.10. Deciding
  * from the artifact covers that, an older vitest ignoring the dotted --outputFile.json, an argv
  * --reporter, and the env switch, with one rule instead of four guesses.
  *
@@ -240,7 +240,7 @@ export function reportDiagnosis(diagnosis, cwd, retrying) {
     if (!diagnosis) {
         if (retrying) {
             console.error('\u2139\uFE0F  Retrying timed-out tests, but the rescue cannot be reported: no devkit json');
-            console.error('   report was produced (a vitest.config `outputFile` diverted it, you passed');
+            console.error('   report was produced (your vitest.config sets `reporters`, you passed');
             console.error(`   --reporter, or ${NO_DIAGNOSIS_ENV} is set). A test that only passes on the`);
             console.error('   retry will look plainly green. Use --retry=0 to turn the retry off instead.');
         }

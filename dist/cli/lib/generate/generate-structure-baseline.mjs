@@ -34,7 +34,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig, resolveTreeExtensions } from '../../../gate-engine/config.mjs';
 import { STRUCTURE_BASELINE_DIR } from '../../../gate-engine/ratchets/baseline-paths.mjs';
-import { walkTree } from '../../../gate-engine/structure/tree/walk.mjs';
+import { walkTree } from '../../../gate-engine/structure/walk.mjs';
 import { persistStructureBaseline } from './structure-baseline-storage.mjs';
 // ─── Regexes (verbatim from frink's generate-eslint-baseline.mjs) ───────────────
 const PASCAL = /^[A-Z][A-Za-z0-9]*$/;

@@ -1,12 +1,10 @@
 // A briefed NEW dist artifact must match a fresh build of its source; tracked dist stays release-only.
-// Ship only compares; the caller builds one with `bun run build:new`, which writes via writeNewDist.
+// Ship never builds: it compares, so a caller's stale or re-checked-out artifact cannot pass.
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-/** A full emit takes about a second; the bound only catches a hung compiler. */
-const TSC_TIMEOUT_MS = 60_000;
 /** The source a dist path is built from: the inverse of `distArtifact` for compiled trees. */
 function distSource(artifact) {
     const rel = artifact.slice('dist/'.length);
@@ -27,20 +25,11 @@ function checkoutTsc(root) {
     }
 }
 /** Compiles the checkout into a tmp dir and returns each wanted artifact's emitted bytes. */
-function freshEmit(root, artifacts, timeoutMs) {
+function freshEmit(root, artifacts) {
     const out = mkdtempSync(path.join(os.tmpdir(), 'devkit-fresh-dist-'));
     try {
         // The exit code is ignored: noEmitOnError is unset, so another file's type error still emits.
-        // SIGKILL, because native tsc ignores SIGTERM mid-compile and spawnSync waits for it to exit.
-        const { error, signal } = spawnSync(process.execPath, [checkoutTsc(root), '-p', path.join(root, 'tsconfig.build.json'), '--outDir', out], { cwd: root, stdio: 'ignore', timeout: timeoutMs, killSignal: 'SIGKILL' });
-        if (error) {
-            const timedOut = 'code' in error && error.code === 'ETIMEDOUT';
-            throw new Error(timedOut
-                ? `tsc did not finish within ${timeoutMs / 1000}s`
-                : `tsc could not run: ${error.message}`);
-        }
-        if (signal)
-            throw new Error(`tsc was killed by ${signal}`);
+        spawnSync(process.execPath, [checkoutTsc(root), '-p', path.join(root, 'tsconfig.build.json'), '--outDir', out], { cwd: root, stdio: 'ignore' });
         const emitted = (file) => {
             const absolute = path.join(out, file.slice('dist/'.length));
             return existsSync(absolute) ? readFileSync(absolute) : undefined;
@@ -51,24 +40,18 @@ function freshEmit(root, artifacts, timeoutMs) {
         rmSync(out, { recursive: true, force: true });
     }
 }
-/** A dist path untracked at base whose source is on disk and builds to exactly that path. */
-function newArtifact(root, artifact, atBase, distArtifact) {
-    const source = distSource(artifact);
-    return (artifact.startsWith('dist/') &&
-        !atBase.has(artifact) &&
-        distArtifact(source) === artifact &&
-        existsSync(path.join(root, source)));
-}
 /** Briefed new dist artifacts whose bytes differ from a fresh build of their on-disk source. */
-export function staleNewDist(root, shipping, atBase, distArtifact, tscTimeoutMs = TSC_TIMEOUT_MS) {
+export function staleNewDist(root, shipping, atBase, distArtifact) {
     const pairs = shipping
-        .filter((file) => newArtifact(root, file, atBase, distArtifact))
+        .filter((file) => file.startsWith('dist/') && !atBase.has(file))
         .filter((file) => existsSync(path.join(root, file)))
-        .map((artifact) => ({ artifact, source: distSource(artifact) }));
+        .map((artifact) => ({ artifact, source: distSource(artifact) }))
+        .filter(({ artifact, source }) => distArtifact(source) === artifact)
+        .filter(({ source }) => existsSync(path.join(root, source)));
     const compiled = pairs
         .filter(({ artifact, source }) => artifact !== `dist/${source}`)
         .map(({ artifact }) => artifact);
-    const fresh = compiled.length > 0 ? freshEmit(root, compiled, tscTimeoutMs) : new Map();
+    const fresh = compiled.length > 0 ? freshEmit(root, compiled) : new Map();
     return pairs
         .filter(({ artifact, source }) => {
         const expected = fresh.has(artifact)
@@ -78,28 +61,4 @@ export function staleNewDist(root, shipping, atBase, distArtifact, tscTimeoutMs 
     })
         .map(({ artifact }) => artifact)
         .sort();
-}
-/**
- * Writes exactly the named NEW dist artifacts from the same fresh build the stale check compares
- * against, so the result passes it. Tracked dist is refused: rebuilding it is release-only.
- */
-export function writeNewDist(root, artifacts, atBase, distArtifact) {
-    const refused = artifacts.filter((file) => path.posix.normalize(file) !== file || !newArtifact(root, file, atBase, distArtifact));
-    if (refused.length > 0) {
-        throw new Error(`not a new dist artifact with a source on disk (tracked dist is release-only): ${refused.join(', ')}`);
-    }
-    const compiled = artifacts.filter((file) => file !== `dist/${distSource(file)}`);
-    const fresh = compiled.length > 0 ? freshEmit(root, compiled, TSC_TIMEOUT_MS) : new Map();
-    const unemitted = compiled.filter((file) => fresh.get(file) === undefined);
-    if (unemitted.length > 0)
-        throw new Error(`tsc emitted nothing for: ${unemitted.join(', ')}`);
-    for (const file of artifacts) {
-        const dest = path.join(root, file);
-        mkdirSync(path.dirname(dest), { recursive: true });
-        // copyFileSync keeps the source's mode, as the release build's cpSync does for shell scripts.
-        if (fresh.has(file))
-            writeFileSync(dest, fresh.get(file));
-        else
-            copyFileSync(path.join(root, distSource(file)), dest);
-    }
 }

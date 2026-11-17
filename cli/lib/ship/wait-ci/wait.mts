@@ -174,7 +174,6 @@ export function verdictLines(result: WaitCiResult, pr: string, repo: string): st
   return lines;
 }
 
-
 export interface WaitCiOptions {
   /** THE seam: one poll's answer. Injected so a 15-minute wait runs in microseconds under test. */
   poll: (attempt: number) => PollResult | Promise<PollResult>;
@@ -345,7 +344,11 @@ export function ghChecksPoller(options: ChecksPollerOptions): () => PollResult {
   if (options.required) args.push('--required');
   const read = (raw: string): PollResult => {
     const rows = parseChecksJson(raw);
-    if (rows) return { kind: 'rows', rows: withFailedSteps(rows, { ...options, repo: options.repo ?? '{owner}/{repo}', exec }) };
+    if (rows)
+      return {
+        kind: 'rows',
+        rows: withFailedSteps(rows, { ...options, repo: options.repo ?? '{owner}/{repo}', exec }),
+      };
     return {
       kind: 'unavailable',
       reason: 'gh-json-unparseable',

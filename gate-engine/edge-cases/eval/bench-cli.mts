@@ -28,13 +28,7 @@ import {
   writeTranscript,
 } from './bench.mts';
 import { matchFindings } from './lib/match.mts';
-import {
-  bcaCI,
-  mcnemarMidP,
-  mean,
-  percentileCI,
-  wilcoxonSignedRank,
-} from './lib/stats.mts';
+import { bcaCI, mcnemarMidP, mean, percentileCI, wilcoxonSignedRank } from './lib/stats.mts';
 import { CEILING_PROMPT } from './prompts.mts';
 
 /** CLI dispatcher for bench.mts (modes documented in its header). Always exits the process. */

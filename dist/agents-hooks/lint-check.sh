@@ -41,20 +41,20 @@ truncate() { if [ ${#1} -gt 1500 ]; then echo "${1:0:1500}... (truncated)"; else
 # 1. Oxfmt check (no --write) over the session's edited files, only where an Oxfmt CONFIG and the
 # local binary both exist; lines rendered from cli/lib/husky/format-fragment.mts. Exit 1 (unformatted,
 # bad config) or 2 (syntax error) is a finding; any other (126/127: no node for its shebang) stands down.
-if { [ -f ".oxfmtrc.json" ] || [ -f ".oxfmtrc.jsonc" ] || [ -f "oxfmt.config.ts" ] || [ -f "oxfmt.config.mts" ]; } && [ -x "./node_modules/.bin/oxfmt" ]; then # devkit: must equal renderAgentHookLines (cli/lib/husky/format-fragment.mts)
+if { [ -f ".oxfmtrc.json" ] || [ -f ".oxfmtrc.jsonc" ] || [ -f "oxfmt.config.ts" ] || [ -f "oxfmt.config.mts" ]; } && [ -x "./node_modules/.bin/oxfmt" ]; then
   oxfmt_files=()
   while IFS= read -r f; do
     [[ "$f" =~ \.(tsx?|jsx?|mts|cts|mjs|cjs|css|jsonc?)$ ]] && oxfmt_files+=("$f")
   done < "$LEDGER"
   if [ ${#oxfmt_files[@]} -gt 0 ]; then
-    lint_output=$("./node_modules/.bin/oxfmt" --no-error-on-unmatched-pattern --check "${oxfmt_files[@]}" 2>&1) # devkit: must equal renderAgentHookLines (cli/lib/husky/format-fragment.mts)
+    lint_output=$("./node_modules/.bin/oxfmt" --no-error-on-unmatched-pattern --check "${oxfmt_files[@]}" 2>&1)
     rc=$?
     if [ "$rc" -eq 1 ] || [ "$rc" -eq 2 ]; then
       echo "Oxfmt format errors detected in files you edited. Please fix these issues:" >&2
       echo "" >&2
       truncate "$lint_output" >&2
       echo "" >&2
-      echo "Run './node_modules/.bin/oxfmt --write <file>' to auto-fix." >&2 # devkit: must equal renderAgentHookLines (cli/lib/husky/format-fragment.mts)
+      echo "Run './node_modules/.bin/oxfmt --write <file>' to auto-fix." >&2
       exit 2
     fi
   fi

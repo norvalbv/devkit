@@ -9,7 +9,6 @@
  * blocked: the shell settled that and published it on this ship's ship_result row, which this
  * reader consumes, so the two can never disagree.
  */
-import { STICKY_RULING } from '../../../../gate-engine/review/evidence/base-context.mts';
 import { branchNarration } from './advisory/advisories.mts';
 import { groupAdvisories } from './advisory/advisory-rows.mts';
 import { type Attributable, type Buckets, COMPLETENESS, classify } from './event-rows.mts';

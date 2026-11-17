@@ -1,17 +1,15 @@
 /** Baseline growth, activation migration, and inherited-debt checks for anti-slop gates. */
-import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { failLine, writeGateReason } from '../../../../gate-engine/deterministic/reason.mjs';
 import { AntiSlopCapabilityError } from './base-capability.mjs';
-import { baselineFromGroups, baselineIncreases, compareBaseline, hasCurrentIdentity, migrateBaselineRenames, rekeyBaseline, removedBaselineMigrationReceipts, } from './baseline.mjs';
-import { ANTI_SLOP_BASELINE_REL } from './constants.mjs';
+import { baselineFromGroups, baselineIncreases, compareBaseline, migrateBaselineRenames, removedBaselineMigrationReceipts, } from './baseline.mjs';
 import { formatGroupSites } from './diagnostics.mjs';
-import { activatedRuleIdsBetween, committedBaselineProbe, rekeyBaselineAtTree, withBaseAntiSlopSnapshot, } from './git-snapshot.mjs';
+import { activatedRuleIdsBetween, committedBaselineProbe, withBaseAntiSlopSnapshot, } from './git-snapshot.mjs';
 import { readManagedAntiSlopActivationEvidence } from './managed-state.mjs';
 import { ACCEPT_VIA_OVERRIDE } from './report/remedy.mjs';
 import { creditRelocatedGrowth, formatSources, relocationBasePaths, relocationKey, vacatedDebt, } from './relocations.mjs';
-import { collectAntiSlopFindings, collectAntiSlopGroups } from './runner.mjs';
+import { collectAntiSlopGroups } from './runner.mjs';
 /** Debt bound for relocation: the committed base (renames applied), or the local baseline without one. */
 export function relocationBound(envelope, candidate) {
     return envelope.base ? migrateBaselineRenames(envelope.base, envelope.renames) : candidate;
@@ -255,21 +253,4 @@ export function inheritedBaseAllowance(cwd, capabilityCwd, selected, candidateGr
             entries: [...entries.values()].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint)),
         };
     });
-}
-function headTreeWithBaseline(cwd) {
-    const git = (args) => spawnSync('git', args, { cwd, encoding: 'utf8' });
-    if (git(['cat-file', '-e', `HEAD:./${ANTI_SLOP_BASELINE_REL}`]).status !== 0)
-        return null;
-    return git(['rev-parse', '--verify', 'HEAD^{tree}']).stdout.trim() || null;
-}
-/** Re-key from HEAD's tree when HEAD commits a baseline, so the result equals the gates' base
- * re-key and dirty lines cannot drop debt; otherwise from the working tree. */
-export function rekeyWorkingBaseline(cwd, legacy) {
-    if (hasCurrentIdentity(legacy))
-        return legacy;
-    const tree = headTreeWithBaseline(cwd);
-    if (tree)
-        return rekeyBaselineAtTree(cwd, tree, legacy);
-    const files = [...new Set(legacy.entries.map((entry) => entry.file))].filter((file) => existsSync(join(cwd, file)));
-    return rekeyBaseline(legacy, files.length === 0 ? [] : collectAntiSlopFindings(cwd, files));
 }

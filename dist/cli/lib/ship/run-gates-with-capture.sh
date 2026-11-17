@@ -76,7 +76,7 @@ run_gates_with_capture() {
   local supervisor="$(dirname "${BASH_SOURCE[0]}")/review/process/gate-supervisor.mts"
   [ -f "$supervisor" ] || supervisor="$(dirname "${BASH_SOURCE[0]}")/review/process/gate-supervisor.mjs"
   local capture_dir capture_fifo tee_pid supervisor_pid tee_status running
-  local capture_failed cleanup_status drain_deadline drain_stage ownership_token gate_started reaped=0 reaped_by="" reaped_log
+  local capture_failed cleanup_status drain_deadline drain_stage ownership_token gate_started reaped=0
   capture_dir=$(mktemp -d "${TMPDIR:-/tmp}/devkit-review-capture.XXXXXX") || {
     echo "$label: could not create private gate output capture" >&2
     return 1
@@ -150,10 +150,7 @@ run_gates_with_capture() {
   fi
   # Git judged every hook by its exit status, so a ship's clean leader landed a gated commit; the
   # fail-closed cleanup and log checks below still apply. Review keeps the 124.
-  if [ -e "$capture_dir/reaped" ]; then
-    reaped=1
-    reaped_by=$(cat -- "$capture_dir/reaped" 2>/dev/null) || reaped_by=""
-  fi
+  [ ! -e "$capture_dir/reaped" ] || reaped=1
   if [ "$reaped" -eq 1 ] && [ "$rc" -eq 124 ] && [ "$label" = ship ]; then
     rc=0
     RUN_GATES_REAPED=1
@@ -212,12 +209,6 @@ run_gates_with_capture() {
     review_gate_finished "$supervisor_pid"
   fi
   rm -rf -- "$capture_dir"
-  # Persist the survivors too: the banner below reaches only stderr, never the archived gate log.
-  if [ -n "$reaped_by" ]; then
-    for reaped_log in "${logs[@]}"; do
-      printf '%s: still running when the gate chain was reaped:\n%s\n' "$label" "$reaped_by" >> "$reaped_log" 2>/dev/null || true
-    done
-  fi
   if [ "$rc" -eq 0 ] && { [ "$tee_status" -ne 0 ] || [ "$capture_failed" -ne 0 ]; }; then
     echo "$label: could not persist gate output to $log" >&2
     rc=1
@@ -225,20 +216,17 @@ run_gates_with_capture() {
   set -e
   [ "$rc" -ne 0 ] || [ "$RUN_GATES_REAPED" -ne 1 ] ||
     echo "✓ ship: the gate chain passed; a process it started outlived it and was reaped after $((SECONDS - gate_started))s." >&2
-  [ "$rc" -ne 0 ] || [ "$RUN_GATES_REAPED" -ne 1 ] || [ -z "$reaped_by" ] ||
-    printf '   Still running when reaped:\n%s\n' "$(printf '%s\n' "$reaped_by" | sed 's/^/     /')" >&2
 
   # 124 is the supervisor's status for two causes: the expiry ceiling, or a command that exited 0 while a
   # process it started was still running and had to be reaped. The supervisor marks the second in the
   # private capture dir, where gate output cannot forge it. 137 means the supervisor itself was killed.
   if [ "$rc" -eq 124 ]; then
     local last_stage unfinished
-    last_stage=$(grep -E '^(🎨|📏|🗂|🔁|🧭|🔍|⚡)|^guard-prefix:|^▶ [a-z-]+: |[Gg]ates?( \([^)]*\))?\.\.\.[[:space:]]*$' "$log" 2>/dev/null | tail -1 || true)
+    last_stage=$(grep -E '^(🎨|📏|🗂|🔁|🧭|🔍|⚡)|^guard-prefix:|[Gg]ates?( \([^)]*\))?\.\.\.[[:space:]]*$' "$log" 2>/dev/null | tail -1 || true)
     {
       if [ "$reaped" -eq 1 ]; then
         echo "⏱  $label: the gate chain exited cleanly, but a process it started outlived it and was reaped after $((SECONDS - gate_started))s (exit 124) — NOT the ${secs}s ceiling."
         echo "   Last stage started: ${last_stage:-unknown stage}"
-        [ -z "$reaped_by" ] || printf '   Still running when reaped:\n%s\n' "$(printf '%s\n' "$reaped_by" | sed 's/^/     /')"
         echo "   Raising SHIP_COMMIT_TIMEOUT will not help."
       else
         echo "⏱  $label: gate chain hit the ${secs}s ceiling (exit $rc) DURING: ${last_stage:-unknown stage}"

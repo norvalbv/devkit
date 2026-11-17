@@ -351,10 +351,7 @@ export function checkRegistrations(
     return check(
       'hook registrations',
       'DRIFT',
-      [
-        trackedAdvice,
-        fallow.length ? `hooks devkit will not remove: ${fallowAdvice}` : '',
-      ]
+      [trackedAdvice, fallow.length ? `hooks devkit will not remove: ${fallowAdvice}` : '']
         .filter(Boolean)
         .join('; '),
       fallow.length

@@ -2,9 +2,8 @@
  * Which of a red PR's failures its base already had: the PR run's per-file summary against the run
  * on its merge commit's first parent. Never guesses; an unreadable input is a named reason.
  */
-// Types only: wait.mts imports this module from its top-level await, so a value import deadlocks it.
 import { unhandledKey, } from '../../../gate-engine/coverage/unhandled-reporter.mjs';
-import { GhUnavailable, commitCi, gh, runById, runView, } from './gh.mjs';
+import { GhUnavailable, commitCi, gh, runById, runView } from './gh.mjs';
 import { configuredSource, loadSummary, workflowSelector } from './source.mjs';
 /** Listed values per field; past this the line says `+N` rather than growing without bound. */
 const LIST_CAP = 5;
@@ -33,13 +32,6 @@ export function compareSummaries(pr, base) {
             out[classifyFile(file, pr, base)].push(file);
     }
     return out;
-}
-/** Files the base passed that the PR run did not run at all — a collection change hides failures. */
-export function lostFiles(pr, base) {
-    return Object.keys(base.files).filter((file) => {
-        const outcome = own(pr.files, file);
-        return own(base.files, file) === 'passed' && outcome !== 'passed' && outcome !== 'failed';
-    });
 }
 /** `inherited-only` is earned: no new or unsure file, no new failing step or outside-test error, no
  * check left unread. `extraUnhandled` is null when either run did not record its errors. */
@@ -109,14 +101,11 @@ function unhandledField(extra, pr, base) {
         return '';
     return ` unhandled=+${extra.length}${pr?.truncated ? ',truncated' : ''}`;
 }
-const baseText = (base) => base ? ` base-run=${base.baseRun} base-ci=${base.baseCi}` : '';
-export const unknownAttribution = (reason, base) => ({
+const unknown = (reason, base = '') => ({
     token: 'unknown',
     inherited: null,
     fresh: null,
-    line: `attribution=unknown reason=${reason}${baseText(base)}`,
-    reason,
-    ...base,
+    line: `attribution=unknown reason=${reason}${base}`,
 });
 const RUN_ID = /\/actions\/runs\/(\d+)/;
 /** The run a failing check links to, or null for a check that is not a GitHub Actions job. */
@@ -141,23 +130,23 @@ function workflowRun(cwd, failures, workflow) {
  */
 export function attributeFailures({ cwd, pr, failures, }) {
     const { workflow, artifact, shardJob } = configuredSource(cwd);
-    let base; // kept once known, so a later unreadable artifact still names it
+    let base = ''; // named once known, so a later unreadable artifact still reports the base's state
     try {
         const run = workflowRun(cwd, failures, workflow);
         if (!run)
-            return unknownAttribution('no-workflow-run');
+            return unknown('no-workflow-run');
         const unattributed = failures.filter((f) => runIdOf(f) !== run.databaseId).map((f) => f.name);
         const prSummary = loadSummary({ cwd, run, artifact });
         if (!prSummary.sha)
-            return unknownAttribution('base-unknown');
+            return unknown('base-unknown');
         const ref = gh(['pr', 'view', pr, '--json', 'baseRefName', '--jq', '.baseRefName'], cwd).trim();
         const sha = gh(['api', `repos/{owner}/{repo}/commits/${prSummary.sha}`, '--jq', '.parents[0].sha'], cwd).trim();
         if (!ref || !sha)
-            return unknownAttribution('base-unknown');
+            return unknown('base-unknown');
         const ci = commitCi({ cwd, workflow, ref, sha });
         if (!ci.run || !ci.failing)
-            return unknownAttribution(`base-${ci.verdict}`);
-        base = { baseRun: ci.run.databaseId, baseCi: ci.verdict };
+            return unknown(`base-${ci.verdict}`);
+        base = ` base-run=${ci.run.databaseId} base-ci=${ci.verdict}`;
         const baseSummary = loadSummary({ cwd, run: ci.run, artifact });
         const files = compareSummaries(prSummary, baseSummary);
         const prSteps = runView(cwd, run.databaseId).failing;
@@ -172,17 +161,12 @@ export function attributeFailures({ cwd, pr, failures, }) {
             fresh: files.fresh.length,
             line: `attribution=${token} inherited=${files.inherited.length} new=${files.fresh.length}${unsure}` +
                 ` new-failing=${capped(files.fresh)} new-steps=${capped(newSteps)}` +
-                `${unhandledField(extraUnhandled, prSummary.unhandled, baseSummary.unhandled)}${other}${baseText(base)}`,
-            newFailing: files.fresh,
-            newSteps,
-            unsure: files.unsure,
-            unattributed,
-            ...base,
+                `${unhandledField(extraUnhandled, prSummary.unhandled, baseSummary.unhandled)}${other}${base}`,
         };
     }
     catch (e) {
         if (e instanceof GhUnavailable)
-            return unknownAttribution(e.reason, base);
+            return unknown(e.reason, base);
         throw e;
     }
 }

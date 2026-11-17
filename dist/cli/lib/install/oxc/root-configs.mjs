@@ -29,9 +29,10 @@ function refreshedStarter(cwd, previous, starter, dryRun, rewrites) {
     const path = join(cwd, previous.path);
     if (created === digest(starter) || created !== fileDigest(path))
         return previous;
-    rewrites.push([previous.path, readFileSync(path, 'utf8'), starter]);
-    if (!dryRun)
+    if (!dryRun) {
+        rewrites.push([previous.path, readFileSync(path, 'utf8'), starter]);
         writeFileAtomic(path, starter);
+    }
     return { path: previous.path, createdDigest: digest(starter) };
 }
 export function ownershipFor(cwd, names, starterPath, starter, previous, dryRun, 

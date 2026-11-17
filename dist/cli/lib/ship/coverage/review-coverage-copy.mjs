@@ -1,7 +1,7 @@
 /** Private copy of a review target's coverage artifact, so the coverage gate can judge it (never a link). */
 import { closeSync, copyFileSync, constants, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, writeSync, } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { CLEAR_MARKER_NAME } from '../../../../gate-engine/coverage/clear-marker/store.mjs';
+import { CLEAR_MARKER_NAME } from '../../../../gate-engine/coverage/failures.mjs';
 import { COVERAGE_DIR } from '../../../../gate-engine/coverage/produce.mjs';
 import { MANIFEST_NAME, parseManifest, readArtifact, sha256, } from '../../../../gate-engine/coverage/provenance.mjs';
 import { runDirectReviewCli } from '../review/run-direct.mjs';

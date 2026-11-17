@@ -4,13 +4,19 @@
  */
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
-import { shellQuote, shellWord } from '../review/valve/shell-word.mjs';
+// Shell-safe argv token: bare when it holds only characters no shell treats specially, else POSIX
+// single-quoted, as is a leading `=` (zsh expands it). A repo path with a space is ordinary here.
+const SAFE_SHELL_ARG_RE = /^(?!=)[\w@%+=:,./-]+$/;
+function shellArg(token, forceQuote = false) {
+    const bare = SAFE_SHELL_ARG_RE.test(token) && !forceQuote;
+    return bare ? token : `'${token.replaceAll("'", "'\\''")}'`;
+}
 // argv[0] as the gate's execvp saw it. A PATH name goes through `env --` so no builtin, function or
 // keyword intercepts it; `NAME=value` is quoted instead (env would read it as an assignment).
 function commandWord(word) {
     if (word.includes('/'))
-        return shellWord(word);
-    return word.includes('=') ? shellQuote(word) : `env -- ${shellWord(word)}`;
+        return shellArg(word);
+    return word.includes('=') ? shellArg(word, true) : `env -- ${shellArg(word)}`;
 }
 function realOrSelf(p) {
     try {
@@ -38,7 +44,7 @@ export function recheckCommand(argv, moduleCwd) {
     // Only argv[1] — the gate module devkit resolved itself — is relativised; repo-written args are exact.
     const bases = moduleCwd ? [...new Set([moduleCwd, realOrSelf(moduleCwd)])] : [];
     const words = argv.map((a, i) => (i === 1 && path.isAbsolute(a) ? displayPath(a, bases) : a));
-    return [commandWord(words[0]), ...words.slice(1).map(shellWord)].join(' ');
+    return [commandWord(words[0]), ...words.slice(1).map((w) => shellArg(w))].join(' ');
 }
 /** A registry gate's re-check line, plus anti-slop's documented short form. */
 export function registryRecheck(g, argv, cwd) {
@@ -56,17 +62,8 @@ export function recheckLines(failure, gate) {
 }
 /** The lead before ship's exact `--dry-gates` command; the hook's overlay arms print it too (sc-2695). */
 export const SHIP_REHEARSAL_LEAD = "Ship's exact staging, no judges:";
-/** Footer after the aggregated failure: what runs next, one re-check per failed gate, then ship's. */
-export function printFailureFooter(rechecks, fixLine, notRun = []) {
-    if (notRun.length > 0) {
-        console.error(`   NOT run (an earlier gate failed): ${notRun.join(' ')} — they run on the next attempt once the failures above are fixed.`);
-    }
-    console.error(fixLine);
-    // review and dry-gates defer this block (`__dk_block_deterministic`), so the selected gates still run.
-    const deferred = ['review', 'dry-gates'].includes(process.env.DEVKIT_RUN_MODE ?? '');
-    console.error(deferred
-        ? '   This run continues through the remaining selected gates, then exits non-zero.'
-        : '   On commit or ship, decision and reviewer gates run only after these pass.');
+/** Footer lines after the aggregated failure: one re-check per failed gate, then ship's exact one. */
+export function printRecheckFooter(rechecks) {
     if (rechecks.length === 0)
         return;
     console.error('   Re-check a fix locally (seconds, no judges) — stage it, then run:');

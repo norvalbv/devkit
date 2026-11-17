@@ -6,7 +6,13 @@ import type { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { CONFIG_FILENAME, coverageBypassed, envFlag, envVar, resolveGuardConfig } from '../config.mts';
+import {
+  CONFIG_FILENAME,
+  coverageBypassed,
+  envFlag,
+  envVar,
+  resolveGuardConfig,
+} from '../config.mts';
 import { emitGateBypass, emitGateEvent } from '../judge/gate-events.mts';
 import { gitPrefix, stagedSet } from '../ratchets/git-index.mts';
 import { crashGuarded, gateEnv } from './reason.mts';

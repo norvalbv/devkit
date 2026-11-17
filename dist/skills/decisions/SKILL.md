@@ -20,7 +20,7 @@ local patch ("flow editor got a modal") *churns*. Write the durable thing.
 - `docs/decisions/INDEX.md` — derived spine: current **Target** per axis. Shows the Target, never a
   note. Regenerable; holds no history.
 
-CLI: `guard-decisions` (`add --target` · `add --note` · `amend --target` · `amend --note` · `amend --note-replace` · `amend --target-replace` · `rescope` · `query` · `list` · `show` · `check` · `reindex`).
+CLI: `guard-decisions` (`add --target` · `add --note` · `amend --target` · `amend --note` · `amend --note-replace` · `rescope` · `query` · `list` · `show` · `check` · `reindex`).
 
 ## The bar — is this log-worthy, and at what altitude? (LAYERED)
 
@@ -157,7 +157,7 @@ Every consumer reads the **current (last) Target block** of an axis. None is sho
 | Consumer | Sees | Limit |
 |---|---|---|
 | Pre-edit brief | Ruling | 3 axes, first 2000 chars of each Ruling |
-| Decision judge (`detect`) | Ruling of scope-matched axes | 8,192-byte block |
+| Decision judge (`detect`) | Ruling of scope-matched axes | 4,096-byte block |
 | Domain reviewers | Ruling of scope-matched axes, plus semantic hits | 8,192-byte block |
 | Completeness judge | Ruling of scope-matched axes, plus semantic hits | none |
 | `check-alignment` | Ruling, plus Vision-fit (Context when there is none) | per Target |
@@ -168,16 +168,12 @@ Every consumer reads the **current (last) Target block** of an axis. None is sho
 - A note can help retrieval find an axis and prints in `query`, but a clarification written as a
   note changes nothing a judge reads. Only tagged notes are parsed: `**Scope:**` (from `rescope`),
   `**Check:**` (from `enforce link`) and `**Amends:**` (from `--supersedes`).
-- Wording the gates must act on lives in the Ruling. `amend --target` fixes an uncommitted Target, and
-  `amend --target-replace` fixes one clause of it; a committed one moves only by a re-target, which
-  still needs a real `--evidence-change`.
+- Wording the gates must act on lives in the Ruling. `amend --target` fixes an uncommitted Target; a
+  committed one moves only by a re-target, which still needs a real `--evidence-change`.
 - A Scope-only correction is `guard-decisions rescope <slug> --scope "<globs>" --reason "<why>"`,
   not a re-target. It replaces the effective Scope of the current Target.
 - A new Target starts from its own `--scope`. Nothing is inherited from the previous block or its
   `rescope` notes, and omitting `--scope` leaves the axis unscoped. Run `show <slug>` first.
-- Cite code by symbol, never by line. `add` and `amend` refuse a `<file>.<ext>:<line>` anchor,
-  because the next edit moves the line and the record cannot be corrected. An upstream source gets
-  its version and a SHA-pinned permalink (`…/blob/<sha>/path#L12`).
 
 ## Append-only — the core invariant (incl. migration)
 
@@ -189,12 +185,8 @@ already sit under it, and those notes are kept byte-for-byte. Earlier committed 
 preserved, and the CLI refuses if committed history changed — a committed Target moves only through
 a new `add --target … --evidence-change`. For a small correction in a long draft note, use
 `amend <slug> --note-replace "<old>" "<new>"`; it changes exactly one matching substring and refuses
-missing or ambiguous matches. `amend <slug> --target-replace "<old>" "<new>"` does the same inside the
-newest uncommitted Target's fields, keeps every other byte, refuses an edit that touches a field label
-or Consequences bullet, starts a heading or note line, empties a value or sets an unknown Category,
-re-derives an auto-generated heading title, and refreshes INDEX. Replace modes ignore field flags.
-While the decisions guard is selected, direct native agent edits are blocked only under the
-configured decisions directory; shell commands and unsupported payloads remain outside
+missing or ambiguous matches. While the decisions guard is selected, direct native agent edits are blocked only
+under the configured decisions directory; shell commands and unsupported payloads remain outside
 this enforcement and fail open.
 To retire a mis-filed (non-epic) entry: **archive, don't delete** — move it under a
 `## [archived — impl-note, not an epic]` heading in the same file (INDEX stops surfacing it; the
@@ -261,7 +253,7 @@ Every piece of code that loads scoped Targets, the hook stage it runs in, and wh
 
 | Code (devkit package) | Stage | Call | Blocks |
 |---|---|---|---|
-| `gate-engine/decisions/capture/block-remedy.mts` | pre-commit | `guard-decisions detect --gate` | yes: an unrecorded decision |
+| `gate-engine/decisions/detect.mts` | pre-commit | `guard-decisions detect --gate` | yes: an unrecorded decision |
 | `gate-engine/review/evidence/targets-block.mts` | pre-commit | `guard-review --gate` | yes: security and performance reviewers' Targets block |
 | `gate-engine/review/evidence/commit-message.mts` | pre-commit | `guard-review --gate` | yes: same reviewer fleet |
 | `gate-engine/review/evidence/findings.mts` | pre-commit | `guard-review --gate` | no: an advisory hint when a failed reviewer cites a Target outside its Scope |

@@ -98,8 +98,6 @@ function hasEstimatedCrap(complexity: FallowComplexity | null | undefined): bool
 const ESTIMATED_CRAP_REMEDY =
   ' (CRAP estimated, no coverage: run `devkit coverage-run <their tests>` in this checkout, then re-ship)';
 
-
-
 /** A field fallow reshaped reads as absent, so one odd finding never costs the whole report. */
 const loose = <T extends z.ZodType>(schema: T) => schema.optional().catch(undefined);
 const Text = loose(z.string().min(1));

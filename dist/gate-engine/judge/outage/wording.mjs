@@ -60,22 +60,6 @@ export function remedyCause(outage) {
         ? kind
         : 'outage';
 }
-/** Reason + machine cause for an inconclusive outcome, both naming what the PROVIDER said: a usage
- *  lock collapsed into "judge outage" sends the reader to the one remedy that cannot work. */
-export function outageReason(outage, pass = 'judge') {
-    const subject = pass === 'escalation' ? 'escalation' : 'judge';
-    if (outage?.kind === 'timeout')
-        return `${subject} timed out`;
-    if (outage?.kind === 'rate-limited')
-        return `${subject} hit the provider usage limit`;
-    if (outage?.kind === 'unauthenticated')
-        return `${subject} CLI is not authenticated`;
-    if (outage?.kind === 'absent')
-        return `${subject} CLI is not installed`;
-    if (outage?.kind === 'model-unavailable')
-        return `${subject} model \`${outage.model ?? 'unknown'}\` is not available on this account`;
-    return `${subject} outage`;
-}
 /** The remedy a fail-closed gate prints when a judge produced no verdict — ONE wording seam for
  *  every gate (sc-1227). The CAUSE picks the remedy, and the wrong one costs real operator time. */
 export function strictRemedy(cause, bin = 'claude', resetsAt) {
@@ -112,9 +96,6 @@ export function strictRemedy(cause, bin = 'claude', resetsAt) {
             `does serve; set that role's model env to one of them, or ${familyOverrideRemedy(bin, true)}`);
     }
     // Every binary reaching this arm ran (only ENOENT reads as absent), so doctor's bind cannot apply.
-    // Resume leads: a family move re-pays every reviewer to recover what is often one blipped call.
-    return (`check \`${bin}\` CLI auth/quota, then resume with \`devkit ship --resume <branch>\`: it ` +
-        're-judges only what has no cached verdict, and every cached PASS replays. A judge that ' +
-        `failed while others on \`${bin}\` answered (a model at capacity, say) needs nothing more. ` +
-        `Only if the account stays dark longer than the ship can wait, ${familyOverrideRemedy(bin, true)}`);
+    return (`check \`${bin}\` CLI auth/quota, then re-run devkit ship. If the account stays dark longer ` +
+        `than the ship can wait, ${familyOverrideRemedy(bin, true)}`);
 }

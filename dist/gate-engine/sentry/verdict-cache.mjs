@@ -45,8 +45,9 @@ export function judgeSentryWithCache(cwd, input, identity, judgeFn) {
     const key = sentryVerdictKey(input, identity);
     const hit = loadEntries(file)[key];
     if (hit && typeof hit.verdict === 'string' && CACHEABLE.has(hit.verdict)) {
+        console.error(`sentry-judge: cached ${hit.verdict} (identical message + error-hunk evidence)`);
         emitCacheHit('sentry-advisory', hit.model, hit.duration_ms);
-        return { verdict: hit.verdict, evidence: String(hit.evidence ?? ''), cached: true };
+        return { verdict: hit.verdict, evidence: String(hit.evidence ?? '') };
     }
     const started = Date.now();
     const result = judgeFn();

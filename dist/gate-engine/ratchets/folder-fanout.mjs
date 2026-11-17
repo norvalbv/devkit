@@ -24,7 +24,7 @@ import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, resolveTreeExtensions, sourceMatchers, } from '../config.mjs';
 import { exitGate } from '../deterministic/reason.mjs';
 import { overlayInstall } from '../overlay-mode.mjs';
-import { childGrammarNode } from '../structure/tree/walk.mjs';
+import { childGrammarNode } from '../structure/walk.mjs';
 import { FANOUT_BASELINE, readRatchetBaseline, refuseFreezeThroughLink, removeRatchetBaseline, writeRatchetBaseline, } from './baseline-paths.mjs';
 import { hasStagedFiles, indexFiles, treeFilesAtRef } from './git-index.mjs';
 // Per-repo STATE, resolved against the consumer cwd (never __dirname).

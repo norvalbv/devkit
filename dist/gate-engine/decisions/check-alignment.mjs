@@ -60,9 +60,9 @@ import { hasVerdict, saveVerdict, verdictKey } from './verdict-cache.mjs';
 // The depth pass moved to depth/ (sc-2769); re-exported so this published subpath keeps its surface.
 export { parseDepthVerdict, runDepthJudge } from './depth/depth-pass.mjs';
 const ALIGN_RE = { CONTRADICT: /\bCONTRADICT\b/, ALIGN: /\bALIGN\b/, UNCLEAR: /\bUNCLEAR\b/ };
-// Tolerates markdown and emoji dressing (`❌ **VERDICT: X**`) so a formatted verdict never falls to
-// the ambiguous-word fallback; the class cannot consume a line terminator, so CRLF parses alike.
-const VERDICT_LINE_RE = /^(?:(?![\r\n])[\s*#>\-\p{Extended_Pictographic}\u{FE0F}\u{200D}])*VERDICT:\s*\**\s*(ALIGN|CONTRADICT|UNCLEAR)\b/gimu;
+// Tolerates markdown dressing (bold/bullet/heading) around the line — a judge that formats its
+// verdict must not silently fall through to the ambiguous-word fallback and lose a block.
+const VERDICT_LINE_RE = /^[\s*#>-]*VERDICT:\s*\**\s*(ALIGN|CONTRADICT|UNCLEAR)\b/gim;
 // Staged names are root-relative while cwd may be a subdirectory; a filename is never a glob.
 const topLiteral = (file) => `:(top,literal)${file}`;
 // One uninterrupted 240s budget for either alignment pass. The old 120s haiku cap killed 9/288

@@ -66,12 +66,7 @@ import {
   type RecheckTarget,
   reportLensPartAdvisories,
 } from './valve/recheck.mts';
-import {
-  planReviewWork,
-  resolveChunkCap,
-  resolveLensGroups,
-  taskLabel,
-} from './lens/split.mts';
+import { planReviewWork, resolveChunkCap, resolveLensGroups, taskLabel } from './lens/split.mts';
 import { mapLimit } from './lens/map-limit.mts';
 import { clearProgress, writeProgress } from './progress.mts';
 import {

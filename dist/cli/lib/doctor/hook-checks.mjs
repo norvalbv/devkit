@@ -20,7 +20,6 @@ import { installHealAlias } from '../husky/overlay/heal-alias.mjs';
 import { overlayHooksPath } from '../husky/overlay/overlay-home.mjs';
 import { firstLine } from '../standalone.mjs';
 import { check } from './check-result.mjs';
-import { checkFallowHook } from './fallow/fallow-hook-check.mjs';
 import { foreignPin, hooksDir, isInside, isInsideResolved, sharedHooksPath, worktreeHooksPathState, worktreeScopedPin, } from './hooks-path.mjs';
 import { FALLOW_STAGED_BLOCK } from '../husky/gate-policy/fallow-staged.mjs';
 import { strayGateCalls } from './stray-gate-calls.mjs';
@@ -348,7 +347,6 @@ export function replaceableHooksPathPin(cwd) {
 export function hookChecks(cwd, guards, fallow = false) {
     return [
         checkHusky(cwd, guards, fallow),
-        ...checkFallowHook(cwd, fallow),
         checkHookRunner(cwd),
         ...checkHooksPathOwner(cwd),
         checkFailOpenGuards(cwd),

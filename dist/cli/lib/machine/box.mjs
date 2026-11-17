@@ -6,7 +6,7 @@ import { dirname } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { digest } from '../fs-helpers.mjs';
-import { shellQuote } from '../../../gate-engine/review/valve/shell-word.mjs';
+import { shellQuote } from '../ship/dist-integrity.mjs';
 const START = fileURLToPath(new URL('./box-start.sh', import.meta.url));
 const DOCKERFILE = `FROM debian:trixie-slim
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 DISPLAY=:1

@@ -26,7 +26,7 @@ import { lockedCommand } from '../lib/install/init/init-lock.mjs';
 import { applyScanRoots } from '../lib/install/init/scan-roots.mjs';
 import { reviewPlanFromFlags } from '../lib/install/flags/review-profile.mjs';
 import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mjs';
-import { ensureFallow } from '../lib/install/install-fallow.mjs';
+import { installFallow } from '../lib/install/install-fallow.mjs';
 import { installSearchCode } from '../lib/install/install-search-code.mjs';
 import * as oxcLifecycle from '../lib/install/oxc/lifecycle.mjs';
 import { patchPackageJson } from '../lib/install/package-json.mjs';
@@ -170,11 +170,11 @@ function installHusky(sel, hookRoot, pkgRel, dryRun) {
             console.log(`  [dry-run] write .husky/pre-commit${where} (assembled from selection)`);
             return;
         }
-        if (writeIfAbsent(hookPath, buildFullHook(sel, pkgRel)) === 'created') {
-            chmodSync(hookPath, 0o755);
-            console.log(`  ✓ created .husky/pre-commit${where}`);
-            return;
-        }
+        mkdirSync(join(hookRoot, '.husky'), { recursive: true });
+        writeFileSync(hookPath, buildFullHook(sel, pkgRel));
+        chmodSync(hookPath, 0o755);
+        console.log(`  ✓ created .husky/pre-commit${where}`);
+        return;
     }
     const current = readText(hookPath);
     const block = buildGuardBlock(sel, pkgRel);
@@ -271,7 +271,7 @@ function runFallowInit(cwd, dryRun) {
 // fallow-ignore-next-line complexity
 async function applyFallow(cwd, dryRun, interactive, gateLine) {
     // The gate is the staged audit in devkit's hook block (step 3); fallow's installer is never run.
-    const r = ensureFallow({ cwd, dryRun });
+    const r = installFallow({ cwd, dryRun });
     console.log(`  ${r.ok ? '✓' : '!'} ${r.message}`);
     const doInit = await subConfirm('Run `fallow init`? (optional — fallow is zero-config)', {
         interactive,
@@ -829,7 +829,7 @@ async function run(args, cwd) {
             }
         }
     }
-    // Self-host runs structure via its own guard.config.json trees, not a template preset, so skip
+    // Self-host runs structure via `bun run lint:structure` (eslint), not a template preset, so skip
     // the "no preset → disable structure" flip (which would otherwise print a misleading notice).
     if (!selfHost && !STRUCTURE_STACKS.has(stack) && selection.structure) {
         selection.structure = false; // no template for this stack — silently skip (noted below)
