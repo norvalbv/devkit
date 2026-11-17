@@ -46,6 +46,7 @@ const withoutReport = (args: string[]) =>
 
 const REACH = 'cli/__tests__/test-graph-reach.test.mts';
 const SCRUB = 'cli/__tests__/vitest-setup-env-scrub.test.mts';
+const PARITY = 'cli/__tests__/agent-asset-projection-parity.test.mts';
 
 const dirs: string[] = [];
 // A failing run writes its reason only where a test points it, never into an enclosing gate's file.
@@ -120,10 +121,19 @@ describe('forcedTests', () => {
     ).toEqual([]);
   });
 
+  // The parity test reads hook sources, projections and the selection from disk.
+  it('forces the agent-asset parity test for a hook source, projection or the selection', () => {
+    expect(forcedTests(['agents-hooks/prior-art-gate.mjs'])).toEqual([PARITY]);
+    expect(forcedTests(['.codex/hooks/knip-check.sh'])).toEqual([PARITY]);
+    expect(forcedTests(['.devkit/config.json'])).toEqual([PARITY]);
+    expect(forcedTests(['dist/agents-hooks/x.mjs', '.claude/hooks.json'])).toEqual([]);
+    expect(forcedTests(['vitest.setup.mjs', '.claude/hooks/x.mjs'])).toEqual([SCRUB, PARITY]);
+  });
+
   it('names forced tests that exist, so a rename cannot silently select nothing', () => {
     const root = join(import.meta.dirname, '..', '..');
-    const tests = forcedTests(['cli/lib/ship/reship.sh', 'vitest.setup.mjs']);
-    expect(tests).not.toEqual([]);
+    const tests = forcedTests(['cli/lib/ship/reship.sh', 'agents-hooks/prior-art-gate.mjs']);
+    expect(tests).toEqual([SCRUB, PARITY]);
     for (const test of tests) expect(existsSync(join(root, test)), test).toBe(true);
   });
 });

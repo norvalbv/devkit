@@ -1,32 +1,30 @@
 /**
  * Projection parity — does an agent surface still hold exactly what the sync writer would put there?
  *
- * `skills/` and `agents/` are sources of truth; `.claude/…`, `.cursor/…` and `.agents/…` are
- * projections of them. #405 and #395 each edited a source without re-running the writer, and the
+ * `skills/`, `agents/` and `agents-hooks/` are sources of truth; the provider dirs are projections
+ * of them. #405 and #395 each edited a source without re-running the writer, and the
  * projections served deleted scripts and a stale MCP tool profile for days. The recorded mitigation
  * (manifest sha256 + doctor) cannot catch it: doctor's asset check is advisory-only in self-host.
  *
  * This is the READER half of that contract, deliberately kept out of the test file so it is
  * typechecked (`tsconfig.json` excludes `**\/*.test.mts`) and can be exercised against fixtures.
- * Enumeration and selection reuse the writers' own `walk` / `listAgents` / `skillNamesForSelection`
- * rather than re-deriving them — reader and writer drifted apart once already (components.mts:346).
+ * Enumeration and selection reuse the writers' own `walk`, `listAgents`, `skillNamesForSelection`
+ * and `selectedHookAssets` rather than re-deriving them: reader and writer drifted apart once.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { listAgents } from '../../../commands/sync/sync-agents.mts';
 import { walk } from '../../../commands/sync/sync-skills.mts';
-import { type SkillSelection, skillNamesForSelection } from '../../components.mts';
+import { type Selection, skillNamesForSelection } from '../../components.mts';
+import { selectedHookAssets } from '../hook-registration-ledger/selection.mts';
 import { agentAssetDir, projectAgentAsset, projectedAssetRel } from './agent-assets.mts';
 
 /**
- * The kinds this reader can compare — deliberately NARROWER than `AgentAssetKind`, which also has
- * `hooks`. Enumeration below routes anything that is not `skills` to `listAgents`, whose `.md`
- * filter matches nothing under `agents-hooks/` (all `.sh`/`.mjs`): `hooks` would yield an empty
- * expectation set and report a deleted hook as clean. That is the exact vacuous pass this module
- * exists to prevent, so it is excluded at the type level rather than guarded at runtime.
+ * Each kind enumerates its own way: an `agents` `.md` filter over `agents-hooks/` (all `.sh`/`.mjs`)
+ * would expect nothing and report a deleted hook as clean, the vacuous pass this module prevents.
  */
-export type ParityKind = 'skills' | 'agents';
+export type ParityKind = 'skills' | 'agents' | 'hooks';
 
 export interface ProjectionParityInput {
   /** Repo root — both the source dirs and the projection dirs are resolved against it. */
@@ -40,8 +38,8 @@ export interface ProjectionParityInput {
   srcDir: string;
   /** The surfaces the writer was told to write. Empty means the check is inert — see below. */
   targets: readonly string[];
-  /** The component selection gating which skills ship. Ignored for kinds other than `skills`. */
-  selection?: SkillSelection;
+  /** The component selection gating which skills and hooks ship. Ignored for `agents`. */
+  selection?: Partial<Selection>;
   /** Defaults to the working tree; the self-host advisory passes the commit index (sc-2759). */
   reader?: SnapshotReader;
 }
@@ -82,6 +80,10 @@ export function projectedLogicals({
       ? reader.list(srcDir).filter((rel) => !rel.includes('/') && rel.endsWith('.md'))
       : listAgents(join(root, srcDir));
   const all = (reader ?? fsReader(root)).list(srcDir);
+  if (kind === 'hooks') {
+    const selected = new Set(selectedHookAssets(selection).scripts);
+    return all.filter((rel) => selected.has(rel));
+  }
   const names = new Set(
     skillNamesForSelection([...new Set(all.map((rel) => rel.split('/')[0]))], selection),
   );
