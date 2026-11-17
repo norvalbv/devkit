@@ -24,18 +24,19 @@ describe('committed agent-asset projection parity', () => {
         readFileSync(join(ROOT, '.devkit', 'config.json'), 'utf8'),
       ) as { components: Partial<Selection> & { agentTargets: string[] } };
 
-      // One target per call, so a gitignored projection reports `unchecked` instead of riding its
-      // siblings' pass; the Set keeps a per-call `unreadable` source line from repeating per target.
-      const { agentTargets } = components;
-      const drift = (agentTargets.length ? agentTargets.map((t) => [t]) : [[]]).flatMap((targets) =>
-        projectionDrift({ root: ROOT, kind, srcDir, targets, selection: components }),
-      );
+      const drift = projectionDrift({
+        root: ROOT,
+        kind,
+        srcDir,
+        targets: components.agentTargets,
+        selection: components,
+      });
       // Sync rewrites a stale file but never prunes an orphan, so each class names its own repair.
       expect(
-        [...new Set(drift)],
+        drift,
         `stale/missing → run \`node cli/index.mts sync-${kind}\` and commit the projection and ` +
           `.devkit/${manifest}; orphan → \`git rm\` it, or \`rm\` it when untracked; ` +
-          'unchecked → the projection dir is gitignored here: un-ignore it and commit the projection',
+          'unchecked → .devkit/config.json lists no agentTargets: add them, then sync',
       ).toEqual([]);
     });
   }
