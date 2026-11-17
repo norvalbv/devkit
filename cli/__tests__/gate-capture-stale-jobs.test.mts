@@ -196,3 +196,88 @@ describe('run_gates_with_capture — timeout attribution', () => {
     );
   });
 });
+
+// bash >= 4.3 retries an interrupted redirection open itself, so only an older /bin/bash can go red.
+const hasPre43Bash =
+  testSpawnSync('/bin/bash', ['-c', '(( BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] < 403 ))'])
+    .status === 0;
+
+function runOpenCaptureWriter(body: string) {
+  const dir = mkdtempSync(join(tmpdir(), 'devkit-capture-open-'));
+  created.push(dir);
+  const args = ['-c', `source "$1"; d=$2\n${body}`, 'open-test', GATE_RUNNER, dir];
+  const result = testSpawnSync('/bin/bash', args, { encoding: 'utf8', timeout: 20_000 });
+  return { ...result, dir };
+}
+
+describe('open_capture_writer — interrupted FIFO open', () => {
+  it.skipIf(!hasPre43Bash)(
+    'retries an open that child exits interrupt (needs /bin/bash < 4.3, e.g. macOS)',
+    () => {
+      const result = runOpenCaptureWriter(
+        [
+          'f="$d/output"; mkfifo "$f"',
+          'for s in 0.1 0.2 0.3 0.4 0.5 0.6; do ( /bin/sleep "$s" ) & last=$!; done',
+          // The reader opens only once the shell has reaped every child, so each SIGCHLD lands mid-open.
+          '( n=0; while kill -0 "$last" 2>/dev/null && [ "$n" -lt 150 ]; do /bin/sleep 0.02; n=$((n + 1)); done',
+          '  exec /bin/cat < "$f" > "$d/got" ) &',
+          'reader=$!',
+          'if open_capture_writer "$f" "$reader" "$d/open.err"; then echo payload >&8; exec 8>&-; echo RC=0',
+          'else echo "RC=$?"; kill -KILL "$reader" 2>/dev/null; fi',
+          'wait "$reader" 2>/dev/null',
+        ].join('\n'),
+      );
+
+      expect(result.stdout, result.stderr).toContain('RC=0');
+      expect(result.stderr).not.toMatch(/Interrupted system call/);
+      expect(readFileSync(join(result.dir, 'got'), 'utf8')).toBe('payload\n');
+    },
+  );
+
+  // A retry after the reader died would block forever: no process will ever open the read end.
+  it.skipIf(!hasPre43Bash)(
+    'gives up on an interrupted open once the reader is gone (needs /bin/bash < 4.3, e.g. macOS)',
+    () => {
+      const result = runOpenCaptureWriter(
+        [
+          'f="$d/output"; mkfifo "$f"',
+          '( exit 0 ) & gone=$!; wait "$gone"; ( /bin/sleep 0.2 ) &',
+          'if open_capture_writer "$f" "$gone" "$d/open.err"; then echo RC=0; else echo "RC=$?"; fi',
+        ].join('\n'),
+      );
+
+      expect(result.stdout, result.stderr).toContain('RC=1');
+      expect(result.stderr).toMatch(/Interrupted system call/);
+    },
+  );
+
+  // ship defers a signal that lands mid-open; the open must finish so the supervisor receives it.
+  it('completes an open that a deferred ship signal interrupts, keeping the signal', () => {
+    const result = runOpenCaptureWriter(
+      [
+        `source ${JSON.stringify(HANDOFF)}; gate_signal_handoff_init; GATE_SIGNAL_DEFER_EXIT=1`,
+        'f="$d/output"; mkfifo "$f"',
+        '( /bin/sleep 0.2; kill -TERM $$ ) & sender=$!',
+        '( n=0; while kill -0 "$sender" 2>/dev/null && [ "$n" -lt 150 ]; do /bin/sleep 0.02; n=$((n + 1)); done',
+        '  exec /bin/cat < "$f" > "$d/got" ) &',
+        'reader=$!',
+        'if open_capture_writer "$f" "$reader" "$d/open.err"; then echo payload >&8; exec 8>&-; echo RC=0',
+        'else echo "RC=$?"; kill -KILL "$reader" 2>/dev/null; fi',
+        'wait "$reader" 2>/dev/null; echo "REQUESTED=$REQUESTED_SIGNAL_STATUS"',
+      ].join('\n'),
+    );
+
+    expect(result.stdout, result.stderr).toContain('RC=0');
+    expect(result.stdout).toContain('REQUESTED=143');
+    expect(readFileSync(join(result.dir, 'got'), 'utf8')).toBe('payload\n');
+  });
+
+  it('reports an open error that no retry can fix exactly once', () => {
+    const result = runOpenCaptureWriter(
+      'if open_capture_writer "$d/missing/output" "$$" "$d/open.err"; then echo RC=0; else echo "RC=$?"; fi',
+    );
+
+    expect(result.stdout, result.stderr).toContain('RC=1');
+    expect(result.stderr.match(/No such file or directory/g)).toHaveLength(1);
+  });
+});
