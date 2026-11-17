@@ -44,6 +44,19 @@
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs\" bash"
           }
         ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/fanout-brief.mjs\""
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/placement-brief.mjs\""
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -92,6 +105,10 @@
           {
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/comment-budget-preflight.mjs\""
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/size-headroom-check.mjs\""
           }
         ]
       },

@@ -16,6 +16,11 @@
         "command": ".cursor/hooks/base-drift-brief.mjs",
         "matcher": "Write",
         "failClosed": false
+      },
+      {
+        "command": ".cursor/hooks/placement-brief.mjs",
+        "matcher": "Write",
+        "failClosed": false
       }
     ],
     "afterFileEdit": [

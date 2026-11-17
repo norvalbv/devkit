@@ -36,6 +36,10 @@
           {
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/comment-budget-preflight.mjs\""
+          },
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/size-headroom-check.mjs\""
           }
         ]
       },
@@ -77,15 +81,6 @@
         ]
       },
       {
-        "matcher": "ExitPlanMode|Task|Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/prior-art-gate.mjs\""
-          }
-        ]
-      },
-      {
         "matcher": "Write",
         "hooks": [
           {
@@ -95,6 +90,15 @@
           {
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/placement-brief.mjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "ExitPlanMode|Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/prior-art-gate.mjs\""
           }
         ]
       }
