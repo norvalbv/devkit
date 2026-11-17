@@ -753,13 +753,18 @@
       "label": "Edge-case autonomy",
       "adapter": "edge-cases",
       "subjectIds": ["benchmark-edge-cases"],
+      "runner": "gate-engine/edge-cases/eval/bench.mts",
       "lifecycle": "no-ship",
       "acceptance": "Pre-registered full analysis with robust no-ship decision",
       "hashes": {
         "implementation": [],
         "corpus": [],
         "scorer": ["gate-engine/edge-cases/eval/lib/**"],
-        "runner": []
+        "runner": [
+          "gate-engine/edge-cases/eval/bench.mts",
+          "gate-engine/edge-cases/eval/bench-cli.mts",
+          "gate-engine/edge-cases/eval/prompts.mts"
+        ]
       }
     },
     {
