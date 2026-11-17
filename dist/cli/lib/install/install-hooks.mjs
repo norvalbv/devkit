@@ -144,6 +144,27 @@ export function syncHookScripts(root, { dryRun = false, targets = AGENT_TARGETS,
         return manifest;
     });
 }
+/** Reclaim devkit's registrations left in the file the other install scope writes, after a switch. */
+function reclaimOtherScope(root, provider, scope, entries, published, dryRun) {
+    const other = otherScopePass(root, provider, scope, entries);
+    if (!other)
+        return { entries, published };
+    if (!other.repairable) {
+        console.log(`  ! ${other.rel} is git-tracked — devkit's hooks there are yours to remove`);
+        return { entries, published };
+    }
+    const otherPlan = {
+        provider,
+        rel: other.rel,
+        document: other.removed.document,
+        changed: other.changed,
+    };
+    const next = publishPlan(root, otherPlan, other.entries, published, dryRun);
+    // Not added to `wrote`: overlay git-excludes those paths, and this file is the user's.
+    const switched = asDropped(other.removed.removed, 'scope-switch');
+    reportDropped(other.rel, [...other.retired.dropped, ...switched], dryRun);
+    return { entries: other.entries, published: next };
+}
 /**
  * The consumer's OWN agent-hook scripts that collide with a devkit-bundled name.
  */
@@ -201,8 +222,11 @@ export function installHookRegistrations(root, componentIds, { dryRun = false, t
         const obsoleteIds = Object.keys(HOOK_REGISTRATIONS).filter((id) => !componentIds.includes(id));
         for (const provider of requireAgentProviders(targets)) {
             const rel = hookRegistrationDestination(provider, scope);
-            if (skipProvider(root, provider, rel, overlay))
+            if (skipProvider(root, provider, rel, overlay)) {
+                // A skipped (git-tracked) file must not stop the other scope's retired hooks being reclaimed.
+                ({ entries, published } = reclaimOtherScope(root, provider, scope, entries, published, dryRun));
                 continue;
+            }
             const { legacy, retired, removed, ...pass } = reclaimPass(root, provider, scope, obsoleteIds, entries, legacyOwnedComponentIds);
             entries = pass.entries;
             const installed = installProjectedHookRegistrations(removed.document, projectHookRegistrations(componentIds, [provider], scope), ledgerOf(entries), provider, scope);
@@ -228,25 +252,7 @@ export function installHookRegistrations(root, componentIds, { dryRun = false, t
             reportDropped(rel, [...retired.dropped, ...deselected], dryRun);
             if (plan.report)
                 wrote.push(plan.rel);
-            // After the publish above, so a throw on this scope leaves the old file's hooks in place.
-            const other = otherScopePass(root, provider, scope, entries);
-            if (!other)
-                continue;
-            if (!other.repairable) {
-                console.log(`  ! ${other.rel} is git-tracked — devkit's hooks there are yours to remove`);
-                continue;
-            }
-            entries = other.entries;
-            const otherPlan = {
-                provider,
-                rel: other.rel,
-                document: other.removed.document,
-                changed: other.changed,
-            };
-            published = publishPlan(root, otherPlan, entries, published, dryRun);
-            // Not added to `wrote`: overlay git-excludes those paths, and this file is the user's.
-            const switched = asDropped(other.removed.removed, 'scope-switch');
-            reportDropped(other.rel, [...other.retired.dropped, ...switched], dryRun);
+            ({ entries, published } = reclaimOtherScope(root, provider, scope, entries, published, dryRun));
         }
         if (wrote.length && published.entries.length)
             wrote.push(HOOK_REGISTRATION_LEDGER_REL);

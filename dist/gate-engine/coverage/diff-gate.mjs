@@ -121,11 +121,11 @@ export function runDiffCoverage(cwd, coverage, min, reviewMode) {
     let added;
     let head;
     try {
+        head = baseTreeish(top);
         added = addedProductionLines(top, (p) => classify(p, false) === 'production', [
             '--cached',
-            baseTreeish(top),
+            head,
         ]);
-        head = git(top, ['rev-parse', 'HEAD']).trim();
     }
     catch {
         failLine('🚫 Coverage gate FAILED — git could not read the staged diff, so the added lines are unknown.');

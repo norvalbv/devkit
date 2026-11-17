@@ -50,6 +50,9 @@ export function checkHookRegistrations(root, componentIds, { overlay = false, ta
         // Mirrors skipProvider: install never registers into a tracked overlay file, so this can't be fixed.
         if (overlay && isTracked(root, rel)) {
             advisories.push(...trackedAdvisories(root, provider, rel));
+            const elsewhere = otherScopeFindings(root, provider, scope, ledger?.entries ?? []);
+            missing.push(...elsewhere.missing);
+            advisories.push(...elsewhere.advisories);
             continue;
         }
         if (!isSafeAgentAssetPath(root, rel, true)) {

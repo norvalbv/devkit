@@ -73,7 +73,7 @@ function parseOptions(args) {
     return opts;
 }
 /** The merge-base sha plus a label naming what it was taken against. */
-function mergeBaseOf(run, base) {
+export function mergeBaseOf(run, base) {
     let target;
     let label;
     if (base) {
@@ -96,7 +96,7 @@ function mergeBaseOf(run, base) {
         return { error: `HEAD shares no history with ${label} — pass --base <ref>` };
     return { sha: line(mb), label };
 }
-const nulList = (out) => out.split('\0').filter(Boolean);
+export const nulList = (out) => out.split('\0').filter(Boolean);
 /** Every line of an untracked file is added. */
 function allLines(top, path) {
     const text = readFileSync(join(top, path), 'utf8');

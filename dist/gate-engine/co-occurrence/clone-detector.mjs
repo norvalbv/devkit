@@ -127,7 +127,7 @@ export function detectClones({ minTokens = DEFAULTS.minTokens, similarity = DEFA
         catch (e) {
             // jscpd exits non-zero only with --threshold (we set none), so a throw here is a real
             // failure: a missing or wrong-version binary, or a base ref it could not check out.
-            const stderr = e instanceof Error && 'stderr' in e ? String(e.stderr).trim() : '';
+            const stderr = e instanceof Error && 'stderr' in e ? String(e.stderr ?? '').trim() : '';
             const why = stderr.split('\n')[0] || (e instanceof Error ? e.message : String(e));
             throw new Error(`jscpd could not run: ${why}`);
         }
