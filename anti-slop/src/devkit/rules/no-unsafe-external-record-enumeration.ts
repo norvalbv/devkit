@@ -1,6 +1,5 @@
 import { defineRule } from '@oxlint/plugins';
 import {
-  appendMutationEvidence,
   branchConditions,
   externalOrigin,
   isGlobalIdentifier,
@@ -11,8 +10,8 @@ import {
   unwrapExpression,
 } from '../shared/external-records.ts';
 
-import type { ESTree, Scope, SourceCode } from '@oxlint/plugins';
-import type { ExternalOrigin, MutationEvidence } from '../shared/external-records.ts';
+import type { ESTree, SourceCode } from '@oxlint/plugins';
+import type { ExternalOrigin } from '../shared/external-records.ts';
 
 function isGlobalObjectCall(
   sourceCode: SourceCode,
@@ -168,123 +167,38 @@ function rejectionParts(
   };
 }
 
-function recordProofExpressions(proof: RecordProof): ESTree.Expression[] {
-  return [proof.identity, proof.objectType, proof.nonNull, proof.array].filter(
-    (expression): expression is ESTree.Expression => expression !== null,
-  );
+function proven(required: readonly (ESTree.Expression | null)[]): boolean {
+  return required.every((proof) => proof !== null);
 }
 
-interface RejectionGuardEvidence {
-  condition: ESTree.Expression;
-  boundary: number;
-  proof: RejectionProof;
-}
-
-interface SourceRange {
-  start: number;
-  end: number;
-}
-
-function rejectionProofExpressions(proof: RejectionProof): ESTree.Expression[] {
-  return [proof.identity, proof.nonObjectType, proof.nullValue, proof.array].filter(
-    (expression): expression is ESTree.Expression => expression !== null,
-  );
-}
-
-function proofCandidateRemainsValid(
-  mutations: readonly MutationEvidence[],
-  scope: Scope,
-  required: readonly (ESTree.Expression | null)[],
-  trustedProofs: readonly ESTree.Expression[],
-  mutationRanges: (proof: ESTree.Expression) => readonly SourceRange[],
-  ignoredRanges: readonly SourceRange[] = [],
-): boolean {
-  return required.every(
-    (proof) =>
-      proof !== null &&
-      !mutations.some(
-        (mutation) =>
-          mutation.scope === scope &&
-          mutationRanges(proof).some(
-            (range) => mutation.start >= range.start && mutation.end <= range.end,
-          ) &&
-          !trustedProofs.some(
-            (trusted) => mutation.start >= trusted.start && mutation.end <= trusted.end,
-          ) &&
-          !ignoredRanges.some(
-            (range) => mutation.start >= range.start && mutation.end <= range.end,
-          ),
-      ),
-  );
-}
-
+/** Calls cannot change a const binding's typeof, null-ness or array-ness, so proofs never expire. */
 function guarded(
   sourceCode: SourceCode,
-  mutations: readonly MutationEvidence[],
   node: ESTree.CallExpression,
   value: ESTree.Expression,
-  origin: Extract<ExternalOrigin, 'json' | 'json-reviver'>,
+  origin: Exclude<ExternalOrigin, 'record-parameter'>,
 ): boolean {
   if (
-    branchConditions(node).some(({ condition, truthy, branch }) => {
-      const scope = sourceCode.getScope(node).variableScope;
-      const mutationRanges = (proof: ESTree.Expression) => [
-        { start: proof.end, end: condition.end },
-        { start: branch.start, end: node.start },
-      ];
+    branchConditions(node).some(({ condition, truthy }) => {
       if (truthy) {
         const proof = recordParts(sourceCode, condition, value);
-        const trustedProofs = recordProofExpressions(proof);
         return (
-          (origin === 'json' &&
-            proofCandidateRemainsValid(
-              mutations,
-              scope,
-              [proof.identity, proof.array],
-              trustedProofs,
-              mutationRanges,
-            )) ||
-          proofCandidateRemainsValid(
-            mutations,
-            scope,
-            [proof.objectType, proof.nonNull, proof.array],
-            trustedProofs,
-            mutationRanges,
-          )
+          (origin === 'json' && proven([proof.identity, proof.array])) ||
+          proven([proof.objectType, proof.nonNull, proof.array])
         );
       }
       const proof = rejectionParts(sourceCode, condition, value);
-      const trustedProofs = rejectionProofExpressions(proof);
       return (
-        (origin === 'json' &&
-          proofCandidateRemainsValid(
-            mutations,
-            scope,
-            [proof.identity, proof.array],
-            trustedProofs,
-            mutationRanges,
-          )) ||
-        proofCandidateRemainsValid(
-          mutations,
-          scope,
-          [proof.nonObjectType, proof.nullValue, proof.array],
-          trustedProofs,
-          mutationRanges,
-        )
+        (origin === 'json' && proven([proof.identity, proof.array])) ||
+        proven([proof.nonObjectType, proof.nullValue, proof.array])
       );
     })
   ) {
     return true;
   }
-  const guards = precedingTerminatingGuards(node)
-    .sort((left, right) => left.condition.start - right.condition.start)
-    .map<RejectionGuardEvidence>(({ condition, boundary }) => ({
-      condition,
-      boundary,
-      proof: rejectionParts(sourceCode, condition, value),
-    }));
-  const combined = guards.reduce<RejectionProof>(
-    (known, { proof: next }) => {
+  const combined = precedingTerminatingGuards(node).reduce<RejectionProof>(
+    (known, { condition }) => {
+      const next = rejectionParts(sourceCode, condition, value);
       return {
         identity: next.identity ?? known.identity,
         nonObjectType: next.nonObjectType ?? known.nonObjectType,
@@ -294,31 +208,9 @@ function guarded(
     },
     { identity: null, nonObjectType: null, nullValue: null, array: null },
   );
-  const scope = sourceCode.getScope(node).variableScope;
-  const trustedProofs = guards.flatMap(({ proof }) => rejectionProofExpressions(proof));
-  const mutationRanges = (proof: ESTree.Expression) => [{ start: proof.end, end: node.start }];
-  const ignoredRanges = guards.map(({ condition, boundary }) => ({
-    start: condition.end,
-    end: boundary,
-  }));
   return (
-    (origin === 'json' &&
-      proofCandidateRemainsValid(
-        mutations,
-        scope,
-        [combined.identity, combined.array],
-        trustedProofs,
-        mutationRanges,
-        ignoredRanges,
-      )) ||
-    proofCandidateRemainsValid(
-      mutations,
-      scope,
-      [combined.nonObjectType, combined.nullValue, combined.array],
-      trustedProofs,
-      mutationRanges,
-      ignoredRanges,
-    )
+    (origin === 'json' && proven([combined.identity, combined.array])) ||
+    proven([combined.nonObjectType, combined.nullValue, combined.array])
   );
 }
 
@@ -336,16 +228,7 @@ export const noUnsafeExternalRecordEnumerationRule = defineRule({
     },
   },
   createOnce(context) {
-    const mutations: MutationEvidence[] = [];
-    const recordMutation = (node: ESTree.Node) => {
-      appendMutationEvidence(context.sourceCode, mutations, node);
-    };
     return {
-      Program() {
-        mutations.length = 0;
-      },
-      AssignmentExpression: recordMutation,
-      AwaitExpression: recordMutation,
       CallExpression(node) {
         const method = isGlobalMemberCall(context.sourceCode, node, 'Object', 'entries')
           ? 'entries'
@@ -360,26 +243,14 @@ export const noUnsafeExternalRecordEnumerationRule = defineRule({
           const value = node.arguments[0]!;
           const origin = externalOrigin(context.sourceCode, value);
           if (
-            (origin === 'json' || origin === 'json-reviver') &&
-            !guarded(context.sourceCode, mutations, node, value, origin)
+            origin !== null &&
+            origin !== 'record-parameter' &&
+            !guarded(context.sourceCode, node, value, origin)
           ) {
             context.report({ node, messageId: 'unsafeEnumeration', data: { method } });
           }
         }
-        recordMutation(node);
       },
-      ImportExpression: recordMutation,
-      MemberExpression(node) {
-        recordMutation(node);
-      },
-      NewExpression: recordMutation,
-      SpreadElement: recordMutation,
-      TaggedTemplateExpression: recordMutation,
-      UnaryExpression(node) {
-        if (node.operator === 'delete') recordMutation(node);
-      },
-      UpdateExpression: recordMutation,
-      YieldExpression: recordMutation,
     };
   },
 });

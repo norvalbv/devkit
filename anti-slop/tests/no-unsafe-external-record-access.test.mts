@@ -45,6 +45,12 @@ tester.run('anti-slop/no-unsafe-external-record-access', noUnsafeExternalRecordA
     'const files: Record<string, string> = Object.create(null); files[key];',
     'const files = new Map<string, string>(); files.get(key);',
     'function read(files: Record<string, string>, key: string) { return files[key]; }',
+    'const parsed = JSON.parse(raw); parsed.data["id"]; JSON.parse(raw).files["a"];',
+    'const parsed = JSON.parse(raw); parsed.entries[0]; parsed.values["x"];',
+    'const cfg = JSON.parse(raw); const name = next(); if (Object.hasOwn(cfg, name)) { const entry = cfg[name]; entry["x"]; }',
+    'const r = JSON.parse(raw); const k = next(); for (const _ of xs) { if (Object.hasOwn(r, k)) r[k]; Reflect.deleteProperty(r, k); }',
+    'const r = JSON.parse(raw); const k = next(); if (Object.hasOwn(r, k)) { for (const x of r[k]) use(x); }',
+    'const r = JSON.parse(raw); const k = next(); if (Object.hasOwn(r, k)) { class C { static { r[k]; } static v = r[k]; } }',
   ],
   invalid: [
     { code: 'const files = JSON.parse(raw).files; files["constructor"];', errors: [error] },
@@ -78,7 +84,7 @@ tester.run('anti-slop/no-unsafe-external-record-access', noUnsafeExternalRecordA
     },
     {
       code: 'const parsed = JSON.parse(raw); parsed["constructor"]["apply"];',
-      errors: [error],
+      errors: [error, error],
     },
     {
       code: 'const parsed = JSON.parse(raw, () => new Date()); parsed["getTime"];',
@@ -152,6 +158,44 @@ tester.run('anti-slop/no-unsafe-external-record-access', noUnsafeExternalRecordA
     {
       code: 'function read(files: Record<string, string>, key: string) { return files[key]; }',
       options: [{ includeRecordParameters: true }],
+      errors: [error],
+    },
+    {
+      code: "const record = JSON.parse('{}'); Object.setPrototypeOf(record, { extra: 1 }); record['extra'];",
+      errors: [error],
+    },
+    {
+      code: 'const record = JSON.parse(raw); Reflect.setPrototypeOf(record.files, proto); record.files["extra"];',
+      errors: [error],
+    },
+    {
+      code: 'const record = JSON.parse(raw); record.__proto__ = proto; record["extra"];',
+      errors: [error],
+    },
+    {
+      code: 'const record = JSON.parse(raw); Object.setPrototypeOf(record as object, proto); record["extra"];',
+      errors: [error],
+    },
+    {
+      code: 'const record = JSON.parse(raw); Reflect.set(record, "__proto__", proto); record["extra"];',
+      errors: [error],
+    },
+    {
+      code: 'const r = JSON.parse(raw); const k = next(); if (Object.hasOwn(r, k)) { for (const _ of xs) { r[k]; Reflect.deleteProperty(r, k); } }',
+      errors: [error],
+    },
+    {
+      code: 'function read(raw: string, k: string) { const r = JSON.parse(raw); if (!Object.hasOwn(r, k)) return; for (const _ of xs) { r[k]; Reflect.deleteProperty(r, k); } }',
+      errors: [error],
+    },
+    { code: "const fn = JSON.parse('{}').toString; fn['call'];", errors: [error] },
+    { code: 'const c = JSON.parse(raw).constructor; c["name"];', errors: [error] },
+    {
+      code: 'const r = JSON.parse(raw); const k = next(); if (Object.hasOwn(r, k)) { class C { value = r[k]; } delete r[k]; new C(); }',
+      errors: [error],
+    },
+    {
+      code: 'const r = JSON.parse(raw); const k = next(); if (Object.hasOwn(r, k)) { class C { accessor value = r[k]; } }',
       errors: [error],
     },
     {

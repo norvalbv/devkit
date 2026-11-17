@@ -31,6 +31,18 @@ tester.run(
       'function read(raw: string) { const parsed = JSON.parse(raw); if (typeof parsed !== "object") { mutate(parsed); return []; } if (parsed === null) return []; if (Array.isArray(parsed)) return []; return Object.entries(parsed); }',
       'function read(raw: string, ready: boolean) { const parsed = JSON.parse(raw); if (Object(parsed) !== parsed) return []; if (ready) { if (Array.isArray(parsed)) return []; return Object.entries(parsed); } return []; }',
       'function read(raw: string) { const parsed = JSON.parse(raw); for (; Object(parsed) === parsed && !Array.isArray(parsed); ) { Object.keys(parsed); break; } }',
+      // A shape proof on a const binding survives calls and mutation: typeof and Array.isArray of one value never change.
+      'const parsed = JSON.parse(raw); if (typeof parsed === "object" && mutate(parsed) && parsed !== null && !Array.isArray(parsed)) Object.entries(parsed);',
+      'const parsed = JSON.parse(raw); if (typeof parsed !== "object" || mutate(parsed) || parsed === null || Array.isArray(parsed)) reject(); else Object.entries(parsed);',
+      'function read(raw: string) { const parsed = JSON.parse(raw); if (typeof parsed !== "object") return []; mutate(parsed); if (parsed === null) return []; if (Array.isArray(parsed)) return []; return Object.entries(parsed); }',
+      'function read(raw: string) { const parsed = JSON.parse(raw); if (typeof parsed !== "object") return []; if (parsed === null) return []; if (Array.isArray(parsed)) return []; mutate(parsed); return Object.entries(parsed); }',
+      'function read(raw: string) { const parsed = JSON.parse(raw); if (typeof parsed !== "object" || mutate(parsed)) return []; if (parsed === null) return []; if (Array.isArray(parsed)) return []; return Object.entries(parsed); }',
+      'function read(raw: string) { const parsed = JSON.parse(raw); if (typeof parsed !== "object") return []; sideEffect.value; if (parsed === null) return []; if (Array.isArray(parsed)) return []; return Object.entries(parsed); }',
+      'function read(raw: string) { const parsed = JSON.parse(raw); if (typeof parsed !== "object") return []; if (parsed === null) return []; if (Array.isArray(parsed)) return []; sideEffect.value = parsed; return Object.entries(parsed); }',
+      'const v = JSON.parse(raw); if (typeof v === "object" && v !== null && !Array.isArray(v)) { class C { keys = Object.keys(v); } }',
+      'const e = JSON.parse(raw).entries; if (typeof e === "object" && e !== null && !Array.isArray(e)) Object.keys(e);',
+      'const value = JSON.parse(text); if (typeof value === "object" && value !== null && !Array.isArray(value)) { const keys = Object.keys(value); const entries = Object.entries(value); }',
+      'const value = JSON.parse(raw, reviver); if (typeof value === "object" && value !== null && !Array.isArray(value)) { Object.keys(value); mutate(value); Object.entries(value); }',
     ],
     invalid: [
       { code: 'Object.entries(JSON.parse(raw));', errors: [error] },
@@ -40,6 +52,10 @@ tester.run(
         errors: [error],
       },
       { code: 'Object["entries"](JSON["parse"](raw));', errors: [error] },
+      {
+        code: 'const fn = JSON.parse(raw).toString; if (Object(fn) === fn && !Array.isArray(fn)) Object.keys(fn);',
+        errors: [error],
+      },
       {
         code: 'const parsed = JSON.parse(raw); const files = parsed.files; Object.keys(files);',
         errors: [error],
@@ -61,14 +77,6 @@ tester.run(
         errors: [error],
       },
       {
-        code: 'const parsed = JSON.parse(raw); if (typeof parsed === "object" && mutate(parsed) && parsed !== null && !Array.isArray(parsed)) Object.entries(parsed);',
-        errors: [error],
-      },
-      {
-        code: 'const parsed = JSON.parse(raw); if (typeof parsed !== "object" || mutate(parsed) || parsed === null || Array.isArray(parsed)) reject(); else Object.entries(parsed);',
-        errors: [error],
-      },
-      {
         code: 'function read() { const parsed = JSON.parse(raw); const other = JSON.parse(raw); if (Object(other) !== other || Array.isArray(other)) return; Object.entries(parsed); }',
         errors: [error],
       },
@@ -86,26 +94,6 @@ tester.run(
       },
       {
         code: 'if (Object(JSON.parse(next())) === JSON.parse(next()) && !Array.isArray(JSON.parse(next()))) Object.entries(JSON.parse(next()));',
-        errors: [error],
-      },
-      {
-        code: 'function read(raw: string) { const parsed = JSON.parse(raw); if (typeof parsed !== "object") return []; mutate(parsed); if (parsed === null) return []; if (Array.isArray(parsed)) return []; return Object.entries(parsed); }',
-        errors: [error],
-      },
-      {
-        code: 'function read(raw: string) { const parsed = JSON.parse(raw); if (typeof parsed !== "object") return []; if (parsed === null) return []; if (Array.isArray(parsed)) return []; mutate(parsed); return Object.entries(parsed); }',
-        errors: [error],
-      },
-      {
-        code: 'function read(raw: string) { const parsed = JSON.parse(raw); if (typeof parsed !== "object" || mutate(parsed)) return []; if (parsed === null) return []; if (Array.isArray(parsed)) return []; return Object.entries(parsed); }',
-        errors: [error],
-      },
-      {
-        code: 'function read(raw: string) { const parsed = JSON.parse(raw); if (typeof parsed !== "object") return []; sideEffect.value; if (parsed === null) return []; if (Array.isArray(parsed)) return []; return Object.entries(parsed); }',
-        errors: [error],
-      },
-      {
-        code: 'function read(raw: string) { const parsed = JSON.parse(raw); if (typeof parsed !== "object") return []; if (parsed === null) return []; if (Array.isArray(parsed)) return []; sideEffect.value = parsed; return Object.entries(parsed); }',
         errors: [error],
       },
     ],

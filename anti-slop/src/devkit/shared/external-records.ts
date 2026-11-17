@@ -1,6 +1,6 @@
 import type { ESTree, Scope, SourceCode, Variable } from '@oxlint/plugins';
 
-export type ExternalOrigin = 'json' | 'json-reviver' | 'record-parameter';
+export type ExternalOrigin = 'json' | 'json-inherited' | 'json-reviver' | 'record-parameter';
 
 type TransparentExpression =
   | ESTree.ChainExpression
@@ -10,7 +10,7 @@ type TransparentExpression =
   | ESTree.TSSatisfiesExpression
   | ESTree.TSTypeAssertion;
 
-function isTransparentExpression(node: ESTree.Expression): node is TransparentExpression {
+export function isTransparentExpression(node: ESTree.Node): node is TransparentExpression {
   return (
     node.type === 'ChainExpression' ||
     node.type === 'ParenthesizedExpression' ||
@@ -142,6 +142,47 @@ function isDefinitelyNonCallable(sourceCode: SourceCode, expression: ESTree.Expr
   }
 }
 
+export function literalPropertyKey(expression: ESTree.Expression): string | null {
+  const candidate = unwrapExpression(expression);
+  if (candidate.type === 'TemplateLiteral' && candidate.expressions.length === 0) {
+    return candidate.quasis[0]?.value.cooked ?? null;
+  }
+  if (
+    candidate.type === 'UnaryExpression' &&
+    (candidate.operator === '+' || candidate.operator === '-')
+  ) {
+    const argument = unwrapExpression(candidate.argument);
+    if (argument.type === 'Literal' && argument.value === Number(argument.value)) {
+      const value = Number(argument.value);
+      return String(candidate.operator === '-' ? -value : value);
+    }
+    if (candidate.operator === '-' && argument.type === 'Literal' && 'bigint' in argument) {
+      return String(-argument.value);
+    }
+  }
+  if (candidate.type !== 'Literal') return null;
+  if ('regex' in candidate) return null;
+  return String(candidate.value);
+}
+
+export function memberKey(node: ESTree.MemberExpression): string | null {
+  if (node.computed) return literalPropertyKey(node.property);
+  return node.property.type === 'Identifier' ? node.property.name : null;
+}
+
+export const JSON_VALUE_PROTOTYPE_KEYS = new Set([
+  ...[
+    Object.prototype,
+    Array.prototype,
+    String.prototype,
+    Number.prototype,
+    Boolean.prototype,
+  ].flatMap((prototype) => Object.getOwnPropertyNames(prototype)),
+  // `prototype` is not inherited from these values, but allowing it beside `constructor` makes the
+  // classic constructor/prototype pollution path too easy to split across fixed accesses.
+  'prototype',
+]);
+
 function isRecordType(type: ESTree.TSType): boolean {
   if (type.type === 'TSParenthesizedType') return isRecordType(type.typeAnnotation);
   if (type.type !== 'TSTypeReference' || type.typeName.type !== 'Identifier') return false;
@@ -172,7 +213,12 @@ export function externalOrigin(
   const jsonOrigin = jsonParseOrigin(sourceCode, unwrapped);
   if (jsonOrigin !== null) return jsonOrigin;
   if (unwrapped.type === 'MemberExpression') {
-    return externalOrigin(sourceCode, unwrapped.object, includeRecordParameters, visited);
+    const origin = externalOrigin(sourceCode, unwrapped.object, includeRecordParameters, visited);
+    const key = memberKey(unwrapped);
+    // A member that may be inherited (`parsed.toString`) is a function, not an ordinary JSON value.
+    return origin === 'json' && key !== null && JSON_VALUE_PROTOTYPE_KEYS.has(key)
+      ? 'json-inherited'
+      : origin;
   }
   if (unwrapped.type !== 'Identifier') return null;
   const variable = resolveVariable(sourceCode, unwrapped);
@@ -248,7 +294,7 @@ function isTerminating(statement: ESTree.Statement): boolean {
   return last !== undefined && isTerminating(last);
 }
 
-function isFunctionBoundary(node: ESTree.Node): boolean {
+export function isFunctionBoundary(node: ESTree.Node): boolean {
   return (
     node.type === 'ArrowFunctionExpression' ||
     node.type === 'FunctionDeclaration' ||
