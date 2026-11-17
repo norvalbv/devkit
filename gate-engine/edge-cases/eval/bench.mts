@@ -22,6 +22,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../../judge/judge-isolation.mts';
+import { isolateBenchTelemetry } from '../../judge/run-context.mts';
 import { execJudgeAsync } from '../../judge/run-judge.mts';
 import { readCases } from './counts.mts';
 import { anchorFilesOf, matchFindings, overlapCount } from './lib/match.mts';
@@ -42,6 +43,7 @@ import {
   WRAPPERS,
 } from './prompts.mts';
 
+isolateBenchTelemetry();
 export const here = path.dirname(fileURLToPath(import.meta.url));
 export const benchDir = path.join(here, 'raw', 'bench');
 export const guardsPath = path.join(here, 'guards-synthetic.jsonl');
