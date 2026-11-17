@@ -75,8 +75,8 @@ beforeAll(() => {
   expect(testSpawnSync('git', ['init', '-q'], { cwd: ignoreRepo }).status).toBe(0);
 });
 afterAll(() => rmSync(ignoreRepo, { recursive: true, force: true }));
-const ignored = (path: string): boolean =>
-  testSpawnSync(
+const ignored = (path: string): boolean => {
+  const { status } = testSpawnSync(
     'git',
     [
       '-c',
@@ -87,7 +87,11 @@ const ignored = (path: string): boolean =>
       path,
     ],
     { cwd: ignoreRepo },
-  ).status === 0;
+  );
+  // 1 is "not ignored"; any other non-zero is git failing, which must not pass as "not ignored".
+  expect([0, 1]).toContain(status);
+  return status === 0;
+};
 
 describe('test:run:coverage:changed', () => {
   it('passes --changed once, taking the base from COVERAGE_BASE', () => {
