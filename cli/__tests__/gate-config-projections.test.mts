@@ -222,6 +222,37 @@ describe('gate config projections', () => {
     }
   });
 
+  it('ship links the baselines an untracked fallow config names, beside the config itself', () => {
+    const { root, worktree } = fixture();
+    writeFileSync(
+      join(root, '.fallowrc.jsonc'),
+      '{\n  // overlay consumers keep both untracked\n  "audit": {\n' +
+        '    "deadCodeBaseline": "fallow-baselines/dead-code.json",\n' +
+        '    "healthBaseline": "fallow-baselines/health.json",\n' +
+        '    "dupesBaseline": "fallow-baselines/dupes.json",\n  },\n}\n',
+    );
+    mkdirSync(join(root, 'fallow-baselines'));
+    for (const name of ['dead-code', 'health', 'dupes'])
+      writeFileSync(join(root, `fallow-baselines/${name}.json`), '{}\n');
+    // Already in the committed tree: left as it is, and not named as linked.
+    mkdirSync(join(worktree, 'fallow-baselines'));
+    writeFileSync(join(worktree, 'fallow-baselines/dupes.json'), '{"tracked":true}\n');
+
+    const result = project(root, worktree, 'ship');
+
+    expect(result.status, result.stderr).toBe(0);
+    for (const rel of [
+      '.fallowrc.jsonc',
+      'fallow-baselines/dead-code.json',
+      'fallow-baselines/health.json',
+    ]) {
+      expect(lstatSync(join(worktree, rel)).isSymbolicLink(), rel).toBe(true);
+      expect(result.stderr).toContain(`- ${rel} (untracked`);
+    }
+    expect(lstatSync(join(worktree, 'fallow-baselines/dupes.json')).isSymbolicLink()).toBe(false);
+    expect(result.stderr).not.toContain('fallow-baselines/dupes.json');
+  });
+
   it('keeps ship projections as symlinks but makes review projections private copies', () => {
     const ship = fixture();
     writeFileSync(join(ship.root, 'guard.config.json'), '{"scanRoots":["src"]}\n');

@@ -43,3 +43,32 @@ describe('a shell gate that blocked the run', () => {
     expect(text).toContain('⚠ fallow — finding recorded');
   });
 });
+
+describe('a shell gate that could not run', () => {
+  // The row `guard-review record-gate fallow --could-not-run` writes when fallow exits 2.
+  const COULD_NOT_RUN = ev({
+    type: 'advisory_result',
+    gate: 'fallow',
+    status: 'could_not_run',
+    detail: 'fallow exited 2 without a verdict — audit skipped: failed to read baseline',
+  });
+
+  it('is named on a green ship', () => {
+    const text = digest([COULD_NOT_RUN, ev({ type: 'ship_result', exit_code: 0 })]);
+
+    expect(text).toContain('· fallow — fallow exited 2 without a verdict — audit skipped');
+    expect(text).not.toContain('fallow — BLOCKED');
+  });
+
+  it('never reads as the blocker beside the gate that did block', () => {
+    const text = digest([
+      COULD_NOT_RUN,
+      ev({ type: 'gate_result', gate: 'comments', family: 'deterministic', status: 'fail' }),
+      ev({ type: 'ship_result', blocked_gate: 'comments', exit_code: 1 }),
+    ]);
+
+    expect(text).toContain('✗ comments — BLOCKED this run');
+    expect(text).toContain('· fallow — fallow exited 2');
+    expect(text).not.toContain('fallow — BLOCKED');
+  });
+});

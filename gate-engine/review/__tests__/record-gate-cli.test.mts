@@ -11,9 +11,9 @@ import { describe, expect, it } from 'vitest';
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'cli.mts');
 
-function recordGate(gate: string) {
+function recordGate(gate: string, ...args: string[]) {
   const sink = path.join(mkdtempSync(path.join(tmpdir(), 'record-gate-')), 'gate-events.jsonl');
-  const result = spawnSync('node', [CLI, 'record-gate', gate], {
+  const result = spawnSync('node', [CLI, 'record-gate', gate, ...args], {
     encoding: 'utf8',
     env: {
       ...process.env,
@@ -45,6 +45,38 @@ describe('guard-review record-gate', () => {
       expect(row).not.toHaveProperty('family');
     },
   );
+
+  it.each([
+    [
+      "fallow's JSON error message after the detail",
+      ['{"error":true,"message":"failed to read baseline: No such file","exit_code":2}'],
+      'fallow exited 2 without a verdict: failed to read baseline: No such file',
+    ],
+    ['the bare detail without a JSON report', [], 'fallow exited 2 without a verdict'],
+    [
+      'the bare detail when the report is not JSON',
+      ['Error: boom'],
+      'fallow exited 2 without a verdict',
+    ],
+  ])('--could-not-run records a non-blocking advisory with %s', (_, json, detail) => {
+    const { status, rows } = recordGate(
+      'fallow',
+      '--could-not-run',
+      'fallow exited 2 without a verdict',
+      ...json,
+    );
+
+    expect(status).toBe(0);
+    expect(rows).toHaveLength(1);
+    const row = JSON.parse(rows[0] ?? '{}');
+    expect(row).toMatchObject({
+      type: 'advisory_result',
+      gate: 'fallow',
+      status: 'could_not_run',
+      detail,
+    });
+    expect(row).not.toHaveProperty('family');
+  });
 
   it('refuses a gate the hook never blocks through the shell, writing nothing', () => {
     const { status, rows } = recordGate('review');

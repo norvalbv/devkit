@@ -5,6 +5,7 @@
 
 import { execFileSync } from 'node:child_process';
 import {
+  appendFileSync,
   chmodSync,
   cpSync,
   existsSync,
@@ -665,6 +666,28 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(lstatSync(join(wt, '.devkit', 'baselines')).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), 'utf8')).toBe(
       '{"a.ts":400}\n',
+    );
+    expect(git(wt, 'status', '--porcelain')).toBe('');
+  });
+
+  it('fallow baselines the untracked fallow config names are copied, like the ratchet baselines', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    writeFileSync(
+      join(root, '.fallowrc.jsonc'),
+      '{ "audit": { "healthBaseline": "fallow-baselines/health.json" } }\n',
+    );
+    mkdirSync(join(root, 'fallow-baselines'));
+    writeFileSync(join(root, 'fallow-baselines', 'health.json'), '{"findings":2}\n');
+    appendFileSync(join(root, '.git', 'info', 'exclude'), '/.fallowrc.jsonc\nfallow-baselines/\n');
+    const wt = addWorktree(root);
+
+    commit(wt, 'project it');
+    writeFileSync(join(wt, 'fallow-baselines', 'health.json'), '{"findings":1}\n');
+
+    expect(lstatSync(join(wt, 'fallow-baselines', 'health.json')).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(root, 'fallow-baselines', 'health.json'), 'utf8')).toBe(
+      '{"findings":2}\n',
     );
     expect(git(wt, 'status', '--porcelain')).toBe('');
   });

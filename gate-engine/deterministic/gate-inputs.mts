@@ -1,8 +1,10 @@
 /** The one registry of paths a gate reads that a clean checkout can lack; ship, review and overlay
  * projection derive from it. Rationale: docs/decisions/gate-inputs-single-registry.md. */
 
-import { readdirSync } from 'node:fs';
-import { isAbsolute, join, relative } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve } from 'node:path';
+import { type ParseError, parse } from 'jsonc-parser';
+import { z } from 'zod';
 import { CONFIG_FILENAME, resolveFromCwd, resolveGuardConfig } from '../config.mts';
 import {
   FANOUT_BASELINE,
@@ -120,12 +122,48 @@ function repoRelative(root: string, abs: string | null): string | null {
   return rel && !escapesRoot(rel) ? rel : null;
 }
 
+// A key that is not a non-empty string names no baseline; the others still do.
+const BaselinePath = z.string().min(1).optional().catch(undefined);
+const FallowAuditConfig = z.object({
+  audit: z.object({
+    deadCodeBaseline: BaselinePath,
+    healthBaseline: BaselinePath,
+    dupesBaseline: BaselinePath,
+  }),
+});
+
+/** The baselines the fallow config's `audit.*Baseline` keys name, resolved as fallow does: from the
+ * project root. A TOML, unreadable or malformed config yields none; fallow reports its own error. */
+function fallowBaselineInputs(root: string): GateInput[] {
+  const config = FALLOW_CONFIG_FILES.map((file) => join(root, file)).find((file) =>
+    existsSync(file),
+  );
+  if (!config || config.endsWith('.toml')) return [];
+  const errors: ParseError[] = [];
+  let text: string;
+  try {
+    text = readFileSync(config, 'utf8');
+  } catch {
+    return [];
+  }
+  const decoded = FallowAuditConfig.safeParse(parse(text, errors, { allowTrailingComma: true }));
+  if (errors.length > 0 || !decoded.success) return [];
+  const paths = Object.values(decoded.data.audit).flatMap((value) =>
+    value === undefined ? [] : (repoRelative(root, resolve(root, value)) ?? []),
+  );
+  // One under a fixed directory entry (`.fallow/`) already arrives with that directory.
+  return [...new Set(paths)]
+    .filter((path) => !gateInputFor(path))
+    .map((path) => ({ path, kind: 'file', share: 'branch' }));
+}
+
 /**
- * Every gate input under `root`. Fixed entries come first, so a caller streaming them keeps those
- * even when guard.config.json then fails to parse and the config-driven half throws.
+ * Every gate input under `root`. Fixed entries and the fallow baselines come first, so a caller
+ * streaming them keeps those even when guard.config.json then fails to parse and the rest throws.
  */
 export function* gateInputs(root: string): Generator<GateInput> {
   for (const input of FIXED_GATE_INPUTS) yield* expand(root, input);
+  yield* fallowBaselineInputs(root);
   const cfg = resolveGuardConfig(root);
   for (const input of CONFIG_INPUTS) {
     const path = repoRelative(root, resolveFromCwd(cfg, input.field));
