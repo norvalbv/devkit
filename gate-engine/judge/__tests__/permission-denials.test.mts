@@ -151,3 +151,48 @@ describe('permission denials on a claude judge spawn', () => {
     expect(rows()[0]).not.toHaveProperty('permission_denials');
   });
 });
+
+describe('tool calls on a claude judge spawn (sc-6118)', () => {
+  const stream = [
+    {
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', id: 't1', name: 'mcp__codebase__searchCode', input: { query: 'x' } },
+        ],
+      },
+    },
+    {
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'hits' }] },
+    },
+    { type: 'result', result: 'VERDICT: PASS' },
+  ]
+    .map((e) => JSON.stringify(e))
+    .join('\n');
+
+  it('hands every tool call to the caller, with telemetry off too', async () => {
+    fakeClaude(undefined, stream);
+    delete process.env.DEVKIT_GATE_EVENTS;
+    delete process.env.DEVKIT_SHIP_ID;
+    let heard: string[] | undefined;
+    expect(await execJudgeAsync({ ...opts, onToolCalls: (calls) => (heard = calls) })).toBe(
+      'VERDICT: PASS',
+    );
+    expect(heard).toEqual(['[ok] mcp__codebase__searchCode: {"query":"x"}']);
+  });
+
+  it('a result with no tool call is a measured empty list', async () => {
+    fakeClaude([]);
+    let heard: string[] | undefined;
+    await execJudgeAsync({ ...opts, onToolCalls: (calls) => (heard = calls) });
+    expect(heard).toEqual([]);
+  });
+
+  it('output that is not a claude stream is not measured: no callback', async () => {
+    fakeClaude(undefined, 'VERDICT: PASS');
+    let fired = false;
+    await execJudgeAsync({ ...opts, onToolCalls: () => (fired = true) });
+    expect(fired).toBe(false);
+  });
+});

@@ -126,9 +126,14 @@ export async function runCascade(
     const exec = opts.exec ?? execJudgeAsync;
     // Reset per exec: only the spawn that produced the verdict may explain it.
     const spawn: SpawnDenials = { denied: null };
-    const observed: typeof execJudgeAsync = (o) => {
+    // Kept across spawns: an escalation PASS may rest on the first pass's searches. A verdict from
+    // an unmeasured spawn (codex) makes the whole set unknown, never zero.
+    let toolCalls: string[] | null = null;
+    let unmeasured = false;
+    const observed: typeof execJudgeAsync = async (o) => {
       spawn.denied = null;
-      return exec({
+      let heard = false;
+      const text = await exec({
         ...o,
         onMcpPrepared: (fingerprint, cause) => {
           o.onMcpPrepared?.(fingerprint, cause);
@@ -137,7 +142,13 @@ export async function runCascade(
         onPermissionDenials: (denied) => {
           spawn.denied = denied;
         },
+        onToolCalls: (lines) => {
+          heard = true;
+          toolCalls = [...(toolCalls ?? []), ...lines];
+        },
       });
+      if (text !== null && !heard) unmeasured = true;
+      return text;
     };
     let res = await cascadeVerdict(sel, { ...opts, exec: observed }, checklistRoot);
     // Recovery below only schedules/classifies; it deletes this attempt's artifact without
@@ -175,7 +186,8 @@ export async function runCascade(
     attachItems(res, finalState, disposition, { full: opts.fullItems });
     // Read before the finally deletes the artifact — the flag lives nowhere else (sc-2317).
     const mcpCause = mcpSpawn.cause();
-    const evidence = { mcpCause, denied: spawn.denied };
+    const calls = unmeasured ? null : toolCalls;
+    const evidence = { mcpCause, denied: spawn.denied, calls, searchTool: opts.cfg.searchTool };
     const degraded = retrievalDegradation(sel.reviewer.name, finalState, res.status, evidence);
     if (degraded) res.degraded = degraded;
     // A named skip judged nothing, so a missing tool weakened nothing — same rule as retrieval.

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { claudeCommandLines } from '../../judge/claude-result.mts';
 import {
   RETRIEVAL_UNRECORDED,
   reportRetrievalDegraded,
@@ -107,6 +108,80 @@ describe('retrievalDegradation kind — derived from what the gate measured, not
   it("the judge's own skip stays skipped whatever else was measured", () => {
     const skipped = { files, retrieval: { status: 'skipped', cause: 'test-only diff' } };
     expect(kindOf(skipped, { mcpCause: 'missing' })).toBe('skipped');
+  });
+});
+
+describe('a recorded ok is checked against the calls the gate measured (sc-6118)', () => {
+  const ok = { files, retrieval: { status: 'ok' } };
+  const tool = 'mcp__codebase__searchCode';
+  const search = `[ok] ${tool}: {"query":"parse a semver range"}`;
+  const check = (evidence: Parameters<typeof retrievalDegradation>[3]) =>
+    retrievalDegradation('commit-guard', ok, 'pass', { searchTool: tool, ...evidence });
+  const unobserved = {
+    cause: `retrieval recorded ok, but no ${tool} call returned in this review`,
+    kind: 'unobserved',
+  };
+
+  it.each([
+    ['a returned search', [search]],
+    ['a subagent search', [`[ok] (subagent) ${tool}: {"query":"x"}`]],
+    ['a search among other calls', ['[ok] Read: {"file_path":"a.ts"}', search]],
+  ])('%s keeps ok clean', (_, calls) => {
+    expect(check({ calls })).toBeUndefined();
+  });
+
+  it.each([
+    ['no tool call at all', []],
+    ['only checklist and grep calls', ['[ok] Bash: node checklist.mjs finalize', '[ok] Grep: {}']],
+    ['an errored search', [`[error] ${tool}: {"query":"x"}`]],
+    ['a refused search', [`[denied] ${tool}: {"query":"x"}`]],
+    ['a search that never returned', [`[no result] ${tool}: {"query":"x"}`]],
+    ['a prose mention of the tool', [`[ok] Bash: echo ${tool}: done`]],
+  ])('%s degrades a recorded ok as unobserved', (_, calls) => {
+    expect(check({ calls })).toEqual(unobserved);
+  });
+
+  it('matches only the configured searchTool', () => {
+    const custom = { calls: [search], searchTool: 'mcp__acme__semanticSearch' };
+    expect(check(custom)?.kind).toBe('unobserved');
+    const own = { calls: ['[ok] mcp__acme__semanticSearch: {}'], searchTool: custom.searchTool };
+    expect(check(own)).toBeUndefined();
+  });
+
+  it('a missing MCP alone leaves ok to its own channel; measured calls still decide', () => {
+    expect(check({ mcpCause: 'MCP codebase unavailable' })).toBeUndefined();
+    expect(check({ mcpCause: 'missing', calls: [] })).toEqual(unobserved);
+    expect(check({ mcpCause: 'missing', calls: [search] })).toBeUndefined();
+  });
+
+  it('trusts ok when nothing was measured (codex, a test double)', () => {
+    expect(check({ calls: null })).toBeUndefined();
+    expect(check({})).toBeUndefined();
+  });
+
+  it('reads the exact line format claudeCommandLines renders', () => {
+    const stream = [
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 't1', name: tool, input: { query: 'x' } }] },
+      },
+      {
+        type: 'user',
+        message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'hits' }] },
+      },
+    ];
+    const calls = claudeCommandLines(stream.map((e) => JSON.stringify(e)).join('\n'));
+    expect(check({ calls })).toBeUndefined();
+  });
+
+  it('prints an unverified retrieval as unverified, never unavailable', () => {
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((line: string) => {
+      lines.push(line);
+    });
+    reportRetrievalDegraded('commit-guard', unobserved.cause, 'unobserved');
+    spy.mockRestore();
+    expect(lines[0]).toContain('semantic retrieval unverified: retrieval recorded ok');
   });
 });
 
