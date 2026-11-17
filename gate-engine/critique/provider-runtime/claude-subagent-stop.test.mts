@@ -17,6 +17,8 @@ import {
 } from '../evidence-store.mts';
 import { getPlanCritiqueWorkQuarantine } from '../lifecycle/work-quarantine.mts';
 import { deriveClaudePlanCritiqueWorkId } from '../provider-adapters/claude-subagent-stop.mts';
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('./claude-subagent-stop.mts'));
 
 const MAX_HOOK_INPUT_BYTES = 4 * 1024 * 1024;
 const wrapper = path.join(import.meta.dirname, 'claude-subagent-stop.mts');
