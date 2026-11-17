@@ -668,7 +668,7 @@ describe('devkit move — directory and untracked sources', () => {
     writePath(
       root,
       'bin/git',
-      '#!/bin/sh\nif [ "$1" = "mv" ]; then rmdir "$DEVKIT_MOVE_RACE_PARENT" && ln -s "$DEVKIT_MOVE_RACE_OUTSIDE" "$DEVKIT_MOVE_RACE_PARENT"; fi\nexec "$DEVKIT_MOVE_REAL_GIT" "$@"\n',
+      '#!/bin/sh\nif [ "$1" = "mv" ]; then\n  "$DEVKIT_MOVE_REAL_GIT" "$@"\n  result=$?\n  mv "$DEVKIT_MOVE_RACE_PARENT" "$DEVKIT_MOVE_RACE_OUTSIDE/lib" && ln -s "$DEVKIT_MOVE_RACE_OUTSIDE/lib" "$DEVKIT_MOVE_RACE_PARENT" || exit 97\n  exit "$result"\nfi\nexec "$DEVKIT_MOVE_REAL_GIT" "$@"\n',
     );
     chmodSync(join(root, 'bin/git'), 0o755);
 
@@ -690,10 +690,10 @@ describe('devkit move — directory and untracked sources', () => {
 
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(
-      /destination changed during move; source is at .*imports were not rewritten/,
+      /destination changed during move; source is at .*move-parent-race-[^/]+\/lib\/new-rules; imports were not rewritten/,
     );
     expect(lstatSync(parent).isSymbolicLink()).toBe(true);
-    expect(existsSync(join(outside, 'new-rules/rule.ts'))).toBe(true);
+    expect(existsSync(join(outside, 'lib/new-rules/rule.ts'))).toBe(true);
     expect(read(root, 'src/renderer/features/b/use.ts')).toBe(importerBefore);
   });
 
