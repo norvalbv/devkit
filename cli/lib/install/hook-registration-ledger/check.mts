@@ -2,15 +2,19 @@ import { AGENT_TARGETS } from '../../components.mts';
 import { isTracked } from '../../git-tracked.mts';
 import { isSafeAgentAssetPath } from '../agent-asset-manifest/lifecycle.mts';
 import { type AgentProvider, requireAgentProviders } from '../agent-assets/agent-providers.mts';
-import { type HookInstallScope, hookRegistrationDestination } from './codec.mts';
+import {
+  type HookInstallScope,
+  type HookRegistrationOwnershipV1,
+  hookRegistrationDestination,
+} from './codec.mts';
 import {
   adoptExactLegacy,
   type HookRegistrationOptions,
   handlerLocation,
   ledgerOf,
-  otherClaudeSettings,
+  otherScopeFile,
+  otherScopePass,
   providerDocument,
-  retiredElsewhere,
   stripReclaimedCommands,
   unrecognisedFallowGates,
 } from './install-support.mts';
@@ -22,7 +26,7 @@ import {
 } from './lifecycle.mts';
 import { dataRecord } from './plain-data.mts';
 
-type HookFile = ReturnType<typeof otherClaudeSettings>;
+type HookFile = ReturnType<typeof otherScopeFile>;
 
 function unrecognisedAdvisories(provider: AgentProvider, file: HookFile): string[] {
   if (!file) return [];
@@ -30,6 +34,29 @@ function unrecognisedAdvisories(provider: AgentProvider, file: HookFile): string
     (handler) =>
       `${provider}:unrecognised-fallow-gate ${handlerLocation(file.rel, handler)}: ${handler.command}`,
   );
+}
+
+/** Doctor rows: `missing` is what `devkit init` repairs, `advisories` what only the user can. */
+interface Findings {
+  missing: string[];
+  advisories: string[];
+}
+
+/** devkit's leftovers in the file the other scope writes, sorted by who can remove them. */
+function otherScopeFindings(
+  root: string,
+  provider: AgentProvider,
+  scope: HookInstallScope,
+  entries: HookRegistrationOwnershipV1[],
+): Findings {
+  const found: Findings = { missing: [], advisories: [] };
+  const elsewhere = otherScopePass(root, provider, scope, entries);
+  if (!elsewhere) return found;
+  const into = elsewhere.repairable ? found.missing : found.advisories;
+  if (elsewhere.retiredFound) into.push(`${provider}:retired-registration:${elsewhere.rel}`);
+  if (elsewhere.switched) into.push(`${provider}:scope-switch:${elsewhere.rel}`);
+  else if (elsewhere.stranded) found.advisories.push(`${provider}:scope-switch:${elsewhere.rel}`);
+  return found;
 }
 
 /** Install never writes a tracked overlay destination, so everything found in it is report-only. */
@@ -59,17 +86,13 @@ export function checkHookRegistrations(
   const advisories: string[] = [];
   for (const provider of requireAgentProviders(targets)) {
     const rel = hookRegistrationDestination(provider, scope);
-    // Install reclaims the other settings file before it skips a destination, so judge it first.
-    const other = otherClaudeSettings(root, provider, scope);
-    const elsewhere = retiredElsewhere(root, provider, scope, other);
-    if (elsewhere)
-      (elsewhere.repairable ? missing : advisories).push(
-        `${provider}:retired-registration:${elsewhere.rel}`,
-      );
-    advisories.push(...unrecognisedAdvisories(provider, other));
+    advisories.push(...unrecognisedAdvisories(provider, otherScopeFile(root, provider, scope)));
     // Mirrors skipProvider: install never registers into a tracked overlay file, so this can't be fixed.
     if (overlay && isTracked(root, rel)) {
       advisories.push(...trackedAdvisories(root, provider, rel));
+      const elsewhere = otherScopeFindings(root, provider, scope, ledger?.entries ?? []);
+      missing.push(...elsewhere.missing);
+      advisories.push(...elsewhere.advisories);
       continue;
     }
     if (!isSafeAgentAssetPath(root, rel, true)) {
@@ -83,6 +106,9 @@ export function checkHookRegistrations(
     if (stripReclaimedCommands(document, provider).changed)
       missing.push(`${provider}:retired-registration`);
     advisories.push(...unrecognisedAdvisories(provider, { rel, document }));
+    const elsewhere = otherScopeFindings(root, provider, scope, ledger?.entries ?? []);
+    missing.push(...elsewhere.missing);
+    advisories.push(...elsewhere.advisories);
     if (legacy.ledgerChanged) missing.push(`${provider}:superseded-registration`);
     const effectiveLedger = legacyOwnedComponentIds?.length
       ? ledgerOf(

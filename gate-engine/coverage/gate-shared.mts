@@ -5,7 +5,8 @@ import { sourceMatchers } from '../config.mts';
 import { appendReviewNotice } from '../deterministic/reason.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { canonicalPath } from './dependencies.mts';
-import { displayPath, formatClearMarker, readClearMarker } from './failures.mts';
+import { readClearMarker } from './clear-marker/store.mts';
+import { displayPath, formatClearMarker } from './failures.mts';
 import { COVERAGE_DIR, COVERAGE_FILE } from './produce.mts';
 import type { Classify, Provenance } from './provenance.mts';
 
@@ -24,6 +25,15 @@ export const OPT_OUT_REMEDY = [
   '   Repo-wide opt-out: "coverage": false in guard.config.json — but `devkit ship`',
   '   reads that file from the COMMITTED tree, so a local-only edit changes nothing.',
 ];
+
+/** The run that measures every changed file a test reaches: vitest's --changed walks its import graph. */
+export function changedRunHint(sha: string): string[] {
+  return [
+    `   Measure them: \`devkit coverage-run --changed=${sha}\` runs every test that imports a changed file`,
+    '   (every suite if package.json or a vite/vitest config changed). Still unmeasured after it, or it',
+    "   measured no files? No test imports them (spawned, mocked or computed imports don't count): write one.",
+  ];
+}
 
 const MAX_LISTED = 10;
 

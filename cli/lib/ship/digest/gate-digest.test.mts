@@ -2,6 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { summariseFallowAudit } from '../../../../gate-engine/judge/advisory/emit.mts';
 import { blockingFields } from '../../../../gate-engine/review/evidence/items.mts';
 import { STICKY_RULING } from '../../../../gate-engine/review/evidence/base-context.mts';
 import { blockingNote } from '../../../../gate-engine/review/overrides.mts';
@@ -102,6 +103,22 @@ describe('summarise', () => {
       SHIP,
     );
     expect(other[0].blocking).toBe(false);
+  });
+
+  it('a crashed deterministic gate blocks as could-not-run and names the crash, never a finding', () => {
+    const detail = 'guard-size(crashed): .devkit/baselines/size-lines.json is ignored by Git';
+    const crashed = ev({
+      type: 'gate_result',
+      gate: 'size',
+      family: 'deterministic',
+      status: 'could_not_run',
+      detail,
+    });
+    const rows = summarise([crashed, shipResult('deterministic')], SHIP);
+    expect(rows).toEqual([
+      expect.objectContaining({ gate: 'size', state: 'could-not-run', blocking: true }),
+    ]);
+    expect(render(rows)).toContain(`✗ size — BLOCKED this run — ${detail}`);
   });
 
   it('nothing is blocking when the run did not stop on a gate (timeout, green, clobber)', () => {
@@ -374,6 +391,42 @@ describe('readShipEvents', () => {
     expect(readShipEvents(sinkWith([]), SHIP)).toEqual([]);
   });
 
+  // One inherited DEVKIT_SHIP_ID spans attempts, and one read chunk can hold both.
+  it('returns only the newest attempt when an earlier one shares its ship id and chunk', () => {
+    const file = sinkWith([
+      JSON.stringify(ev({ type: 'ship_attempt' })),
+      JSON.stringify(reviewFail('correctness', 'the previous attempt, already fixed')),
+      JSON.stringify(ev({ type: 'ship_result', exit_code: 1 })),
+      JSON.stringify(ev({ type: 'ship_attempt' })),
+      JSON.stringify(completenessFail('this attempt')),
+      JSON.stringify(ev({ type: 'ship_result', exit_code: 0 })),
+    ]);
+    expect(readShipEvents(file, SHIP).map((e) => e.type)).toEqual([
+      'ship_attempt',
+      'gate_result',
+      'ship_result',
+    ]);
+  });
+
+  it('drops the rows this ship wrote before its own ship_attempt', () => {
+    const file = sinkWith([
+      JSON.stringify(ev({ type: 'ship_intent' })),
+      JSON.stringify(ev({ type: 'judge_preflight' })),
+      JSON.stringify(ev({ type: 'ship_attempt' })),
+      JSON.stringify(completenessFail('gap')),
+    ]);
+    expect(readShipEvents(file, SHIP).map((e) => e.type)).toEqual(['ship_attempt', 'gate_result']);
+  });
+
+  it('returns every row of this ship when it wrote no ship_attempt, as a dry-gates run does', () => {
+    const file = sinkWith([
+      JSON.stringify(ev({ type: 'judge_preflight' })),
+      JSON.stringify(completenessFail('gap')),
+      JSON.stringify(shipResult('review')),
+    ]);
+    expect(readShipEvents(file, SHIP)).toHaveLength(3);
+  });
+
   // The default sink is per-MACHINE, so two Frink panes shipping different repos interleave in it.
   // A backward scan must stop at MY ship_attempt — stopping at whichever attempt it meets first
   // silently truncates this run's findings to whatever sat after a stranger's row.
@@ -472,6 +525,31 @@ describe('advisory_result', () => {
     }
   });
 
+  it("keeps the first introduced finding's name inside the row cap, however deep its path", () => {
+    const findings = [
+      {
+        path: 'gate-engine/review/eval/reviewers/scale/lens-run.mts',
+        name: 'runOne',
+        line: 366,
+        introduced: true,
+      },
+      { path: 'gate-engine/review/eval/reviewers/scale/lens-run.mts', name: 'b', introduced: true },
+    ];
+    const audit = {
+      verdict: 'fail',
+      attribution: { complexity_introduced: 2 },
+      complexity: { findings },
+    };
+    const detail = summariseFallowAudit(JSON.stringify(audit))?.detail ?? '';
+    const text = render(
+      summarise(
+        [ev({ type: 'ship_attempt' }), advisory('fallow-advisory', 'finding', detail)],
+        SHIP,
+      ),
+    );
+    expect(text).toContain('2 complexity introduced: lens-run.mts:366 runOne');
+  });
+
   it('can never be rendered as the blocker, even when the run failed unattributably', () => {
     // 'unknown' blocked_gate is the arm that turns every ATTRIBUTABLE row's blocking to null
     // ("finding recorded" with no claim either way). An advisory is knowable on every run.
@@ -524,6 +602,29 @@ describe('advisory_result', () => {
       SHIP,
     );
     expect(rows.map((r) => r.gate)).toEqual(['fallow-advisory', 'skill-projection']);
+  });
+
+  it('keeps the estimated-CRAP remedy inside the digest row cut, at any counter size', () => {
+    // The digest flattens every detail to 140 chars, so a remedy placed after the counters is cut.
+    const finding = { exceeded: 'crap', coverage_source: 'estimated', introduced: true };
+    for (const n of [1, Number.MAX_SAFE_INTEGER]) {
+      const attribution = {
+        complexity_introduced: n,
+        duplication_introduced: n,
+        dead_code_introduced: n,
+        styling_introduced: n,
+      };
+      const complexity = { findings: [finding] };
+      const report = JSON.stringify({ verdict: 'fail', attribution, complexity });
+      const detail = summariseFallowAudit(report)?.detail ?? '';
+      const rows = summarise(
+        [advisory('fallow-advisory', 'finding', detail), shipResult(null)],
+        SHIP,
+      );
+      expect(render(rows)).toContain(
+        '`devkit coverage-run <their tests>` in this checkout, then re-ship',
+      );
+    }
   });
 });
 
@@ -1029,5 +1130,92 @@ describe('a reviewer blocking on several fingerprints (sc-3212)', () => {
   it('lists the same fingerprints once when the reviewer judged twice in one run', () => {
     const rows = summarise([blockingFail(THREE), blockingFail(THREE), shipResult('review')], SHIP);
     expect(rows.map((r) => r.fp)).toEqual(THREE.map((b) => b.fp));
+  });
+});
+
+describe('a finding that did not block says why', () => {
+  const ended = (blocked: string | null, exitCode: number) =>
+    ev({ type: 'ship_result', blocked_gate: blocked, exit_code: exitCode });
+  const line = (events: GateEvent[]) =>
+    render(summarise(events, SHIP))
+      .split('\n')
+      .find((l) => l.includes('⚠ completeness')) ?? '';
+
+  it('names the gate that stopped the run first', () => {
+    const text = line([
+      reviewFail('correctness', 'bug'),
+      completenessFail('gap'),
+      ended('review', 1),
+    ]);
+    expect(text).toBe(
+      '   ⚠ completeness — finding recorded, did NOT block this run only because review:correctness stopped it first — read it before retrying: gap',
+    );
+  });
+
+  it('names a reviewer with several blocking fingerprints once', () => {
+    const blocking = [
+      { lens: 'a', fp: 'aaaaaaaaaaaa' },
+      { lens: 'b', fp: 'bbbbbbbbbbbb' },
+    ];
+    const fail = ev({ type: 'review_result', reviewer: 'correctness', status: 'fail', blocking });
+    expect(line([fail, completenessFail('gap'), ended('review', 1)])).toContain(
+      'only because review:correctness stopped it first',
+    );
+  });
+
+  it('names a strict-mode inconclusive reviewer as the blocker', () => {
+    const inconclusive = ev({
+      type: 'review_result',
+      reviewer: 'security',
+      status: 'inconclusive',
+      inconclusive_cause: 'timeout',
+    });
+    expect(line([inconclusive, completenessFail('gap'), ended('review', 1)])).toContain(
+      'only because review:security stopped it first',
+    );
+  });
+
+  it('names what the run ended on when no row blocked, gate or not', () => {
+    const text = line([completenessFail('gap'), ended('timeout', 124)]);
+    expect(text).toContain('did NOT block this run — the run ended on timeout — read it before');
+    expect(text).not.toContain('stopped it first');
+    // A gate family whose own rows never reached the sink is still a gate: never "not a gate".
+    const silent = line([completenessFail('gap'), ended('decisions', 1)]);
+    expect(silent).toContain('did NOT block this run — the run ended on decisions — read it');
+    expect(silent).not.toContain('not on a gate finding');
+  });
+
+  it('says the gate let a passing run through, without claiming the finding was cleared', () => {
+    const text = line([completenessFail('gap'), ended(null, 0)]);
+    expect(text).toContain(
+      'did NOT block this run (its gate let the run pass) — read it before merging',
+    );
+    expect(text).not.toContain('stopped it first');
+  });
+});
+
+describe('the why clause over real-world sink shapes', () => {
+  // A non-string blocked_gate reads as unattributed: a throw here silenced the whole digest.
+  it('survives a non-string blocked_gate', () => {
+    const sink = sinkWith([
+      `{"ship_id":"${SHIP}","type":"gate_result","gate":"completeness","family":"review","status":"fail","detail":"gap"}`,
+      `{"ship_id":"${SHIP}","type":"ship_result","blocked_gate":{"toString":1},"exit_code":1}`,
+    ]);
+    const text = render(summarise(readShipEvents(sink, SHIP), SHIP));
+    expect(text).toContain('⚠ completeness — finding recorded — read it before retrying: gap');
+    expect(text).not.toContain('did NOT block');
+  });
+
+  // The parallel judge often finishes before the fleet, so its row lands FIRST in the sink.
+  it('names the fleet blocker whichever row the sink recorded first', () => {
+    const rows = summarise(
+      [
+        completenessFail('gap'),
+        reviewFail('correctness', 'bug'),
+        ev({ type: 'ship_result', blocked_gate: 'review', exit_code: 1 }),
+      ],
+      SHIP,
+    );
+    expect(render(rows)).toContain('only because review:correctness stopped it first');
   });
 });

@@ -1,6 +1,6 @@
 // Staged structure attribution: a violation in a file the change only edits already existed at
 // HEAD when nothing staged could have changed its verdict, so it is reported, not blocked.
-import { headSha } from '../coverage/failures.mts';
+import { headSha } from '../coverage/provenance.mts';
 import { preExisting, type StructureGateResult } from './verdict.mts';
 
 type Lint = (cwd: string, targets: string[]) => Promise<StructureGateResult>;

@@ -5,7 +5,7 @@ import {
   type RegressionEvidence,
   type RegressionFailureSummary,
   type RegressionOperandEvidence,
-} from '../../baseline-status/regression-evidence.mts';
+} from '../../baseline-status/regression/evidence.mts';
 import {
   callerText,
   carryEvidenceBlock,
@@ -89,6 +89,16 @@ describe('evidence block', () => {
   it('reads a block produced at another head as stale', () => {
     const block = renderEvidenceBlock(captured, evidence);
     expect(readEvidenceBlock(block, 'f'.repeat(40))?.stale).toBe(true);
+  });
+
+  it('lists each green failure and green file error, bounded like the red ones', () => {
+    const fileError = { fullName: '<checkout>/src/extra.test.mjs', message: 'x'.repeat(400) };
+    const green = { ...operand(HEAD, 1, 1), fileErrors: [fileError] };
+    const block = renderEvidenceBlock(captured, { ...evidence, green });
+    expect(block).toContain('<summary>Failed on green (1 test)</summary>');
+    expect(block).toContain('- `<checkout>/src/extra.test.mjs`: `' + 'x'.repeat(239) + '…`');
+    expect(block).toContain('<summary>Did not load on green (1 file)</summary>');
+    expect(renderEvidenceBlock(captured, evidence)).not.toContain('Failed on green');
   });
 
   it('names the abstention reason and renders no runs when nothing was captured', () => {

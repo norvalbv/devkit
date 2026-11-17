@@ -133,6 +133,10 @@ describe('attemptBypasses', () => {
     expect(read([ATTEMPT, earlier, ATTEMPT, PASSED])).toEqual([]);
   });
 
+  it("never credits this attempt with an earlier attempt's pass", () => {
+    expect(read([ATTEMPT, PASSED, ATTEMPT])).toBeUndefined();
+  });
+
   it.each([
     ...documentedControls(),
     ...BYPASS_ENV.filter((name) => name.startsWith('GUARD_')),

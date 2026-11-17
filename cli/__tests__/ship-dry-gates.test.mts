@@ -1,16 +1,20 @@
+import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import {
   buildAndRun,
+  dropWorktree,
   localBranchExists,
   remoteBranchExists,
   reviewerTimeoutEnv,
@@ -18,6 +22,8 @@ import {
   seedBaseRepo,
   seedShipRepo,
 } from './_ship-branch-fixture.mts';
+
+const UI_GATE = fileURLToPath(new URL('../../gate-engine/ui-evidence/cli.mts', import.meta.url));
 
 describe('ship-branch.sh — --dry-gates', () => {
   it('supports the same committed --from-branch source snapshot without keeping a branch', () => {
@@ -49,7 +55,7 @@ describe('ship-branch.sh — --dry-gates', () => {
       hookBody: `
 [ "\${DEVKIT_RUN_MODE:-}" = dry-gates ] || exit 0
 test "$DEVKIT_RUN_MODE" = dry-gates || exit 91
-test "$DEVKIT_REVIEW_GUARDS" = comments || exit 92
+test "$DEVKIT_REVIEW_GUARDS" = comments,ui-evidence || exit 92
 test "$DEVKIT_SHIP_BASE_SHA" = "$EXPECTED_BASE" || exit 93
 test "$(git diff --cached --name-only)" = note.txt || exit 94
 test "$(cat note.txt)" = finalized || exit 95
@@ -94,6 +100,27 @@ printf 'DRY_GATES_HOOK_OK\n'
     expect(realpathSync(dirname(gateLog))).toBe(realpathSync(join(dir, '.devkit')));
     expect(basename(gateLog)).toMatch(/^last-ship-gates-.+\.log$/);
     expect(readFileSync(gateLog, 'utf8')).toContain('DRY_GATES_HOOK_OK');
+  });
+
+  it('a rehearsal on a UI path prints the screenshot reminder from the real gate', () => {
+    const { dir, env } = seedShipRepo();
+    // Written after seeding, so only the rehearsal runs the reminder.
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      `#!/bin/sh\n"${process.execPath}" "${UI_GATE}" || true\n`,
+    );
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src/Card.tsx'), 'export const Card = 1;\n');
+
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/dry-ui', 'ship it', '--dry-gates', '--', 'src/Card.tsx'],
+      { cwd: dir, input: '', encoding: 'utf8', env },
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('📸 ui-evidence: Add before (base branch) and after (this branch)');
+    expect(r.stderr).toContain('UI paths changed: src/Card.tsx');
   });
 
   it('returns the hook failure and still removes its ephemeral branch', () => {
@@ -173,6 +200,105 @@ echo DRY_GATES_LOCKED_OK`,
   });
 });
 
+describe('ship — decision-smell advisory before the gate chain', () => {
+  const BIG = `${Array.from({ length: 150 }, (_, i) => `line ${i}`).join('\n')}\n`;
+  const SMELL = 'decision smell (regex only, not a verdict): legacy-deletion — old.ts';
+  const DECISIONS_HOOK = '# devkit:guard-decisions\necho GATE_START >&2';
+  const reshipPath = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
+  const count = (text: string) => text.split(SMELL).length - 1;
+
+  /** Commits a 150-line file, deletes it, and ships the deletion: the legacy-deletion smell. */
+  function shipDeletion(
+    hookBody: string,
+    args: string[],
+    env: Record<string, string> = {},
+    prepare: (dir: string) => void = () => {},
+  ) {
+    const seeded = seedShipRepo({ hookBody });
+    prepare(seeded.dir);
+    writeFileSync(join(seeded.dir, 'old.ts'), BIG);
+    seeded.git(['add', 'old.ts']);
+    seeded.git(['commit', '-q', '--no-verify', '-m', 'old module']);
+    rmSync(join(seeded.dir, 'old.ts'));
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/smell', 'drop old', ...args, '--', 'old.ts'],
+      {
+        cwd: seeded.dir,
+        input: 'b\n',
+        encoding: 'utf8',
+        env: { ...seeded.env, GUARD_NO_LOG: '', GUARD_DECISION_NO_LLM: '', ...env },
+      },
+    );
+    return { ...seeded, r };
+  }
+
+  it('a rehearsal names the smell before the chain and again last, keeping the exit code', () => {
+    const { r, git } = shipDeletion(DECISIONS_HOOK, ['--dry-gates']);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr.indexOf(SMELL)).toBeGreaterThan(-1);
+    expect(r.stderr.indexOf(SMELL)).toBeLessThan(r.stderr.indexOf('GATE_START'));
+    expect(r.stderr.lastIndexOf(SMELL)).toBeGreaterThan(r.stderr.indexOf('GATE_START'));
+    expect(localBranchExists(git, 'feat/smell')).toBe(false);
+  });
+
+  it('a real ship prints it before the chain, once, when the decisions gate rules', () => {
+    const { r, git } = shipDeletion(
+      `${DECISIONS_HOOK}\necho 'decision-gate: judge cleared as ROUTINE' >&2`,
+      [],
+      { SHIP_DRY_RUN: '1' },
+    );
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr.indexOf(SMELL)).toBeLessThan(r.stderr.indexOf('GATE_START'));
+    expect(count(r.stderr)).toBe(1);
+  });
+
+  it("reads an overlay's git-excluded config, which reaches the gate worktree only once linked", () => {
+    const { r } = shipDeletion(DECISIONS_HOOK, ['--dry-gates'], {}, (dir) => {
+      writeFileSync(join(dir, 'guard.config.json'), '{"decisionsDir": ".devkit/decisions"}\n');
+      writeFileSync(join(dir, '.git/info/exclude'), 'guard.config.json\n.devkit/decisions/\n');
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain(
+      'If it blocks: git cannot confirm .devkit/decisions is stageable here',
+    );
+    expect(r.stderr).not.toContain("pass the record's path");
+  });
+
+  it('is silent under GUARD_NO_LOG and when the hook has no decisions gate', () => {
+    const bypassed = shipDeletion(DECISIONS_HOOK, ['--dry-gates'], { GUARD_NO_LOG: '1' });
+    const noGate = shipDeletion('echo GATE_START >&2', ['--dry-gates']);
+    for (const { r } of [bypassed, noGate]) {
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stderr).not.toContain('decision smell');
+    }
+  });
+
+  it('a --pr re-ship prints it before the chain too', () => {
+    const { dir, env, git } = seedShipRepo({ hookBody: DECISIONS_HOOK });
+    const bare = join(dir, '.origin.git');
+    execFileSync('git', ['init', '-q', '--bare', bare]);
+    git(['remote', 'set-url', 'origin', bare]);
+    writeFileSync(join(dir, 'old.ts'), BIG);
+    git(['add', 'old.ts']);
+    git(['commit', '-q', '--no-verify', '-m', 'old module']);
+    git(['push', '-q', 'origin', 'HEAD:work', 'HEAD:feat/pr']);
+    git(['fetch', '-q', 'origin']);
+    rmSync(join(dir, 'old.ts'));
+    const r = spawnSync('/bin/bash', [reshipPath, 'feat/pr', 'drop old', '--pr', '--', 'old.ts'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1', GUARD_NO_LOG: '', GUARD_DECISION_NO_LLM: '' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr.indexOf(SMELL)).toBeGreaterThan(-1);
+    expect(r.stderr.indexOf(SMELL)).toBeLessThan(r.stderr.indexOf('GATE_START'));
+  });
+});
+
 // The marker the generated review fragment prints before the fleet runs (ai-guard-fragments.mts).
 const REVIEWER_GATE_LINE = 'echo "🔍 Reviewer gate (headless domain judges)..."';
 
@@ -184,7 +310,7 @@ function linkedWorktrees(git, dir) {
 }
 
 /** A `node` shim that records each judge-preflight invocation's args. With `remedy`, the preflight
- *  prints it as a dark judge's family move instead of running; otherwise the real node runs. */
+ *  prints it as its remedy line instead of running; otherwise the real node runs. */
 function preflightSpyEnv(dir, env, remedy?: string) {
   const bin = join(dir, 'preflight-spy-bin');
   const calls = join(dir, 'preflight-calls.log');
@@ -195,7 +321,7 @@ function preflightSpyEnv(dir, env, remedy?: string) {
       '#!/bin/bash',
       'if [[ $1 == */preflight/judge.* ]]; then',
       '  echo "${*:2}" >> "$PREFLIGHT_CALLS"',
-      remedy === undefined ? '' : `  echo ${remedy}; exit 0`,
+      remedy === undefined ? '' : `  echo '${remedy}'; exit 0`,
       'fi',
       'exec "$REAL_NODE" "$@"',
     ].join('\n'),
@@ -217,7 +343,7 @@ describe('ship-branch.sh — --dry-gates --with-reviewers', () => {
     const { dir, env, git, bare, studioTip } = seedBaseRepo({
       hookBody: `
 [ "\${DEVKIT_RUN_MODE:-}" = dry-gates ] || exit 0
-test "$DEVKIT_REVIEW_GUARDS" = comments,review || exit 81
+test "$DEVKIT_REVIEW_GUARDS" = comments,review,ui-evidence || exit 81
 test "\${DEVKIT_SHIP_DRY_REVIEWERS:-}" = 1 || exit 82
 test "$DEVKIT_SHIP_BASE_SHA" = "$EXPECTED_BASE" || exit 83
 test "$(git diff --cached --name-only)" = note.txt || exit 84
@@ -263,7 +389,9 @@ printf 'DRY_REVIEW_HOOK_OK\\n'
 
     expect(r.status, r.stderr).toBe(0);
     expect(r.stderr).toMatch(/dry gates.*domain reviewers/is);
-    expect(r.stderr).toMatch(/Skipping decision, completeness/);
+    expect(r.stderr).toMatch(
+      /Skipping the decision judge \(regex smells shown as advisory\), completeness/,
+    );
     expect(r.stderr).toMatch(/dry gates \+ reviewers passed/);
     expect(git(['rev-parse', 'HEAD']).trim()).toBe(headBefore);
     expect(localBranchExists(git, 'feat/dry-review')).toBe(false);
@@ -278,7 +406,7 @@ printf 'DRY_REVIEW_HOOK_OK\\n'
     const { dir, env, git } = seedShipRepo({
       hookBody: `
 [ "\${DEVKIT_RUN_MODE:-}" = dry-gates ] || exit 0
-test "$DEVKIT_REVIEW_GUARDS" = comments || exit 91
+test "$DEVKIT_REVIEW_GUARDS" = comments,ui-evidence || exit 91
 test -z "\${DEVKIT_SHIP_DRY_REVIEWERS:-}" || exit 92`,
     });
     writeFileSync(join(dir, 'note.txt'), 'plain\n');
@@ -374,11 +502,35 @@ test -z "\${DEVKIT_SHIP_DRY_REVIEWERS:-}" || exit 92`,
 
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).not.toContain('DARK_JUDGE_REMEDY');
-    const tail = r.stderr.trimEnd().split('\n').slice(-2).join('\n');
-    expect(tail).toContain('Ship dry gates passed');
-    expect(tail).toContain("found a dark judge — the real ship's uncached judges will fail closed");
-    expect(tail).toContain('DARK_JUDGE_REMEDY');
+    const tail = r.stderr.trimEnd().split('\n').slice(-2);
+    expect(tail[0]).toContain('Ship dry gates passed');
+    // The preflight's line is printed verbatim: no prefix or period of the shell's own around it.
+    expect(tail[1]).toMatch(
+      /found a dark judge — the real ship's uncached judges will fail closed\. DARK_JUDGE_REMEDY$/,
+    );
   });
+
+  // With no single family move, the preflight's line is a warning, not a remedy — still the tail.
+  for (const arm of [[], ['--with-reviewers']]) {
+    it(`a green ${['--dry-gates', ...arm].join(' ')} with both judge CLIs dark ends saying so`, () => {
+      const { dir, env } = seedShipRepo();
+      writeFileSync(join(dir, 'note.txt'), 'x\n');
+      const bothDark =
+        'Both judge CLIs are dark, so no family move helps — install or authenticate one of them.';
+      const spy = preflightSpyEnv(dir, env, bothDark);
+      const r = spawnSync(
+        '/bin/bash',
+        [scriptPath, 'feat/dry-both-dark', 't', '--dry-gates', ...arm, '--', 'note.txt'],
+        { cwd: dir, input: '', encoding: 'utf8', env: spy.env },
+      );
+
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).not.toContain(bothDark);
+      expect(r.stderr.trimEnd().split('\n').at(-1)).toBe(
+        `⚠️  ship: the judge preflight found a dark judge — the real ship's uncached judges will fail closed. ${bothDark}`,
+      );
+    });
+  }
 
   it('a reachable judge — credit-backed included — adds nothing to the rehearsal tail', () => {
     const { dir, env } = seedShipRepo();

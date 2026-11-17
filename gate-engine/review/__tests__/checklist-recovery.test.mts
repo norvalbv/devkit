@@ -8,6 +8,7 @@ import { REVIEWERS } from '../reviewers.mts';
 import { runReviewGate } from '../run-review.mts';
 import { runCascade } from '../cascade/reviewer.mts';
 import { reportDeniedCalls, reportFailedItems } from '../contracts/checklist.mts';
+import { CONTRACT_MISS } from '../contracts/response.mts';
 import { resolveGuardConfig } from '../../config.mts';
 import {
   cleanupReviewFixtures,
@@ -193,6 +194,44 @@ describe('runReviewGate — deferred checklist recovery (sc-1476)', () => {
     expect(parts.every((p) => p.status === 'pass')).toBe(true);
     expect(rows[0].retried).toBe(true);
     expect(targetCalls).toBe(2);
+  });
+
+  // The real cache round-trip: a re-run replays the three groups the first run PASSed, and the
+  // merged row has to say which entries were replayed rather than leave it to a NULL model.
+  it('a re-run marks only the replayed groups cached in the merged lens_parts', async () => {
+    delete process.env.GUARD_CORRECTNESS_SPLIT;
+    const repo = consumerRepo({ backend: true });
+    reviewEnv(repo);
+    const failLens = 'state-transitions';
+    const groups: readonly (readonly string[])[] = FOUR_WAY_LENS_GROUPS;
+    const judge = (failing: boolean) =>
+      mkExec(async ({ label, args }) => {
+        writeArtifact(repo, label);
+        const group = groups.find((g) => args[1].includes(g[0]));
+        if (label !== 'review:correctness-reviewer' || !group) return 'VERDICT: PASS';
+        const fails = failing && group[0] === failLens;
+        writeFileSync(
+          join(repo, `.claude/.correctness-review-${lensGroupId(group)}.json`),
+          JSON.stringify({
+            items: [{ name: group[0], category: 'X', status: fails ? 'fail' : 'pass', issues: [] }],
+          }),
+        );
+        return fails ? 'VERDICT: FAIL — a dead state' : 'VERDICT: PASS';
+      });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await runReviewGate(repo, { exec: judge(true) });
+    writeFileSync(join(repo, 'events.jsonl'), '');
+    const rerun = judge(false);
+    expect(await runReviewGate(repo, { exec: rerun })).toBe(0);
+    const judged = rerun.mock.calls.filter((c) => c[0].label === 'review:correctness-reviewer');
+    expect(judged).toHaveLength(1); // only the failed group is judged again
+    const row = events(repo).find(
+      (e) => e.type === 'review_result' && e.reviewer === 'correctness-reviewer',
+    );
+    // SAFETY: a split reviewer's merged row always carries lens_parts with these fields.
+    const parts = row?.lens_parts as { lens: string; cached?: true; model?: string }[];
+    expect(parts).toHaveLength(FOUR_WAY_LENS_GROUPS.length);
+    for (const p of parts) expect(p.cached).toBe(p.lens === failLens ? undefined : true);
   });
 });
 
@@ -383,6 +422,10 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
     // Once, for the terminal attempt: a parked wave attempt names its count on the retry line.
     const refused = err.mock.calls.flat().filter((l) => String(l).includes(`: ${DENIED}`));
     expect(refused).toEqual([`⚠️  guard-review: api-security-reviewer — ${COUNTED}: ${DENIED}`]);
+    // The count reaches the strict Remedy through the solo retry's own spawn.
+    const remedies = err.mock.calls.flat().filter((l) => String(l).startsWith('   Remedy:'));
+    expect(remedies).toHaveLength(1);
+    expect(remedies[0]).not.toMatch(/fix a real violation|forged/);
   });
 
   it('a refusal that the solo retry recovers from leaves no refused-call line behind', async () => {
@@ -433,9 +476,27 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
     expect(await runReviewGate(repo, { exec })).toBe(2);
     expect(exec.mock.calls.filter(([o]) => o.label === TARGET)).toHaveLength(1);
     expect(reasonOf(repo)).toBe(
-      `checklist artifact missing — ${COUNTED}; run the checklist commands exactly as written`,
+      `checklist artifact missing — ${COUNTED}; run each checklist command as its own plain node call, with no chains, loops or variables`,
     );
-    expect(err.mock.calls.flat().join('\n')).toContain(`${COUNTED}: ${DENIED}`);
+    const out = err.mock.calls.flat().join('\n').split('\n');
+    expect(out.join('\n')).toContain(`${COUNTED}: ${DENIED}`);
+    const remedies = out.filter((l) => l.startsWith('   Remedy:'));
+    expect(remedies).toHaveLength(1);
+    expect(remedies[0]).toContain('if it repeats, move that judge to another model');
+    expect(remedies[0]).not.toMatch(/devkit ship|cached|fix a real violation|forged/);
+  });
+
+  it('a refused call beside a FAILED item keeps the violation remedy', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async ({ label, onPermissionDenials }) => {
+      writeArtifact(repo, label, label === TARGET ? { pending: 1, failed: 1 } : {});
+      if (label === TARGET) onPermissionDenials?.(['Bash: vitest run']);
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(2);
+    const remedies = err.mock.calls.flat().filter((l) => String(l).startsWith('   Remedy:'));
+    expect(remedies).toEqual([`   Remedy: ${CONTRACT_MISS}.`]);
   });
 
   it('a refused correctness lens judge fails the ship closed under its own lens name', async () => {
@@ -475,6 +536,76 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
     expect(err.mock.calls.flat().join('\n')).toContain(
       `correctness-reviewer [${refusedLens}] — ${COUNTED}: ${DENIED}`,
     );
+    const remedies = err.mock.calls.flat().filter((l) => String(l).startsWith('   Remedy:'));
+    expect(remedies).toHaveLength(1);
+    expect(remedies[0]).toContain('re-run devkit ship, and if it repeats move that judge');
+  });
+
+  // A FAILED item is a candidate violation, so a refused sibling lens must not reword its remedy.
+  it('a refused lens beside a FAILED-item lens keeps both remedies', async () => {
+    delete process.env.GUARD_CORRECTNESS_SPLIT;
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const [refused, failing] = FOUR_WAY_LENS_GROUPS;
+    const exec = mkExec(async ({ label, args, onPermissionDenials }) => {
+      writeArtifact(repo, label);
+      const group = FOUR_WAY_LENS_GROUPS.find((g) => args[1].includes(g[0]));
+      if (label !== 'review:correctness-reviewer' || !group) return 'VERDICT: PASS';
+      if (group === refused) onPermissionDenials?.([DENIED]);
+      else {
+        const status = group === failing ? 'fail' : 'pass';
+        writeFileSync(
+          join(repo, `.claude/.correctness-review-${lensGroupId(group)}.json`),
+          JSON.stringify({ items: [{ name: group[0], category: 'X', status, issues: [] }] }),
+        );
+      }
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    const remedies = err.mock.calls.flat().filter((l) => String(l).startsWith('   Remedy:'));
+    expect(remedies).toHaveLength(2);
+    expect(remedies.join('\n')).toContain('if it repeats move that judge');
+    expect(remedies.join('\n')).toContain('fix a real violation if present');
+  });
+
+  it('a lens refused on the wave that skips again with no refusal fails closed on the same model', async () => {
+    delete process.env.GUARD_CORRECTNESS_SPLIT;
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const skipLens = 'writer-reader-contracts';
+    const attempts: { prompt: string; model: string }[] = [];
+    const exec = mkExec(async ({ label, args, onPermissionDenials }) => {
+      writeArtifact(repo, label);
+      const group = FOUR_WAY_LENS_GROUPS.find((g) => args[1].includes(g[0]));
+      if (label !== 'review:correctness-reviewer' || !group) return 'VERDICT: PASS';
+      if (group[0] === skipLens) {
+        attempts.push({ prompt: args[1], model: args[args.indexOf('--model') + 1] });
+        onPermissionDenials?.(attempts.length === 1 ? [DENIED] : []);
+        return 'No blocking defects found.\nVERDICT: PASS';
+      }
+      writeFileSync(
+        join(repo, `.claude/.correctness-review-${lensGroupId(group)}.json`),
+        JSON.stringify({ items: [{ name: group[0], category: 'X', status: 'pass', issues: [] }] }),
+      );
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    const row = events(repo).find(
+      (e) => e.type === 'review_result' && e.reviewer === 'correctness-reviewer',
+    );
+    expect(row?.status).toBe('inconclusive');
+    // The retry's own measured zero explains the outcome, not the wave attempt's refusal.
+    expect(row?.reason).toContain(
+      'contract failed after one retry — checklist artifact missing — the judge skipped the checklist workflow (no tool call was denied)',
+    );
+    // SAFETY: a split correctness row always carries its settled lens parts.
+    const parts = row?.lens_parts as { lens: string; status: string }[];
+    expect(parts.filter((p) => p.status !== 'pass').map((p) => p.lens)).toEqual([skipLens]);
+    expect(attempts).toHaveLength(2); // one solo retry, no third attempt
+    expect(attempts[1].prompt).toContain(COUNTED);
+    expect(attempts[1].model).toBe(attempts[0].model); // the retry never switches model
   });
 
   it('the log claims a retry only where a judge actually re-ran', async () => {
@@ -489,7 +620,7 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
   });
 
   it('a measured zero says no call was refused; an unmeasured spawn keeps the bare wording', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const measured = consumerRepo({ backend: true });
     shipEnv(measured);
     expect(await runReviewGate(measured, { exec: judgeDenied(measured, []) })).toBe(3);
@@ -501,6 +632,10 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
     expect(await runReviewGate(unmeasured, { exec: judgeDenied(unmeasured, null) })).toBe(3);
     expect(reasonOf(unmeasured)).toContain('the judge skipped the checklist workflow');
     expect(reasonOf(unmeasured)).not.toContain('denied');
+    // Neither run measured a refusal, so both keep today's strict Remedy byte for byte.
+    const remedies = err.mock.calls.flat().filter((l) => String(l).startsWith('   Remedy:'));
+    const today = `   Remedy: ${CONTRACT_MISS}, then re-run devkit ship (completed verdicts are cached).`;
+    expect(remedies).toEqual([today, today]);
   });
 
   it('items left pending behind a refusal carry the count', async () => {
@@ -532,6 +667,101 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
     expect(out).toContain('api-security-reviewer FAILED (escalation-confirmed)');
     expect(out).not.toContain('No verdict was reached');
     expect(out).toContain(`api-security-reviewer — ${COUNTED}: ${DENIED}`);
+    // An unpinned reviewer never reaches the override valve, so the hint offers no waiver.
+    expect(out).toContain(`api-security-reviewer — ${LIKELY_CAUSE} — re-run`);
+    expect(out).not.toContain('waive it citing the refusal');
+  });
+
+  const LIKELY_CAUSE =
+    'no failed checklist item was recorded: if the reason cites no file:line defect, the refused calls are the likely cause';
+  // A correctness judge answering FAIL; `failed` items land in its (un-lensed) artifact.
+  const correctnessFail = (repo: string, denied: string[] | null, failed: number) =>
+    mkExec(async ({ label, onPermissionDenials }) => {
+      if (label !== 'review:correctness-reviewer') {
+        writeArtifact(repo, label);
+        return 'VERDICT: PASS';
+      }
+      if (failed) writeArtifact(repo, label, { failed });
+      if (denied) onPermissionDenials?.(denied);
+      return 'Bash approval denied; no code defect found.\nVERDICT: FAIL — checklist could not run';
+    });
+
+  // The observed shape: one split lens refused its checklist calls and answered FAIL with no item.
+  for (const strict of [false, true])
+    it(`a refused lens FAIL with no item keeps its block and names the refusal (${strict ? 'strict ship' : 'plain commit'})`, async () => {
+      delete process.env.GUARD_CORRECTNESS_SPLIT; // the shipped four-way default
+      const repo = consumerRepo({ backend: true });
+      if (strict) shipEnv(repo);
+      else process.env.DEVKIT_GATE_EVENTS = join(repo, 'events.jsonl');
+      const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const refusedLens = 'concurrency-races';
+      const exec = mkExec(async ({ label, args, onPermissionDenials }) => {
+        writeArtifact(repo, label);
+        const group = FOUR_WAY_LENS_GROUPS.find((g) => args[1].includes(g[0]));
+        if (label !== 'review:correctness-reviewer' || !group) return 'VERDICT: PASS';
+        if (group[0] === refusedLens) {
+          onPermissionDenials?.([DENIED]);
+          return 'Bash approval denied; no code defect found.\nVERDICT: FAIL — checklist could not run';
+        }
+        writeFileSync(
+          join(repo, `.claude/.correctness-review-${lensGroupId(group)}.json`),
+          JSON.stringify({
+            items: [{ name: group[0], category: 'X', status: 'pass', issues: [] }],
+          }),
+        );
+        return 'VERDICT: PASS';
+      });
+      expect(await runReviewGate(repo, { exec })).toBe(1);
+      const row = events(repo).find(
+        (e) => e.type === 'review_result' && e.reviewer === 'correctness-reviewer',
+      );
+      expect(row?.status).toBe('fail');
+      expect(err.mock.calls.flat().join('\n')).toContain(
+        `correctness-reviewer [${refusedLens}] — ${LIKELY_CAUSE} — re-run, and if it repeats, waive it citing the refusal`,
+      );
+    });
+
+  it('a refused FAIL that carries a failed checklist item gets no likely-cause hint', async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await runReviewGate(repo, { exec: correctnessFail(repo, [DENIED], 1) })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain(`correctness-reviewer — ${COUNTED}: ${DENIED}`);
+    expect(out).not.toContain(LIKELY_CAUSE);
+  });
+
+  it('an unmeasured FAIL with no item names no refusal', async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await runReviewGate(repo, { exec: correctnessFail(repo, null, 0) })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).not.toContain('were denied');
+    expect(out).not.toContain(LIKELY_CAUSE);
+  });
+
+  it('a waived refused FAIL is a PASS, so neither the refusal nor the hint prints', async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await runReviewGate(repo, { exec: correctnessFail(repo, [DENIED], 0) })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain(LIKELY_CAUSE);
+    const row = events(repo).findLast(
+      (e) => e.type === 'review_result' && e.reviewer === 'correctness-reviewer',
+    );
+    process.env[`OVERRIDE_${row?.blocking[0].fp}_RATIONALE`] =
+      'the judge was refused its checklist';
+    err.mockClear();
+    try {
+      expect(await runReviewGate(repo, { exec: correctnessFail(repo, [DENIED], 0) })).toBe(0);
+    } finally {
+      delete process.env[`OVERRIDE_${row?.blocking[0].fp}_RATIONALE`];
+    }
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('overridden [');
+    expect(out).not.toContain('were denied');
+    expect(out).not.toContain(LIKELY_CAUSE);
   });
 
   it('a first-pass refusal is not pinned on the escalation that produced the verdict', async () => {
@@ -804,15 +1034,43 @@ describe('reportDeniedCalls', () => {
     const correctness = REVIEWERS.find((r) => r.name === 'correctness-reviewer');
     if (!correctness) throw new Error('correctness-reviewer is not registered');
     const lensJudge = { ...correctness, lens: ['state-transitions'] };
-    reportDeniedCalls(lensJudge, 'pass', ['a']);
-    reportDeniedCalls(lensJudge, 'inconclusive', null);
+    reportDeniedCalls(lensJudge, { status: 'pass' }, ['a'], null);
+    reportDeniedCalls(lensJudge, { status: 'inconclusive' }, null, null);
     expect(err).not.toHaveBeenCalled();
-    reportDeniedCalls(lensJudge, 'fail', ['a', 'b', 'c', 'd', 'e']);
+    const failed = { items: [{ name: 'state-transitions', status: 'fail' }] };
+    reportDeniedCalls(lensJudge, { status: 'fail' }, ['a', 'b', 'c', 'd', 'e'], failed);
     expect(err).toHaveBeenCalledWith(
       "⚠️  guard-review: correctness-reviewer [state-transitions] — 5 tool call(s) were denied by the judge's tool allowlist: a | b | c (+2 more)",
     );
-    reportDeniedCalls(lensJudge, 'error', ['a', 'b', 'c']);
+    reportDeniedCalls(lensJudge, { status: 'error' }, ['a', 'b', 'c'], null);
     expect(err).toHaveBeenLastCalledWith(expect.stringMatching(/: a \| b \| c$/));
+  });
+
+  it('adds the likely cause only to a checklist FAIL with no failed item', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const byName = (name: string) => {
+      const r = REVIEWERS.find((x) => x.name === name);
+      if (!r) throw new Error(`${name} is not registered`);
+      return r;
+    };
+    const hints = () => err.mock.calls.flat().filter((l) => String(l).includes('likely cause'));
+    const allPass = { items: [{ name: 'x', status: 'pass' }] };
+    reportDeniedCalls(byName('correctness-reviewer'), { status: 'fail' }, ['a'], null);
+    reportDeniedCalls(byName('correctness-reviewer'), { status: 'fail' }, ['a'], allPass);
+    expect(hints()).toHaveLength(2);
+    expect(hints()[0]).toMatch(/waive it citing the refusal$/);
+    // Grounded conventions lenses carry their own evidence; other statuses are not a FAIL to explain.
+    reportDeniedCalls(byName('conventions-reviewer'), { status: 'fail' }, ['a'], null);
+    reportDeniedCalls(byName('correctness-reviewer'), { status: 'error' }, ['a'], null);
+    reportDeniedCalls(byName('correctness-reviewer'), { status: 'inconclusive' }, ['a'], null);
+    // commit-guard records its failures in files[], not items[].
+    const failedFile = { files: [{ path: 'src/a.ts', status: 'fail' }] };
+    reportDeniedCalls(byName('commit-guard'), { status: 'fail' }, ['a'], failedFile);
+    expect(hints()).toHaveLength(2);
+    // A measured zero refused nothing, so it has no refusal to blame.
+    err.mockClear();
+    reportDeniedCalls(byName('correctness-reviewer'), { status: 'fail' }, [], null);
+    expect(err).not.toHaveBeenCalled();
   });
 });
 

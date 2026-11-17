@@ -6,7 +6,8 @@
  */
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   COMPLETENESS_TARGETS_FRAMING,
@@ -15,6 +16,8 @@ import {
   renderTargets,
   type TargetBlock,
 } from '../evidence/targets-block.mts';
+
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 const block = (slug: string, ruling = 'Ruling text.'): TargetBlock => ({
   slug,
@@ -99,5 +102,18 @@ describe('loadReviewerTargetsBlocks — salt stability', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("devkit's own spawn-site ruling, as its reviewers receive it", () => {
+  // A ruling compressed to a bare "Leaf verbs stay raw." drew opposite FAILs on consecutive ships.
+  it('tells a git-integration test reviewer that leaf verbs need no native timeout', async () => {
+    const { saltBlock } = await loadReviewerTargetsBlocks(REPO, [
+      'cli/__tests__/prepare-gate-worktree.test.mts',
+    ]);
+    expect(saltBlock).toContain('### suite-hangs-bound-at-the-spawn-site');
+    expect(saltBlock).toMatch(/Leaf verbs \([^)]*\) MAY stay raw and need no native timeout/);
+    expect(saltBlock).toContain('no other raw call is required to');
+    expect(saltBlock).not.toContain('OMITTED:');
   });
 });

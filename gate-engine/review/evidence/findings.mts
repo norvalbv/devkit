@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { loadScopedTargets, matchScope } from '../../decisions/check-alignment.mts';
+import { rescopeCommand } from '../../decisions/scope/scope-miss.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import { readTranscript } from '../../judge/transcript-store.mts';
 import { issueLocations, LOCATION_RE } from '../contracts/response.mts';
@@ -177,7 +178,8 @@ export function normalizeCitedPath(
   return exists(path.join(cwd, posix)) ? posix : null;
 }
 
-/** Every (slug, path) pair where a blocking issue cites a known Target on an out-of-Scope path. */
+/** Every (slug, path) pair where a blocking issue cites a known Target on an out-of-Scope path.
+ *  An issue citing several Targets is skipped: its paths cannot be bound to their own Target. */
 export function scopeDriftFindings(
   items: ReviewItem[],
   targets: ScopeGlobs[],
@@ -189,6 +191,7 @@ export function scopeDriftFindings(
   const drifts: ScopeDrift[] = [];
   for (const issue of items.filter(isBlockingItem).flatMap((i) => i.issues ?? [])) {
     const slugs = [...issue.matchAll(TARGET_CITE_RE)].map((m) => m[1]);
+    if (new Set(slugs).size > 1) continue;
     for (const slug of slugs) {
       const globs = bySlug.get(slug);
       if (!globs) continue;
@@ -210,7 +213,7 @@ export function renderScopeDriftHints(reviewer: string, drifts: ScopeDrift[]): s
       const scope = globs.join(',');
       return (
         `  ↳ Target ${slug} was enforced outside its Scope (${scope}) on ${p}. If it governs this file: ` +
-        `guard-decisions rescope ${slug} --scope "${scope},${p}" --reason "enforced on ${p} by ${reviewer}"; ` +
+        `${rescopeCommand(slug, globs, [p], `enforced on ${p} by ${reviewer}`)}; ` +
         'if not, the finding applies a ruling outside its Scope.'
       );
     })

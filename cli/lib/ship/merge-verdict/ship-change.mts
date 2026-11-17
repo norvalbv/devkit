@@ -10,7 +10,13 @@ import type { EvidenceOutcome } from '../evidence/outcome.mts';
 import { prBase } from '../evidence/red-ref.mts';
 import { errorMessage, gitEnvironment } from '../review/shared/common.mts';
 import { type PrCommit, shipBypasses } from './bypasses.mts';
-import { type ChangedPath, mergeVerdict, VERDICT_MARK, verdictReasons } from './verdict.mts';
+import {
+  type ChangedPath,
+  mergeVerdict,
+  VERDICT_MARK,
+  verdictEnabled,
+  verdictReasons,
+} from './verdict.mts';
 
 const git = (cwd: string, args: string[]): string =>
   execFileSync('git', ['-C', cwd, ...args], {
@@ -70,11 +76,14 @@ export interface VerdictInput {
   env: NodeJS.ProcessEnv;
 }
 
-export function printVerdict(input: VerdictInput): PrintedVerdict {
+/** Undefined when the policy sets `mergeVerdict.enabled: false`: the block then has no verdict line. */
+export function printVerdict(input: VerdictInput): PrintedVerdict | undefined {
   const { cwd, head, baseRefOid, title, outcome, env } = input;
   try {
-    if (title === undefined) throw new Error('the PR title was not read');
     const base = prBase(cwd, baseRefOid, head);
+    const policy = policyText(cwd, base);
+    if (!verdictEnabled(policy)) return undefined;
+    if (title === undefined) throw new Error('the PR title was not read');
     const change = {
       headSha: head,
       subject: title,
@@ -82,7 +91,7 @@ export function printVerdict(input: VerdictInput): PrintedVerdict {
       bypasses: shipBypasses(telemetrySink(env), prCommits(cwd, base, head)),
       evidence: outcome,
     };
-    const verdict = mergeVerdict(change, policyText(cwd, base));
+    const verdict = mergeVerdict(change, policy);
     const mark = `${VERDICT_MARK[verdict.verdict]} ${verdict.verdict}`;
     const line = `${VERDICT_LABEL} ${mark} · advisory, at \`${head.slice(0, 12)}\``;
     return { line, reasons: verdictReasons(verdict), verdict };

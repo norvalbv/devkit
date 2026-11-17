@@ -17,6 +17,7 @@ import { HOOK_REGISTRATIONS } from '../lib/install/hook-registration-ledger/regi
 import {
   DECISION_EDIT_HOOK,
   DECISION_SCOPE_BRIEF_HOOK,
+  EDIT_TARGETS_LIB,
   hookScriptsFor,
   PLACEMENT_BRIEF_HOOK,
   selectedHookAssets,
@@ -34,6 +35,7 @@ const SCRIPT_OWNING_COMPONENTS = [
   'antiSlop',
   'fanout',
   'placement',
+  'size',
 ] as const;
 
 /** A selection with exactly ONE component on — notably agentHooks OFF for every other component. */
@@ -47,6 +49,7 @@ const only = (component: string) => ({
   antiSlop: component === 'antiSlop',
   fanout: component === 'fanout',
   placement: component === 'placement',
+  size: component === 'size',
 });
 
 /** The hook-dir script a registration command invokes, or null for an engine-bin command. */
@@ -77,6 +80,7 @@ describe('hook registrations resolve to installable scripts', () => {
       comments: true,
       fanout: true,
       placement: true,
+      size: true,
     });
     const dangling = Object.values(HOOK_REGISTRATIONS)
       .flat()
@@ -95,7 +99,9 @@ describe('hook registrations resolve to installable scripts', () => {
     };
     const owned = [DECISION_EDIT_HOOK, DECISION_SCOPE_BRIEF_HOOK];
     // Selecting the guard is sufficient — the brief must not need the agent-hook bundle.
-    expect(hookScriptsFor({ ...base, decisions: true }).sort()).toEqual([...owned].sort());
+    expect(hookScriptsFor({ ...base, decisions: true }).sort()).toEqual(
+      [...owned, EDIT_TARGETS_LIB].sort(),
+    );
     // …and the bundle alone must not drag in a script only the guard registers, or `desired`
     // reconciliation would install a hook no registration ever invokes.
     for (const hook of owned)

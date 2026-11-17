@@ -1,8 +1,9 @@
 import { failLine, writeGateReason } from '../deterministic/reason.mts';
-import { detectChangedComments } from './detect.mts';
-import { emptyInventory } from './inventory.mts';
-import { recordShown, shownAnchors } from './shown.mts';
-import { emitCommentBudget } from './telemetry.mts';
+import { lineAnchors } from '../markdown/referenced-paths.mts';
+import { detectChangedComments, PARAGRAPH_CHANGED_LINE_LIMIT } from './detect.mts';
+import { emptyInventory } from './findings/inventory.mts';
+import { recordShown, shownAnchors } from './findings/shown.mts';
+import { emitCommentBudget } from './findings/telemetry.mts';
 import type { CommentFinding, DetectionResult, RefFinding } from './types.mts';
 
 interface FirewallDeps {
@@ -27,11 +28,15 @@ export function findingLocation(finding: CommentFinding): string {
 
 function printFinding(finding: CommentFinding): void {
   const summary = finding.comment.replace(/\s+/g, ' ').slice(0, 140);
-  console.error(`  • [${finding.id}] ${findingLocation(finding)} — ${summary}`);
+  console.error(
+    `  • [${finding.id}] ${findingLocation(finding)} (${finding.textLines} changed text lines) — ${summary}`,
+  );
 }
 
 export const PARAGRAPH_ADVICE = [
-  'Each paragraph has 3+ changed text lines. Shorten the comment where possible.',
+  'A paragraph is one block comment, or a run of same-style single-line comments with only blank lines between them.',
+  `Blank lines never split it. It blocks at ${PARAGRAPH_CHANGED_LINE_LIMIT} or more changed lines with text. Only lines you added or edited count; leave unchanged lines as they are.`,
+  'Shorten the comment where possible.',
   'If you need a paragraph-long comment to justify a workaround, the code is wrong — fix the code.',
 ];
 
@@ -54,16 +59,22 @@ function printParagraphs(findings: CommentFinding[]): void {
   writeGateReason(
     findings.map(
       (f) =>
-        `[${f.id}] ${findingLocation(f)} — 3+-line comment paragraph: shorten it, or retry unchanged (blocks once)`,
+        `[${f.id}] ${findingLocation(f)} — ${f.textLines} changed text lines in one comment paragraph: shorten it, or retry unchanged (blocks once)`,
     ),
   );
 }
+
+const ANCHOR_REMEDY =
+  'A file:line anchor rots on the next edit to that file: cite the function or test name instead.';
 
 function printRefs(findings: RefFinding[]): void {
   for (const { path, line, refs, comment } of findings) {
     console.error(`  • ${path}:${line} cites ${refs.join(', ')} — ${comment}`);
   }
   console.error(REF_REMEDY);
+  if (findings.some(({ refs }) => refs.some((ref) => lineAnchors(ref).length > 0))) {
+    console.error(ANCHOR_REMEDY);
+  }
   writeGateReason(
     findings.map(
       ({ path, line, refs }) =>

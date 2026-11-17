@@ -49,7 +49,7 @@ export function nativeProjection(
     event: string;
     matcher: string;
     command: string;
-    cursorEvent?: string;
+    cursorEvent?: string | null;
     cursorMatcher?: string;
     providers?: readonly AgentProvider[];
   },
@@ -63,6 +63,7 @@ export function nativeProjection(
       matcher: matcher || null,
       command: codexCommand(command),
     };
+  if (registration.cursorEvent === null) return null;
   if (registration.cursorEvent)
     return {
       event: registration.cursorEvent,

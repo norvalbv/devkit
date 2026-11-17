@@ -418,7 +418,7 @@ describe('exit 4 renders as an object-database fault, never as a verdict', () =>
     expect(out).toContain('unexpected exit 4');
     // The lines it must NOT print — each names a cause that did not happen.
     expect(out).not.toContain('auth/quota');
-    expect(out).not.toContain('Record the decision target');
+    expect(out).not.toContain('GUARD_NO_LOG=1 git commit');
   });
 
   it('the review gate does not call it a reviewer verdict', () => {
@@ -519,8 +519,9 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
     expect(firstAi).toBeGreaterThan(0);
     expect(hook.indexOf('fallow audit --diff-stdin')).toBeLessThan(firstAi);
     expect(hook.indexOf('xargs -0 -r $DK_ESLINT -c eslint.config.devkit.mjs')).toBeLessThan(
-      firstAi,
+      hook.indexOf('# devkit:cheap-gate-flush'),
     );
+    expect(hook.indexOf('# devkit:cheap-gate-flush')).toBeLessThan(firstAi);
     expect(hook.indexOf('# devkit:guard-ui-evidence')).toBeGreaterThan(
       hook.indexOf('fallow audit --diff-stdin'),
     );
@@ -795,34 +796,6 @@ describe('assembled commit-msg hook is sh -e-safe (fail-open 2 → 0, confirmed 
     expect(r.status).toBe(1);
     expect(r.stdout).toContain('Confirmed completeness gap');
     expect(r.stateExists).toBe(false);
-  });
-});
-
-describe('extras (--extra hard gates on the deterministic line)', () => {
-  it('emits `--extra "label=cmd"` per extra', () => {
-    const block = buildGuardBlock({
-      guards: ['size'],
-      extras: [{ label: 'lint', cmd: 'bun run lint' }],
-    });
-    expect(block).toContain('--extra "lint=bun run lint"');
-  });
-
-  it('supports multiple extras in order', () => {
-    const block = buildGuardBlock({
-      guards: ['size'],
-      extras: [
-        { label: 'lint', cmd: 'bun run lint' },
-        { label: 'types', cmd: 'bun run typecheck' },
-      ],
-    });
-    expect(block).toContain('--extra "lint=bun run lint" --extra "types=bun run typecheck"');
-  });
-
-  it('empty/absent extras is byte-identical to before (no --extra emitted)', () => {
-    const withEmpty = buildGuardBlock({ guards: ['size'], extras: [] });
-    const without = buildGuardBlock({ guards: ['size'] });
-    expect(withEmpty).toBe(without);
-    expect(without).not.toContain('--extra');
   });
 });
 

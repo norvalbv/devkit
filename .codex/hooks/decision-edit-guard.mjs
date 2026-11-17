@@ -1,0 +1,182 @@
+#!/usr/bin/env node
+
+/**
+ * Pre-tool guard for the append-only decision store.
+ *
+ * This file is synced into each selected agent surface rather than importing the installed package,
+ * so it also works in package-less overlay repositories. It deliberately protects only native
+ * file-mutation tools; shell/MCP/OS writes are outside the v1 boundary.
+ *
+ * Codex edits arrive as apply_patch, whose targets come from edit-targets-lib.mjs. Codex has been
+ * reported not to enforce some apply_patch denials: https://github.com/openai/codex/issues/27833
+ */
+
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
+
+// Loaded lazily so a missing lib never costs the Claude/Cursor denial.
+const { patchTargets = () => [] } = await import("./edit-targets-lib.mjs").catch(() => ({}));
+
+const DEFAULT_DECISIONS_DIR = "docs/decisions";
+const MUTATING_TOOLS = new Set(["Edit", "Write", "MultiEdit", "Delete", "apply_patch"]);
+// Claude and Cursor send `file_path`. The other keys stay, because a missed key lets an edit
+// through silently, while an extra key costs nothing.
+const PATH_KEYS = new Set(["file_path", "path", "target_file", "target_path"]);
+
+function configuredDir(root, env = process.env) {
+  // FRINK_DECISIONS_DIR remains a compatibility alias for pre-Devkit guard configurations.
+  const fromEnv = env.GUARD_DECISIONS_DIR ?? env.FRINK_DECISIONS_DIR;
+  if (fromEnv !== undefined) return fromEnv.trim() || null;
+  const configPath = resolve(root, "guard.config.json");
+  if (!existsSync(configPath)) return DEFAULT_DECISIONS_DIR;
+  try {
+    const parsed = JSON.parse(readFileSync(configPath, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return null;
+    if (parsed.decisionsDir === undefined) return DEFAULT_DECISIONS_DIR;
+    return typeof parsed.decisionsDir === "string" && parsed.decisionsDir.trim()
+      ? parsed.decisionsDir.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The tool input as an object: Cursor documents some tools' `tool_input` as a JSON params string. */
+function toolInputOf(input) {
+  try {
+    return JSON.parse(input?.tool_input);
+  } catch {
+    return input?.tool_input;
+  }
+}
+
+function collectPaths(value, out = []) {
+  if (!value || typeof value !== "object") return out;
+  if (Array.isArray(value)) {
+    for (const item of value) collectPaths(item, out);
+    return out;
+  }
+  for (const [key, item] of Object.entries(value)) {
+    if (PATH_KEYS.has(key) && typeof item === "string" && item.trim())
+      out.push(item.trim());
+    else if (item && typeof item === "object") collectPaths(item, out);
+  }
+  return out;
+}
+
+function inside(candidate, directory) {
+  const rel = relative(directory, candidate);
+  return (
+    rel === "" ||
+    (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+  );
+}
+
+function canonicalizeAvailableParent(target) {
+  let existing = resolve(target);
+  const missing = [];
+  while (!existsSync(existing)) {
+    const parent = dirname(existing);
+    if (parent === existing) return target;
+    missing.unshift(basename(existing));
+    existing = parent;
+  }
+  return resolve(realpathSync(existing), ...missing);
+}
+
+/** `git rev-parse` output lines for `dir`, or [] when it is not inside a git work tree. */
+function revParse(dir, ...args) {
+  const run = spawnSync("git", ["-C", dir, "rev-parse", ...args], {
+    encoding: "utf8",
+  });
+  return run.status === 0 ? run.stdout.split("\n") : [];
+}
+
+/** Claude names the project root; Codex runs the hook from the session cwd, maybe a subdirectory. */
+function projectRoot() {
+  if (process.env.CLAUDE_PROJECT_DIR) return process.env.CLAUDE_PROJECT_DIR;
+  return revParse(process.cwd(), "--show-toplevel")[0] || process.cwd();
+}
+
+/**
+ * The checkout to guard. The payload cwd follows the agent into a linked worktree while
+ * CLAUDE_PROJECT_DIR stays put; a cwd in the same checkout or an unrelated repository keeps the root.
+ */
+function workspaceRoot(input) {
+  const root = projectRoot();
+  if (!input?.cwd?.trim?.()) return root;
+  const at = ["--path-format=absolute", "--show-toplevel", "--git-common-dir"];
+  const [cdup, top, common] = revParse(input.cwd, "--show-cdup", ...at);
+  const [rootTop, rootCommon] = revParse(root, ...at);
+  return common && top !== rootTop && common === rootCommon
+    ? resolve(input.cwd, cdup)
+    : root;
+}
+
+/** The worktree the agent works in and the project root: an edit may reach either decision log. */
+function guardedRoots(input) {
+  return [...new Set([workspaceRoot(input), projectRoot()])];
+}
+
+/** The decision log under `root` that one of `paths` would change, or null. */
+function blockedLog(root, paths, env) {
+  const configured = configuredDir(root, env);
+  if (!configured) return null;
+  const protectedDir = canonicalizeAvailableParent(resolve(root, configured));
+  const blocked = paths.some((filePath) =>
+    inside(canonicalizeAvailableParent(resolve(root, filePath)), protectedDir),
+  );
+  return blocked ? relative(root, protectedDir) || configured : null;
+}
+
+/** Return the denial reason for a known in-scope mutation, otherwise null (fail-open). */
+export function decide(input, roots = guardedRoots(input), env = process.env) {
+  try {
+    const toolName = input?.tool_name;
+    if (!MUTATING_TOOLS.has(toolName)) return null;
+    const paths = [...collectPaths(toolInputOf(input)), ...patchTargets(input)];
+    const log = [roots].flat().map((root) => blockedLog(root, paths, env)).find(Boolean);
+    if (!log) return null;
+    return (
+      `Blocked: direct agent edits under ${log} are disabled ` +
+      "because decision history is append-only. Use `guard-decisions add …` to record an entry or " +
+      "`guard-decisions amend …` to correct an uncommitted entry — the newest note, or the newest " +
+      'Target with its trailing notes kept as written.'
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Render the vendor-specific structured denial expected by the invoking agent surface. */
+export function renderOutput(input, reason) {
+  if (input?.cursor_version) {
+    return { permission: "deny", user_message: reason, agent_message: reason };
+  }
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: reason,
+    },
+  };
+}
+
+export function main() {
+  try {
+    const input = JSON.parse(readFileSync(0, "utf8"));
+    const reason = decide(input);
+    if (reason)
+      process.stdout.write(`${JSON.stringify(renderOutput(input, reason))}\n`);
+  } catch {
+    // Fail-open: a broken hook must never wedge every file edit in a consumer repository.
+  }
+}
+
+const invokedDirectly =
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+if (invokedDirectly) main();

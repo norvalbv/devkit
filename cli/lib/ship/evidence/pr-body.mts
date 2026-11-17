@@ -1,7 +1,8 @@
 // The PR-body boundary: one bounded gh read and write each. GitHub has no compare-and-set on a body,
-// so the upsert re-reads after writing and refuses once the PR head is no longer the evidence head.
+// so an edit re-reads after writing and, given a head, refuses once the PR head has moved past it.
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
+import { carryEvidenceBlock } from './block.mts';
 
 const GH_TIMEOUT_MS = 60_000;
 /** Uploads of a few MB each can take a while on a slow link; this bounds one `--attach` call. */
@@ -50,20 +51,36 @@ export function writeBodyAttaching(repo: string, pr: string, dir: string, files:
   }
 }
 
-/** Apply `edit` while the PR head is still `head`; a lost concurrent write is retried, bounded. */
-export function publishBody(
+/** Rewrite the body from a fresh read each attempt; `edit` returns null once the head has moved. */
+function rewriteBody(
   repo: string,
   pr: string,
-  head: string,
-  edit: (body: string) => string,
+  edit: (pull: PullState) => string | null,
 ): PublishResult {
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     const pull = readPull(repo, pr);
-    if (pull.headRefOid !== head) return 'head-moved';
-    const next = edit(pull.body);
+    const next = edit(pull);
+    if (next === null) return 'head-moved';
     if (next === pull.body) return 'unchanged';
     writeBody(repo, pr, next);
     if (readPull(repo, pr).body.trimEnd() === next.trimEnd()) return 'written';
   }
   return 'contended';
+}
+
+/** Apply `edit` to the PR body while its head is still `head` (null: any head); retried, bounded. */
+export function publishBody(
+  repo: string,
+  pr: string,
+  head: string | null,
+  edit: (body: string) => string,
+): PublishResult {
+  return rewriteBody(repo, pr, (pull) =>
+    head === null || pull.headRefOid === head ? edit(pull.body) : null,
+  );
+}
+
+/** Replace the caller-authored text and keep the PR's evidence block; a failed read writes nothing. */
+export function replaceCallerText(repo: string, pr: string, caller: string): PublishResult {
+  return rewriteBody(repo, pr, (pull) => carryEvidenceBlock(caller, pull.body));
 }

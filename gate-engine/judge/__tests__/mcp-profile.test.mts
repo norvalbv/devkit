@@ -29,6 +29,9 @@ const repo = path.join(root, 'repo');
 const registry = path.join(root, 'registry.json');
 mkdirSync(repo);
 
+const remedy = (registryPath: string) =>
+  ` — to restore it, add or re-enable the \`codebase\` MCP server for this project in ${realpathSync(registryPath)}, or point DEVKIT_JUDGE_MCP_CONFIG at a registry that defines it`;
+
 interface RegistryFixtureOverrides {
   projects?: {
     [root: string]: {
@@ -231,6 +234,10 @@ describe('missing-server resolution and reporting (sc-2837)', () => {
     expect(mcpDegradedCause(res)).toBe(
       'MCP codebase unavailable (missing from the trusted MCP registry) — reviewer ran without codebase search',
     );
+    // A project-disabled server exists in the registry: the remedy must not only say "add" it.
+    spyStderr();
+    reportMissingMcpServers(res, ['commit-guard']);
+    expect(stderr[0].endsWith(remedy(registryPath))).toBe(true);
   });
 
   it.each([
@@ -238,6 +245,7 @@ describe('missing-server resolution and reporting (sc-2837)', () => {
     ['unreadable (corrupt JSON)', () => freshRegistry('{ nope'), 'unreadable'],
     ['unreadable (JSON array, not an object)', () => freshRegistry('[]'), 'unreadable'],
   ] as const)('%s: every requested server is missing, so the run is DEGRADED', (_, mk, kind) => {
+    spyStderr();
     const res = judgeMcpMissingServers(namedAgentMcpProfile(), {
       cwd: repo,
       registryPath: mk(),
@@ -246,6 +254,8 @@ describe('missing-server resolution and reporting (sc-2837)', () => {
     expect(res.kind).toBe(kind);
     expect(res.missing).toEqual(['codebase', 'context7', 'autonomous_bugs']);
     expect(mcpDegradedCause(res)).toMatch(/^MCP codebase unavailable \(trusted MCP registry/);
+    reportMissingMcpServers(res, ['commit-guard']);
+    expect(stderr.join('\n')).not.toContain('to restore it');
   });
 
   it('a pure judge (kind none) is never missing anything', () => {
@@ -297,19 +307,22 @@ describe('missing-server resolution and reporting (sc-2837)', () => {
     expect(stderr[0]).toMatch(
       /^⚠️ {2}guard-review: DEGRADED — no MCP codebase, autonomous_bugs for commit-guard /,
     );
+    expect(stderr[0]).toMatch(/a judged PASS from them is marked DEGRADED — to restore it, /);
+    expect(stderr[0].endsWith(remedy(registryPath))).toBe(true);
   });
 
   it('with no agent report first, the per-spawn warning still carries ⚠️ and DEGRADED', () => {
     spyStderr();
+    const registryPath = withServers('context7', 'autonomous_bugs');
     const prepared = prepareJudgeMcpProfile(namedAgentMcpProfile(), {
       cwd: repo,
-      registryPath: withServers('context7', 'autonomous_bugs'),
+      registryPath,
       projectRoots: [repo],
       temporaryRoot: root,
     });
     prepared.cleanup();
     expect(stderr).toEqual([
-      '⚠️  guard-review: named-agent MCP profile missing codebase — continuing with the configured subset under strict isolation — DEGRADED',
+      `⚠️  guard-review: named-agent MCP profile missing codebase — continuing with the configured subset under strict isolation — DEGRADED${remedy(registryPath)}`,
     ]);
   });
 

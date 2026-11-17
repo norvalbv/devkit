@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   ANTI_SLOP_PREFLIGHT_HOOK,
+  EDIT_TARGETS_LIB,
   hookScriptsFor,
 } from '../lib/install/hook-registration-ledger/selection.mts';
 import { HOOK_REGISTRATIONS } from '../lib/install/hook-registration-ledger/registrations.mts';
@@ -34,7 +35,9 @@ describe('hookScriptsFor ownership', () => {
     expect(hookScriptsFor({ ...base, agentHooks: true, antiSlop: false })).not.toContain(
       ANTI_SLOP_PREFLIGHT_HOOK,
     );
-    expect(hookScriptsFor({ ...base, antiSlop: true })).toEqual([ANTI_SLOP_PREFLIGHT_HOOK]);
+    expect(hookScriptsFor({ ...base, antiSlop: true }).sort()).toEqual(
+      [ANTI_SLOP_PREFLIGHT_HOOK, EDIT_TARGETS_LIB].sort(),
+    );
   });
 
   it('registers on the edit tools Claude uses, so the Cursor mirror maps it to afterFileEdit', () => {
@@ -58,6 +61,11 @@ describe('devkit init --anti-slop', () => {
           entry.startsWith('Edit|Write|MultiEdit::') && entry.includes(ANTI_SLOP_PREFLIGHT_HOOK),
       ),
     ).toBe(true);
+    expect(
+      postToolUse(root).some(
+        (entry) => entry.startsWith('Bash::') && entry.includes(ANTI_SLOP_PREFLIGHT_HOOK),
+      ),
+    ).toBe(true);
   });
 
   it('is absent without anti-slop, even with the agent-hook bundle on', () => {
@@ -74,6 +82,7 @@ describe('devkit init --anti-slop', () => {
     if (!existsSync(cursorHooks)) return;
     const hooks = readJson(root, '.cursor/hooks.json').hooks ?? {};
     expect(JSON.stringify(hooks.afterFileEdit ?? [])).toContain(ANTI_SLOP_PREFLIGHT_HOOK);
+    expect(JSON.stringify(hooks.afterShellExecution ?? [])).not.toContain(ANTI_SLOP_PREFLIGHT_HOOK);
   });
 
   it('removes the script and registration when anti-slop is later deselected', () => {

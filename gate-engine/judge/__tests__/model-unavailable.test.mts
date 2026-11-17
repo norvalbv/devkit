@@ -19,6 +19,22 @@ describe('classifyJudgeOutage — model refused by the plan', () => {
     expect(outage.detail).toContain('is not supported when using Codex');
   });
 
+  it('reads the older {"detail"} envelope of the same refusal the same way', () => {
+    const stderr = `{"detail":"The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account."}`;
+    expect(classifyJudgeOutage({ status: 1, stderr })).toMatchObject({
+      kind: 'model-unavailable',
+      permanent: true,
+    });
+  });
+
+  // A refused MODEL only: any other 400 must not reach the move-the-model remedy.
+  it.each([
+    `{"detail":"Unsupported value: 'xhigh' is not supported with the 'gpt-5.6-sol' model."}`,
+    '{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"Invalid value for temperature: model does not support this parameter."}}',
+  ])('a different 400 is not read as a refused model: %s', (stderr) => {
+    expect(classifyJudgeOutage({ status: 1, stderr }).kind).not.toBe('model-unavailable');
+  });
+
   it.each([
     'Error: model_not_found',
     'The model `gpt-x` does not exist or you do not have access to it.',

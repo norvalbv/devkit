@@ -1,5 +1,5 @@
 /** `devkit coverage-diff` against real git repos and real `devkit coverage-run` manifests. */
-import { rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -11,6 +11,10 @@ import {
   type Thresholds,
   write,
 } from '../../../gate-engine/coverage/__tests__/_provenance-fixtures.mts';
+import {
+  type ClearMarker,
+  writeClearMarker,
+} from '../../../gate-engine/coverage/clear-marker/store.mts';
 import { snapshotSource } from '../../../gate-engine/coverage/provenance.mts';
 import coverageDiff from './diff.mts';
 
@@ -57,6 +61,13 @@ function cov(root: string, files: Record<string, [number, number][]>): string {
     ),
   );
 }
+
+const marker: ClearMarker = {
+  clearedAt: new Date().toISOString(),
+  previousMtime: null,
+  head: 'abc1234',
+  failedFiles: [],
+};
 
 const lines = (n: number) => Array.from({ length: n }, (_, i) => `l${i + 1}`).join('\n') + '\n';
 
@@ -105,6 +116,8 @@ describe('devkit coverage-diff — what counts as added', () => {
     expect(out).toMatch(/3\/4\s+75\.0%\s+src\/a\.mts\s+uncovered: 3/);
     expect(out).toContain('Total: 3/4 added executable lines covered (75.0%).');
     expect(out).not.toMatch(/stale|provenance unknown/);
+    // Uncovered lines in a measured file need a test, not a re-run: no "measure them" hint.
+    expect(out).not.toContain('--changed=');
   });
 
   it('reports NEW-side line numbers when deletions above shift the file', () => {
@@ -159,7 +172,9 @@ describe('devkit coverage-diff — what counts as added', () => {
 
     const { out } = run(root);
     expect(out).toContain('Total: 1/1');
-    expect(out).toMatch(/Not measured[^\n]*\n\s+src\/unmeasured\.mts$/m);
+    expect(out).toMatch(/Not measured[^\n]*\n\s+src\/unmeasured\.mts \(\+2\)$/m);
+    const base = git(root, 'merge-base', 'HEAD', 'origin/main');
+    expect(out).toContain(`devkit coverage-run --changed=${base}`);
     expect(out).not.toContain('a.test.mts');
     expect(out).not.toContain('notes.txt');
   });
@@ -196,6 +211,107 @@ describe('devkit coverage-diff — what counts as added', () => {
     expect(out).toContain('no executable added lines');
     expect(out).not.toContain('Total:');
     expect(out).not.toContain('not applied'); // total 0 alone is not "unmeasured"
+  });
+});
+
+describe('devkit coverage-diff — added lines it cannot measure', () => {
+  /** featureRepo() with `cli/x.sh` committed on main, so the branch's edit to it is a diff. */
+  function shellRepo() {
+    const r = repo();
+    write(r.root, 'src/a.mts', lines(1));
+    write(r.root, 'cli/x.sh', '#!/bin/sh\n');
+    commitAll(r.root, 'seed');
+    git(r.root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git(r.root, 'switch', '-q', '-c', 'feature');
+    return r;
+  }
+  const measureA = (root: string) =>
+    measure(root, snapshotSource(root), cov(root, { 'src/a.mts': [[1, 1]] }));
+
+  it('a shell-only change lists its files and added-line counts instead of the bare zero line', () => {
+    const { root } = shellRepo();
+    write(root, 'cli/x.sh', '#!/bin/sh\necho 1\necho 2\necho 3\n');
+    write(root, 'new.sh', 'a\nb\n');
+    measureA(root);
+
+    const { code, out } = run(root);
+    expect(code).toBe(0);
+    expect(out).not.toContain('no executable added lines');
+    expect(out).toContain('no measured added lines');
+    expect(out).toContain('Not measurable — 5 added lines in 2 shell files');
+    expect(out).toMatch(/^\s+cli\/x\.sh \(\+3\)$/m);
+    expect(out).toMatch(/^\s+new\.sh \(\+2\)$/m);
+  });
+
+  it('detects an extensionless shell hook by its shebang; other shebangs and test fixtures are not shell', () => {
+    const { root } = shellRepo();
+    write(root, '.husky/pre-commit', '#!/usr/bin/env sh\necho hi\n');
+    write(root, 'bin/tool', '#!/usr/bin/env node\nconsole.log(1)\n');
+    write(root, '__tests__/fixtures/f.sh', 'echo fixture\n');
+    measureA(root);
+
+    const { out } = run(root);
+    expect(out).toMatch(/^\s+\.husky\/pre-commit \(\+2\)$/m);
+    expect(out).not.toContain('bin/tool');
+    expect(out).not.toContain('f.sh');
+  });
+
+  it('a mixed change reports the measured total and lists the shell files apart', () => {
+    const { root } = shellRepo();
+    write(root, 'src/a.mts', lines(2));
+    write(root, 'cli/x.sh', '#!/bin/sh\necho 1\n');
+    measure(root, snapshotSource(root), cov(root, { 'src/a.mts': [[2, 1]] }));
+
+    const { out } = run(root);
+    expect(out).toContain('Total: 1/1');
+    expect(out).toMatch(/^\s+cli\/x\.sh \(\+1\)$/m);
+  });
+
+  it('a shell change that adds no lines (mode-only, deletion-only, empty new file) keeps the bare zero line', () => {
+    const { root } = shellRepo();
+    write(root, 'cli/y.sh', '#!/bin/sh\necho y\n');
+    commitAll(root, 'y');
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    chmodSync(join(root, 'cli/x.sh'), 0o755);
+    write(root, 'cli/y.sh', '#!/bin/sh\n');
+    write(root, 'empty.sh', '');
+    measureA(root);
+
+    const { out } = run(root, '--min', '80');
+    expect(out).toContain('no executable added lines in measured files.');
+    expect(out).not.toMatch(/Not measurable|not applied|x\.sh|y\.sh|empty\.sh/);
+  });
+
+  it('a changed extensionless path that is a directory (submodule, dir symlink) is skipped, not a crash', () => {
+    const { root } = shellRepo();
+    mkdirSync(join(root, 'vendor'));
+    write(root, 'vendor/lib.mts', lines(1));
+    symlinkSync('vendor', join(root, 'linked'));
+    measureA(root);
+
+    const { code, out } = run(root);
+    expect(code).toBe(0);
+    expect(out).not.toMatch(/^\s+linked\b/m);
+  });
+
+  it('--min on a shell-only change still exits 0, but says it was not applied', () => {
+    const { root } = shellRepo();
+    write(root, 'cli/x.sh', '#!/bin/sh\necho 1\n');
+    measureA(root);
+
+    const { code, out } = run(root, '--min', '80');
+    expect(code).toBe(0);
+    expect(out).toContain('--min 80 not applied: no measured added lines (1 unmeasured files');
+  });
+
+  it('an unmeasured source file alone also replaces the bare zero line', () => {
+    const { root } = featureRepo();
+    write(root, 'src/unmeasured.mts', lines(2));
+    measure(root, snapshotSource(root), cov(root, { 'src/a.mts': [[1, 1]] }));
+
+    const { out } = run(root);
+    expect(out).not.toContain('no executable added lines');
+    expect(out).toMatch(/^\s+src\/unmeasured\.mts \(\+2\)$/m);
   });
 });
 
@@ -313,6 +429,36 @@ describe('devkit coverage-diff — the artifact', () => {
     const { code, out } = run(root);
     expect(code).toBe(1);
     expect(out).toMatch(/absent.*devkit coverage-run/);
+  });
+
+  it('says why the artifact is absent when a failed run cleared it', () => {
+    const { root } = featureRepo();
+    write(root, 'red.test.ts', 'x');
+    const failedFiles = [join(root, 'red.test.ts')];
+    mkdirSync(join(root, 'coverage'));
+    writeClearMarker(join(root, 'coverage'), { ...marker, failedFiles });
+    const { code, out } = run(root);
+    expect(code).toBe(1);
+    expect(out).toMatch(
+      /discarded by a test run that produced no report[\s\S]*Failed: red\.test\.ts/,
+    );
+  });
+
+  it('prints no marker when there is none, or it is corrupt', () => {
+    const { root } = featureRepo();
+    expect(run(root).out).not.toMatch(/discarded/);
+    write(root, 'coverage/.last-clear.json', '{torn');
+    expect(run(root).out).not.toMatch(/discarded/);
+  });
+
+  // A marker beside a malformed artifact is not what made it unreadable, so it must not explain it.
+  it('prints no marker for an artifact that exists but is malformed', () => {
+    const { root } = featureRepo();
+    write(root, 'coverage/coverage-final.json', '{not json');
+    writeClearMarker(join(root, 'coverage'), marker);
+    const { out } = run(root);
+    expect(out).toMatch(/malformed/);
+    expect(out).not.toMatch(/discarded/);
   });
 
   it('exits 1 on a malformed artifact rather than reading garbage as coverage', () => {

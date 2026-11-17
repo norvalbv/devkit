@@ -367,6 +367,23 @@ describe('the routing predicate', () => {
   });
 });
 
+describe('the background-ship guidance using-devkit documents', () => {
+  // A ship piped through tail leaves the polled file empty until exit, hiding every heartbeat.
+  const skill = readFileSync(join(SKILLS_DIR, 'using-devkit', 'SKILL.md'), 'utf8');
+  const bullet = skill
+    .slice(skill.indexOf('**Run `devkit ship` in the BACKGROUND**'))
+    .split('\n- ')[0]
+    .replace(/\s+/g, ' ');
+
+  it('forbids piping ship through tail or head', () => {
+    expect(bullet).toContain('Never pipe ship through `tail` or `head`');
+  });
+
+  it('gives each concurrent ship its own redirect file', () => {
+    expect(bullet).toMatch(/> \/tmp\/ship-<[^>]+>\.log 2>&1/);
+  });
+});
+
 describe('the coverage-run stop pattern using-devkit documents', () => {
   // A renamed flag or run directory would make the documented pkill match nothing, and an empty
   // result is exactly what tempts an agent to widen the kill to every worktree's run.
@@ -387,6 +404,27 @@ describe('the coverage-run stop pattern using-devkit documents', () => {
     ['the host command line every worktree shares', 'node /usr/local/bin/devkit coverage-run'],
   ])('does not match %s', (_case, commandLine) => {
     expect(patternIn('/repo/wt').test(commandLine)).toBe(false);
+  });
+});
+
+describe('the ship progress file using-devkit documents', () => {
+  // A renamed file would leave agents polling a path that never appears, reading "not started" forever.
+  const skill = readFileSync(join(SKILLS_DIR, 'using-devkit', 'SKILL.md'), 'utf8');
+  const writer = readFileSync(
+    join(ROOT, 'cli', 'lib', 'ship', 'commit-with-gate-capture.sh'),
+    'utf8',
+  );
+
+  it('names the file the ship gate capture writes, slashes as dashes', () => {
+    expect(skill).toContain('`.devkit/review-progress-<branch>.json`');
+    expect(skill).toContain('(`/` in the branch becomes `-`');
+    expect(writer).toContain('local branch_safe="${br//\\//-}"');
+    expect(writer).toContain('local progress="$root/.devkit/review-progress-$branch_safe.json"');
+  });
+
+  it('names the separate file a dry-gates rehearsal writes', () => {
+    expect(skill).toContain('`…-<branch>-dry-*.json`');
+    expect(writer).toContain('progress="$root/.devkit/review-progress-$branch_safe-dry-');
   });
 });
 

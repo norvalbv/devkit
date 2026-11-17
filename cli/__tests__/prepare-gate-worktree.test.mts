@@ -17,6 +17,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { coverageMapSchema } from '../../gate-engine/coverage/fallow-copy.mts';
+import { publishManifest, stageManifest } from '../../gate-engine/coverage/provenance.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
 // Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
@@ -81,6 +82,10 @@ function seedRepoWithLinkedWorktree({ husky = true, prefix = 'gatewt-' } = {}) {
  * the caller. Without it these tests would run the code in a shell no consumer uses.
  */
 function prepare(wt: string, root: string, ...extraLinks: string[]) {
+  return prepareWithEnv({}, wt, root, ...extraLinks);
+}
+
+function prepareWithEnv(env: NodeJS.ProcessEnv, wt: string, root: string, ...extraLinks: string[]) {
   // Paths travel as positional args, never interpolated: real roots contain spaces.
   return spawnSync(
     '/bin/bash',
@@ -93,7 +98,7 @@ function prepare(wt: string, root: string, ...extraLinks: string[]) {
       'ship',
       ...extraLinks,
     ],
-    { encoding: 'utf8', env: { ...process.env, ...GIT_ENV } },
+    { encoding: 'utf8', env: { ...process.env, ...GIT_ENV, ...env } },
   );
 }
 
@@ -474,6 +479,93 @@ describe('prepare_gate_worktree — coverage resolves from the consumer root onl
   });
 });
 
+// A monorepo package's coverage gate reads <pkg>/coverage, which only reaches a ship worktree via
+// --link; it gets the same root-only rule as the repo root's coverage/.
+describe('prepare_gate_worktree — a package coverage --link resolves from the consumer root only', () => {
+  it.each([
+    'pkg/coverage',
+    './pkg/coverage',
+    'pkg/coverage/',
+    'pkg/x/../coverage',
+    'pkg/coverage/coverage-final.json',
+  ])('never borrows the main checkout copy for %j (fail-closed)', (spelling) => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(main, { 'pkg/coverage/coverage-final.json': '{}' });
+
+    const r = prepare(wt, linked, spelling);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(lstatSafe(join(wt, 'pkg', 'coverage'))).toBe(false);
+    expect(r.stderr).not.toMatch(/linked pkg\/coverage/);
+  });
+
+  it("links the linked worktree's OWN package coverage, with no warning", () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(main, { 'pkg/coverage/coverage-final.json': '{}' });
+    seedFiles(linked, { 'pkg/coverage/coverage-final.json': '{}' });
+
+    const r = prepare(wt, linked, 'pkg/coverage');
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(linkTarget(join(wt, 'pkg', 'coverage'))).toBe(join(linked, 'pkg', 'coverage'));
+    expect(r.stderr).not.toMatch(/MAIN checkout/);
+  });
+
+  it("WARNS when the package coverage dir is a hand-made symlink into main's", () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(main, { 'pkg/coverage/coverage-final.json': '{}' });
+    mkdirSync(join(linked, 'pkg'));
+    symlinkSync(join(main, 'pkg', 'coverage'), join(linked, 'pkg', 'coverage'));
+
+    const r = prepare(wt, linked, 'pkg/coverage');
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stderr).toMatch(/pkg\/coverage\/ is the MAIN checkout's/);
+  });
+
+  it("WARNS when a local package coverage dir holds a report symlinked into main's", () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(main, { 'pkg/coverage/coverage-final.json': '{}' });
+    mkdirSync(join(linked, 'pkg', 'coverage'), { recursive: true });
+    symlinkSync(
+      join(main, 'pkg', 'coverage', 'coverage-final.json'),
+      join(linked, 'pkg', 'coverage', 'coverage-final.json'),
+    );
+
+    const r = prepare(wt, linked, 'pkg/coverage');
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stderr).toMatch(/pkg\/coverage\/coverage-final\.json is the MAIN checkout's/);
+  });
+
+  it("WARNS when main's package coverage is itself a symlink and the linked root points at it", () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    const shared = `${dirname(main)}/shared-pkg-coverage`;
+    seedFiles(shared, { 'coverage-final.json': '{}' });
+    mkdirSync(join(main, 'pkg'));
+    symlinkSync(shared, join(main, 'pkg', 'coverage'));
+    mkdirSync(join(linked, 'pkg'));
+    symlinkSync(join(main, 'pkg', 'coverage'), join(linked, 'pkg', 'coverage'));
+
+    const r = prepare(wt, linked, 'pkg/coverage');
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stderr).toMatch(/pkg\/coverage\/ is the MAIN checkout's/);
+  });
+
+  it('a node_modules under a package NAMED coverage still falls back to the main checkout', () => {
+    // Only the LAST component classifies: `packages/coverage` is a package, not a report dir.
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(main, { 'packages/coverage/node_modules/dep.js': 'x' });
+
+    const r = prepare(wt, linked, 'packages/coverage/node_modules');
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    const rel = join('packages', 'coverage', 'node_modules');
+    expect(linkTarget(join(wt, rel))).toBe(join(main, rel));
+  });
+});
+
 // sc-1267. "Populated" only proves that an install exists; it does not prove that the install
 // satisfies the commit selected as the ship base. When origin/main adds a dependency after the
 // shared checkout last ran `bun install`, an unrelated ship can otherwise pass early binary-based
@@ -494,24 +586,135 @@ describe('prepare_gate_worktree — dependency manifest freshness', () => {
     expect(linkTarget(join(wt, 'node_modules'))).toBe(join(main, 'node_modules'));
   });
 
-  it('fails before gates when every available install misses a base dependency', () => {
+  // A checkout that forked before the base added the dependency cannot install it, so the
+  // gate worktree installs the base's own lockfile instead of telling the caller to.
+  it('installs the base lockfile in the gate worktree when every available install is stale', () => {
+    const { main, linked, git } = seedRepoWithLinkedWorktree({ prefix: 'gate wt-' });
+    seedFiles(main, {
+      'package.json': JSON.stringify({ dependencies: { 'fresh-dep': '^1.0.0' } }),
+      'bun.lock': '{}',
+    });
+    git(['add', 'package.json', 'bun.lock']);
+    git(['commit', '-q', '-m', 'base adds fresh-dep']);
+    const wt = join(dirname(main), 'gate');
+    git(['worktree', 'add', '-q', '--detach', wt]);
+    seedFiles(linked, { 'node_modules/old-dep/package.json': '{}' });
+    const stub = stubBun();
+
+    const r = prepareWithEnv(stub.env, wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(stub.calls()).toEqual(['install --frozen-lockfile HUSKY=0']);
+    expect(lstatSync(join(wt, 'node_modules')).isSymbolicLink()).toBe(false);
+    expect(existsSync(join(wt, 'node_modules/fresh-dep/package.json'))).toBe(true);
+    expect(r.stderr).toContain('running `bun install --frozen-lockfile` in the gate worktree');
+    expect(git(['status', '--porcelain'], wt)).toBe('');
+    // The caller's (possibly shared) install is never the one written to.
+    expect(existsSync(join(linked, 'node_modules/fresh-dep'))).toBe(false);
+  });
+
+  it('returns the installed path alone, even when the install writes to stdout', () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(wt, {
+      'package.json': JSON.stringify({ dependencies: { 'fresh-dep': '^1.0.0' } }),
+      'bun.lock': '{}',
+    });
+    const stub = stubBun();
+
+    const r = spawnSync(
+      '/bin/bash',
+      [
+        '-c',
+        'set -euo pipefail; . "$0"; gate_node_modules_source "$@"',
+        scriptPath,
+        wt,
+        linked,
+        main,
+      ],
+      { encoding: 'utf8', env: { ...process.env, ...GIT_ENV, ...stub.env } },
+    );
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stdout).toBe(`${join(wt, 'node_modules')}\n`);
+    expect(r.stderr).toContain('stub: installed');
+  });
+
+  it('refuses when the install exits 0 but still leaves a base dependency missing', () => {
+    const { linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(wt, {
+      'package.json': JSON.stringify({ dependencies: { 'fresh-dep': '^1.0.0' } }),
+      'bun.lock': '{}',
+    });
+    const stub = stubBun({ mode: 'noop' });
+
+    const r = prepareWithEnv(stub.env, wt, linked);
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain(
+      '`bun install --frozen-lockfile` in the gate worktree did not supply them',
+    );
+    expect(lstatSafe(join(wt, 'node_modules'))).toBe(false);
+  });
+
+  it('fails before gates, naming the install error, when the gate worktree install fails', () => {
     const { main, linked, wt } = seedRepoWithLinkedWorktree();
     seedFiles(wt, {
       'package.json': JSON.stringify({ dependencies: { 'fresh-dep': '^1.0.0' } }),
       'bun.lock': '{}',
     });
     seedFiles(linked, { 'node_modules/old-dep/package.json': '{}' });
+    const stub = stubBun({ mode: 'fail' });
 
-    const r = prepare(wt, linked);
+    const r = prepareWithEnv(stub.env, wt, linked);
 
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain('no node_modules satisfies the ship base package.json');
     expect(r.stderr).toContain('fresh-dep');
     expect(r.stderr).toContain(join(linked, 'node_modules'));
     expect(r.stderr).toContain(join(main, 'node_modules'));
-    expect(r.stderr).toContain('bun install --frozen-lockfile');
+    expect(r.stderr).toContain('stub install failed');
+    expect(r.stderr).toContain(
+      '`bun install --frozen-lockfile` in the gate worktree did not supply them',
+    );
+    expect(r.stderr).not.toContain('in the checkout');
+  });
+
+  it('keeps the checkout remedy, and installs nothing, when the base has no lockfile', () => {
+    const { linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(wt, { 'package.json': JSON.stringify({ dependencies: { 'fresh-dep': '^1.0.0' } }) });
+    seedFiles(linked, { 'node_modules/old-dep/package.json': '{}' });
+    const stub = stubBun();
+
+    const r = prepareWithEnv(stub.env, wt, linked);
+
+    expect(r.status).not.toBe(0);
+    expect(stub.calls()).toEqual([]);
+    expect(r.stderr).toContain(
+      "run `install dependencies with this repo's package manager` in the checkout",
+    );
   });
 });
+
+/** A `bun` on PATH that logs its args and HUSKY, then installs fresh-dep into cwd, fails, or does nothing. */
+function stubBun({ mode = 'install' }: { mode?: 'install' | 'fail' | 'noop' } = {}) {
+  const bin = realpathSync(mkdtempSync(join(tmpdir(), 'stub-bun-')));
+  dirs.push(bin);
+  const log = join(bin, 'calls.log');
+  const install = {
+    install: 'mkdir -p node_modules/fresh-dep && echo "{}" > node_modules/fresh-dep/package.json',
+    fail: 'echo "stub install failed" >&2; exit 1',
+    noop: ':',
+  }[mode];
+  writeFileSync(
+    join(bin, 'bun'),
+    `#!/bin/sh\necho "$* HUSKY=\${HUSKY-unset}" >> '${log}'\necho "stub: installed"\n${install}\n`,
+    { mode: 0o755 },
+  );
+  return {
+    env: { PATH: `${bin}:${process.env.PATH}` },
+    calls: () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []),
+  };
+}
 
 // sc-1934: the linked install IS the engine the worktree hook runs — one older than
 // `.devkit/baselines` blocks every grandfathered ratchet entry as new, so ship must stop first.
@@ -753,9 +956,6 @@ echo "SURVIVED:$?"`,
 // sc-1292 wiring under the errexit shell real callers use; unit behaviour lives in
 // cli/lib/ship/coverage/coverage-rebase.test.mts.
 describe('prepare_gate_worktree — fallow gets rekeyed coverage, the gate keeps the link', () => {
-  // Raw leaf git calls still carry a native bound so one cannot wedge a git-integration worker.
-  const LEAF_TIMEOUT_MS = 30_000;
-
   /** A real git worktree (as ship creates) under a root with a SPACE, as real consumer paths have. */
   function seedShipWorktree(coverageKeyRoot: (main: string) => string) {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'gatewt cov-')));
@@ -763,12 +963,7 @@ describe('prepare_gate_worktree — fallow gets rekeyed coverage, the gate keeps
     const main = join(root, 'main');
     mkdirSync(join(main, 'src'), { recursive: true });
     const git = (args: string[], cwd = main) =>
-      rawExecFileSync('git', args, {
-        cwd,
-        encoding: 'utf8',
-        env: { ...process.env, ...GIT_ENV },
-        timeout: LEAF_TIMEOUT_MS,
-      });
+      rawExecFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, ...GIT_ENV } });
     git(['init', '-q', '-b', 'main']);
     git(['config', 'user.email', 'a@b.c']);
     git(['config', 'user.name', 'a']);
@@ -818,19 +1013,14 @@ describe('prepare_gate_worktree — fallow gets rekeyed coverage, the gate keeps
     const gitDir = rawExecFileSync('git', ['rev-parse', '--absolute-git-dir'], {
       cwd: wt,
       encoding: 'utf8',
-      timeout: LEAF_TIMEOUT_MS,
     }).trim();
     expect(r.exported).toBe(join(gitDir, 'devkit-fallow-coverage.json'));
     const report = coverageMapSchema.parse(JSON.parse(readFileSync(r.exported ?? '', 'utf8')));
     expect(Object.keys(report)).toEqual([`${realpathSync(wt)}/src/a.ts`]);
     // Linked AFTER staging: nothing the ship could commit may appear.
-    expect(
-      rawExecFileSync('git', ['status', '--porcelain'], {
-        cwd: wt,
-        encoding: 'utf8',
-        timeout: LEAF_TIMEOUT_MS,
-      }),
-    ).toBe('');
+    expect(rawExecFileSync('git', ['status', '--porcelain'], { cwd: wt, encoding: 'utf8' })).toBe(
+      '',
+    );
   });
 
   it('exports nothing when the report already names the worktree paths', () => {
@@ -848,6 +1038,25 @@ describe('prepare_gate_worktree — fallow gets rekeyed coverage, the gate keeps
     expect(r.stderr).not.toContain('rekeyed');
     expect(r.exported).toBe('');
     expect(linkTarget(join(wt, 'coverage'))).toBe(join(main, 'coverage'));
+  });
+
+  it('hands fallow an empty map when the linked coverage came from a scoped run', () => {
+    const { main, wt } = seedShipWorktree((m) => m);
+    const cov = join(main, 'coverage');
+    const snapshot = { roots: [], head: '', dirty: {}, args: ['src/a.test.ts'] };
+    mkdirSync(join(cov, '.runs'), { recursive: true });
+    publishManifest(
+      stageManifest(join(cov, '.runs'), join(cov, 'coverage-final.json'), snapshot, 'run-1'),
+      cov,
+    );
+
+    const r = prepareExported(wt, main);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain(
+      'fallow scores CRAP from static estimates — the linked coverage came from a scoped run (devkit coverage-run src/a.test.ts)',
+    );
+    expect(readFileSync(r.exported ?? '', 'utf8')).toBe('{}');
   });
 
   it("leaves an operator's FALLOW_COVERAGE in place and says so", () => {

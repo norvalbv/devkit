@@ -1,13 +1,18 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PACKAGED_ROOT_DIRS } from '../../../cli/lib/fs-helpers.mts';
 import { resolveGuardConfig, resolveGuardConfigJson } from '../../config.mts';
 import {
   domainsDisabledByEmptyRoots,
   filesRoutedToNoDomain,
+  filesUnseenByCorrectness,
   reportNonRuns,
   REVIEW_ROUTING_ADVISORY,
+  serverFilesSeenOnlyByFrontend,
+  SYNCED_ASSET_EXCLUDES,
 } from '../evidence/scope.mts';
 import { selectReviewers } from '../reviewers.mts';
 
@@ -195,6 +200,12 @@ describe('filesRoutedToNoDomain', () => {
       '/nonexistent-cwd-defaults-only',
     );
 
+  // A repo-wide review scope whose only domain root is cli/, the shape devkit's config once had.
+  const cliOnly = (backendRoots = ['cli']) => {
+    const cfg = make(['cli'], backendRoots, []);
+    return { ...cfg, review: { ...cfg.review, paths: { include: ['**'], exclude: [] } } };
+  };
+
   it("devkit's own self-host config routes every scanRoot, so a commit inside them stays quiet", () => {
     const cfg = selfHost();
     expect(
@@ -205,9 +216,41 @@ describe('filesRoutedToNoDomain', () => {
     ).toEqual([]);
   });
 
+  it("devkit's own config routes every code file it ships into consumer repos", () => {
+    const shipped = execFileSync(
+      'git',
+      ['ls-files', '--', ...PACKAGED_ROOT_DIRS, 'anti-slop/src/devkit', 'anti-slop/src/index.ts'],
+      { cwd: REPO_ROOT, encoding: 'utf8' },
+    )
+      .split('\n')
+      .filter(Boolean);
+    expect(shipped).toContain('skills/_devkit/review-roots.mjs');
+    expect(unrouted(shipped, selfHost())).toEqual([]);
+    expect(unrouted(['skills/_devkit/review-roots.mjs'], selfHost())).toEqual([]);
+  });
+
+  it("devkit's own config routes every root-level code file, whatever its extension", () => {
+    const configs = execFileSync('git', ['ls-files', '--', ':!:*/**'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+    })
+      .split('\n')
+      .filter(Boolean);
+    expect(configs).toContain('vitest.setup.mjs');
+    expect(unrouted(configs, selfHost())).toEqual([]);
+  });
+
+  it("devkit's own config sends a shell hook it ships to the security reviewer", () => {
+    const hook = 'agents-hooks/decision-stop-check.sh';
+    const selection = selectReviewers([hook], selfHost());
+    expect(selection.find((s) => s.reviewer.name === 'api-security-reviewer')?.files).toEqual([
+      hook,
+    ]);
+  });
+
   it('names a root-level implementation file shipped beside a test under a domain root', () => {
     const staged = ['vitest.setup.mjs', 'cli/__tests__/vitest-setup-env-scrub.test.mts'];
-    expect(unrouted(staged, selfHost())).toEqual(['vitest.setup.mjs']);
+    expect(unrouted(staged, cliOnly())).toEqual(['vitest.setup.mjs']);
   });
 
   it('stays silent for prose, data and test files outside the domain roots', () => {
@@ -258,11 +301,7 @@ describe('filesRoutedToNoDomain', () => {
   });
 
   it('a remedy the notice names routes the file: an exact path under backendRoots', () => {
-    const cfg = selfHost();
-    const routed = {
-      ...cfg,
-      review: { ...cfg.review, backendRoots: [...cfg.review.backendRoots, 'vitest.setup.mjs'] },
-    };
+    const routed = cliOnly(['cli', 'vitest.setup.mjs']);
     const selection = selectReviewers(['vitest.setup.mjs'], routed);
     expect(selection.find((s) => s.reviewer.name === 'api-security-reviewer')?.files).toEqual([
       'vitest.setup.mjs',
@@ -280,6 +319,215 @@ describe('filesRoutedToNoDomain', () => {
       const raw = readFileSync(join(REPO_ROOT, 'templates', template, 'guard.config.json'), 'utf8');
       const cfg = resolveGuardConfigJson(raw, '/nonexistent-cwd-defaults-only');
       expect(unrouted(['src/shared/x.ts'], cfg)).toEqual([]);
+    },
+  );
+});
+
+describe('serverFilesSeenOnlyByFrontend', () => {
+  // The Next.js dashboard shape: app/ is frontend, only app/api and lib reach the backend reviewers.
+  const dashboard = make(['app', 'lib'], ['app/api', 'lib'], ['app']);
+  const reader = (blobs: Record<string, string>) => (paths: readonly string[]) =>
+    new Map(paths.map((p) => [p, p in blobs ? Buffer.from(blobs[p]) : null]));
+  const server = (blobs: Record<string, string>, cfg = dashboard) =>
+    serverFilesSeenOnlyByFrontend(selectReviewers(Object.keys(blobs), cfg), cfg, reader(blobs));
+
+  it('names a file-level server action under a frontend-only root', () => {
+    const save = "'use server';\nexport async function save() {}\n";
+    expect(server({ 'app/actions/save.ts': save })).toEqual(['app/actions/save.ts']);
+  });
+
+  it('names an inline server action and a server-only module', () => {
+    const page =
+      'export default function P() {\n  async function go() {\n    "use server";\n  }\n}\n';
+    const data = "import 'server-only';\nexport const rows = [];\n";
+    expect(server({ 'app/admin/page.tsx': page, 'app/data.ts': data })).toEqual([
+      'app/admin/page.tsx',
+      'app/data.ts',
+    ]);
+  });
+
+  it('names a route handler by its HTTP-method export', () => {
+    expect(
+      server({
+        'app/webhook/route.ts': 'export async function POST() {}\n',
+        'app/feed/route.js': 'const h = () => 1;\nexport { h as GET };\n',
+      }),
+    ).toEqual(['app/webhook/route.ts', 'app/feed/route.js']);
+  });
+
+  it('stays silent for a client route.tsx, a commented marker, unmarked code and tests', () => {
+    const electron = make(['src'], ['src/main'], ['src/renderer']);
+    const route = 'export const Route = createFileRoute("/x")({ component: X });\n';
+    expect(server({ 'src/renderer/routes/x/route.tsx': route }, electron)).toEqual([]);
+    expect(
+      server({
+        'app/util.ts': "// 'use server' belongs in actions\nexport const u = 1;\n",
+        'app/plain.ts': 'export const p = 1;\n',
+        'app/x.test.ts': "'use server';\n",
+      }),
+    ).toEqual([]);
+  });
+
+  it('stays silent when backendRoots is empty by design (react-app template)', () => {
+    expect(server({ 'src/actions.ts': "'use server';\n" }, make(['src'], [], ['src']))).toEqual([]);
+  });
+
+  // Every dashboard route handler sits under app/api, which is ALSO inside the frontend root app.
+  it('stays silent for server code that also reached the backend reviewers (overlapping roots)', () => {
+    const route = "'use server';\nexport async function POST() {}\n";
+    expect(server({ 'app/api/save/route.ts': route })).toEqual([]);
+  });
+
+  it('names a marker behind a UTF-8 byte-order mark (Windows editors write one)', () => {
+    expect(server({ 'app/actions/bom.ts': "\uFEFF'use server';\n" })).toEqual([
+      'app/actions/bom.ts',
+    ]);
+  });
+
+  it('skips a symlink (null blob) and a staged deletion (absent from the tree), naming the rest', () => {
+    const staged = ['app/link.ts', 'app/gone.ts', 'app/actions/save.ts'];
+    const read = () =>
+      new Map([
+        ['app/link.ts', null],
+        ['app/actions/save.ts', Buffer.from("'use server';\n")],
+      ]);
+    const selection = selectReviewers(staged, dashboard);
+    expect(serverFilesSeenOnlyByFrontend(selection, dashboard, read)).toEqual([
+      'app/actions/save.ts',
+    ]);
+  });
+
+  it('stands down when git cannot answer, or under the topology-warning opt-out', () => {
+    const selection = selectReviewers(['app/actions/save.ts'], dashboard);
+    expect(serverFilesSeenOnlyByFrontend(selection, dashboard, () => null)).toEqual([]);
+    process.env.GUARD_REVIEW_NO_TOPOLOGY_WARN = '1';
+    expect(server({ 'app/actions/save.ts': "'use server';\n" })).toEqual([]);
+  });
+
+  it('prints one line per kind and writes ONE row with the server fact first', () => {
+    sinkDir = mkdtempSync(join(tmpdir(), 'review-routing-'));
+    const sink = join(sinkDir, 'events.jsonl');
+    vi.stubEnv('DEVKIT_GATE_EVENTS', sink);
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const cfg = make(['app', 'lib', 'scripts'], ['app/api', 'lib'], ['app']);
+    const unrouted = Array.from({ length: 4 }, (_, i) => `scripts/${'n'.repeat(200)}${i}.ts`);
+    const staged = ['app/actions/save.ts', ...unrouted];
+    const selection = selectReviewers(staged, cfg);
+    const read = reader({ 'app/actions/save.ts': "'use server';\n" });
+    reportNonRuns(staged, cfg, selection, new Set(), new Set(), selection, read);
+    expect(spy.mock.calls.map((c) => String(c[0]))).toContain(
+      'guard-review: 1 server file(s) reached only the frontend reviewers (app/actions/save.ts) — ' +
+        'add each path or its directory to review.backendRoots in guard.config.json',
+    );
+    const rows = readFileSync(sink, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((event) => event.type === 'advisory_result');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].detail).toMatch(
+      /^1 server file\(s\) reached only the frontend reviewers \(app\/actions\/save\.ts\); 4 source file/,
+    );
+  });
+});
+
+describe('filesUnseenByCorrectness', () => {
+  // No review.paths: the legacy selector gives correctness only declared roots with a ts/tsx suffix.
+  const legacy = make(['src'], ['src'], []);
+  const unseen = (staged: string[], cfg = legacy) =>
+    filesUnseenByCorrectness(staged, selectReviewers(staged, cfg), cfg);
+  const templateCfg = (template: string) =>
+    resolveGuardConfigJson(
+      readFileSync(join(REPO_ROOT, 'templates', template, 'guard.config.json'), 'utf8'),
+      '/nonexistent-cwd-defaults-only',
+    );
+  const report = (staged: string[], cfg = legacy) => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const selection = selectReviewers(staged, cfg);
+    reportNonRuns(staged, cfg, selection, new Set(), new Set(), selection);
+    return spy.mock.calls.map((c) => String(c[0]));
+  };
+
+  it('names code that reached no reviewer at all, on one line', () => {
+    const lines = report(['drizzle.config.ts', 'src/a.ts']);
+    expect(lines).toEqual([
+      'guard-review: 1 code file(s) reached no correctness reviewer (drizzle.config.ts) — ' +
+        'review.paths is absent, so correctness reviews only declared roots with a sourceExtensions ' +
+        'suffix: declare review.paths in guard.config.json (templates ship include ["**"] with ' +
+        'excludes), or add the extension to sourceExtensions',
+    ]);
+  });
+
+  it("stays silent for devkit's synced agent assets and build output", () => {
+    const synced = [
+      '.claude/skills/x/scripts/checklist.mjs',
+      '.codex/hooks/base-drift-brief.mjs',
+      'dist/index.mjs',
+      'src/a.ts',
+    ];
+    expect(report(synced)).toEqual([]);
+  });
+
+  it('names in-root code outside sourceExtensions that only domain reviewers received', () => {
+    expect(unseen(['src/db.mts', 'src/a.ts'])).toEqual(['src/db.mts']);
+  });
+
+  it('stays silent for test, prose and data files', () => {
+    expect(unseen(['a.test.ts', 'README.md', 'package.json', 'src/a.ts'])).toEqual([]);
+  });
+
+  it('names code when correctness received nothing at all but another reviewer ran', () => {
+    expect(report(['src/db.mts'])).toEqual([
+      expect.stringContaining('1 code file(s) reached no correctness reviewer (src/db.mts)'),
+    ]);
+  });
+
+  it('counts a file the HEAD review.paths policy routed to correctness as seen', () => {
+    const staged = ['drizzle.config.ts', 'src/a.ts'];
+    const routing = selectReviewers(staged, legacy, templateCfg('generic'));
+    expect(filesUnseenByCorrectness(staged, routing, legacy)).toEqual([]);
+  });
+
+  it('never re-names a file the empty-frontendRoots line already named', () => {
+    const lines = report(['src/App.jsx', 'src/a.ts']);
+    expect(lines.filter((l) => l.includes('src/App.jsx'))).toHaveLength(1);
+    expect(lines.some((l) => l.includes('correctness'))).toBe(false);
+  });
+
+  it('stays silent when review.paths is declared', () => {
+    expect(unseen(['drizzle.config.ts', 'src/a.ts'], templateCfg('generic'))).toEqual([]);
+  });
+
+  it('stays silent under the opt-out and on a recheck', () => {
+    expect(filesUnseenByCorrectness(['drizzle.config.ts'], [], legacy)).toEqual([]);
+    process.env.GUARD_REVIEW_NO_TOPOLOGY_WARN = '1';
+    expect(unseen(['drizzle.config.ts', 'src/a.ts'])).toEqual([]);
+  });
+
+  it('joins both routing facts into one advisory row', () => {
+    sinkDir = mkdtempSync(join(tmpdir(), 'review-routing-'));
+    const sink = join(sinkDir, 'events.jsonl');
+    vi.stubEnv('DEVKIT_GATE_EVENTS', sink);
+    const cfg = make(['src'], ['src/main'], ['src/renderer']);
+    report(['src/shared/v.ts', 'drizzle.config.ts', 'src/main/a.ts'], cfg);
+    const rows = readFileSync(sink, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((event) => event.type === 'advisory_result');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].detail).toBe(
+      '1 source file(s) reached no security/performance reviewer (src/shared/v.ts); ' +
+        '1 code file(s) reached no correctness reviewer (drizzle.config.ts)',
+    );
+  });
+
+  it.each(readdirSync(join(REPO_ROOT, 'templates')).filter((t) => !t.startsWith('_')))(
+    'templates/%s excludes every synced asset path',
+    (template) => {
+      expect(templateCfg(template).review.paths?.exclude).toEqual(
+        expect.arrayContaining(SYNCED_ASSET_EXCLUDES),
+      );
     },
   );
 });

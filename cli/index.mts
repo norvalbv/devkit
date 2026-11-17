@@ -17,6 +17,7 @@
  * Consumers install prebuilt .mjs — no build on their side.
  */
 import { readFileSync } from 'node:fs';
+import { crashExit, GATE_REASON_ENV } from '../gate-engine/deterministic/reason.mts';
 import { assertGit } from './lib/guard/require-git.mts';
 import { type CommandMeta, renderCommandHelp, renderTopLevelHelp } from './lib/help/render.mts';
 import { wantsCommandHelp } from './lib/help/wants-help.mts';
@@ -60,6 +61,8 @@ const COMMANDS: Record<string, CommandLoader> = {
   'anti-slop': () => import('./commands/oxc/anti-slop.mts'),
   reconcile: () => import('./commands/reconcile.mts'),
   ship: () => import('./commands/ship.mts'),
+  'pr-body': () => import('./commands/pr/pr-body.mts'),
+  'pr-evidence': () => import('./commands/pr/pr-evidence.mts'),
   review: () => import('./commands/review.mts'),
   'guard-branch': () => import('./commands/guard-branch.mts'),
   'base-status': () => import('./commands/base-drift/base-status.mts'),
@@ -70,18 +73,26 @@ const COMMANDS: Record<string, CommandLoader> = {
   'test-redundancy': () => import('./commands/test-redundancy/test-redundancy.mts'),
   'test-report-run': () => import('./commands/baseline/test-report-run.mts'),
   'baseline-status': () => import('./commands/baseline/status.mts'),
+  'ci-probe': () => import('./commands/baseline/ci-probe.mts'),
   'prove-regression': () => import('./commands/baseline/prove-regression.mts'),
+  'subtraction-trial': () => import('./commands/baseline/subtraction-trial.mts'),
+  'ci-verdict': () => import('./commands/baseline/ci-verdict.mts'),
 };
 
 // The subcommands that shell out to git — they get a friendly missing-git preflight (require-git).
 const GIT_COMMANDS = new Set([
   'baseline-status',
+  'ci-probe',
+  'ci-verdict',
   'coverage-diff',
   'test-redundancy',
   'base-status',
   'prove-regression',
+  'subtraction-trial',
   'ship',
   'machine',
+  'pr-body',
+  'pr-evidence',
   'review',
   'move',
   'release',
@@ -175,6 +186,8 @@ async function main() {
 }
 
 main().catch((e) => {
+  // Run as a gate (anti-slop), a throw is a crash, never the exit 1 that means a finding.
+  if (process.env[GATE_REASON_ENV] !== undefined) crashExit(e);
   console.error(`devkit: ${e.message}`);
   process.exit(1);
 });

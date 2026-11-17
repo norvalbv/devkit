@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveGuardConfig, sourceMatchers } from '../config.mts';
+import { resolveGuardConfig } from '../config.mts';
 import { readRatchetBaseline } from './baseline-paths.mts';
 import { fanoutSplitHints } from './folder-fanout.mts';
 import { stagedSet, treeTextAtRef } from './git-index.mts';
@@ -13,7 +13,7 @@ import {
   normalizeCandidateLineBaseline,
   normalizeLineBaseline,
 } from './size-line-authority.mts';
-import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mts';
+import { LINES_BASELINE, lineMatchers, SIZE_SKIP_DIRS } from './size-policy.mts';
 
 interface LinesPreflightRow {
   file: string;
@@ -54,7 +54,7 @@ function sourcePaths(
   cfg: ReturnType<typeof resolveGuardConfig>,
   selected: string[],
 ): string[] {
-  const match = sourceMatchers(cfg.sourceExtensions);
+  const match = lineMatchers(cfg);
   return selected.filter(
     (file) =>
       existsSync(join(root, file)) &&
@@ -91,7 +91,7 @@ export function preflightLines(root: string, ref: string, requested: string[] = 
     return 2;
   }
   local = normalizeCandidateLineBaseline(root, local, [ref], (file) => workingText(root, file));
-  const match = sourceMatchers(cfg.sourceExtensions);
+  const match = lineMatchers(cfg);
   const cap = (file: string) => (match.isTest(file) ? cfg.maxTestLines : cfg.maxLines);
   const selected = requested.length > 0 ? requested : [...(stagedSet(root) ?? [])];
   const baselineIncluded = selected.some((file) => file === LINES_BASELINE);

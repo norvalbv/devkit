@@ -9,17 +9,19 @@ import { setTimeout as sleepFor } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { Attribution } from '../../baseline-status/attribution.mts';
 import type { UnknownReason } from '../../baseline-status/gh.mts';
+import {
+  CHECK_BUCKETS,
+  CHECKS_JSON_FIELDS,
+  type CheckBucket,
+  type CheckRow,
+  parseChecksJson,
+} from './checks-json.mts';
+
+export { CHECK_BUCKETS, CHECKS_JSON_FIELDS, parseChecksJson, type CheckBucket, type CheckRow };
 import { classifyChecksFailure, type ExecFailure } from './classify.mts';
 import { requiredSetPoller } from './required.mts';
 import { withFailedSteps } from './steps.mts';
 import { recordCiEvent } from './telemetry.mts';
-
-/** The five states gh collapses `state` into. Ordered for stable rendering, not by severity. */
-export const CHECK_BUCKETS = ['pass', 'fail', 'pending', 'skipping', 'cancel'] as const;
-export type CheckBucket = (typeof CHECK_BUCKETS)[number];
-
-/** The `--json` fields this reader dereferences, as one gh argument. */
-export const CHECKS_JSON_FIELDS = 'bucket,name,state,link,workflow';
 
 /** Every outcome line starts here, including the not-run one ship-branch.sh echoes on a skip. */
 export const VERDICT_PREFIX = 'ship: ci-outcome=';
@@ -37,16 +39,6 @@ const DEFAULT_EXEC_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_S = 7200;
 /** Below this a `no-checks` verdict is unreachable, so a CI-less repo would report a bogus timeout. */
 export const MIN_TIMEOUT_S = 60;
-
-export interface CheckRow {
-  bucket: CheckBucket;
-  name: string;
-  state: string;
-  link: string;
-  workflow: string;
-  /** `check › step` for a still-pending job whose step already failed; set only by steps.mts. */
-  failedSteps?: string[];
-}
 
 /**
  * The first four members are baseline-status/gh.mts's vocabulary, narrowed by Extract so a rename
@@ -174,44 +166,12 @@ export function verdictLine(result: WaitCiResult, pr: string): string {
   }
 }
 
-/** The shape gh emits, every field optional so a malformed entry is REJECTED, not dereferenced. */
-interface CheckRowCandidate {
-  bucket?: unknown;
-  name?: unknown;
-  state?: unknown;
-  link?: unknown;
-  workflow?: unknown;
-}
-
-const BUCKET_NAMES: ReadonlySet<string> = new Set(CHECK_BUCKETS);
-/** Blank for non-Actions checks (CodeRabbit reports both), so presence is proven, not content. */
-const TEXT_FIELDS = ['name', 'state', 'link', 'workflow'] as const;
-
-/** Every field this reader dereferences, compared by round-trip rather than a representation check. */
-function isCheckRow(value: CheckRowCandidate | null): value is CheckRow {
-  return (
-    !!value &&
-    `${value.bucket}` === value.bucket &&
-    BUCKET_NAMES.has(String(value.bucket)) &&
-    TEXT_FIELDS.every((f) => `${value[f]}` === value[f])
-  );
-}
-
-/** Parse gh's `--json` array, rejecting any row that fails the guard above. */
-export function parseChecksJson(raw: string): CheckRow[] | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!Array.isArray(parsed)) return null;
-  const rows: CheckRow[] = [];
-  for (const entry of parsed) {
-    if (!isCheckRow(entry)) return null;
-    rows.push(entry);
-  }
-  return rows;
+/** The verdict, then on a timeout the quiet one-shot: re-shipping a pushed PR does not re-wait. */
+export function verdictLines(result: WaitCiResult, pr: string, repo: string): string[] {
+  const lines = [verdictLine(result, pr)];
+  if (result.outcome === 'timed-out')
+    lines.push(`  checks so far: gh pr checks ${pr} --repo ${repo} --json ${CHECKS_JSON_FIELDS}`);
+  return lines;
 }
 
 export interface WaitCiOptions {
@@ -359,14 +319,15 @@ export async function waitForChecks(options: WaitCiOptions): Promise<WaitCiResul
 /** The gh invocation, injectable so the classifier is testable without a network or a PR. */
 export type ChecksExec = (args: string[], cwd: string) => string;
 
-const defaultExec =
-  (timeout: number): ChecksExec =>
+export const defaultExec =
+  (timeout = DEFAULT_EXEC_TIMEOUT_MS): ChecksExec =>
   (args, cwd) =>
     execFileSync('gh', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout });
 
 export interface ChecksPollerOptions {
   pr: string;
-  repo: string;
+  /** Omitted: gh resolves the repository from `cwd`. */
+  repo?: string;
   cwd: string;
   /** Narrow to branch-protection required checks. Never the default — see the decision record. */
   required?: boolean;
@@ -377,12 +338,17 @@ export interface ChecksPollerOptions {
 
 /** Build the poller `waitForChecks` drives. It never throws: every outcome is a PollResult. */
 export function ghChecksPoller(options: ChecksPollerOptions): () => PollResult {
-  const exec = options.exec ?? defaultExec(options.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS);
-  const args = ['pr', 'checks', options.pr, '--repo', options.repo, '--json', CHECKS_JSON_FIELDS];
+  const exec = options.exec ?? defaultExec(options.execTimeoutMs);
+  const repo = options.repo ? ['--repo', options.repo] : [];
+  const args = ['pr', 'checks', options.pr, ...repo, '--json', CHECKS_JSON_FIELDS];
   if (options.required) args.push('--required');
   const read = (raw: string): PollResult => {
     const rows = parseChecksJson(raw);
-    if (rows) return { kind: 'rows', rows: withFailedSteps(rows, { ...options, exec }) };
+    if (rows)
+      return {
+        kind: 'rows',
+        rows: withFailedSteps(rows, { ...options, repo: options.repo ?? '{owner}/{repo}', exec }),
+      };
     return {
       kind: 'unavailable',
       reason: 'gh-json-unparseable',
@@ -432,18 +398,24 @@ function unknownAttribution(reason: string): Attribution {
   };
 }
 
+/** The attribution engine's signature, injectable so a caller's tests need no gh. */
+export type AttributeFn = (input: { cwd: string; pr: string; failures: CheckRow[] }) => Attribution;
+
 /** Loaded lazily, so a broken import can never cost the verdict line of any outcome. */
 export async function attribute(
   pr: string,
   failures: CheckRow[],
   pending: CheckRow[],
+  cwd = process.cwd(),
+  run?: AttributeFn,
 ): Promise<Attribution> {
   // A red that ended the wait early leaves a run unfinished: no summary yet, and more red to come.
   if (pending.length > 0 || failures.some((f) => f.failedSteps))
     return unknownAttribution('run-in-progress');
   try {
-    const { attributeFailures } = await import('../../baseline-status/attribution.mts');
-    return attributeFailures({ cwd: process.cwd(), pr, failures });
+    const attributeFailures =
+      run ?? (await import('../../baseline-status/attribution.mts')).attributeFailures;
+    return attributeFailures({ cwd, pr, failures });
   } catch {
     return unknownAttribution('attribution-error');
   }
@@ -478,7 +450,7 @@ async function main(argv: string[]): Promise<number> {
   }).then((r) => ({ ...r, required, requiredContexts: narrowed?.contexts()?.length }));
   if (result.outcome === 'failed')
     result.attribution = await attribute(pr, result.failures, result.pending);
-  console.error(verdictLine(result, pr));
+  for (const line of verdictLines(result, pr, repo)) console.error(line);
   recordCiEvent(result, pr);
   // Without --strict the ship already succeeded and this process never speaks for it.
   return argv.includes('--strict') && result.outcome !== 'passed' ? 5 : 0;

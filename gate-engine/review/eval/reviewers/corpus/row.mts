@@ -6,6 +6,7 @@ import { resolveGuardConfig } from '../../../../config.mts';
 import { BenchAbort, materializeFixture } from '../../../../decisions/eval/bench.mts';
 import { REMEDY_CAUSES } from '../../../../judge/outage/wording.mts';
 import { execJudgeAsync } from '../../../../judge/run-judge.mts';
+import { restoreRows } from '../../../cascade/escalation.mts';
 import { mergeLensCaptures } from '../../../lens/split.mts';
 import { parseReviewVerdict, selectReviewers } from '../../../reviewers.mts';
 import { runCascade } from '../../../run-review.mts';
@@ -42,7 +43,9 @@ export function makeSpyExec(capture, { reviewer, cascade, delegate = execJudgeAs
     } catch {
       /* missing/corrupt artifact = null snapshot; scoring buckets it */
     }
-    capture.push({ label: opts.label, out, ms: Date.now() - t0, snapshot });
+    const modelAt = opts.args?.indexOf('--model') ?? -1;
+    const model = modelAt === -1 ? null : opts.args[modelAt + 1];
+    capture.push({ label: opts.label, out, ms: Date.now() - t0, snapshot, model });
     return out;
   };
 }
@@ -95,7 +98,13 @@ export function scoreRow(row, capture, cas) {
     const snap = (esc && !esc.synthetic ? esc.snapshot : null) ?? first?.snapshot ?? null;
     // Domain reviewers write items[].name; commit-guard writes one files[].path entry per file.
     const listed = snap?.items ?? snap?.files;
-    const items = Array.isArray(listed) ? listed : [];
+    const items = Array.isArray(listed) ? [...listed] : [];
+    // The escalation snapshot predates the cascade's restore: a row it left pending keeps the first pass's.
+    const firstListed = first?.snapshot?.items ?? first?.snapshot?.files;
+    const firstFails = (Array.isArray(firstListed) ? firstListed : []).filter(
+      (i) => i.status === 'fail',
+    );
+    if (snap !== first?.snapshot) restoreRows(items, firstFails);
     const failedItems = items.filter((i) => i.status === 'fail').map((i) => i.name ?? i.path);
     if (row.expectSymbols)
       symbols = symbolsNamed(
@@ -230,6 +239,15 @@ function assertScoredRow(row) {
     throw new BenchAbort(2, 'scored execution requires a labeled corpus row; probes are forbidden');
 }
 
+/** An inconclusive part the provider caused: its structured cause decides, its wording only without one. */
+export function isOutagePart(part) {
+  if (part.res.status !== 'inconclusive') return false;
+  const cause = part.res.inconclusiveCause;
+  return cause === undefined
+    ? subcause(part.res.reason ?? '') === 'outage'
+    : OUTAGE_CAUSES.has(cause);
+}
+
 /** Existing labeled-row API; execution remains shared with exploratory reviews. */
 export async function runRow(row, options = {}) {
   assertScoredRow(row);
@@ -242,12 +260,7 @@ export async function runRow(row, options = {}) {
       firstVerdict: null,
       okFirst: false,
       okFinal: false,
-      subcause: measured.parts.some(
-        (part) =>
-          part.res.status === 'inconclusive' && OUTAGE_CAUSES.has(part.res.inconclusiveCause),
-      )
-        ? 'outage'
-        : 'engine-error',
+      subcause: measured.parts.some(isOutagePart) ? 'outage' : 'engine-error',
     });
   return { ...result, execution: execution.execution };
 }

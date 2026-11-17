@@ -76,8 +76,12 @@ export function normalizeLineEndings(raw: string): string {
 // leading dressing class is guarded so it can never consume a line terminator: multiline `^`
 // matches immediately after a bare `\r`, so an unguarded `[\s*#>-]*` swallows the `\n` of a CRLF
 // and every consumer that slices on `.index` gets a fragment ending in a dangling `\r`.
-export const VERDICT_LINE_RE =
-  /^(?:(?![\r\n])[\s*#>\-\p{Extended_Pictographic}\u{FE0F}\u{200D}])*VERDICT:\s*\**\s*(PASS|FAIL)\b\**[ \t]*(?:[—–:-]+[ \t]*)?(.*)$/gimu;
+export const VERDICT_DRESSING = /(?:(?![\r\n])[\s*#>\-\p{Extended_Pictographic}\u{FE0F}\u{200D}])*/u
+  .source;
+export const VERDICT_LINE_RE = new RegExp(
+  String.raw`^${VERDICT_DRESSING}VERDICT:\s*\**\s*(PASS|FAIL)\b\**[ \t]*(?:[—–:-]+[ \t]*)?(.*)$`,
+  'gimu',
+);
 
 export function parseReviewVerdict(raw: string): ReviewVerdict {
   const lines = [...String(raw).matchAll(VERDICT_LINE_RE)];
@@ -92,15 +96,41 @@ export function parseReviewVerdict(raw: string): ReviewVerdict {
 // Same guarded dressing as VERDICT_LINE_RE: the marker must open its line, never sit inside prose.
 const ADVISORY_LINE_RE = /^(?:(?![\r\n])[\s*#>-])*ADVISORY:\**[^\S\r\n]*(.+)$/gim;
 export const ADVISORY_CAP = 5;
-const ADVISORY_CHARS = 200;
+
+const flatten = (text: string): string => text.replace(/\*+/g, '').replace(/\s+/g, ' ').trim();
+
+/** The writer half of parseAdvisories: only a final-reply marker line ever reaches the author. */
+export const PASS_ADVISORY_RULE =
+  'FAIL only for a finding that must block THIS commit. Every concrete in-charter defect that ' +
+  'does not block, on a PASS too, goes in your FINAL reply directly above the VERDICT line as ' +
+  'ADVISORY: <file:line> — <finding> (a plain line number). A defect named only in a bullet, in ' +
+  'earlier narration or in the verdict reason never reaches the author.';
 
 /** The judge's `ADVISORY:` lines citing a code location — non-blocking, to resolve before merge. */
-export function parseAdvisories(raw: string, maxChars = ADVISORY_CHARS): string[] {
+export function parseAdvisories(raw: string): string[] {
   const texts = [...normalizeLineEndings(raw).matchAll(ADVISORY_LINE_RE)]
-    .map((m) => m[1].replace(/\*+/g, '').replace(/\s+/g, ' ').trim().slice(0, maxChars))
+    .map((m) => flatten(m[1]))
     // The contract asks for a file:line, so `none` or an echoed `<file:line>` is not a finding.
     .filter((text) => issueLocations(text).length > 0);
-  return [...new Set(texts)].slice(0, ADVISORY_CAP);
+  return [...new Set(texts)];
+}
+
+/** The completeness brief's one-line `SEVERITY: desc | paths` findings, located or not. */
+export function parseSeverityFindings(raw: string): string[] {
+  const texts = normalizeLineEndings(raw)
+    .split('\n')
+    .map((line) => line.match(FINDING_LINE_RE))
+    .filter((m) => m !== null)
+    .map((m) => `${m[1]}: ${flatten(m[2])}`);
+  return [...new Set(texts)];
+}
+
+/** A judged verdict's advisories. A FAIL's count too: the prompt asks for them on every verdict,
+ *  and a fixed blocker's re-ship never shows them again. INCONCLUSIVE/error judged nothing. */
+export function verdictAdvisories(res: { status: string; transcript?: string }): string[] {
+  return res.status === 'pass' || res.status === 'fail'
+    ? parseAdvisories(res.transcript ?? '')
+    : [];
 }
 
 /** Remedy for a cascade that THREW: the gate failed before or around the judge, so pointing the
@@ -109,7 +139,10 @@ export const ENGINE_ERROR_REMEDY =
   'the gate itself failed before or around the judge — this is NOT an auth/quota problem. The ' +
   'error is quoted above; re-run devkit ship, and if it repeats, report it against devkit';
 
-/** Remedy for any healthy judge whose response failed its declared machine contract. */
-export const RESPONSE_CONTRACT_REMEDY =
+/** What a contract miss asks of the author; fail-open prints it without the ship re-run. */
+export const CONTRACT_MISS =
   'the judge response did not satisfy its declared contract; inspect the transcript or checklist ' +
-  'above, fix a real violation if present, then re-run devkit ship';
+  'above, fix a real violation if present';
+
+/** Remedy for any healthy judge whose response failed its declared machine contract. */
+export const RESPONSE_CONTRACT_REMEDY = `${CONTRACT_MISS}, then re-run devkit ship`;

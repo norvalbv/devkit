@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { rootRegistry } from './_helpers.mts';
 
 const SNAPSHOT_SCRIPT = fileURLToPath(new URL('../lib/ship/review/snapshot.sh', import.meta.url));
+const WORKTREE_SCRIPT = fileURLToPath(new URL('../lib/ship/review/worktrees.sh', import.meta.url));
 const registry = rootRegistry();
 
 export const { mkTmp, cleanup } = registry;
@@ -72,6 +73,22 @@ export function runSnapshotTrees(root: string, targetHead: string, env: NodeJS.P
       SNAPSHOT_SCRIPT,
       root,
       targetHead,
+    ],
+    { env, encoding: 'utf8' },
+  );
+}
+
+export function runWorktreeHelper(name: string, args: string[], env: NodeJS.ProcessEnv) {
+  return spawnSync(
+    '/bin/bash',
+    [
+      '-c',
+      // REVIEW_HELPER_UMASK=077 reproduces review-target.sh's umask for mode assertions.
+      'set -euo pipefail; umask "${REVIEW_HELPER_UMASK:-022}"; source "$1"; shift; helper=$1; shift; "$helper" "$@"',
+      'review-worktree-test',
+      WORKTREE_SCRIPT,
+      name,
+      ...args,
     ],
     { env, encoding: 'utf8' },
   );

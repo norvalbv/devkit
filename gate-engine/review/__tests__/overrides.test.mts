@@ -567,12 +567,14 @@ describe('cached waivers (a PASS replayed from the review cache)', () => {
 });
 
 describe('overrides lock holders', () => {
+  // The process lock names its holder file by an acquisition nonce.
+  const HOLDER_NONCE = 'seat-nonce';
   const seat = (cwd: string, pid: number, identity: string) => {
     const lock = overridesLockDir(cwd);
     mkdirSync(lock, { recursive: true });
-    writeFileSync(join(lock, 'holder'), `${pid}\n${identity}`);
+    writeFileSync(join(lock, HOLDER_NONCE), `${pid}\n${identity}`);
     const old = new Date(Date.now() - 60_000);
-    utimesSync(join(lock, 'holder'), old, old);
+    utimesSync(join(lock, HOLDER_NONCE), old, old);
     utimesSync(lock, old, old);
     return lock;
   };
@@ -588,7 +590,7 @@ describe('overrides lock holders', () => {
       }),
     ).toThrow(LockHeldError);
     expect(ran).toBe(false);
-    expect(readdirSync(lock)).toEqual(['holder']);
+    expect(readdirSync(lock)).toEqual([HOLDER_NONCE]);
   }, 20_000);
 
   it('recovers the lock from a holder that has exited', () => {

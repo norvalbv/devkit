@@ -20,6 +20,7 @@
  * whole block in the same `─────` style completeness.mts already uses.
  */
 
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import type { PromptExtras } from '../reviewers.mts';
@@ -104,4 +105,22 @@ export async function loadReviewerContext(
       targets_via: targets.semantic ? 'scope+semantic' : 'scope',
     },
   };
+}
+
+// git's `--cleanup=whitespace`, so the ship's raw temp file and the cleaned COMMIT_EDITMSG key the
+// same completeness PASS; otherwise the pre-commit prewarm's cached PASS silently misses.
+const TRAILING_WS_RE = /[ \t]+$/gm;
+const BLANK_RUN_RE = /\n{3,}/g;
+export function normalizeCommitMessage(raw: string): string {
+  return raw.replace(TRAILING_WS_RE, '').replace(BLANK_RUN_RE, '\n\n').trim();
+}
+
+/** Which message a PASS covers: subject, size, short sha of the normalised bytes. The sticky
+ *  PASS is diff-blind, so this is the log's only proof of which --resume body was judged. */
+export function judgedMessageId(message: string): string {
+  const subject = message.split('\n', 1)[0] ?? '';
+  const chars = Array.from(subject); // code points: a UTF-16 slice can split an emoji's surrogates
+  const shown = chars.length > 60 ? `${chars.slice(0, 57).join('')}...` : subject;
+  const sha = createHash('sha256').update(message).digest('hex').slice(0, 12);
+  return `${JSON.stringify(shown)} ${Buffer.byteLength(message)}B sha:${sha}`;
 }

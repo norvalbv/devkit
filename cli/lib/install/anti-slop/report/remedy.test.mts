@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   GATE_REASON_ENV,
   readGateReason,
+  reasonReport,
 } from '../../../../../gate-engine/deterministic/reason.mts';
 import antiSlop from '../../../../commands/oxc/anti-slop.mts';
 import {
@@ -77,6 +78,24 @@ describe('antiSlopRemedyLines', () => {
     expect(hints[0]).toContain('named `type`');
     expect(hints[0]).toContain("the function's return type");
     expect(hints[0]).toMatch(/in plain JavaScript, .*separate statements/u);
+  });
+
+  it('names a schema parse or an opted-in type guard for runtime typeof, never truthiness', () => {
+    const typeofRule = 'anti-slop/no-runtime-typeof';
+    const hints = antiSlopRemedyLines([typeofRule, typeofRule], false).filter((line) =>
+      line.includes('no-runtime-typeof:'),
+    );
+    expect(hints).toHaveLength(1);
+    expect(hints[0]).toMatch(/safeParse/u);
+    expect(hints[0]).toMatch(/enable the rule's `allowInTypeGuards`/u);
+    expect(hints[0]).toMatch(/`Boolean\(x\)`, `!!x`\) is not a replacement/u);
+  });
+
+  it('offers only the schema route for runtime typeof in overlay, where no rule option persists', () => {
+    const text = antiSlopRemedyLines(['anti-slop/no-runtime-typeof'], true).join('\n');
+    expect(text).toMatch(/safeParse/u);
+    expect(text).toMatch(/is not a replacement/u);
+    expect(text).not.toMatch(/allowInTypeGuards|Oxlint config/u);
   });
 
   it('still names the acceptance route when no rule has a hint', () => {
@@ -228,7 +247,7 @@ describe('anti-slop check FAIL output (wiring)', () => {
   const git = (cwd: string, args: string[]) =>
     execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 30_000 }).trim();
 
-  function repository(overlay: boolean): string {
+  function repository(overlay: boolean, baseline = true): string {
     const root = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-remedy-'));
     roots.push(root);
     git(root, ['init', '-q']);
@@ -243,7 +262,7 @@ describe('anti-slop check FAIL output (wiring)', () => {
     }
     syncAntiSlopCapability(root);
     syncOxcCapability(root, overlay ? { antiSlop: true, overlay: true } : { antiSlop: true });
-    writeFileSync(join(root, ANTI_SLOP_BASELINE_REL), EMPTY_BASELINE);
+    if (baseline) writeFileSync(join(root, ANTI_SLOP_BASELINE_REL), EMPTY_BASELINE);
     writeFileSync(join(root, 'src', 'a.test.ts'), MOCKING_SOURCE);
     git(root, ['add', '-A']);
     return root;
@@ -259,10 +278,15 @@ describe('anti-slop check FAIL output (wiring)', () => {
     expect(stderr).toContain(ACCEPT_VIA_OVERRIDE);
   });
 
+  function reasonFile(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-reason-'));
+    roots.push(dir);
+    return join(dir, 'reason.txt');
+  }
+
   it('records the FAIL line, then the rule and location, for the aggregated verdict', () => {
     const cwd = repository(false);
-    const reason = join(mkdtempSync(join(tmpdir(), 'devkit-anti-slop-reason-')), 'reason.txt');
-    roots.push(join(reason, '..'));
+    const reason = reasonFile();
     vi.stubEnv(GATE_REASON_ENV, reason);
     expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
     const [summary, ...locations] = readGateReason(reason);
@@ -271,6 +295,36 @@ describe('anti-slop check FAIL output (wiring)', () => {
       expect.stringMatching(/^ERROR \S+ src\/a\.test\.ts:3:\d+ \(1 new\)$/u),
     ]);
     expect(locations[0]).toContain(MOCKING);
+  });
+
+  it.each([false, true])(
+    'records the missing-baseline exit 2 so the tail block names the remedy, stderr unchanged (overlay %s)',
+    (overlay) => {
+      const cwd = repository(overlay, false);
+      const reason = reasonFile();
+      vi.stubEnv(GATE_REASON_ENV, reason);
+      const missing = `anti-slop: ${ANTI_SLOP_BASELINE_REL} is missing; run \`devkit anti-slop create\` explicitly`;
+      expect(antiSlop(['check', '--staged'], cwd)).toBe(2);
+      expect(err).toEqual([missing]);
+      expect(readGateReason(reason)).toEqual([missing]);
+      const block = reasonReport([
+        { id: 'anti-slop', label: 'guard-anti-slop(unexpected:2)', reason: readGateReason(reason) },
+      ]).join('\n');
+      expect(block).toContain(`── guard-anti-slop(unexpected:2) ──\n     ${missing}`);
+      expect(block).not.toContain('(no reason summary');
+    },
+  );
+
+  it('records the not-installed refusal of a capability-gated command', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-remedy-'));
+    roots.push(cwd);
+    git(cwd, ['init', '-q']);
+    const reason = reasonFile();
+    vi.stubEnv(GATE_REASON_ENV, reason);
+    expect(antiSlop(['create'], cwd)).toBe(2);
+    expect(readGateReason(reason)).toEqual([
+      'anti-slop: not installed — run `devkit init --anti-slop`',
+    ]);
   });
 
   it('prints the named-type hint when the real rule blocks a conditional empty spread', () => {
@@ -326,6 +380,17 @@ describe('anti-slop check FAIL output (wiring)', () => {
     expect(err.join('\n')).toMatch(/hint — require-safety-comment-for-type-assertion: .*zod/u);
   });
 
+  it('prints the typeof hint for a real no-runtime-typeof diagnostic', () => {
+    const cwd = repository(false);
+    writeFileSync(
+      join(cwd, 'src', 'skip.ts'),
+      "export const named = (x: string | number) => typeof x === 'string';\n",
+    );
+    git(cwd, ['add', '-A']);
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
+    expect(err.join('\n')).toMatch(/hint — no-runtime-typeof: .*safeParse/u);
+  });
+
   it('prints the overlay route, not the Oxlint config, in an overlay install', () => {
     const cwd = repository(true);
     expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
@@ -367,7 +432,7 @@ describe('anti-slop check FAIL output (wiring)', () => {
     expect(stderr).toContain(ACCEPT_VIA_OVERRIDE);
   });
 
-  it('carries debt on a line edited elsewhere through the staged gate, but not a second offence', () => {
+  it('keeps debt baselined when another token on its line is edited, but not a second offence', () => {
     const cwd = repository(false);
     const debtLine = (tail: string) =>
       `export function widen(value: object${tail} {\n  return 1;\n}\n`;
@@ -380,7 +445,7 @@ describe('anti-slop check FAIL output (wiring)', () => {
     writeFileSync(join(cwd, 'src', 'widen.ts'), debtLine('): 1'));
     git(cwd, ['add', '-A']);
     expect(antiSlop(['check', '--staged'], cwd)).toBe(0);
-    expect(out.join('\n')).toMatch(/PASS — .*1 carried from edited lines/u);
+    expect(out.join('\n')).toMatch(/PASS — 1 current finding/u);
 
     writeFileSync(join(cwd, 'src', 'widen.ts'), debtLine(', other: object): 1'));
     git(cwd, ['add', '-A']);

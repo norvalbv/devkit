@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -78,7 +79,7 @@ function runCommit(
   inheritedDryGates = '',
   extraEnv: Record<string, string> = {},
 ) {
-  const telemetry = join(root, 'telemetry', 'gate-events.jsonl');
+  const telemetry = join(root, extraEnv.DK_TEST_SINK_DIR ?? 'telemetry', 'gate-events.jsonl');
   const script = `
 set -e
 . "$1"
@@ -99,7 +100,7 @@ export DEVKIT_SHIP_ID=sc1537-test
 export SHIP_COMMIT_TIMEOUT=10
 # The ship caller's own BASE_FLAG / PATHS, which the helper reads by dynamic scope (sc-3443).
 eval "\${DK_TEST_CALLER_VARS:-}"
-commit_with_gate_capture "$4" "$5" feat/sc1537 "test title" "test body"
+commit_with_gate_capture "$4" "$5" "\${DK_TEST_BRANCH:-feat/sc1537}" "test title" "test body"
 `;
   // Supervised: this runs the shipped script and dispatches real hooks (suite-hangs-bound-at-the-spawn-site).
   return testSpawnSync(
@@ -259,6 +260,41 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     const rows = events.filter((e) => e.type === 'ship_attempt' || e.type === 'ship_result');
     expect(rows).toHaveLength(2);
     for (const row of rows) expect(row.parent_session_id).toBe(expected);
+    // The helper is handed the caller's root as its second argument, distinct from the worktree.
+    for (const row of rows) expect(row.root).toBe(root);
+  });
+
+  it('writes a ship row longer than the 1,024-byte bash append split whole, typed, untruncated', () => {
+    const { root, wt, base } = fixture(true);
+    const branch = `feat/${'b'.repeat(195)}`;
+    const sinkDir = join('d'.repeat(200), 'e'.repeat(200), 'f'.repeat(200));
+    const result = runCommit(root, wt, base, false, false, '', {
+      DK_TEST_BRANCH: branch,
+      DK_TEST_SINK_DIR: sinkDir,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const lines = readFileSync(join(root, sinkDir, 'gate-events.jsonl'), 'utf8')
+      .trim()
+      .split('\n');
+    const rows = lines.map((line) => JSON.parse(line));
+    const [attempt, outcome] = ['ship_attempt', 'ship_result'].map((t) =>
+      rows.find((e) => e.type === t),
+    );
+    expect(Buffer.byteLength(lines[rows.indexOf(attempt)])).toBeGreaterThan(1024);
+    for (const row of [attempt, outcome]) {
+      expect(row).toMatchObject({ branch, ship_id: 'sc1537-test' });
+      expect(row.log_path).toBe(join(root, sinkDir, 'logs', 'sc1537-test.log'));
+      // Only the node envelope stamps `source`: a bash-built row never carried it.
+      expect(row).toHaveProperty('source');
+    }
+    expect(attempt).toMatchObject({ mode: 'ship', resumed: false, body_bytes: expect.any(Number) });
+    expect(outcome).toMatchObject({
+      exit_code: 0,
+      timed_out: false,
+      blocked_gate: null,
+      duration_s: expect.any(Number),
+    });
   });
 
   // Values must stay free of single quotes: the row is spliced into a single-quoted printf argument.
@@ -290,7 +326,9 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('Retry after fixing');
     expect(result.stderr).toContain('✗ review:correctness — BLOCKED this run');
-    expect(result.stderr).toContain('⚠ completeness — finding recorded, did NOT block');
+    expect(result.stderr).toContain(
+      '⚠ completeness — finding recorded, did NOT block this run only because review:correctness stopped it first',
+    );
     // The whole point: a reader who sees only the tail still sees it.
     expect(result.stderr.indexOf('Gate findings this run')).toBeGreaterThan(
       result.stderr.indexOf('Retry after fixing'),
@@ -329,7 +367,8 @@ describe('commit_with_gate_capture — executable hook proof', () => {
   });
 
   // The preflight's family move must survive to the tail, where a blocked ship is read.
-  const REMEDY = 'move the judges to the claude family: run `export GUARD_REVIEW_MODEL=haiku`';
+  const REMEDY =
+    'To ship inside this window, move the judges to the claude family: run `export GUARD_REVIEW_MODEL=haiku`.';
   const darkJudge = {
     SHIP_JUDGE_REMEDY: REMEDY,
     DK_TEST_CALLER_VARS: `BASE_FLAG=main; PATHS=(src/a.ts)`,
@@ -491,6 +530,17 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     ['✗ deterministic gates failed: guard-anti-slop guard-comments', 'deterministic'],
     ['✗ deterministic gates failed: guard-comments guard-anti-slop', 'deterministic'],
     ['✗ deterministic gates failed: guard-comments-lint', 'deterministic'],
+    // The cheap-gate flush names every gate; comments keeps its name only when alone.
+    [
+      '✗ deterministic gates failed: guard-comments\n✗ commit blocked before the AI gates: deterministic-gates (findings above)',
+      'comments',
+    ],
+    [
+      '✗ deterministic gates failed: guard-comments\n✗ commit blocked before the AI gates: deterministic-gates fallow (findings above)',
+      'deterministic',
+    ],
+    ['✗ commit blocked before the AI gates: fallow (findings above)', 'deterministic'],
+    ['✗ commit blocked before the AI gates: eslint-overlay (findings above)', 'deterministic'],
     ['✗ staged gate blocked: fallow (its report is above)', 'fallow'],
     ['✗ staged gate blocked: eslint-overlay (its report is above)', 'eslint-overlay'],
     ['✗ staged gate blocked: biome-overlay (its report is above)', 'biome-overlay'],
@@ -697,5 +747,232 @@ describe('_ship_sh_word — quoting round-trips any argument', () => {
     const script = `. "$1"; w=$(_ship_sh_word "$2"; printf x); w=\${w%x}; eval "got=$w"; printf '%s' "$got"`;
     const r = testSpawnSync('/bin/bash', ['-c', script, 'rt', helper, input], { encoding: 'utf8' });
     expect(r.stdout).toBe(input);
+  });
+});
+
+describe('commit_with_gate_capture — a failed config gate that also fails at the cut commit', () => {
+  // The gate chain's own shape: the failed verdict row, the summary line the shell classifies on.
+  const RED_GATE_HOOK =
+    `printf '%s\\n' '{"ship_id":"sc1537-test","type":"gate_result","gate":"always-red","family":"deterministic","status":"fail"}' >> "$DEVKIT_GATE_EVENTS"\n` +
+    "echo '✗ deterministic gates failed: always-red' >&2\nexit 1\n";
+  const LINE =
+    /ship: always-red also exits 1 at [0-9a-f]{7}, the commit this gate worktree was cut from/;
+
+  function redGateFixture(declared: boolean, prefix?: string, hook = RED_GATE_HOOK) {
+    const made = fixture(true, hook, prefix);
+    if (declared) {
+      const config = join(made.root, 'guard.config.json');
+      writeFileSync(config, JSON.stringify({ extraGates: { 'always-red': 'false' } }));
+      symlinkSync(config, join(made.wt, 'guard.config.json'));
+    }
+    const callerVars = { DK_TEST_CALLER_VARS: `BASE=${made.base}; PATHS=(note.txt)` };
+    return { ...made, callerVars };
+  }
+
+  it('says so above the brief footer and in the retained log, without touching the exit code', () => {
+    const red = redGateFixture(true);
+    const undeclared = redGateFixture(false);
+
+    const result = runCommit(red.root, red.wt, red.base, false, false, '', red.callerVars);
+    const control = runCommit(
+      undeclared.root,
+      undeclared.wt,
+      undeclared.base,
+      false,
+      false,
+      '',
+      undeclared.callerVars,
+    );
+
+    expect(result.stderr).toMatch(LINE);
+    expect(result.stderr.search(LINE)).toBeLessThan(
+      result.stderr.indexOf('ship: the gates judged'),
+    );
+    expect(readFileSync(join(red.root, '.devkit/last-ship-gates-feat-sc1537.log'), 'utf8')).toMatch(
+      LINE,
+    );
+    expect(control.stderr).toContain('ship: the gates judged');
+    expect(control.stderr).not.toMatch(LINE);
+    expect(result.status).toBe(control.status);
+    expect(result.status).not.toBe(0);
+  });
+
+  // The base run is fed exactly this list, so a gate's own output or ship's hook dir must not be in it.
+  it('records the untracked entries the gate worktree held before its gates ran', () => {
+    const red = redGateFixture(true, undefined, `: > late.txt\n${RED_GATE_HOOK}`);
+    mkdirSync(join(red.wt, 'big', 'a'), { recursive: true });
+    writeFileSync(join(red.wt, 'big', 'a', 'b.txt'), 'x\n');
+
+    const result = runCommit(red.root, red.wt, red.base, false, false, '', red.callerVars);
+    const snapshot = git(
+      red.wt,
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-path',
+      'devkit-pre-gate-untracked',
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(existsSync(join(red.wt, 'late.txt'))).toBe(true);
+    expect(readFileSync(snapshot, 'utf8').split('\0').filter(Boolean).sort()).toEqual([
+      'big/',
+      'guard.config.json',
+    ]);
+    expect(result.stderr).not.toContain('devkit-pre-gate-untracked');
+  });
+
+  // A list left by an earlier run in the same worktree must not stand in for a failed capture.
+  it('leaves no list, and says nothing, when the capture fails over an earlier list', () => {
+    const red = redGateFixture(true);
+    const snapshot = git(
+      red.wt,
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-path',
+      'devkit-pre-gate-untracked',
+    );
+    writeFileSync(snapshot, 'stale\0');
+    mkdirSync(`${snapshot}.tmp`);
+
+    const result = runCommit(red.root, red.wt, red.base, false, false, '', red.callerVars);
+
+    expect(result.status).not.toBe(0);
+    expect(existsSync(snapshot)).toBe(false);
+    expect(result.stderr).not.toMatch(LINE);
+  });
+
+  it('says so on a --dry-gates run too, under repo and worktree paths containing a space', () => {
+    const red = redGateFixture(true, 'ship hook proof ');
+
+    expect(red.wt).toContain(' ');
+    const result = runCommit(red.root, red.wt, red.base, false, true, '', red.callerVars);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(LINE);
+  });
+});
+
+// A "sat idle for an hour" report must be checkable from the attempt itself: queue wait, setup and
+// gate time are split on one line, which both retained logs keep.
+describe('commit_with_gate_capture — every attempt prints its timing line', () => {
+  const sinkRows = (root: string) =>
+    readFileSync(join(root, 'telemetry/gate-events.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+  const attemptLine = (stderr: string) =>
+    stderr.split('\n').find((line) => line.startsWith('attempt sc1537-test feat/sc1537: '));
+  const queuedEnv = () => ({
+    DEVKIT_SHIP_QUEUED_S: '90',
+    DEVKIT_SHIP_GRANTED_AT: String(Math.floor(Date.now() / 1000) - 100),
+  });
+
+  it('a green attempt splits queued, setup and gates and keeps the line in both logs', () => {
+    const { root, wt, base } = fixture(true);
+
+    const result = runCommit(root, wt, base, false, false, '', queuedEnv());
+
+    expect(result.status, result.stderr).toBe(0);
+    const line = attemptLine(result.stderr);
+    expect(line).toMatch(
+      /^attempt sc1537-test feat\/sc1537: queued 90s · setup 1\d\ds · gates \d+s · \S+Z → \S+Z · outcome=pass · log /,
+    );
+    // The per-attempt archive, not the per-branch log every retry overwrites.
+    expect(line?.endsWith(` · log ${join(root, 'telemetry/logs/sc1537-test.log')}`)).toBe(true);
+    for (const log of [
+      join(root, '.devkit/last-ship-gates-feat-sc1537.log'),
+      join(root, 'telemetry/logs/sc1537-test.log'),
+    ]) {
+      expect(readFileSync(log, 'utf8'), log).toContain(`${line}\n`);
+    }
+    expect(sinkRows(root).find((e) => e.type === 'ship_attempt')).toMatchObject({ queued_s: 90 });
+  });
+
+  it('a blocked attempt names the blocking gate, above the digest', () => {
+    const hook =
+      "echo 'REAL_PRE_COMMIT_RAN' >&2\n" +
+      `printf '%s\\n' '{"ship_id":"sc1537-test","type":"review_result","reviewer":"correctness","status":"fail","reason":"x"}' >> "$DEVKIT_GATE_EVENTS"\n` +
+      "echo 'guard-review: correctness — FAILED' >&2\nexit 1\n";
+    const { root, wt, base } = fixture(true, hook);
+
+    const result = runCommit(root, wt, base, false, false, '', queuedEnv());
+
+    expect(result.status).not.toBe(0);
+    expect(attemptLine(result.stderr)).toContain('· outcome=review ·');
+    expect(result.stderr.indexOf('attempt sc1537-test')).toBeLessThan(
+      result.stderr.indexOf('Gate findings this run'),
+    );
+  });
+
+  it('without the queue env (a direct shell run) it prints gates only and records no queued_s', () => {
+    const { root, wt, base } = fixture(true);
+
+    const result = runCommit(root, wt, base);
+
+    expect(attemptLine(result.stderr)).toMatch(/^attempt sc1537-test feat\/sc1537: gates \d+s · /);
+    expect(sinkRows(root).find((e) => e.type === 'ship_attempt')).not.toHaveProperty('queued_s');
+  });
+
+  it('a --dry-gates rehearsal prints the line but writes no ship_attempt row', () => {
+    const { root, wt, base } = fixture(true);
+
+    const result = runCommit(root, wt, base, false, true, '', queuedEnv());
+
+    expect(attemptLine(result.stderr)).toContain('queued 90s');
+    const sink = join(root, 'telemetry/gate-events.jsonl');
+    expect(existsSync(sink) && sinkRows(root).some((e) => e.type === 'ship_attempt')).toBe(false);
+  });
+
+  it('ignores a non-numeric queue env, so the sink row can never tear', () => {
+    const { root, wt, base } = fixture(true);
+
+    const result = runCommit(root, wt, base, false, false, '', {
+      DEVKIT_SHIP_QUEUED_S: '9"x',
+      DEVKIT_SHIP_GRANTED_AT: '1',
+    });
+
+    expect(attemptLine(result.stderr)).not.toContain('queued');
+    expect(sinkRows(root).find((e) => e.type === 'ship_attempt')).not.toHaveProperty('queued_s');
+  });
+});
+
+// The pre-chain decision-smell advisory must also be the last thing a tailing reader sees.
+describe('commit_with_gate_capture — repeats the decision-smell advisory at the tail', () => {
+  const ADVISORY = '⚠️  decision smell (regex only, not a verdict): legacy-deletion — old.ts';
+
+  it('ends with the advisory when the decisions gate never ran, pass or block', () => {
+    for (const [body, ok] of [
+      ["echo 'GATE_RAN' >&2\n", true],
+      ["echo 'GATE_RAN' >&2\nexit 1\n", false],
+    ] as const) {
+      const { root, wt, base } = fixture(true, body);
+      const result = runCommit(root, wt, base, false, false, '', {
+        SHIP_DECISION_ADVISORY: ADVISORY,
+      });
+      expect(result.status === 0, result.stderr).toBe(ok);
+      expect(result.stderr.trimEnd().endsWith(ADVISORY), result.stderr).toBe(true);
+    }
+  });
+
+  it('stays quiet once the decisions gate printed its own verdict', () => {
+    const { root, wt, base } = fixture(
+      true,
+      "echo 'decision-gate: judge cleared as ROUTINE' >&2\n",
+    );
+    const result = runCommit(root, wt, base, false, false, '', {
+      SHIP_DECISION_ADVISORY: ADVISORY,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).not.toContain(ADVISORY);
+  });
+
+  it('leaves a timed-out chain its own guidance last', () => {
+    const { root, wt, base } = fixture(true, 'sleep 20\n');
+    const result = runCommit(root, wt, base, false, false, '', {
+      SHIP_DECISION_ADVISORY: ADVISORY,
+      DK_TEST_CALLER_VARS: 'SHIP_COMMIT_TIMEOUT=2',
+    });
+    expect(result.status, result.stderr).toBe(124);
+    expect(result.stderr).not.toContain(ADVISORY);
   });
 });

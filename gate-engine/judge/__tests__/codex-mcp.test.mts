@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { codexMcpArgs, judgeCliFor } from '../codex/result.mts';
+import { codexMcpArgs } from '../codex/mcp.mts';
+import { judgeCliFor } from '../codex/result.mts';
 
 // sc-2054: gpt judges get the SAME role-scoped MCP servers as claude judges, via codex-native
 // per-invocation config. Contracts pinned here: secrets ride the spawn env (never argv), the

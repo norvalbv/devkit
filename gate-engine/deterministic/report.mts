@@ -1,8 +1,14 @@
 /** The end-of-run reports of guard-deterministic: gates that opted out, and gates that failed. */
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { GUARD_PREFIX_RE } from './command-gates.mts';
-import { appendReviewNotice, type GateFailure, reasonDetail, reasonReport } from './reason.mts';
-import { printRecheckFooter } from './recheck.mts';
+import {
+  appendReviewNotice,
+  fixLine,
+  type GateFailure,
+  reasonDetail,
+  reasonReport,
+} from './reason.mts';
+import { printFailureFooter } from './recheck.mts';
 
 /** The blocked_gate token the ship script publishes for this whole chain. */
 export const DETERMINISTIC_FAMILY = 'deterministic';
@@ -43,6 +49,7 @@ export function reportFailures(
   fails: readonly GateFailure[],
   failed: readonly FailedGate[],
   rechecks: string[],
+  notRun: readonly string[] = [],
 ): void {
   // A gate that never reached a verdict (`(unexpected:rc)`, `(could-not-run)`) is not a `fail`.
   // `family` lets a reader join this per-gate chain to the family-level blocked_gate.
@@ -57,9 +64,7 @@ export function reportFailures(
   }
   console.error(`✗ deterministic gates failed:${fails.map((f) => ` ${f.label}`).join('')}`);
   for (const line of reasonReport(fails)) console.error(line);
-  console.error('   Fix every failure above together, then commit once.');
-  console.error('   On commit or ship, decision and reviewer gates run only after these pass.');
-  printRecheckFooter(rechecks);
+  printFailureFooter(rechecks, fixLine(failed, notRun.length > 0), notRun);
   if (fails.some((f) => f.label.startsWith('structure-lint'))) {
     console.error('   guard-structure blocks only violations your change adds, or all when');
     console.error('   it edits structure policy or deletes/renames. Fix those.');

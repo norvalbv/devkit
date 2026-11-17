@@ -25,8 +25,8 @@ afterEach(() => {
   while (dirs.length) rmSync(dirs.pop(), { recursive: true, force: true });
 });
 
-/** Stage `content` in a fixture repo, run `generate`, return the enumerated item names. */
-function generatedItems(skill, content, filename = 'staged.ts') {
+/** Stage `content` (over a committed `base`, if given), run `generate`, return the item names. */
+function generatedItems(skill, content, filename = 'staged.ts', base?: string) {
   const repo = mkdtempSync(join(tmpdir(), 'catalog-trigger-'));
   dirs.push(repo);
   const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
@@ -36,6 +36,15 @@ function generatedItems(skill, content, filename = 'staged.ts') {
     JSON.stringify({ review: { backendRoots: ['src'], frontendRoots: ['src'] } }),
   );
   mkdirSync(join(repo, 'src'), { recursive: true });
+  if (base !== undefined) {
+    writeFileSync(join(repo, 'src', filename), base);
+    git(['add', '.']);
+    git([
+      ...['-c', 'user.name=t', '-c', 'user.email=t@t'],
+      ...['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null'],
+      ...['commit', '-qm', 'base'],
+    ]);
+  }
   writeFileSync(join(repo, 'src', filename), content);
   git(['add', '.']);
   const r = spawnSync('node', [skillScript(skill), 'generate'], { cwd: repo, encoding: 'utf8' });
@@ -251,6 +260,71 @@ describe('catalog trigger regexes (fires / stays quiet pairs)', () => {
       expect(generatedItems(skill, quiet, file)).not.toContain(item);
     });
   }
+});
+
+describe('backend-performance sync-io via an imported wrapper; --cached is not caching', () => {
+  // `./git` is never written, so no literal sync call is staged: only the loop predicate can fire.
+  const STAGED_HELPER =
+    "import { git } from './git';\n\nfunction staged() {\n  return git(['diff', '--cached', '--name-only']).split('\\n');\n}\n";
+  const PER_FILE_SHOW =
+    "\nexport function removed() {\n  const out = [];\n  for (const file of staged()) {\n    out.push(git(['show', 'HEAD:' + file]));\n  }\n  return out;\n}\n";
+  const items = (content, base?: string) =>
+    generatedItems('backend-performance', content, 'report.ts', base);
+
+  it('a per-file spawn through an unstaged wrapper generates sync-io, not caching-strategy', () => {
+    const got = items(STAGED_HELPER + PER_FILE_SHOW, STAGED_HELPER);
+    expect(got).toContain('sync-io');
+    expect(got).not.toContain('caching-strategy');
+  });
+
+  it('a spawn added inside a loop that already existed generates sync-io', () => {
+    const loop = (body) =>
+      `import { git } from './git';\n\nexport function blobs(cwd, files) {\n  const out = [];\n  for (const f of files) {\n    ${body}\n  }\n  return out;\n}\n`;
+    expect(
+      items(loop("out.push(git(cwd, ['show', 'HEAD:' + f]));"), loop('out.push(f);')),
+    ).toContain('sync-io');
+  });
+
+  it('a new file whose loop calls a helper that spawns generates sync-io', () => {
+    const file =
+      "import { git } from './git';\n\nconst blobOf = (cwd, f) => git(cwd, ['show', 'HEAD:' + f]);\n\nexport function blobs(cwd, files) {\n  return files.map((f) => blobOf(cwd, f));\n}\n";
+    expect(items(file)).toContain('sync-io');
+  });
+
+  it('a loop with no argv-array call stays quiet', () => {
+    expect(items('let s = 0;\nfor (const x of xs) s += x;\n')).not.toContain('sync-io');
+    expect(items("for (const eol of ['\\n', '\\r\\n']) split(eol);\n")).not.toContain('sync-io');
+  });
+
+  it('git --cached alone stays out of caching-strategy; a real cache read still fires', () => {
+    expect(items("const out = git(['diff', '--cached', '--name-only']);\n")).not.toContain(
+      'caching-strategy',
+    );
+    expect(items('const cached = await redis.get(key);\n')).toContain('caching-strategy');
+  });
+
+  it('the commit that batches a per-file spawn away stays quiet (removed lines are not evidence)', () => {
+    const batched =
+      "\nexport function removed() {\n  return git(['diff', '--cached', '--unified=0']).split('\\n');\n}\n";
+    expect(items(STAGED_HELPER + batched, STAGED_HELPER + PER_FILE_SHOW)).not.toContain('sync-io');
+  });
+
+  it('a loop and an argv call in different hunks of one file stay quiet', () => {
+    const filler = Array.from({ length: 20 }, (_, i) => `const c${i} = ${i};`).join('\n');
+    const file = (top, bottom) => `${top}\n${filler}\n${bottom}\n`;
+    const staged = file('for (const x of xs) total += x;', "run(['npm', 'ls']);");
+    expect(items(staged, file('let total = 0;', 'done();'))).not.toContain('sync-io');
+  });
+
+  it('a per-item spawn inside a for-await loop generates sync-io', () => {
+    const file =
+      "import { git } from './git';\n\nexport async function blobs(files) {\n  const out = [];\n  for await (const f of files) {\n    out.push(git(['show', 'HEAD:' + f]));\n  }\n  return out;\n}\n";
+    expect(items(file)).toContain('sync-io');
+  });
+
+  it('a minified one-line file is scanned in bounded time', { timeout: 10_000 }, () => {
+    expect(items(`export const blob = ${'f('.repeat(150_000)}\n`)).not.toContain('sync-io');
+  });
 });
 
 describe('prose staged files are excluded from the scan', () => {

@@ -13,7 +13,6 @@ import {
   cacheKey,
   checklistScriptAt,
   effectiveReviewConfig,
-  escalatePrompt,
   hasChecklist,
   parseReviewVerdict,
   REVIEWERS,
@@ -24,6 +23,7 @@ import {
   wrapPrompt,
 } from '../reviewers.mts';
 import { verifyChecklist } from '../runtime.mts';
+import { escalatePrompt } from '../cascade/escalation.mts';
 
 // A frink-shaped review config without touching disk: defaults + explicit roots.
 const defaults = resolveGuardConfig('/nonexistent-cwd-defaults-only');
@@ -458,6 +458,7 @@ describe('correctness-reviewer (domain all)', () => {
       'packages/ui/node_modules/package/index.js',
       'packages/ui/dist/index.mjs',
       'coverage/coverage-final.json',
+      'e2e/fixtures/anti-slop/all-rules.ts',
     ];
     const selected = selectReviewers(
       [...authored, ...excluded, 'dist/gate-engine/review/reviewers.mjs', 'bun.lock'],
@@ -492,6 +493,16 @@ describe('allowedToolsFor', () => {
     expect(tools).toContain(',mcp__codebase__searchCode');
     expect(tools).toContain('Bash(node .claude/skills/commit-guard/scripts/checklist.mjs:*)');
   });
+  it('commit-guard may run only the read-only allowlist lookup, not the writes or search-code', () => {
+    const guard = REVIEWERS.find((r) => r.name === 'commit-guard');
+    const bash = allowedToolsFor(guard, cfg)
+      .split(',')
+      .filter((t) => t.startsWith('Bash('));
+    expect(bash).toContain('Bash(guard-dup-allowlist check:*)');
+    expect(bash.filter((t) => t.includes('guard-dup-allowlist'))).toHaveLength(1);
+    expect(bash.join()).not.toMatch(/search-code|vitest/);
+    expect(allowedToolsFor(REVIEWERS[0], cfg)).not.toContain('guard-dup-allowlist');
+  });
   it('grants a provider-projected checklist path when the consumer resolver supplies one', () => {
     const tools = allowedToolsFor(REVIEWERS[0], cfg, '.agents');
     expect(tools).toContain('Bash(node .agents/skills/api-security/scripts/checklist.mjs:*)');
@@ -511,6 +522,8 @@ describe('allowedToolsFor', () => {
         .split(',')
         .filter((tool) => tool.startsWith('Bash'));
       const own = hasChecklist(reviewer) ? [`Bash(node ${checklistScriptAt(reviewer)}:*)`] : [];
+      // commit-guard alone also gets the read-only allowlist lookup.
+      if (reviewer.name === 'commit-guard') own.push('Bash(guard-dup-allowlist check:*)');
       expect(bash, reviewer.name).toEqual(own);
     }
   });
@@ -739,13 +752,59 @@ describe('wrapConventionsPrompt / parseConventionFindings', () => {
     const transcript = `VIOLATION: Never use raw SQL. — CLAUDE.md:3\n${boundary}OFFENDING: const x = 1 — src/unrelated.ts:80`;
     expect(parseConventionEvidencePairs(transcript)).toEqual([]);
   });
-  it('treats a verdict closer before a delayed citation as a hard evidence boundary', () => {
+  it.each([
+    'VERDICT: FAIL — abandoned point',
+    '✅ VERDICT: PASS',
+    '⚠️ **VERDICT**: FAIL',
+    '✅ NO_VIOLATIONS',
+  ])('treats %s before a delayed citation as a hard evidence boundary', (verdict) => {
     const transcript =
       'VIOLATION: Never use raw SQL.\n' +
-      'VERDICT: FAIL — abandoned point\n' +
+      `${verdict}\n` +
       '— CLAUDE.md:3\n' +
       'OFFENDING: const x = 1 — src/unrelated.ts:80';
     expect(parseConventionEvidencePairs(transcript)).toEqual([]);
+  });
+  it('never merges an emoji-dressed verdict line into an untrailered OFFENDING block', () => {
+    const transcript =
+      'VIOLATION: Never use raw SQL. — CLAUDE.md:3\n' +
+      'OFFENDING: db.raw(query)\n' +
+      '⚠️ **VERDICT**: FAIL\n' +
+      'more — src/db.ts:80';
+    expect(parseConventionEvidencePairs(transcript)).toEqual([
+      { violation: 'Never use raw SQL. — CLAUDE.md:3', offending: 'db.raw(query)' },
+    ]);
+  });
+  it('stops the citation lookahead for a protocol-like OFFENDING line at an emoji verdict', () => {
+    const transcript =
+      'VIOLATION: Never use raw SQL. — CLAUDE.md:3\n' +
+      'OFFENDING: db.raw(query)\n' +
+      'OFFENDING: second\n' +
+      '✅ VERDICT: FAIL\n' +
+      '— src/db.ts:80';
+    for (const pair of parseConventionEvidencePairs(transcript))
+      expect(pair.offending).not.toContain('VERDICT');
+  });
+  it('keeps a complete pair blocking when an emoji verdict line closes the transcript', () => {
+    const transcript =
+      'VIOLATION: Never use raw SQL. — CLAUDE.md:3\n' +
+      'OFFENDING: db.raw(query) — src/db.ts:80\n' +
+      '❌ **VERDICT: FAIL** — raw SQL';
+    expect(lensesOf(transcript)).toEqual([
+      { rulePath: 'CLAUDE.md', ruleLine: 3, offendingPath: 'src/db.ts', offendingLine: 80 },
+    ]);
+  });
+  it('does not close on a backtick-quoted verdict mention', () => {
+    const transcript =
+      'VIOLATION: Never use raw SQL. — CLAUDE.md:3\n' +
+      'OFFENDING: db.raw(query)\n' +
+      '`VERDICT: FAIL` — src/db.ts:80';
+    expect(parseConventionEvidencePairs(transcript)).toEqual([
+      {
+        violation: 'Never use raw SQL. — CLAUDE.md:3',
+        offending: 'db.raw(query) `VERDICT: FAIL` — src/db.ts:80',
+      },
+    ]);
   });
   it('preserves quoted verdict text without treating it as a protocol closer', () => {
     const transcript =

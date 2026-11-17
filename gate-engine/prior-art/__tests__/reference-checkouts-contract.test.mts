@@ -37,6 +37,20 @@ describe('prior-art agent: reference checkouts resolve from a linked worktree', 
     expect(phase0).toContain('skipped silently and counts only as declared');
   });
 
+  it('Q6 carries what an earlier attempt at the same problem cost', () => {
+    const q6 = read('agents/prior-art.md').split('**Q6 — Cost symmetry.**')[1]?.split('**Q7')[0];
+    expect(q6).toContain('earlier PR, branch or commit');
+    expect(q6).toContain('review rounds, rewrites or');
+  });
+
+  it("reads the main worktree's config when a linked worktree lacks its git-ignored copy", () => {
+    const context = read('agents/prior-art.md')
+      .split('</architecture_context>')[0]
+      .replace(/\s+/g, ' ');
+    expect(context).toContain('`git check-ignore -q guard.config.json`');
+    expect(context).toContain('same directory of the main worktree');
+  });
+
   it('ships the same text to every synced agent surface', () => {
     const source = read('agents/prior-art.md');
     expect(read('.claude/agents/prior-art.md')).toBe(source);

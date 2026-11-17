@@ -46,6 +46,20 @@ const RED =
 /** A settled verdict in milliseconds: the module is bounded by wall clock, not by poll count. */
 const FAST = { DEVKIT_WAIT_CI_INTERVAL_MS: '5', DEVKIT_WAIT_CI_SETTLE_MS: '1' };
 
+/** A `node` that records the waiter's argv instead of polling, and runs every other script for real. */
+function waiterShim(log: string, path = process.env.PATH): string {
+  const bin = mkdtempSync(join(tmpdir(), 'wait-ci-node-'));
+  const realNode = spawnSync('/bin/sh', ['-c', 'command -v node'], {
+    encoding: 'utf8',
+  }).stdout.trim();
+  writeFileSync(
+    join(bin, 'node'),
+    `#!/bin/sh\ncase "$1" in */wait-ci/wait.mts|*/wait-ci/wait.mjs) printf '%s\\n' "$*" >> '${log}'; exit 0 ;; esac\nexec '${realNode}' "$@"\n`,
+    { mode: 0o755 },
+  );
+  return `${bin}:${path}`;
+}
+
 function ship(argv: string[], log: string, rows = GREEN, extraEnv: Record<string, string> = {}) {
   const { dir, env } = seedShipRepoLocalRemote();
   writeFileSync(join(dir, 'note.txt'), 'hello\n');
@@ -57,7 +71,7 @@ function ship(argv: string[], log: string, rows = GREEN, extraEnv: Record<string
       ...env,
       ...FAST,
       ...extraEnv,
-      PATH: `${ghChecksStub(log, rows)}:${process.env.PATH}`,
+      PATH: `${ghChecksStub(log, rows)}:${extraEnv.PATH ?? process.env.PATH}`,
     },
   });
   return { dir, r };
@@ -111,6 +125,8 @@ describe('ship-branch.sh — --wait-ci refusals', () => {
       ['--wait-ci', '--wait-ci-timeout', 'soon'],
       /whole number of seconds/,
     ],
+    // Refused, never filled: the default must not stand in for a value the operator left empty.
+    ['an empty timeout', ['--wait-ci', '--wait-ci-timeout', ''], /requires seconds/],
     ['a timeout under the floor', ['--wait-ci', '--wait-ci-timeout', '10'], /must be between/],
     ['a timeout over the ceiling', ['--wait-ci', '--wait-ci-timeout', '7201'], /must be between/],
     ['--wait-ci with --dry-gates', ['--wait-ci', '--dry-gates'], /never opens a PR/],
@@ -158,6 +174,20 @@ describe('ship-branch.sh — --wait-ci', () => {
     // The required-set reads belong to --wait-ci-required alone.
     expect(calls.filter((l) => l.includes('baseRefName'))).toEqual([]);
     expect(r.stderr).toContain('ship: ci-outcome=passed pr=42');
+  });
+
+  // The default fills only an UNSET budget: an unconditional assignment would silently override the
+  // operator's own --wait-ci-timeout.
+  it.each([
+    ['a budget that outlasts a ~55-minute CI run when no timeout is passed', [], '--timeout 3600'],
+    ["the operator's own timeout over the default", ['--wait-ci-timeout', '120'], '--timeout 120'],
+  ])('hands the waiter %s', (_label, extra, expected) => {
+    const waits = argvLog();
+    const { r } = ship(['feat/budget', 't', '--wait-ci', ...extra, 'note.txt'], argvLog(), GREEN, {
+      PATH: waiterShim(waits),
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(lines(waits)).toEqual([expect.stringContaining(expected)]);
   });
 
   it('leaves the immediate return untouched when the flag is absent', () => {
@@ -250,6 +280,26 @@ describe('reship.sh — --wait-ci after a real re-push', () => {
     expect(r.status, r.stderr).toBe(0);
     expect(readFileSync(ghLog, 'utf8')).toContain('pr checks 7');
     expect(r.stderr).toContain('ship: ci-outcome=passed pr=7');
+  });
+
+  it('hands the waiter the same default budget as a new ship', () => {
+    const { dir, env } = bodyUpdateRepo();
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+    const waits = argvLog();
+
+    const r = spawnSync(
+      '/bin/bash',
+      [reshipScript, 'feat/pr', 'add v2', '--pr', '--wait-ci', '--', 'a.ts'],
+      {
+        cwd: dir,
+        input: 'body\n',
+        encoding: 'utf8',
+        env: { ...process.env, ...env, ...CHECKS, PATH: waiterShim(waits, env.PATH) },
+      },
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(lines(waits)).toEqual([expect.stringContaining('--timeout 3600')]);
   });
 
   it('skips the wait and says so when the --ready flip failed', () => {
@@ -575,10 +625,10 @@ function strictShip(flags: string[], rows: string, env: Record<string, string> =
   return ship(['feat/strict', 't', ...flags, 'note.txt'], argvLog(), rows, env).r;
 }
 
-/** A --pr re-push of feat/pr; `edit` false leaves a.ts unchanged, so only a --body can publish. */
-function strictReship(argv: string[], env: Record<string, string>, edit = true) {
+/** A --pr re-push of feat/pr with an edited a.ts. */
+function strictReship(argv: string[], env: Record<string, string>) {
   const { dir, env: repoEnv, ghBody } = bodyUpdateRepo();
-  if (edit) writeFileSync(join(dir, 'a.ts'), 'v2\n');
+  writeFileSync(join(dir, 'a.ts'), 'v2\n');
   const r = spawnSync('/bin/bash', [reshipScript, 'feat/pr', 'add v2', '--pr', ...argv], {
     cwd: dir,
     input: 'body\n',
@@ -653,13 +703,29 @@ describe('--wait-ci-strict', () => {
     expect(r.stderr).toContain('ci-outcome=failed pr=7');
   });
 
-  it('finishes a body-only update before exiting 5, rather than aborting mid-arm', () => {
-    // reship runs under `set -e`: a wait that exited would skip the body receipt and the URL echo.
-    const argv = ['--body', 'fresh body', ...STRICT, '--', 'a.ts'];
-    const { r, ghBody } = strictReship(argv, { GH_CHECKS_JSON: RED }, false);
+  it('finishes a recovered body-only update before exiting 5, rather than aborting mid-arm', () => {
+    // A lost push response leaves the body recorded with no commit delta; the resume's body-only arm
+    // runs under `set -e`, so a wait that exited would skip the body receipt and the URL echo.
+    const { dir, env, ghBody } = bodyUpdateRepo();
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+    const run = (argv: string[], extra: Record<string, string>) =>
+      spawnSync('/bin/bash', [reshipScript, ...argv], {
+        cwd: dir,
+        input: 'body\n',
+        encoding: 'utf8',
+        env: { ...process.env, ...env, ...FAST, ...extra },
+      });
+    const lost = run(['feat/pr', 'add v2', '--pr', '--body', 'fresh body', '--', 'a.ts'], {
+      FAIL_AFTER_PUSH: '1',
+    });
+    expect(lost.status).not.toBe(0);
+    expect(existsSync(ghBody)).toBe(false);
+
+    const r = run(['--resume', 'feat/pr', ...STRICT], { GH_CHECKS_JSON: RED });
     expect(r.status, r.stderr).toBe(5);
     expect(readFileSync(ghBody, 'utf8')).toBe('fresh body');
     expect(r.stdout).toContain('https://github.com/acme/app/pull/7');
+    expect(r.stderr).toContain('ci-outcome=failed pr=7');
   });
 
   it('exits 5 for a SHIP_DRY_RUN re-push, as a new ship does, since no verdict was formed', () => {

@@ -1,12 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { sourceMatchers } from '../config.mts';
 import {
   readRatchetBaseline,
   removeRatchetBaseline,
   writeRatchetBaseline,
 } from './baseline-paths.mts';
-import { LINES_BASELINE } from './size-policy.mts';
+import { LINES_BASELINE, lineMatchers } from './size-policy.mts';
 import {
   CURRENT_LINE_COUNT_VERSION,
   lineBaselineParents,
@@ -20,6 +19,7 @@ interface LinesConfig {
   maxLines: number;
   maxTestLines: number;
   sourceExtensions: string[];
+  maxLinesExtensions: string[];
 }
 
 interface OversizedFile {
@@ -51,7 +51,7 @@ export function freezeLinesBaseline(
       }
     },
   );
-  const match = sourceMatchers(config.sourceExtensions);
+  const match = lineMatchers(config);
   const cap = (file: string) => (match.isTest(file) ? config.maxTestLines : config.maxLines);
   const previousCeiling = (file: OversizedFile) => previous.files[file.file];
   const unverifiableLegacy = (file: OversizedFile) =>

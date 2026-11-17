@@ -14,8 +14,10 @@ const inconclusive = (reviewer: string, cause = 'outage', reason = 'judge outage
   });
 const completenessNoRun = (cause: string) =>
   ev({ type: 'gate_infra_failure', gate: 'completeness', family: 'review', cause });
-const judgeFailed = (judge: string, detail: string, outcome = 'transient') =>
-  ev({ type: 'judge_exec', judge, outcome, outage_detail: detail });
+const judgeFailed = (judge: string, detail: string, outcome = 'transient', lens?: string) =>
+  ev({ type: 'judge_exec', judge, outcome, outage_detail: detail, lens });
+const judgeWordless = (judge: string, outcome: string, lens?: string) =>
+  ev({ type: 'judge_exec', judge, outcome, lens });
 const digest = (events: GateEvent[]): string => render(summarise(events, SHIP));
 
 const QUOTA = "You've hit your usage limit. Try again in 29 days.";
@@ -92,6 +94,55 @@ describe('a judge outage in the ship digest', () => {
       SHIP,
     );
     expect(rows[0].detail).toBe(QUOTA);
+  });
+
+  it("drops an earlier spawn's words when the spawn that ended the reviewer failed without any", () => {
+    const rows = summarise(
+      [
+        judgeFailed('review:x', QUOTA),
+        judgeWordless('review:x', 'empty'),
+        inconclusive('x', 'outage', 'judge returned empty output'),
+        shipResult('review'),
+      ],
+      SHIP,
+    );
+    expect(rows[0].detail).toBe('judge returned empty output');
+  });
+
+  it.each([
+    ['before', false],
+    ['after', true],
+  ])("keeps a failed lens's words when a concurrent lens's ok lands %s it", (_order, okFirst) => {
+    const failed = judgeFailed('review:x', QUOTA, 'transient', 'a');
+    const ok = judgeWordless('review:x', 'ok', 'b');
+    const rows = summarise(
+      [...(okFirst ? [ok, failed] : [failed, ok]), inconclusive('x'), shipResult('review')],
+      SHIP,
+    );
+    expect(rows[0].detail).toBe(QUOTA);
+  });
+
+  it("drops a lens's words once that same lens's retry succeeds", () => {
+    const rows = summarise(
+      [
+        judgeFailed('review:x', QUOTA, 'transient', 'a'),
+        judgeWordless('review:x', 'ok', 'a'),
+        inconclusive('x', 'outage', 'judge outage'),
+        shipResult('review'),
+      ],
+      SHIP,
+    );
+    expect(rows[0].detail).toBe('judge outage');
+  });
+
+  it("drops completeness's earlier words when its last spawn failed without any", () => {
+    const text = digest([
+      judgeFailed('review:completeness', QUOTA),
+      judgeWordless('review:completeness', 'empty'),
+      completenessNoRun('transient'),
+    ]);
+    expect(text).toContain('· completeness — judge failed, cause unclassified');
+    expect(text).not.toContain(QUOTA);
   });
 
   it("keeps a response-contract reviewer's own reason over an earlier spawn's outage words", () => {

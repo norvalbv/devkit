@@ -2,6 +2,9 @@
  * The advisory channel: a stage that holds no exit still has to be readable at the ship terminus.
  * Its OWN event type, never gate_result — reasoning in gate-telemetry-self-describing (sc-2526).
  */
+import { stripVTControlCharacters } from 'node:util';
+import { z } from 'zod';
+import { UNSAFE_TEXT_RE } from '../../review/valve/shell-word.mts';
 import { emitGateEvent } from '../gate-events.mts';
 
 /** What an advisory can say about itself. It can never say "blocked": it holds no exit. */
@@ -55,25 +58,138 @@ interface FallowAttribution {
 interface FallowAudit {
   verdict?: string;
   attribution?: FallowAttribution;
+  complexity?: FallowComplexity | null;
+  crapEstimated?: boolean;
+  lists?: FindingLists;
 }
 
-/** The counters paired with the words devkit prints for them. */
-const INTRODUCED: ReadonlyArray<readonly [field: keyof FallowAttribution, label: string]> = [
-  ['complexity_introduced', 'complexity'],
-  ['duplication_introduced', 'duplication'],
-  ['dead_code_introduced', 'dead code'],
-  ['styling_introduced', 'styling'],
+/** One `complexity.findings[]` entry, reduced to the three fields that say a score was estimated. */
+interface FallowComplexityFinding {
+  introduced?: boolean;
+  exceeded?: string;
+  coverage_source?: string;
+}
+
+/** fallow's complexity section; only its per-finding list is read. */
+interface FallowComplexity {
+  findings?: ReadonlyArray<FallowComplexityFinding | null>;
+}
+
+/** fallow tags each finding `istanbul` or one of these; there is no report-level flag to read. */
+const ESTIMATED_SOURCES: readonly string[] = ['estimated', 'estimated_component_inherited'];
+
+/**
+ * Only a CRAP-alone breach qualifies: a cyclomatic or cognitive breach survives measured coverage,
+ * so naming a coverage run for it would send the reader on a re-ship that cannot change anything.
+ */
+const isEstimatedCrapOnly = (f: FallowComplexityFinding | null): boolean =>
+  f?.exceeded === 'crap' &&
+  // Absent under `gate all`, where every finding decides the verdict; only `false` means inherited.
+  f.introduced !== false &&
+  ESTIMATED_SOURCES.includes(f.coverage_source ?? '');
+
+/** Array.isArray guards the read: a reshaped vendor field means no marker, never a throw. */
+function hasEstimatedCrap(complexity: FallowComplexity | null | undefined): boolean {
+  const findings = complexity?.findings;
+  return Array.isArray(findings) && findings.some(isEstimatedCrapOnly);
+}
+
+/** The remedy is the devkit step that feeds ship's FALLOW_COVERAGE, not fallow's own command. */
+const ESTIMATED_CRAP_REMEDY =
+  ' (CRAP estimated, no coverage: run `devkit coverage-run <their tests>` in this checkout, then re-ship)';
+
+/** A field fallow reshaped reads as absent, so one odd finding never costs the whole report. */
+const loose = <T extends z.ZodType>(schema: T) => schema.optional().catch(undefined);
+const Text = loose(z.string().min(1));
+const Line = loose(z.number().int());
+const Site = z.object({ file: Text, path: Text, start_line: Line, line: Line });
+
+/** The fields fallow's own summary renderer (action/jq/summary-audit.jq) locates and names one by. */
+const Finding = z.object({
+  introduced: loose(z.boolean()),
+  path: Text,
+  from_path: Text,
+  line: Line,
+  files: z.array(z.string().min(1)).catch([]),
+  instances: z.array(Site).catch([]),
+  locations: z.array(Site).catch([]),
+  name: Text,
+  export_name: Text,
+  package_name: Text,
+  member_name: Text,
+  specifier: Text,
+  code: Text,
+});
+type Finding = z.infer<typeof Finding>;
+
+const Findings = z
+  .array(Finding.nullable().catch(null))
+  .catch([])
+  .transform((items) => items.filter((item): item is Finding => item !== null));
+
+/** The lists whose items fallow flags `introduced`; a missing or reshaped list reads as empty. */
+const FindingLists = z.object({
+  complexity: z
+    .object({ findings: Findings, styling_findings: Findings })
+    .catch({ findings: [], styling_findings: [] }),
+  duplication: z.object({ clone_groups: Findings }).catch({ clone_groups: [] }),
+  dead_code: z.record(z.string(), Findings).catch({}),
+});
+type FindingLists = z.infer<typeof FindingLists>;
+
+/** The counters paired with the words devkit prints and the lists whose items fallow flags. */
+const INTRODUCED: ReadonlyArray<
+  readonly [field: keyof FallowAttribution, label: string, items: (l: FindingLists) => Finding[]]
+> = [
+  ['complexity_introduced', 'complexity', (l) => l.complexity.findings],
+  ['duplication_introduced', 'duplication', (l) => l.duplication.clone_groups],
+  ['dead_code_introduced', 'dead code', (l) => Object.values(l.dead_code).flat()],
+  ['styling_introduced', 'styling', (l) => l.complexity.styling_findings],
 ];
 
 /** A counter the report did not supply, or supplied as something that is not a number, counts 0. */
 const count = (value: number | undefined): number =>
   Number.isFinite(value) && Number(value) > 0 ? Math.trunc(Number(value)) : 0;
 
-/** fallow's introduced counters as the words devkit prints. Zeroes are omitted, never rendered. */
-function introducedParts(attribution: FallowAttribution = {}): string[] {
-  return INTRODUCED.map(([field, label]) => [count(attribution[field]), label] as const)
-    .filter(([n]) => n > 0)
-    .map(([n, label]) => `${n} ${label}`);
+/** The first candidate present — one call rather than a branch per candidate. */
+const firstOf = <T,>(...candidates: Array<T | undefined>): T | undefined =>
+  candidates.find((candidate) => candidate !== undefined);
+
+/** `path:line name` for one finding; a clone group is located by its first instance. */
+function locate(item: Finding): string {
+  const [clone = {}] = item.instances;
+  const [site = {}] = item.locations;
+  const file = firstOf(item.path, item.from_path, clone.file, item.files[0], site.path);
+  const line = firstOf(item.line, clone.start_line, site.line);
+  const where = file && (line === undefined ? file : `${file}:${line}`);
+  const { name, export_name, package_name, member_name, specifier, code } = item;
+  const label = firstOf(name, export_name, package_name, member_name, specifier, code);
+  const located = [where, label].filter(Boolean).join(' ') || '(no location)';
+  // A committed path can carry a newline or an escape sequence; printed raw it forges a log line.
+  return stripVTControlCharacters(located).replace(UNSAFE_TEXT_RE, ' ');
+}
+
+interface Introduced {
+  /** fallow's introduced counters as the words devkit prints. Zeroes are omitted, never rendered. */
+  parts: string[];
+  /** Every finding fallow flagged introduced, from the categories whose flags match its counter. */
+  named: string[];
+  /** Categories whose flag count disagrees with the counter: fallow keys findings without a line. */
+  unattributed: string[];
+}
+
+/** A category is named only when its flags equal its counter; a disagreement is silence, not a guess. */
+function introduced({ attribution = {}, lists }: FallowAudit): Introduced {
+  const result: Introduced = { parts: [], named: [], unattributed: [] };
+  for (const [field, label, items] of INTRODUCED) {
+    const n = count(attribution[field]);
+    if (n === 0) continue;
+    result.parts.push(`${n} ${label}`);
+    const flagged = lists ? items(lists).filter((item) => item.introduced === true) : [];
+    if (flagged.length === n) result.named.push(...flagged.map(locate));
+    else result.unattributed.push(label);
+  }
+  return result;
 }
 
 /**
@@ -94,7 +210,12 @@ function readReport(text: string): FallowAudit {
   if (!VERDICTS.includes(report.verdict ?? '')) return {};
   // `?? {}` covers a literal `attribution: null`, which the parameter default cannot: a default
   // fires only on undefined, so null would reach the counter reads and throw inside the hook.
-  return { verdict: report.verdict, attribution: report.attribution ?? {} };
+  return {
+    verdict: report.verdict,
+    attribution: report.attribution ?? {},
+    crapEstimated: hasEstimatedCrap(report.complexity),
+    lists: FindingLists.safeParse(report).data,
+  };
 }
 
 /** The verdicts fallow emits and this module can interpret; anything else is an unreadable report. */
@@ -104,22 +225,45 @@ const VERDICTS: readonly string[] = ['pass', 'warn', 'fail'];
 const isClean = (verdict: string, parts: string[]): boolean =>
   verdict === 'pass' && parts.length === 0;
 
-/** What the terminus prints: fallow's verdict, its own counters, and where the prose is. */
-const detailFor = (verdict: string, parts: string[]): string =>
-  `verdict=${verdict}${parts.length > 0 ? ` · ${parts.join(', ')} introduced` : ''} — read the fallow section of the log`;
+/** The digest cuts a row at 140 chars, so the row carries basenames and only the first few names. */
+const NAMED_IN_ROW = 3;
+
+function rowNames(named: string[]): string {
+  if (named.length === 0) return '';
+  const shown = named.slice(0, NAMED_IN_ROW).map((name) => name.replace(/^\S*\//, ''));
+  const more = named.length > NAMED_IN_ROW ? `, +${named.length - NAMED_IN_ROW} more` : '';
+  return `: ${shown.join(', ')}${more}`;
+}
+
+/** What the terminus prints: fallow's verdict, its own counters, what they name, and the prose. */
+const detailFor = (verdict: string, { parts, named }: Introduced, crapEstimated = false): string =>
+  `verdict=${verdict}${crapEstimated ? ESTIMATED_CRAP_REMEDY : ''}${parts.length > 0 ? ` · ${parts.join(', ')} introduced${rowNames(named)}` : ''} — read the fallow section of the log`;
+
+type FallowSummary = { token: Exclude<AdvisoryToken, 'unreadable'>; detail: string } & Introduced;
 
 /**
  * CLEAN needs a `pass` verdict AND zero introduced counters: fallow returns warn with EXIT 0 for a
  * duplication-only changeset, which is exactly the run sc-2526 reports as lost.
  */
-export function summariseFallowAudit(
-  text: string,
-): { token: Exclude<AdvisoryToken, 'unreadable'>; detail: string } | null {
-  const { verdict, attribution } = readReport(text);
+export function summariseFallowAudit(text: string): FallowSummary | null {
+  const report = readReport(text);
+  const { verdict, crapEstimated } = report;
   if (!verdict) return null;
-  const parts = introducedParts(attribution);
-  if (isClean(verdict, parts)) return { token: 'clean', detail: '' };
-  return { token: 'findings', detail: detailFor(verdict, parts) };
+  const found = introduced(report);
+  if (isClean(verdict, found.parts)) return { token: 'clean', detail: '', ...found };
+  return { token: 'findings', detail: detailFor(verdict, found, crapEstimated), ...found };
+}
+
+/** The log's answer to "which finding is mine": fallow's human report lists them unmarked. */
+function introducedBlock({ named, unattributed }: Introduced): string {
+  const lines = [
+    ...named.map((name) => `  ${name}`),
+    ...unattributed.map(
+      (label) => `  ${label}: fallow's per-finding flags do not match its counter — not named`,
+    ),
+  ];
+  if (lines.length === 0) return '';
+  return `fallow — introduced by this diff (fallow's own attribution):\n${lines.join('\n')}\n`;
 }
 
 /** `absent` is its own case rather than a silent skip — gate-opt-out-is-visible-and-detectable. */
@@ -146,7 +290,13 @@ export function reportFallowAudit(
     return 'clean';
   }
   emitAdvisoryResult(FALLOW_ADVISORY, 'finding', summary.detail);
+  process.stderr.write(introducedBlock(summary));
   return 'findings';
+}
+
+/** An audit the hook declined to run, e.g. because it could not scope it to the staged set. */
+export function reportFallowSkipped(detail: string): AdvisoryToken {
+  return verifiedNothing(detail);
 }
 
 /** A gate that verified NOTHING must not read like a gate that found nothing. */
@@ -164,8 +314,8 @@ function summariseSafely(read: () => string): ReturnType<typeof summariseFallowA
   }
 }
 
-// CLI: `node advisory/emit.mjs fallow-advisory <json-path>|--absent` prints ONE token — clean |
-// findings | unreadable. Narration only: it always exits 0 and may never change a verdict.
+// CLI: `node advisory/emit.mjs fallow-advisory <json-path> [rc]|--absent|--skipped <detail>` prints
+// ONE token — clean | findings | unreadable. Narration only: it always exits 0, never a verdict.
 if (
   /[/\\]advisory[/\\]emit\.m[jt]s$/.test(process.argv[1] ?? '') &&
   process.argv[2] === FALLOW_ADVISORY
@@ -174,11 +324,14 @@ if (
   let token: AdvisoryToken = 'unreadable';
   try {
     const { readFileSync } = await import('node:fs');
-    token = reportFallowAudit(
-      () => readFileSync(arg, 'utf8'),
-      arg === '--absent',
-      (process.argv[4] ?? '0') !== '0',
-    );
+    token =
+      arg === '--skipped'
+        ? reportFallowSkipped(process.argv[4] ?? '')
+        : reportFallowAudit(
+            () => readFileSync(arg, 'utf8'),
+            arg === '--absent',
+            (process.argv[4] ?? '0') !== '0',
+          );
   } catch {
     /* narration only — the default token already tells the caller to print the human report */
   }

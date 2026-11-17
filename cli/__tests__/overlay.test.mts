@@ -47,24 +47,23 @@ import {
 
 const overlayAll = () =>
   applyOverlayConstraints({ ...defaultSelection(), agentHooks: true, fallow: true }, 'react-app');
-// comments:preflight, fanout:new-file-brief and placement:brief (fanout guard, structure) postdate
-// the hook ledger, so no pre-ledger configuration can carry them.
+// comments:preflight, fanout:new-file-brief, placement:brief and size:post-edit postdate the hook
+// ledger, so no pre-ledger configuration can carry them.
 const preLedgerAll = () => {
   const selection = overlayAll();
+  const postLedger = new Set(['comments', 'fanout', 'size']);
   return {
     ...selection,
     structure: false,
-    guards: selection.guards.filter((guard) => guard !== 'comments' && guard !== 'fanout'),
+    guards: selection.guards.filter((guard) => !postLedger.has(guard)),
   };
 };
 
-// Stub fallow's external CLI (detect/install) so overlay's fallow flow runs without
-// a real `fallow` binary or a global network install. detectFallow → present, so resolveOverlayFallow
-// wires the gate without installing. Plain fns (not vi.fn) so afterEach's restoreAllMocks can't clear them.
+// Stub the overlay fallow resolver (detect/install) at overlay.mts's import, so no test
+// spawns a real `fallow` or a global install. Plain fn (not vi.fn) so restoreAllMocks can't clear it.
 vi.mock('../lib/install/install-fallow.mts', async (importOriginal) => ({
   ...(await importOriginal()),
-  detectFallow: () => ({ available: true, version: '2.89.0' }),
-  installFallow: () => ({ ok: true, method: 'bun', message: 'installed fallow@2.89.0 via bun' }),
+  resolveOverlayFallow: () => true,
 }));
 
 // For the overlay-upgrade suite below: keep needsRerun / repoUrl REAL, but stub the
@@ -985,10 +984,10 @@ describe('overlay (local-only) install', () => {
     applyOverlayConstraints({
       ...defaultSelection(),
       agentHooks: false,
-      // decisions, comments and fanout are the guards that own hooks; structure owns one too.
+      // decisions, comments, fanout and size are the guards that own hooks; structure owns one too.
       structure: false,
       guards: RECOMMENDED_GUARD_IDS.filter(
-        (guard) => !['decisions', 'comments', 'fanout'].includes(guard),
+        (guard) => !['decisions', 'comments', 'fanout', 'size'].includes(guard),
       ),
       ...extra,
     });
@@ -1515,7 +1514,7 @@ describe('overlay hook regeneration (syncOverlayHook + doctor --fix)', () => {
 
     expect(await doctorRun([], root)).toBe(0);
     expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toMatch(
-      /· hook registrations: fallow-gate.sh hooks devkit will not remove: claude:retired-registration:\.claude\/settings\.json/,
+      /· hook registrations: hooks devkit will not remove: claude:retired-registration:\.claude\/settings\.json/,
     );
     expect(await doctorRun(['--fix'], root)).toBe(0);
     expect(readFileSync(settings, 'utf8')).toBe(before);

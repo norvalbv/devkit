@@ -1,21 +1,34 @@
 #!/usr/bin/env node
 
 // Ship's PR-body steps, run by publish-evidence.sh. `budget` sizes the bound, `publish` writes the
-// red/green block, `publish-media` the QA capture, `notes` advisories, `body` cleans caller text.
-import { readFileSync, realpathSync } from 'node:fs';
+// red/green block, `publish-media` the QA capture, `notes` advisories, `body` cleans caller text and
+// adds the UI task item, and `ui-item` adds that item to an open PR whose body this ship did not write.
+import { mkdtempSync, readFileSync, realpathSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { resolveGuardConfig } from '../../../../gate-engine/config.mts';
 import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mts';
 import { clip } from '../../../../gate-engine/judge/odb-probe.mts';
-import type { RegressionEvidence } from '../../baseline-status/regression-evidence.mts';
-import { captureRegressionEvidence } from '../../baseline-status/regression-proof.mts';
+import type { RegressionEvidence } from '../../baseline-status/regression/evidence.mts';
+import {
+  type CapturedRegression,
+  captureRegressionEvidence,
+} from '../../baseline-status/regression/proof.mts';
 import {
   type PreparedRegressionRepository,
   prepareRegressionRepository,
-} from '../../baseline-status/regression-repository.mts';
+} from '../../baseline-status/regression/repository.mts';
+import { git } from '../../../../gate-engine/decisions/git-io.mts';
+import {
+  instruction,
+  UI_EVIDENCE,
+  uiPathReason,
+} from '../../../../gate-engine/ui-evidence/check.mts';
+import { textOf } from '../digest/fields.mts';
 import { telemetrySink } from '../../../../gate-engine/judge/run-context.mts';
-import { readShipEvents } from '../digest/gate-digest.mts';
+import { ATTEMPT, readShipEvents } from '../digest/gate-digest.mts';
+import { readJson } from '../../fs-helpers.mts';
 import { errorMessage } from '../review/shared/common.mts';
 import type { VerdictInput } from '../merge-verdict/ship-change.mts';
 import {
@@ -32,17 +45,21 @@ import { publishBody, type PublishResult, readPull } from './pr-body.mts';
 import { publishMedia, withPrEvidenceLock } from './publish-media.mts';
 import { buildRedCommit, classifyChange, prBase, treeOf } from './red-ref.mts';
 import { noteLines, upsertNotes } from './reviewer-notes.mts';
+import { withUiItem } from './ui-item.mts';
 
 /** Ship waits out a `devkit machine attach` on the same PR, whose upload is bounded at 300 s. */
 const LOCK_WAIT_MS = 330_000;
 
 const REPORT = '.devkit-evidence-report.json';
+const SKIPPED_QUIET = `📸 ${UI_EVIDENCE}: the gates were skipped (an earlier run passed them), so only file paths were checked, and none is a UI file; if this change is visible, add before/after screenshots to the PR`;
 
 interface Produced {
   outcome: EvidenceOutcome;
   evidence: RegressionEvidence | null;
   /** Changed test files; null when the change was never classified. */
   tests: number | null;
+  /** The capture's red/green logs; set only when a capture ran. */
+  evidenceDir?: string;
 }
 
 /** What one completed publish run did, for its `ship_evidence` row. A null outcome produced none. */
@@ -101,7 +118,7 @@ export function phaseTimes(marks: readonly PhaseMark[], now: number): string {
 async function captureWithin(
   prepared: PreparedRegressionRepository,
   seconds: number,
-): Promise<{ evidence: RegressionEvidence; timing: string }> {
+): Promise<{ captured: CapturedRegression; timing: string }> {
   // Monotonic, like the timer itself, so a wall-clock step cannot skew a phase or make it negative.
   const marks: PhaseMark[] = [{ name: 'setup', at: performance.now() }];
   let stalled: string | null = null;
@@ -110,10 +127,10 @@ async function captureWithin(
     process.kill(process.pid, 'SIGTERM');
   }, seconds * 1000);
   try {
-    const { evidence } = await captureRegressionEvidence(prepared, (name) =>
+    const captured = await captureRegressionEvidence(prepared, (name) =>
       marks.push({ name, at: performance.now() }),
     );
-    return { evidence, timing: phaseTimes(marks, performance.now()) };
+    return { captured, timing: phaseTimes(marks, performance.now()) };
   } catch (error) {
     throw stalled ? new Error(`the tests did not finish within ${seconds}s (${stalled})`) : error;
   } finally {
@@ -155,9 +172,15 @@ async function produce(
       ['--red', red, '--green', head, '--vitest-report', REPORT, '--', ...argv],
       cwd,
     );
-    const { evidence, timing } = await captureWithin(prepared, config.timeoutSeconds);
+    const { captured, timing } = await captureWithin(prepared, config.timeoutSeconds);
+    const { evidence, evidenceDir } = captured;
     const outcome = outcomeFromRegression(evidence, head, base);
-    return { outcome: { ...outcome, detail: `${outcome.detail} (${timing})` }, evidence, tests };
+    return {
+      outcome: { ...outcome, detail: `${outcome.detail} (${timing})` },
+      evidence,
+      tests,
+      evidenceDir,
+    };
   } catch (error) {
     return { ...notProduced(errorMessage(error), head), tests };
   } finally {
@@ -172,7 +195,7 @@ const notProduced = (why: string, head: string): Produced => ({
 });
 
 /** Loaded only once a block is being written, so a ship that writes none never pays for it. */
-async function shipVerdict(input: VerdictInput): Promise<PrintedVerdict> {
+async function shipVerdict(input: VerdictInput): Promise<PrintedVerdict | undefined> {
   try {
     const { printVerdict } = await import('../merge-verdict/ship-change.mts');
     return printVerdict(input);
@@ -181,15 +204,32 @@ async function shipVerdict(input: VerdictInput): Promise<PrintedVerdict> {
   }
 }
 
-interface PublishArgs {
+export interface PublishArgs {
   cwd: string;
   repo: string;
   pr: string;
   head: string;
-  failed: string | undefined;
+  failed?: string;
+  /** Where a non-captured run's logs are moved, out of a capture root its caller deletes. */
+  keepIn?: string;
+  /** Replace a same-head block that recorded inconclusive. */
+  recapture?: boolean;
 }
 
-async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<Published | null> {
+function keepEvidence(dir: string | undefined, keepIn: string | undefined, captured: boolean) {
+  if (!dir || !keepIn || captured) return;
+  try {
+    const kept = join(mkdtempSync(join(keepIn, 'devkit-evidence-kept-')), 'evidence');
+    renameSync(dir, kept);
+    console.error(`evidence: kept the red/green logs at ${kept}`);
+  } catch (error) {
+    console.error(`evidence: the red/green logs were not kept: ${errorMessage(error)}`);
+  }
+}
+
+/** Null when no block was written for lack of an evidence entry. */
+export async function publish(args: PublishArgs): Promise<Published | null> {
+  const { cwd, repo, pr, head, failed } = args;
   const nothing = { outcome: null, tests: null, verdict: null };
   const pull = readPull(repo, pr);
   if (pull.headRefOid !== head) {
@@ -197,8 +237,14 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<Pu
     return { ...nothing, publish: 'head-moved' };
   }
   const current = readEvidenceBlock(pull.body, head);
-  if (current?.stale === false) {
-    console.error('evidence: the PR body already records evidence for this head');
+  const redo =
+    args.recapture === true && current?.stale === false && current.status === 'inconclusive';
+  if (current?.stale === false && !redo) {
+    const hint =
+      current.status === 'inconclusive' ? `; re-capture it with devkit pr-evidence ${pr}` : '';
+    console.error(
+      `evidence: the PR body already records ${current.status} evidence for this head${hint}`,
+    );
     const verdict = current.mergeVerdict?.verdict ?? null;
     return { ...nothing, outcome: current, verdict, publish: 'unchanged' };
   }
@@ -217,6 +263,10 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<Pu
       produced = notProduced(errorMessage(error), head);
     }
   }
+  if (redo && current) {
+    const detail = `${produced.outcome.detail} (recaptured; previously inconclusive: ${current.detail})`;
+    produced.outcome = { ...produced.outcome, detail };
+  }
   const { title, baseRefOid } = pull;
   const verdict = await shipVerdict({
     cwd,
@@ -230,11 +280,16 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<Pu
   const write = () => publishBody(repo, pr, head, (body) => replaceKeepingSections(body, block));
   const result = withPrEvidenceLock(cwd, { repo, pr }, write, LOCK_WAIT_MS);
   const { status, reason, detail } = produced.outcome;
+  const edit =
+    result === 'written'
+      ? `; edit it with devkit pr-body ${pr} --body-file <f>, not gh pr edit`
+      : '';
   console.error(
-    `evidence: ${status}${reason ? ` (${reason})` : ''}: ${detail} [PR body ${result}]`,
+    `evidence: ${status}${reason ? ` (${reason})` : ''}: ${detail} [PR body ${result}${edit}]`,
   );
   const { outcome, tests } = produced;
-  return { outcome, tests, publish: result, verdict: verdict.verdict?.verdict ?? null };
+  keepEvidence(produced.evidenceDir, args.keepIn, status === 'captured');
+  return { outcome, tests, publish: result, verdict: verdict?.verdict?.verdict ?? null };
 }
 
 /** This ship's reviewer advisories into the PR body; a ship whose reviewers raised none makes no gh call. */
@@ -245,6 +300,47 @@ function publishNotes(repo: string, pr: string, head: string, replace: boolean):
   const write = () => publishBody(repo, pr, head, (body) => upsertNotes(body, lines, replace));
   const result = withPrEvidenceLock(process.cwd(), { repo, pr }, write, LOCK_WAIT_MS);
   console.error(`reviewer notes: ${lines.length} advisory row(s) [PR body ${result}]`);
+}
+
+/** This ship attempt's screenshot reminder, read from its own gate events; null when it was quiet. */
+function uiEvidenceDetail(env: NodeJS.ProcessEnv): string | null {
+  const events = readShipEvents(env.DEVKIT_GATE_EVENTS ?? '', env.DEVKIT_SHIP_ID ?? '');
+  // One ship id can span attempts: only rows after the newest marker are this run's. With no
+  // marker the rows cannot be attributed, and a reminder that cannot tell stays quiet.
+  const opened = events.map((e) => e.type).lastIndexOf(ATTEMPT);
+  const mine = opened < 0 ? [] : events.slice(opened);
+  const rows = mine.filter((e) => e.type === 'advisory_result' && e.gate === UI_EVIDENCE);
+  // A sink row is arbitrary JSON, so a non-string detail reads as no reminder instead of throwing.
+  return textOf(rows[rows.length - 1]?.detail) || null;
+}
+
+/** The reminder a gate-skipped run would have given: the model-free path rule over its commit. */
+function skippedCommitDetail(cwd: string, commit: string): string | null {
+  const paths = git(cwd, ['diff', '--name-only', '-z', `${commit}^`, commit]).split('\0');
+  const reason = uiPathReason(paths.filter(Boolean), resolveGuardConfig(cwd).uiEvidence.paths);
+  return reason ? instruction(reason) : null;
+}
+
+/** Whether the repo installed the ui-evidence guard; a deselected one never reminds. */
+function uiEvidenceSelected(cwd: string): boolean {
+  const record = readJson<{ components?: { guards?: unknown } }>(
+    join(cwd, '.devkit', 'config.json'),
+  );
+  const guards = record?.components?.guards;
+  return Array.isArray(guards) && guards.includes(UI_EVIDENCE);
+}
+
+/** Add the item to the open PR's own body; an item already there, ticked or not, is left alone. */
+function publishUiItem(cwd: string, repo: string, pr: string, skipped: string | undefined): void {
+  if (skipped && !uiEvidenceSelected(cwd)) return;
+  const detail = skipped ? skippedCommitDetail(cwd, skipped) : uiEvidenceDetail(process.env);
+  if (!detail) {
+    if (skipped) console.error(SKIPPED_QUIET);
+    return;
+  }
+  if (publishBody(repo, pr, null, (body) => withUiItem(body, body, detail)) === 'written') {
+    console.error(`📸 ${UI_EVIDENCE}: added the screenshot task item to the PR`);
+  }
 }
 
 function required(values: Record<string, string | undefined>, name: string): string {
@@ -268,12 +364,20 @@ async function main(argv: string[]): Promise<void> {
     source: { type: 'string' },
     mode: { type: 'string' },
     started: { type: 'string' },
+    'keep-in': { type: 'string' },
+    'skipped-commit': { type: 'string' },
   } as const;
   const { values } = parseArgs({ args: rest, options, strict: true });
   if (command === 'body') {
     const caller = readFileSync(0, 'utf8');
     const current = values.pr ? readPull(required(values, 'repo'), values.pr).body : '';
-    process.stdout.write(carryEvidenceBlock(caller, current));
+    const body = carryEvidenceBlock(caller, current);
+    process.stdout.write(withUiItem(body, current, uiEvidenceDetail(process.env)));
+    return;
+  }
+  if (command === 'ui-item') {
+    const [cwd, repo, pr] = ['cwd', 'repo', 'pr'].map((name) => required(values, name));
+    publishUiItem(cwd, repo, pr, values['skipped-commit']);
     return;
   }
   if (command === 'publish-media') {
@@ -293,7 +397,9 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
   if (command !== 'publish')
-    throw new Error('usage: run.mts budget <dir> | publish … | publish-media … | notes … | body …');
+    throw new Error(
+      'usage: run.mts budget <dir> | publish … | publish-media … | notes … | body … | ui-item …',
+    );
   // The step's start, from the shell, so a fallback run after a killed one times the whole step.
   const started = Number(values.started) * 1000;
   const run = {
@@ -308,6 +414,7 @@ async function main(argv: string[]): Promise<void> {
     pr: run.pr,
     head: run.head,
     failed: values.failed,
+    keepIn: values['keep-in'],
   });
   // Last, never in a finally: a run that throws exits 1 and its --failed fallback writes the row.
   if (published) recordEvidenceEvent(published, run);

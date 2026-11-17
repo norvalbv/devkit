@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -31,7 +32,9 @@ import {
 /** The calls an AI guard could have made: `guard-review record-gate` is a shell gate's own narration. */
 const aiCalls = (calls: string) => calls.replace(/^guard-review record-gate .*\n/gm, '');
 
-// The hook's SHELL contract: commit/ship fail fast, review/dry-gates defer per lane, and it all
+const WITH_UI_EVIDENCE = { biome: false, guards: [...ALL_GUARDS, 'ui-evidence'] };
+
+// The hook's SHELL contract: commit/ship stop before the AI gates, review/dry-gates defer per lane, and it all
 // survives dash + a hook path with spaces. The orchestrator's own aggregation is tested in run.test.mjs.
 
 afterEach(cleanupHomes);
@@ -85,31 +88,37 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
   });
 
   it('dry-gates remembers deterministic failure and skips expensive gates', () => {
-    const r = runHook({
-      DET_RC: '1',
-      DEVKIT_RUN_MODE: 'dry-gates',
-      DEVKIT_REVIEW_GUARDS: 'comments',
-    });
+    const r = runHook(
+      {
+        DET_RC: '1',
+        DEVKIT_RUN_MODE: 'dry-gates',
+        DEVKIT_REVIEW_GUARDS: 'comments,ui-evidence',
+      },
+      WITH_UI_EVIDENCE,
+    );
     expect(r.status).toBe(1);
     expect(r.calls).toContain('guard-deterministic');
     // sc-2753: the comment budget runs inside guard-deterministic, never as its own hook step.
     expect(r.calls).not.toContain('guard-comments');
     expect(r.calls).not.toContain('guard-decisions');
     expect(r.calls).not.toContain('guard-review');
-    expect(r.calls).not.toContain('guard-ui-evidence');
+    expect(r.calls).toContain('guard-ui-evidence');
   });
 
-  it('dry-gates with reviewers runs the fleet after a deterministic failure, never decisions or ui-evidence', () => {
-    const r = runHook({
-      DET_RC: '1',
-      DEVKIT_RUN_MODE: 'dry-gates',
-      DEVKIT_REVIEW_GUARDS: 'comments,review',
-    });
+  it('dry-gates with reviewers runs the fleet and the UI reminder after a deterministic failure, never decisions', () => {
+    const r = runHook(
+      {
+        DET_RC: '1',
+        DEVKIT_RUN_MODE: 'dry-gates',
+        DEVKIT_REVIEW_GUARDS: 'comments,review,ui-evidence',
+      },
+      WITH_UI_EVIDENCE,
+    );
     expect(r.status).toBe(1);
     expect(r.calls).toContain('guard-deterministic');
     expect(r.calls).toContain('guard-review --gate');
     expect(r.calls).not.toContain('guard-decisions');
-    expect(r.calls).not.toContain('guard-ui-evidence');
+    expect(r.calls).toContain('guard-ui-evidence');
   });
 
   it('dry-gates with reviewers never arms the completeness judge, even with a message file present', () => {
@@ -151,6 +160,7 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     });
     expect(r.status).toBe(1);
     expect(r.calls).toContain('guard-decisions');
+    expect(r.stdout).toContain("with the user's OK: GUARD_NO_LOG=1 git commit");
     expect(r.calls).toContain('guard-review --gate');
   });
 
@@ -268,7 +278,7 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     const r = runHook({ DEC_RC: '3' });
     expect(r.status).toBe(1);
     expect(r.stdout).toContain('strict ship mode failed closed');
-    expect(r.stdout).not.toContain('Record the decision target');
+    expect(r.stdout).not.toContain('GUARD_NO_LOG=1 git commit');
   });
 
   // sc-2753: an installed guard-comments bin is never the hook's own step any more — a stale
@@ -310,6 +320,44 @@ describe('parallel completeness prewarm (ship message file present)', () => {
       expect(r.calls).toContain('guard-review --gate');
     },
   );
+
+  it('both judges share one per-run Remedy dir, removed before the verdict arms', () => {
+    const r = runHook({ DEVKIT_REMEDY_DIR: '/inherited' }, undefined, { shipMsg: true });
+    expect(r.status).toBe(0);
+    const dirs = readFileSync(join(r.home, 'remedy-dirs.log'), 'utf8').trim().split('\n');
+    expect(dirs).toHaveLength(2);
+    expect(dirs[0]).toBe(dirs[1]);
+    expect(dirs[0]).not.toBe('/inherited');
+    expect(existsSync(dirs[0])).toBe(false);
+  });
+
+  it('a failing mktemp leaves both judges without a dir and the verdict unchanged', () => {
+    // A bad TMPDIR is not enough: macOS mktemp falls back to its own temp dir.
+    const stubs = mkdtempSync(join(tmpdir(), 'dk-no-mktemp-'));
+    homes.push(stubs);
+    writeFileSync(join(stubs, 'mktemp'), '#!/bin/sh\nexit 1\n');
+    chmodSync(join(stubs, 'mktemp'), 0o755);
+    const r = runHook({ PATH: `${stubs}:/usr/bin:/bin` }, undefined, { shipMsg: true });
+    expect(r.status).toBe(0);
+    expect(readFileSync(join(r.home, 'remedy-dirs.log'), 'utf8').trim().split('\n')).toEqual([
+      'none',
+      'none',
+    ]);
+  });
+
+  it.runIf(hasDash)('dash (Debian/Ubuntu /bin/sh): both judges still share one Remedy dir', () => {
+    const r = runHook({}, undefined, { shipMsg: true, shell: '/bin/dash' });
+    expect(r.status).toBe(0);
+    const dirs = readFileSync(join(r.home, 'remedy-dirs.log'), 'utf8').trim().split('\n');
+    expect(dirs).toHaveLength(2);
+    expect(dirs[0]).toBe(dirs[1]);
+    expect(dirs[0]).not.toBe('none');
+  });
+
+  it('without the ship message the fleet gets no Remedy dir, even an inherited one', () => {
+    const r = runHook({ DEVKIT_REMEDY_DIR: '/inherited' });
+    expect(readFileSync(join(r.home, 'remedy-dirs.log'), 'utf8').trim()).toBe('none');
+  });
 
   it('a confident completeness FAIL (exit 1) blocks the commit at pre-commit', () => {
     const r = runHook({ COMP_RC: '1' }, undefined, { shipMsg: true });
@@ -451,7 +499,8 @@ describe('format re-stage step (real git)', () => {
     return repo;
   }
 
-  function runInRepo(repo, { devkit = '#!/bin/sh\nexit 0\n' } = {}) {
+  // `commitArgs` runs the hook through a real `git commit`, which re-reads the index afterwards.
+  function runInRepo(repo, { devkit = '#!/bin/sh\nexit 0\n', commitArgs = null } = {}) {
     const home = mkdtempSync(join(tmpdir(), 'dk-hook-git-home-'));
     homes.push(home);
     const bin = join(home, '.bun', 'bin');
@@ -466,8 +515,12 @@ describe('format re-stage step (real git)', () => {
     }
     const hookPath = join(home, 'pre-commit');
     writeFileSync(hookPath, buildFullHook({ guards: [] }));
+    chmodSync(hookPath, 0o755);
+    const [cmd, args] = commitArgs
+      ? ['git', ['-c', `core.hooksPath=${home}`, 'commit', '-q', '-m', 't', ...commitArgs]]
+      : ['sh', ['-e', hookPath]];
     try {
-      const stdout = execFileSync('sh', ['-e', hookPath], {
+      const stdout = execFileSync(cmd, args, {
         cwd: repo,
         env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin' },
         encoding: 'utf8',
@@ -530,29 +583,176 @@ describe('format re-stage step (real git)', () => {
       expect(r.stdout).toContain('🎨 oxfmt: no staged formattable path');
     });
 
-    it('names the paths it skipped when every eligible one carries unstaged edits', () => {
+    // Formats stdin like a real formatter (collapses runs of spaces); path mode is a no-op.
+    const STDIN_STUB =
+      '#!/bin/sh\ncase "$*" in *--stdin-filepath=*) echo "STDIN[$*]" >> "$PWD/argv.log"; exec sed \'s/  */ /g\' ;; esac\nexit 0\n';
+    // `:0:` names the stage explicitly, so a path like `0:foo.mts` is not read as a stage number.
+    const show = (repo, name) =>
+      execFileSync('git', ['show', `:0:${name}`], { cwd: repo, encoding: 'utf8' });
+    // Literal pathspecs, or staging `a[1].mts` would also stage a1.mts.
+    const stagePartially = (repo, name, staged, working) => {
+      writeFileSync(join(repo, name), staged);
+      execFileSync('git', ['--literal-pathspecs', 'add', name], { cwd: repo });
+      writeFileSync(join(repo, name), working); // dirty AFTER staging
+    };
+
+    it('formats only the STAGED copy of a partially staged file, leaving the working copy alone', () => {
       const repo = initRepo();
-      stageFile(repo, 'a.mts');
-      writeFileSync(join(repo, 'a.mts'), 'const a = 2\n'); // dirty AFTER staging
-      const r = runInRepo(repo);
-      expect(r.status).toBe(0);
-      expect(r.stdout).toContain('every eligible path also carries unstaged edits');
-      expect(r.stdout).toContain('a.mts');
+      stagePartially(repo, 'a.mts', 'const a  =  1\n', 'const a  =  2\n');
+      const r = runInRepo(repo, { devkit: STDIN_STUB });
+      expect(r.status, r.stdout).toBe(0);
+      expect(show(repo, 'a.mts')).toBe('const a = 1\n');
+      expect(readFileSync(join(repo, 'a.mts'), 'utf8')).toBe('const a  =  2\n');
+      expect(r.stdout).toContain('🎨 oxfmt formatted the STAGED copy of 1 path(s)');
+      expect(r.stdout).toContain('     a.mts');
       // Indented so the listed path never looks like a stage anchor to ship's log scraper.
       expect(r.stdout).not.toMatch(/^a\.mts$/m);
     });
 
-    // The PARTIAL case is the one that bites: "formatted 3" over a staged set of 5 reads as a
-    // clean pass while two unformatted files ride into the commit.
-    it('names the skipped paths when only SOME eligible ones carry unstaged edits', () => {
+    it('reports fully and partially staged files separately', () => {
       const repo = initRepo();
       stageFile(repo, 'clean.mts');
-      stageFile(repo, 'dirty.mts');
-      writeFileSync(join(repo, 'dirty.mts'), 'const b = 9\n'); // dirty AFTER staging
-      const r = runInRepo(repo);
-      expect(r.status).toBe(0);
-      expect(r.stdout).toContain('dirty.mts');
+      stagePartially(repo, 'dirty.mts', 'const b  =  1\n', 'const b = 9\n');
+      const r = runInRepo(repo, { devkit: STDIN_STUB });
+      expect(r.status, r.stdout).toBe(0);
       expect(r.stdout).toContain('🎨 oxfmt formatted and re-staged 1 staged file(s).');
+      expect(r.stdout).toContain('STAGED copy of 1 path(s)');
+      expect(show(repo, 'dirty.mts')).toBe('const b = 1\n');
+    });
+
+    // `:0:foo.mts` as a revision is stage 0 of foo.mts, and `a[1].mts` as a pathspec also matches
+    // a1.mts, so each must be read by its literal path and its own blob.
+    it('gives every partially staged path its own bytes, whatever its name', () => {
+      const repo = initRepo();
+      const names = ['foo.mts', '0:foo.mts', 'a1.mts', 'a[1].mts', 'my file.mts', 'café.mts'];
+      for (const [i, name] of names.entries()) {
+        stagePartially(repo, name, `const v${i}  =  1\n`, `const v${i} = 2\n`);
+      }
+      const r = runInRepo(repo, { devkit: STDIN_STUB });
+      expect(r.status, r.stdout).toBe(0);
+      for (const [i, name] of names.entries()) expect(show(repo, name)).toBe(`const v${i} = 1\n`);
+      expect(r.stdout).toContain('STAGED copy of 6 path(s)');
+    });
+
+    // The wiring the step depends on: git commits the index the hook rewrote, including under
+    // --include, where the hook's index is the commit's own lock file.
+    it.each([[[]], [['--include', 'other.txt']]])(
+      'commits the formatted staged copy through a real git commit %j',
+      (extra) => {
+        const repo = initRepo();
+        stageFile(repo, 'other.txt', 'x\n');
+        execFileSync('git', ['commit', '-qm', 'other'], { cwd: repo });
+        writeFileSync(join(repo, 'other.txt'), 'y\n');
+        stagePartially(repo, 'a.mts', 'const a  =  1\n', 'const a  =  2\n');
+        const r = runInRepo(repo, { devkit: STDIN_STUB, commitArgs: extra });
+        expect(r.status, r.stdout).toBe(0);
+        const head = execFileSync('git', ['show', 'HEAD:a.mts'], { cwd: repo, encoding: 'utf8' });
+        expect(head).toBe('const a = 1\n');
+        expect(show(repo, 'a.mts')).toBe('const a = 1\n');
+        expect(readFileSync(join(repo, 'a.mts'), 'utf8')).toBe('const a  =  2\n');
+      },
+    );
+
+    // Catches a rewrite that drops the executable bit: update-index must reuse the entry's mode.
+    it('keeps an executable staged file executable', () => {
+      const repo = initRepo();
+      writeFileSync(join(repo, 'run.mjs'), 'const r  =  1\n');
+      chmodSync(join(repo, 'run.mjs'), 0o755);
+      execFileSync('git', ['add', 'run.mjs'], { cwd: repo });
+      writeFileSync(join(repo, 'run.mjs'), 'const r = 2\n');
+      const r = runInRepo(repo, { devkit: STDIN_STUB });
+      expect(r.status, r.stdout).toBe(0);
+      const entry = execFileSync('git', ['ls-files', '-s', 'run.mjs'], {
+        cwd: repo,
+        encoding: 'utf8',
+      });
+      expect(entry).toMatch(/^100755 /);
+      expect(show(repo, 'run.mjs')).toBe('const r = 1\n');
+    });
+
+    // Every branch reports: an already-formatted staged copy must not read as silence.
+    it('says so when the staged copy is already formatted, and leaves it alone', () => {
+      const repo = initRepo();
+      stagePartially(repo, 'a.mts', 'const a = 1\n', 'const a  =  2\n');
+      const before = execFileSync('git', ['ls-files', '-s', 'a.mts'], {
+        cwd: repo,
+        encoding: 'utf8',
+      });
+      const r = runInRepo(repo, { devkit: STDIN_STUB });
+      expect(r.status, r.stdout).toBe(0);
+      expect(r.stdout).toContain('is already formatted');
+      expect(
+        execFileSync('git', ['ls-files', '-s', 'a.mts'], { cwd: repo, encoding: 'utf8' }),
+      ).toBe(before);
+    });
+
+    // Catches dropping --path from hash-object: a CRLF-emitting formatter would then store CRLF
+    // where `git add` on the fully staged branch stores LF.
+    it('normalises the rewritten blob through .gitattributes, as git add does', () => {
+      const repo = initRepo();
+      writeFileSync(join(repo, '.gitattributes'), '*.mts text eol=crlf\n');
+      execFileSync('git', ['add', '.gitattributes'], { cwd: repo });
+      stagePartially(repo, 'a.mts', 'const a  =  1\n', 'const a = 2\n');
+      const crlfStub =
+        '#!/bin/sh\ncase "$*" in *--stdin-filepath=*) sed \'s/  */ /g\' | awk \'{ printf "%s\\r\\n", $0 }\' ;; esac\n';
+      const r = runInRepo(repo, { devkit: crlfStub });
+      expect(r.status, r.stdout).toBe(0);
+      expect(show(repo, 'a.mts')).toBe('const a = 1\n');
+    });
+
+    // A held index lock (a concurrent git command) makes update-index fail; under `sh -e` that
+    // must be a named left-as-staged path, not an aborted commit.
+    it('leaves the staged copy and continues when the index cannot be written', () => {
+      const repo = initRepo();
+      stagePartially(repo, 'a.mts', 'const a  =  1\n', 'const a = 2\n');
+      writeFileSync(join(repo, '.git', 'index.lock'), '');
+      const r = runInRepo(repo, { devkit: STDIN_STUB });
+      rmSync(join(repo, '.git', 'index.lock'));
+      expect(r.status, r.stdout).toBe(0);
+      expect(show(repo, 'a.mts')).toBe('const a  =  1\n');
+      expect(r.stdout).toContain('left 1 staged path(s)');
+    });
+
+    it('leaves the staged copy as staged and names it when the formatter fails on it', () => {
+      const repo = initRepo();
+      stagePartially(repo, 'a.mts', 'const a  =  1\n', 'const a = 2\n');
+      const r = runInRepo(repo, { devkit: '#!/bin/sh\nexit 2\n' });
+      expect(r.status, r.stdout).toBe(0); // consumer policy: report, never block
+      expect(show(repo, 'a.mts')).toBe('const a  =  1\n');
+      expect(r.stdout).toContain(
+        '🎨 oxfmt left 1 staged path(s) with unstaged edits exactly as staged',
+      );
+      expect(r.stdout).toContain('oxfmt failed over the staged copies listed above (exit 2)');
+    });
+
+    it('never writes an empty formatter output over a staged copy', () => {
+      const repo = initRepo();
+      stagePartially(repo, 'a.mts', 'const a  =  1\n', 'const a = 2\n');
+      const r = runInRepo(repo); // the default stub prints nothing and exits 0
+      expect(r.status, r.stdout).toBe(0);
+      expect(show(repo, 'a.mts')).toBe('const a  =  1\n');
+      expect(r.stdout).toContain('left 1 staged path(s)');
+      expect(r.stdout).not.toContain('failed over');
+    });
+
+    it('leaves a symlink and a file deleted from the working tree untouched, without formatting them', () => {
+      const repo = initRepo();
+      symlinkSync('target.mts', join(repo, 'link.mts'));
+      execFileSync('git', ['add', 'link.mts'], { cwd: repo });
+      rmSync(join(repo, 'link.mts'));
+      symlinkSync('other.mts', join(repo, 'link.mts'));
+      stageFile(repo, 'gone.mts', 'const g  =  1\n');
+      rmSync(join(repo, 'gone.mts'));
+      const r = runInRepo(repo, { devkit: STDIN_STUB });
+      expect(r.status, r.stdout).toBe(0);
+      expect(existsSync(join(repo, 'argv.log'))).toBe(false); // the formatter never saw either
+      expect(show(repo, 'link.mts')).toBe('target.mts');
+      expect(show(repo, 'gone.mts')).toBe('const g  =  1\n');
+      // Named rather than skipped silently, so a symlink-only set never reads as "already formatted".
+      expect(r.stdout).toContain('left 2 staged path(s)');
+      expect(r.stdout).toContain('     link.mts');
+      expect(r.stdout).toContain('     gone.mts');
+      expect(r.stdout).not.toContain('already formatted');
     });
 
     // `echo | xargs` splits on whitespace: the formatter gets two paths that do not exist and
@@ -1054,14 +1254,14 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
     for (const ai of AI_CALLS) expect(r.calls.indexOf(ai)).toBeGreaterThan(fallowAt);
   });
 
-  it('the deterministic orchestrator still runs before fallow, and its failure skips fallow', () => {
+  it('the deterministic orchestrator still runs before fallow, and its failure still runs fallow', () => {
     const passing = runHook({}, { guards: ['size', 'review'] }, overlay());
     expect(passing.calls.indexOf('guard-deterministic')).toBeLessThan(
       passing.calls.indexOf('fallow audit'),
     );
     const failing = runHook({ DET_RC: '1' }, { guards: ['size', 'review'] }, overlay());
     expect(failing.status).toBe(1);
-    expect(failing.calls).not.toContain('fallow');
+    expect(failing.calls).toContain('fallow audit');
     expect(failing.calls).not.toContain('guard-review');
   });
 

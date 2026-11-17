@@ -11,9 +11,18 @@ export type ConfigComponent = Exclude<keyof RawDevkitComponents, 'guards'>;
 const ANTI_SLOP_COMPONENT: ConfigComponent = 'antiSlop';
 // guard-comments' exit 4 blocks, but like unexpected/could-not-run it is not a verdict.
 export const UNREADABLE_EVIDENCE = '(unreadable-evidence)';
+// A strict run's rejected opt-out, or a gate that blocks with no verdict. Not `(unexpected:2)`:
+// that stays for an exit 2 that is neither, e.g. an `--extra` command's fatal config error.
+export const COULD_NOT_RUN = '(could-not-run)';
+// Hoisted: inline, tsc unions it with comments' `{ 4 }` into a shape the Gate type rejects.
+const NO_VERDICT_LABELS = { 2: COULD_NOT_RUN };
+// Node exits 1 on an uncaught throw, the code a finding uses; ./crash-exit.mts re-exits a crash 70.
+export const CRASH_EXIT = 70;
+export const CRASHED = '(crashed)';
 
 // Fixed run order; each runs as `node <sibling module> <args>`, so every install mode resolves it.
-// Exit contract: 0 clean, 1 violation, 2 fail-open (could-not-run) unless `failOpen2` says otherwise.
+// Exit contract: 0 clean, 1 violation, 2 fail-open (could-not-run) unless `failOpen2` says otherwise,
+// 70 crashed (blocks, never a verdict).
 export const DETERMINISTIC = [
   // First: the cheapest gate, one `git diff --check` over the commit's index.
   { id: 'whitespace', module: './whitespace.mjs', args: ['gate'] },
@@ -63,5 +72,6 @@ export const DETERMINISTIC = [
     optIn: true,
     withGuard: 'decisions',
     failOpen2: false,
+    rcLabels: NO_VERDICT_LABELS,
   },
 ];

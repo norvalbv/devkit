@@ -1,9 +1,10 @@
-import { execFileSync } from 'node:child_process';
-import { commitIndexEnv } from '../ratchets/commit-index.mts';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { shellWord } from '../review/valve/shell-word.mts';
+import type { ClearMarker } from './clear-marker/store.mts';
 import { canonicalPath, type CollectionError, collectionRemedies } from './dependencies.mts';
+import { stagedIntersection } from './provenance.mts';
 import { readUnhandled, UNHANDLED_NAME, type UnhandledError } from './unhandled-reporter.mts';
 
 /**
@@ -28,9 +29,6 @@ export const UNHANDLED_REPORTER = fileURLToPath(
     import.meta.url,
   ),
 );
-
-/** The advisory sidecar a CLEARING run leaves beside the artifact it removed. */
-export const CLEAR_MARKER_NAME = '.last-clear.json';
 
 /** vitest 4.1.10's json spelling of a test timeout (an upstream quirk, pinned by tests). Not unique
  * to timeouts, so it is only trusted alongside a retry — see the coverage-gate decision. */
@@ -79,16 +77,6 @@ export interface RunDiagnosis {
   unhandled?: UnhandledError[];
   /** Files that failed before any test ran (an import error), with vitest's file-level message. */
   collection?: CollectionError[];
-}
-
-/** What a run that cleared the artifact leaves behind so the next reader knows what happened. */
-export interface ClearMarker {
-  clearedAt: string;
-  previousMtime: number | null;
-  head: string | null;
-  failedFiles: string[];
-  unhandledErrors?: UnhandledError[];
-  collectionErrors?: CollectionError[];
 }
 
 interface VitestAssertion {
@@ -198,56 +186,6 @@ export function readDiagnosis(resultsFile: string, exitCode = 0): RunDiagnosis |
   }
 }
 
-/**
- * Absolute paths of the staged files, or null when git cannot answer.
- *
- * null is NOT an empty diff, and the caller must not collapse the two: an empty list licenses the
- * sentence "none of them are in your staged diff", which is a claim. devkit runs inside a repo it does
- * not own and may be invoked outside a work tree entirely — same reason sc-1959 ruled that a gate
- * which cannot run git must not report a missing catalog.
- */
-export function stagedFiles(cwd: string): string[] | null {
-  const git = (args: string[]): string =>
-    execFileSync('git', args, {
-      cwd,
-      env: commitIndexEnv(cwd),
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-  try {
-    const top = canonicalPath(git(['rev-parse', '--show-toplevel']).trim());
-    return git(['diff', '--cached', '--name-only', '-z'])
-      .split('\0')
-      .filter(Boolean)
-      .map((p) => canonicalPath(join(top, p)));
-  } catch {
-    return null;
-  }
-}
-
-/** The short HEAD sha, or null outside a work tree. Recorded so a stale marker dates itself. */
-export function headSha(cwd: string): string | null {
-  try {
-    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
-      cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-  } catch {
-    return null;
-  }
-}
-
-/** Failed files that are also staged. null propagates: unknown stays unknown, never "none". */
-export function stagedIntersection(
-  failedFiles: string[],
-  staged: string[] | null,
-): string[] | null {
-  if (staged === null) return null;
-  const set = new Set(staged);
-  return failedFiles.map(canonicalPath).filter((f) => set.has(f));
-}
-
 /** Repo-relative where that is shorter and inside cwd; absolute otherwise. Paths are for humans. */
 export function displayPath(file: string, cwd: string): string {
   const rel = relative(canonicalPath(cwd), canonicalPath(file));
@@ -288,25 +226,6 @@ export function raisedTimeoutMs(failures: FailureVerdict | undefined): number {
 /** Enough to see the shape of a failure; short enough not to bury vitest's own summary. */
 const MAX_LISTED_FILES = 10;
 
-const markerPath = (coverageDir: string): string => join(coverageDir, CLEAR_MARKER_NAME);
-
-/** Best-effort: an unwritable marker must never fail somebody's test run. Advisory data only. */
-export function writeClearMarker(coverageDir: string, marker: ClearMarker): void {
-  try {
-    writeFileSync(markerPath(coverageDir), `${JSON.stringify(marker, null, 2)}\n`);
-  } catch {
-    /* diagnosis is a courtesy, not a guarantee */
-  }
-}
-
-export function removeClearMarker(coverageDir: string): void {
-  try {
-    rmSync(markerPath(coverageDir), { force: true });
-  } catch {
-    /* see writeClearMarker */
-  }
-}
-
 /** The part of a marker that says why the run ended. Every key is set, so spreading it over an older
  * marker replaces a stale unhandled list too (an undefined value is dropped on write). */
 export function markerCause(
@@ -317,40 +236,6 @@ export function markerCause(
     unhandledErrors: diagnosis?.unhandled,
     collectionErrors: diagnosis?.collection,
   };
-}
-
-/** A marker entry we could have written; anything else came from a hand edit and is dropped. */
-const isUnhandledError = (e: UnhandledError | null): e is UnhandledError =>
-  e?.constructor === Object &&
-  String(e.message) === e.message &&
-  (e.file === null || String(e.file) === e.file);
-
-/** The marker, or null when absent/corrupt. Never throws — the gate's verdict cannot depend on it. */
-export function readClearMarker(coverageDir: string): ClearMarker | null {
-  const file = markerPath(coverageDir);
-  if (!existsSync(file)) return null;
-  try {
-    const parsed: Partial<ClearMarker> = JSON.parse(readFileSync(file, 'utf8'));
-    // clearedAt is the marker's identity — a payload without one is some other file that happens to
-    // share the name, and inventing a timestamp for it would date the gate's message wrongly.
-    if (!parsed?.clearedAt) return null;
-    return {
-      clearedAt: parsed.clearedAt,
-      previousMtime: parsed.previousMtime ?? null,
-      head: parsed.head ?? null,
-      failedFiles: Array.isArray(parsed.failedFiles) ? parsed.failedFiles : [],
-      ...(Array.isArray(parsed.unhandledErrors) && {
-        unhandledErrors: parsed.unhandledErrors.filter(isUnhandledError),
-      }),
-      ...(Array.isArray(parsed.collectionErrors) && {
-        collectionErrors: parsed.collectionErrors.filter(
-          (e): e is CollectionError => isUnhandledError(e) && e.file !== null,
-        ),
-      }),
-    };
-  } catch {
-    return null;
-  }
 }
 
 /** The producer's post-run lines: what failed, whether it is yours, and whether it is load. Timeouts
@@ -379,6 +264,8 @@ export function formatDiagnosis(
     const hidden = diagnosis.failedFiles.length - MAX_LISTED_FILES;
     if (hidden > 0) lines.push(`     …and ${hidden} more`);
     lines.push(...stagedSentence(diagnosis.failedFiles, staged, cwd));
+    if (!diagnosis.failures?.allTimedOut)
+      lines.push(...baselinePointer(diagnosis.failedFiles, staged, cwd));
     lines.push(...formatCollectionErrors(diagnosis.collection ?? [], cwd));
     // Said HERE, where the run failed — not only after a rescue — so the remedy arrives before the
     // next full run is spent rather than after it (sc-3473).
@@ -416,8 +303,20 @@ function stagedSentence(files: string[], staged: string[] | null, cwd: string): 
   if (mine === null) return [];
   return [
     mine.length === 0
-      ? '   None of them are in your staged diff.'
+      ? '   None of them are staged — that alone does not make them pre-existing.'
       : `   In your staged diff: ${mine.map((f) => displayPath(f, cwd)).join(', ')}`,
+  ];
+}
+
+/** An unstaged failure may predate your change: name the check that answers in seconds, not a verdict. */
+function baselinePointer(files: string[], staged: string[] | null, cwd: string): string[] {
+  if (staged === null) return [];
+  const mine = new Set(staged);
+  const other = files.find((f) => !mine.has(canonicalPath(f)));
+  if (!other) return [];
+  const file = shellWord(displayPath(other, cwd));
+  return [
+    `   Already red on the default branch? Check in seconds: devkit baseline-status --file ${file}`,
   ];
 }
 

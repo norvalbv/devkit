@@ -17,6 +17,7 @@ import {
   renderProgress,
   summarise,
   verdictLine,
+  verdictLines,
   waitForChecks,
 } from './wait.mts';
 import { recordCiEvent } from './telemetry.mts';
@@ -182,6 +183,22 @@ describe('waitForChecks', () => {
       { settleGraceMs: 10_000 },
     ).run();
     expect(result.outcome).toBe('failed');
+  });
+
+  it('outwaits a stale cancel that a re-queued run replaces inside the grace', async () => {
+    // gh keeps a same-SHA cancelled row until the re-queued run starts (cli/cli#14371), so a
+    // cancel seen once is not yet the verdict.
+    const result = await drive(
+      [
+        rows(row('pass', 'CodeRabbit'), row('cancel', 'gate')),
+        rows(row('pass', 'CodeRabbit'), row('cancel', 'gate')),
+        rows(row('pass', 'CodeRabbit'), row('pending', 'gate')),
+        rows(row('pass', 'CodeRabbit'), row('pass', 'gate')),
+      ],
+      { settleGraceMs: 10_000 },
+    ).run();
+    expect(result.outcome).toBe('passed');
+    expect(result.cancelled).toEqual([]);
   });
 
   it('reports no-checks only once the grace has proven the set really is empty', async () => {
@@ -378,6 +395,19 @@ describe('verdictLine', () => {
         '514',
       ),
     ).toBe('ship: ci-outcome=timed-out pr=514 pending=gate waited=900s');
+  });
+
+  it('follows only a timed-out verdict with the gh one-shot, after the one verdict line', async () => {
+    const pending = await drive([rows(row('pending', 'gate'))], { timeoutMs: 5_000 }).run();
+    const timedOut = verdictLines(pending, '514', 'o/r');
+    expect(timedOut).toEqual([
+      verdictLine(pending, '514'),
+      `  checks so far: gh pr checks 514 --repo o/r --json ${CHECKS_JSON_FIELDS}`,
+    ]);
+    // Callers grep line-wise for the prefix, so the hint must never read as a second verdict.
+    expect(timedOut.filter((l) => l.includes(VERDICT_PREFIX))).toHaveLength(1);
+    const passed = await drive([rows(row('pass', 'gate'))]).run();
+    expect(verdictLines(passed, '514', 'o/r')).toEqual([verdictLine(passed, '514')]);
   });
 
   it('names the reason when the wait could not run', () => {

@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSyn
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { devkitVersion } from '../../../gate-engine/devkit-version.mts';
-import { emitShipIntentEvent } from './ship-intent-event.mts';
+import { emitShipIntentEvent, printStaleRecovery } from './ship-intent-event.mts';
 import { fail, parseArgs } from './ship-intent-args.mts';
 import { appendPathsInPlace, donateIntent } from './intent/donate.mts';
 import {
@@ -171,7 +171,7 @@ export function writeIntent(
     return fail(e instanceof Error ? e.message : String(e)); // lock contention → record nothing
   }
   process.stdout.write(`${intent.generation}\n`);
-  emitShipIntentEvent(intent, opts.resumed);
+  emitShipIntentEvent(intent, opts.resumed, opts.root);
   return 0;
 }
 
@@ -286,7 +286,11 @@ function main(): number {
   }
   if (sub === 'read') {
     const result = readIntent(root, branch);
-    if ('reason' in result) return fail(result.reason);
+    if ('reason' in result) {
+      fail(result.reason);
+      if (result.stale) printStaleRecovery(result.stale, relIntentPath(branch));
+      return 1;
+    }
     emitFields(result.intent);
     return 0;
   }

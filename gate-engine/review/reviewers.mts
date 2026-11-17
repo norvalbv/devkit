@@ -17,7 +17,8 @@ import { devkitVersion } from '../devkit-version.mts';
 import { JUDGE_READ_TOOLS, LIGHT_JUDGE_MODEL } from '../judge/judge-isolation.mts';
 import { withNamedAgentMcpTools } from '../judge/mcp/profile.mts';
 import type { ReviewerResponseContractName } from './contracts/registry.mts';
-import { checklistContractFor } from './lens/split.mts';
+import { PASS_ADVISORY_RULE } from './contracts/response.mts';
+import { checklistContractFor, gateBrief, scriptCommand } from './lens/split.mts';
 import { reviewerFilesAcrossPolicies } from './scope/policy.mts';
 
 export { declaredRoots, rootsFor, underRoot } from './scope/policy.mts';
@@ -248,7 +249,8 @@ export function resolveEscalationModel(cfg: { review: { escalationModel: string 
 }
 
 /** Comma-joined --allowedTools for one reviewer: the read-only base, its exact-path checklist
- *  script, the consumer's search tool where wired, and named-agent MCP tools. */
+ *  script, the consumer's search tool where wired (commit-guard also gets the read-only
+ *  `guard-dup-allowlist check:*`), and named-agent MCP tools. */
 export function allowedToolsFor(
   reviewer: Reviewer,
   cfg: GuardConfig,
@@ -259,11 +261,11 @@ export function allowedToolsFor(
 
   // A skill-less reviewer has no checklist script; its evidence is pre-rendered onto stdin/prompt.
   if (!hasChecklist(reviewer)) return withNamedAgentMcpTools(JUDGE_READ_TOOLS);
-  const tools = `${JUDGE_READ_TOOLS},Bash(node ${checklistScriptAt(reviewer, assetRoot)}:*)`;
-  if (reviewer.domain === 'code') return withNamedAgentMcpTools(tools, cfg.searchTool);
-  // The correctness reviewer's writer/reader-contract lens benefits from semantic search, but
-  // only when the consumer actually wired an index (indexPath set) — otherwise cfg.searchTool is
-  // a generic default naming an MCP tool the judge doesn't have, and Grep is the core mechanism.
+  const tools = `${JUDGE_READ_TOOLS},Bash(${scriptCommand(checklistScriptAt(reviewer, assetRoot))}:*)`;
+  if (reviewer.domain === 'code')
+    return withNamedAgentMcpTools(`${tools},Bash(guard-dup-allowlist check:*)`, cfg.searchTool);
+  // The correctness reviewer gets semantic search only when the consumer wired an index
+  // (indexPath set): else cfg.searchTool names an MCP tool the judge lacks, and Grep is the mechanism.
   if (reviewer.domain === 'all' && cfg.indexPath)
     return withNamedAgentMcpTools(tools, cfg.searchTool);
   return withNamedAgentMcpTools(tools);
@@ -323,13 +325,8 @@ export function wrapPrompt(
   { targetsBlock = '', commitMsgBlock = '', alsoStagedBlock = '' }: PromptExtras = {},
   checklistRoot = assetRoot ?? '.claude',
 ): string {
-  const effectiveAssetRoot = checklistRoot;
-  const skillPrefix = `${effectiveAssetRoot.replace(TRAILING_SLASH_RE, '')}/skills/`;
-  const brief = ['.agents/skills/', '.claude/skills/', '.cursor/skills/'].reduce(
-    (body, providerPrefix) => body.replaceAll(providerPrefix, skillPrefix),
-    stripFrontmatter(agentBody),
-  );
-  const script = checklistScriptAt(reviewer, effectiveAssetRoot);
+  const script = checklistScriptAt(reviewer, checklistRoot);
+  const brief = gateBrief(stripFrontmatter(agentBody), script);
   const checklistContract = checklistContractFor(reviewer, script, assetRoot);
   return (
     'You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
@@ -363,8 +360,7 @@ export function wrapPrompt(
     'Judge ONLY the staged diff; pre-existing issues in code this commit does not touch are not ' +
     'findings. List findings (file:line, one line each), then END with exactly one line:\n' +
     'VERDICT: PASS | FAIL — <one-line reason>\n' +
-    'FAIL only for a finding that must block THIS commit. A non-blocking finding to resolve ' +
-    'before merge goes on its own line before the verdict: ADVISORY: <file:line> — <finding>'
+    PASS_ADVISORY_RULE
   );
 }
 
@@ -404,20 +400,6 @@ export function wrapConventionsPrompt(
     'one line:\n' +
     'VERDICT: PASS | FAIL — <one-line reason>\n' +
     'FAIL only for a clear, quotable violation that must block THIS commit.'
-  );
-}
-
-/** Escalation prompt: the escalation model independently re-verifies a first-pass FAIL
- * (check-alignment shape). */
-export function escalatePrompt(wrappedPrompt: string, firstPass: string): string {
-  return (
-    `${wrappedPrompt}\n\n` +
-    'A first-pass reviewer judged FAIL. Its full notes:\n' +
-    '─────\n' +
-    `${firstPass}\n` +
-    '─────\n' +
-    'Independently verify its evidence with your own investigation — confirm or overturn. ' +
-    'Your verdict is final; a FAIL blocks the commit.'
   );
 }
 

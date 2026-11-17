@@ -3,18 +3,35 @@
   "sourceExtensions": ["mts"],
   "fanoutCap": 12,
   "indexPath": ".search-code/index.db",
+  "//indexCommand": "Refreshes the index before the dup gate in the checkout that owns it, bounded under the 60s refresh timeout; a ship worktree's linked index is never refreshed.",
+  "indexCommand": "search-code index --timeout 45s --no-wait",
   "//generated": "Paths ship's three-way staging abort points at a generator instead of a hand-merge (sc-2770). .devkit/*-manifest.json are built-in defaults.",
   "generated": [{ "glob": "dist/**", "command": "bun run build" }],
-  "//extraGates": "related-tests runs the tests vitest relates to the staged paths ({staged}), so a test the change breaks blocks before any AI judge runs. typecheck covers e2e/, which no test run does, so an export only an e2e file imports cannot vanish unseen.",
+  "//extraGates": "devkit's own command gates, declared the way a consumer declares them, so a failure has one source for its command. hook-parity and formatter-identity fail the commit that breaks generator parity, not the next push. release-only-dist runs CI's release-only dist check from the ship worktree's own copy. corpus-lint is the structural half of `bench.mts validate`. related-tests runs the tests vitest relates to the staged paths ({staged}), so a test the change breaks blocks before any AI judge runs. It is afterGreen: it runs last, and only when every other deterministic gate passed, because a fix to an earlier failure changes the staged tree and discards its verdict. typecheck covers e2e/, which no test run does, so an export only an e2e file imports cannot vanish unseen. run-as-main runs the realpath run-as-main sweep, which reads source text and so is never related to a staged file. skill-projection blocks provider-skill drift the staged change caused.",
   "extraGates": {
+    "lint": "bun run lint",
+    "hook-parity": "node cli/lib/husky/hook-parity.mts --gate",
+    "formatter-identity": "node cli/lib/husky/format-identity/formatter-identity.mts --gate",
+    "decisions-integrity": "node gate-engine/decisions/cli.mts integrity --staged",
+    "skill-projection": "node cli/lib/husky/skill-projection-integrity.mts --root . --gate",
+    "release-only-dist": "node cli/lib/ship/dist-integrity.mts --ship-staged",
+    "benchmarks": "bun run benchmarks:check -- --mode staged",
+    "corpus-lint": "bun run benchmarks:corpus",
     "git-pathspec": "node scripts/git-pathspec-check.mts",
-    "related-tests": "node cli/lib/husky/gate-policy/related-tests.mts {staged}",
+    "related-tests": {
+      "cmd": "node cli/lib/husky/gate-policy/related-tests.mts {staged}",
+      "afterGreen": true
+    },
+    "run-as-main": "node_modules/.bin/vitest run --reporter=dot cli/__tests__/bin-run-as-main.test.mts",
     "typecheck": "bun run typecheck"
   },
-  "//comments": "devkit is open source: a comment citing a private Shortcut ticket, an autonomous report id or a decision record means nothing to an outside reader, so guard-comments blocks changed comments that do.",
+  "//gateTimeoutMs": "Per-gate deadline for guard-deterministic (default 30 min). Raised here because related-tests has legitimately run for about 32 minutes on a loaded machine before reporting a real failure.",
+  "gateTimeoutMs": 3000000,
+  "//comments": "devkit is open source: a comment citing a private Shortcut ticket, an autonomous report id or a decision record means nothing to an outside reader, and a file:line anchor rots on the next edit, so guard-comments blocks changed comments that cite either.",
   "comments": {
     "forbiddenRefs": ["\\bsc-\\d+\\b", "\\breport-[0-9a-f]{6,}\\b"],
-    "forbidDecisionRefs": true
+    "forbidDecisionRefs": true,
+    "forbidLineAnchors": true
   },
   "//evidence": "devkit ship runs a PR's added or changed test files on red (the PR base plus those files) and green (the PR head) after the PR opens, and writes the outcome into the PR body.",
   "evidence": {
@@ -37,12 +54,28 @@
       "../search-code"
     ]
   },
-  "//review": "devkit's own ships pin the judges to Claude so they do not depend on codex quota; consumers without a pin keep the codex defaults in gate-engine/config.mts.",
+  "//review": "devkit's own ships pin the judges to Claude so they do not depend on codex quota; consumers without a pin keep the codex defaults in gate-engine/config.mts. backendRoots covers code that runs in consumer repos (skills, agents-hooks, templates, devkit's own anti-slop rules) and devkit's build and test infrastructure. The pinned upstream anti-slop rules and docs/benchmarks/experiments get correctness review only; e2e/fixtures is deliberately bad code and is excluded.",
   "review": {
     "model": "claude-sonnet-5-5",
     "escalationModel": "claude-opus-5-5",
     "correctnessModel": "claude-haiku-5-5",
-    "backendRoots": ["cli", "gate-engine"],
+    "backendRoots": [
+      "cli",
+      "gate-engine",
+      "skills",
+      "agents-hooks",
+      "templates",
+      "anti-slop/src/devkit",
+      "anti-slop/src/index.ts",
+      "oxc/rules",
+      "scripts",
+      "e2e/lib",
+      "vitest.config.mjs",
+      "vitest.setup.mjs",
+      "vitest.global-setup.mjs",
+      "vitest.e2e.config.mjs",
+      "eslint.config.mjs"
+    ],
     "frontendRoots": [],
     "paths": {
       "include": ["**"],
@@ -61,7 +94,8 @@
         "coverage/**",
         "*.lock",
         "**/*.lock",
-        "docs/benchmarks/decisions-brief/tasks/**"
+        "docs/benchmarks/decisions-brief/tasks/**",
+        "e2e/fixtures/**"
       ]
     },
     "trustBoundaries": "devkit is a CLI + portable gate-engine, not a hosted app — no server/client split. Its trust model is W-3: devkit ships inside the consumer's node_modules and EXECUTES in a repo it does not own, so every path it resolves must be consumer-cwd-relative, never __dirname, and synced assets (skills/agents/gate scripts) must read layout from the consumer's guard.config.json, never hardcode a stack's directory tree."
@@ -116,6 +150,7 @@
         "sourceExtensions": ["mts"],
         "entryAllowlist": [
           "config-json.mts",
+          "config-source-matchers.mts",
           "config.mts",
           "devkit-version.mts",
           "overlay-mode.mts"
@@ -144,7 +179,7 @@
           ]
         },
         "grammar": {
-          "files": ["config-json.mts", "config.mts"],
+          "files": ["config-json.mts", "config-source-matchers.mts", "config.mts"],
           "domainGate": "@root",
           "recurse": "engineModule",
           "rules": {
@@ -159,10 +194,12 @@
     ],
     "walls": []
   },
-  "//maxLines": "Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only). 0 = off. Per-FUNCTION caps need a parser — not yet.",
+  "//maxLines": "Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only in .devkit/baselines/size-lines.json). 0 = off. Per-FUNCTION caps need a parser — not yet.",
   "maxLines": 500,
-  "//maxTestLines": "Loose raw line cap per test file; existing oversized tests are grandfathered shrink-only. 0 = off.",
+  "//maxTestLines": "Loose raw line cap per test file; existing oversized tests are grandfathered shrink-only in .devkit/baselines/size-lines.json. 0 = off.",
   "maxTestLines": 2000,
+  "//maxLinesExtensions": "Extra extensions the raw-line cap also governs. The ship scripts are shell, and only guard-size can hold them shrink-only on every judge model.",
+  "maxLinesExtensions": ["sh"],
   "//mergeVerdict": "devkit reaches consumers only through devkit release, which needs green CI, so merging to main is not the consumer boundary. The verdict's own code stays human-reviewed so a change cannot certify itself. fix and feat get larger limits than the built-in 50 lines / 4 files.",
   "mergeVerdict": {
     "consumerSurface": ["cli/lib/ship/merge-verdict/**"],

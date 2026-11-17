@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { configExtraGates } from '../../gate-engine/deterministic/command-gates.mts';
 import { defaultSelection } from '../lib/components.mts';
 import { buildFullHook } from '../lib/husky/husky-block.mts';
 import { buildSelfHostHook } from '../lib/husky/self-host.mts';
@@ -197,6 +198,12 @@ describe('self-host Husky skill projection warning', () => {
     expect(selfHost).toContain('cli/lib/husky/skill-projection-integrity.mts');
     expect(selfHost).toContain('--root "$__dk_skill_root" || true');
     expect(consumer).not.toContain('self-host-skill-projection-advisory');
+    // The blocking half is a declared extra gate, so it runs in the deterministic stage ahead of the judges.
+    expect(configExtraGates(repoRoot)).toContainEqual({
+      label: 'skill-projection',
+      cmd: 'node cli/lib/husky/skill-projection-integrity.mts --root . --gate',
+    });
+    expect(consumer).not.toContain('skill-projection-integrity.mts --root . --gate');
 
     for (const script of [shipScript, reshipScript]) {
       const source = readFileSync(script, 'utf8');

@@ -46,16 +46,27 @@ const NON_UI_PATHS = [
 /** Never worth a model call: prose and generated dependency pins. */
 const NOT_JUDGED = ['**/*.md', '**/*.lock', '**/package-lock.json', '**/pnpm-lock.yaml'];
 
+/** Agent-tool dirs devkit syncs, and its own state: no screen unless uiEvidence.paths names one. */
+const AGENT_ASSET_PATHS = [
+  '**/.claude/**',
+  '**/.cursor/**',
+  '**/.codex/**',
+  '**/.agents/**',
+  '**/.devkit/**',
+];
+
 const PATHS_SHOWN = 3;
 
+const anyGlob = (path: string, list: string[]) => list.some((glob) => matchesRepoGlob(path, glob));
+
 export function uiPaths(staged: string[], globs: string[]): string[] {
-  const any = (path: string, list: string[]) => list.some((glob) => matchesRepoGlob(path, glob));
-  return staged.filter((path) => any(path, globs) && !any(path, NON_UI_PATHS));
+  return staged.filter((path) => anyGlob(path, globs) && !anyGlob(path, NON_UI_PATHS));
 }
 
 /** Why this commit deserves screenshots by path alone, or null when no UI file is staged. */
 export function uiPathReason(staged: string[], globs: string[]): string | null {
-  const paths = uiPaths(staged, [...DEFAULT_UI_PATHS, ...globs]);
+  const own = staged.filter((path) => anyGlob(path, globs) || !anyGlob(path, AGENT_ASSET_PATHS));
+  const paths = uiPaths(own, [...DEFAULT_UI_PATHS, ...globs]);
   if (paths.length === 0) return null;
   const more = paths.length > PATHS_SHOWN ? `, +${paths.length - PATHS_SHOWN} more` : '';
   return `UI paths changed: ${paths.slice(0, PATHS_SHOWN).join(', ')}${more}`;
@@ -63,8 +74,8 @@ export function uiPathReason(staged: string[], globs: string[]): string | null {
 
 /** The judged paths, listed in full, then their staged diff capped at DIFF_CAP; '' when none. */
 export function judgeInput(cwd: string, staged: string[]): string {
-  const skip = [...NON_UI_PATHS, ...NOT_JUDGED];
-  const paths = staged.filter((path) => !skip.some((g) => matchesRepoGlob(path, g)));
+  const skip = [...NON_UI_PATHS, ...AGENT_ASSET_PATHS, ...NOT_JUDGED];
+  const paths = staged.filter((path) => !anyGlob(path, skip));
   if (paths.length === 0) return '';
   const prefixes = ['-c', 'diff.noprefix=false', '-c', 'diff.mnemonicPrefix=false'];
   const pathspecs = paths.map((path) => `:(literal)${path}`);
@@ -73,11 +84,11 @@ export function judgeInput(cwd: string, staged: string[]): string {
 }
 
 /** Why this commit deserves screenshots, or null when neither the paths nor the judge say so. */
-function uiEvidenceReason(cwd: string): string | null {
+function uiEvidenceReason(cwd: string, judge: boolean): string | null {
   const cfg = resolveGuardConfig(cwd);
   const staged = stagedFiles(cwd);
   const byPath = uiPathReason(staged, cfg.uiEvidence.paths);
-  if (byPath) return byPath;
+  if (byPath || !judge) return byPath;
   const input = judgeInput(cwd, staged);
   const verdict = input ? judgeUiVisible(cwd, input, resolveReviewModel(cfg)) : null;
   return verdict?.visible
@@ -107,10 +118,11 @@ export const instruction = (reason: string, machine = false): string =>
 
 /** The gate. Every unreadable input means silence: a reminder that cannot tell stays quiet. */
 export function runUiEvidence(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): number {
-  if (env.DEVKIT_RUN_MODE === 'review' || env.DEVKIT_RUN_MODE === 'dry-gates') return 0;
+  if (env.DEVKIT_RUN_MODE === 'review') return 0;
   let reason: string | null;
   try {
-    reason = uiEvidenceReason(cwd);
+    // A dry-gates rehearsal stays model-free: the path rule only.
+    reason = uiEvidenceReason(cwd, env.DEVKIT_RUN_MODE !== 'dry-gates');
   } catch {
     return 0;
   }

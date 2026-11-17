@@ -9,6 +9,7 @@
 import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withGitignoreLock } from './gitignore-cache.mts';
+import { writeIfAbsent } from '../fs-helpers.mts';
 
 export const SEARCH_CODE_CONFIG = 'search-code.config.json';
 const INDEX_LINE = '.search-code/';
@@ -79,8 +80,7 @@ export function installSearchCode(
 ): void {
   console.log('  search-code (opt-in semantic search)');
   const cfgPath = join(cwd, SEARCH_CODE_CONFIG);
-  const existed = existsSync(cfgPath);
-  if (!existed && !dryRun) writeFileSync(cfgPath, STARTER);
+  const existed = !dryRun && writeIfAbsent(cfgPath, STARTER) === 'exists';
   console.log(
     `  ${dryRun ? '[dry-run] write' : existed ? '• kept' : '✓ wrote'} ${SEARCH_CODE_CONFIG}`,
   );

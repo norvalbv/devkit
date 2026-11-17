@@ -439,15 +439,27 @@ describe('review gate supervisor', () => {
     // post-leader-exit reap. Under the old behaviour this test passed by WAITING for expiry, which
     // is exactly the bug — on a ship the ceiling is an hour (sc-1199).
     const notice = join(dirname(fixture.ready), 'reaped');
+    const token = 'c'.repeat(64);
+    const env = {
+      ...process.env,
+      DEVKIT_GATE_REAP_NOTICE_FILE: notice,
+      DEVKIT_REVIEW_SUPERVISOR_OWNER_TOKEN: token,
+      FAKE_SECRET: 'sentinel-env',
+    };
     const result = spawnSync(
       process.execPath,
       [SUPERVISOR, '600', '--', process.execPath, fixture.script, fixture.ready, fixture.signal],
-      { encoding: 'utf8', env: { ...process.env, DEVKIT_GATE_REAP_NOTICE_FILE: notice } },
+      { encoding: 'utf8', env },
     );
 
     expect(result.status, result.stderr).toBe(124);
     // The runner's banner keys on this file to say "not the ceiling" for a 124 that never expired.
-    expect(existsSync(notice)).toBe(true);
+    // It names the survivor by executable only: never its env (token, secrets) nor its arguments.
+    const named = readFileSync(notice, 'utf8');
+    expect(named).toMatch(/^\d+ ppid=\d+ pgid=\d+ up=\S+ node$/m);
+    for (const secret of [token, 'sentinel-env', fixture.ready, 'input-type']) {
+      expect(named).not.toContain(secret);
+    }
     expect(readFileSync(fixture.signal, 'utf8')).toBe('SIGTERM');
     expect(Date.now() - started).toBeLessThan(WAIT_MS);
   });

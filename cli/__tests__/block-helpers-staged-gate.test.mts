@@ -1,12 +1,16 @@
 /**
  * A shell gate's block (fallow, the eslint/biome overlays) names itself: a gate_result row through
- * `guard-review record-gate`, and on commit/ship the line ship's blocked_gate classifier reads.
+ * `guard-review record-gate`, and on commit/ship the line ship's blocked_gate classifier reads. The
+ * block only records the failure; the cheap-gate flush after the cheap gates is what stops the hook.
  */
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { DK_GATE_BLOCK_HELPERS } from '../lib/husky/gate-policy/block-helpers.mts';
+import {
+  CHEAP_GATE_FLUSH,
+  DK_GATE_BLOCK_HELPERS,
+} from '../lib/husky/gate-policy/block-helpers.mts';
 import { DK_NO_GIT_ENV_HELPER } from '../lib/husky/review-fragments.mts';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 
@@ -14,6 +18,8 @@ const SHELLS = ['sh', 'dash'].filter(
   (shell) => spawnSync('sh', ['-c', `command -v ${shell}`]).status === 0,
 );
 const SENTINEL = '✗ staged gate blocked: fallow (its report is above)';
+const FLUSH_LINE =
+  '✗ commit blocked before the AI gates: fallow (findings above) — fix them together, then commit once.';
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -44,6 +50,7 @@ function block(shell: string, gate: string, mode: string, rc: number | null = 0)
     DK_GATE_BLOCK_HELPERS,
     `__dk_block_deterministic ${gate}`,
     'echo "deferred:$dk_review_failed_gates"',
+    CHEAP_GATE_FLUSH,
   ].join('\n');
   const result = spawnSync(shell, ['-e', '-c', script], {
     encoding: 'utf8',
@@ -58,7 +65,7 @@ describe.each(SHELLS)('__dk_block_deterministic under %s', (shell) => {
 
     expect(r.status).toBe(1);
     expect(r.stderr.trim()).toBe(SENTINEL);
-    expect(r.stdout).toBe('');
+    expect(r.stdout).toBe(`deferred: fallow\n${FLUSH_LINE}\n`);
     expect(r.calls).toBe('record-gate fallow\n');
   });
 
@@ -87,6 +94,6 @@ describe.each(SHELLS)('__dk_block_deterministic under %s', (shell) => {
 
     expect(r.status).toBe(1);
     expect(r.stderr.trim()).toBe(SENTINEL);
-    expect(r.stdout).toBe('');
+    expect(r.stdout).toBe(`deferred: fallow\n${FLUSH_LINE}\n`);
   });
 });

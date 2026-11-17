@@ -1,6 +1,14 @@
 /** The ship-time judge reachability report (sc-2538). The property that matters most is NEGATIVE:
  *  this check may never change what a ship does — a dark provider is not a doomed ship. */
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,12 +21,13 @@ import {
 } from '../../gate-engine/judge/codex/rate-limits.mts';
 import {
   claudeFamilyEnvLine,
+  familyOverrideRemedy,
   judgeEnvUnsetLine,
 } from '../../gate-engine/judge/outage/family-override.mts';
 import {
-  familyRemedy,
   judgeReachability,
   type PreflightDeps,
+  remedyLine,
   renderPreflight,
   reviewGuardSelected,
   selectedJudgeGuards,
@@ -237,12 +246,12 @@ describe('judgeReachability', () => {
   it('the family move clears once fully exported, and survives a partial export', async () => {
     const dir = repo(['review'], CODEX_FAMILY);
     const locked = deps({ rateLimits: async () => parseRateLimitsReply(LOCKED_REPLY) });
-    expect(familyRemedy(await judgeReachability(dir, locked))).toContain(claudeFamilyEnvLine());
+    expect(remedyLine(await judgeReachability(dir, locked))).toContain(claudeFamilyEnvLine());
     process.env.GUARD_REVIEW_MODEL = 'haiku';
-    expect(familyRemedy(await judgeReachability(dir, locked))).toContain(claudeFamilyEnvLine());
+    expect(remedyLine(await judgeReachability(dir, locked))).toContain(claudeFamilyEnvLine());
     process.env.GUARD_REVIEW_ESCALATION_MODEL = 'opus';
     process.env.GUARD_CORRECTNESS_MODEL = 'sonnet';
-    expect(familyRemedy(await judgeReachability(dir, locked))).toBe('');
+    expect(remedyLine(await judgeReachability(dir, locked))).toBe('');
   });
 
   it('never spends a rate-limit call on a claude family — there is no such query to make', async () => {
@@ -324,7 +333,7 @@ describe('renderPreflight', () => {
       },
     ];
     const out = renderPreflight(loggedOut, now).join('\n');
-    expect(out).toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(out).toContain('GUARD_REVIEW_MODEL=sonnet');
     expect(out).not.toContain('devkit doctor --fix');
   });
 
@@ -334,7 +343,7 @@ describe('renderPreflight', () => {
     ];
     const out = renderPreflight(absent, now).join('\n');
     expect(out).toContain('devkit doctor --fix');
-    expect(out).toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(out).toContain('GUARD_REVIEW_MODEL=sonnet');
   });
 
   // sc-2689: the redirect is only honest when ONE family is dark. With both blocked there is
@@ -351,7 +360,7 @@ describe('renderPreflight', () => {
     ];
     const out = renderPreflight(bothDark, now).join('\n');
     expect(out).toContain('Both judge CLIs are dark');
-    expect(out).not.toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(out).not.toContain('GUARD_REVIEW_MODEL=sonnet');
     expect(out).not.toContain('move the judges to the claude family');
   });
 
@@ -361,26 +370,45 @@ describe('renderPreflight', () => {
     ];
     const out = renderPreflight(claudeDark, now).join('\n');
     expect(out).toContain('the packaged codex family');
-    expect(out).not.toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(out).not.toContain('GUARD_REVIEW_MODEL=sonnet');
   });
 
-  // Ship repeats this at the tail of a blocked attempt, so it exists only when ONE move helps.
-  it('familyRemedy names the claude move for a dark codex and the codex move for a dark claude', () => {
-    expect(familyRemedy(locked)).toContain(claudeFamilyEnvLine());
+  // Ship repeats this line at its tail, which is read when the head has scrolled away.
+  it('remedyLine names the claude move for a dark codex and the codex move for a dark claude', () => {
+    expect(remedyLine(locked)).toBe(
+      `To ship inside this window, ${familyOverrideRemedy('codex', true)}.`,
+    );
+    expect(remedyLine(locked)).toContain(claudeFamilyEnvLine());
     const claudeDark = [
       { role: 'review' as const, model: 'haiku', bin: 'claude', state: 'unauthenticated' as const },
     ];
-    expect(familyRemedy(claudeDark)).toContain(judgeEnvUnsetLine());
+    expect(remedyLine(claudeDark)).toContain(judgeEnvUnsetLine());
   });
 
-  it('familyRemedy is empty when nothing is dark, both CLIs are dark, or the bin is compound', () => {
+  it('remedyLine still warns when both CLIs are dark or the bin is compound', () => {
     const ok = { role: 'review' as const, model: 'haiku', bin: 'claude', state: 'ok' as const };
-    const unknown = { ...locked[0], state: 'unknown' as const };
     const claudeOut = { ...ok, role: 'correctness' as const, state: 'unauthenticated' as const };
-    const compound = { ...locked[0], bin: 'codex+claude' };
-    expect(familyRemedy([ok, unknown])).toBe('');
-    expect(familyRemedy([...locked, claudeOut])).toBe('');
-    expect(familyRemedy([compound])).toBe('');
+    expect(remedyLine([...locked, claudeOut])).toBe(
+      'Both judge CLIs are dark, so no family move helps — install or authenticate one of them.',
+    );
+    // A compound bin names no move, so it must not open with "To ship inside this window".
+    expect(remedyLine([{ ...locked[0], bin: 'codex+claude' }])).toBe(
+      `This${familyOverrideRemedy('codex+claude').slice(4)}.`,
+    );
+  });
+
+  it('remedyLine is empty when every judge is reachable or unverified, credit-backed included', () => {
+    const ok = { role: 'review' as const, model: 'haiku', bin: 'claude', state: 'ok' as const };
+    const onCredits = { ...locked[0], state: 'ok' as const, onCredits: true as const };
+    const unknown = { ...locked[0], state: 'unknown' as const };
+    expect(remedyLine([ok, onCredits, unknown])).toBe('');
+  });
+
+  it('the report closes on the very line ship repeats at its tail, so the two cannot drift', () => {
+    const ok = { role: 'review' as const, model: 'haiku', bin: 'claude', state: 'ok' as const };
+    const claudeOut = { ...ok, role: 'correctness' as const, state: 'unauthenticated' as const };
+    for (const statuses of [locked, [...locked, claudeOut]])
+      expect(renderPreflight(statuses, now).at(-1)).toBe(`   ${remedyLine(statuses)}`);
   });
 
   it('warns that the gates STILL RUN — it is a report, never a decision', () => {
@@ -533,7 +561,8 @@ describe('readCodexRateLimits — the spawn, not just the parser', () => {
   function fakeCodex(body: string): string {
     const dir = mkdtempSync(join(tmpdir(), 'fake-codex-'));
     const bin = join(dir, 'codex');
-    writeFileSync(bin, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    // Hold stdin like the real server; `exec` makes the reader's SIGKILL reach the holder.
+    writeFileSync(bin, `#!/bin/sh\n${body}\nexec cat >/dev/null\n`, { mode: 0o755 });
     chmodSync(bin, 0o755);
     return bin;
   }
@@ -556,18 +585,18 @@ describe('readCodexRateLimits — the spawn, not just the parser', () => {
         `echo '{"id":1,"result":{"userAgent":"x"}}'`,
         `echo '{"method":"remoteControl/status/changed","params":{}}'`,
         `echo '{"id":2,"result":{"rateLimits":{"rateLimitReachedType":"rate_limit_reached","primary":{"usedPercent":100,"resetsAt":0}}}}'`,
-        'sleep 5',
       ].join('\n'),
     );
     expect(snap?.reached).toBe(true);
   });
 
   it('reports the CLI version from the handshake reply, and the account-level usage flag', async () => {
+    // Exit once all three requests are read: resolves on close, with no timeout race and no EPIPE.
     const snap = await withFake(
       [
         `echo '{"id":1,"result":{"userAgent":"devkit/0.162.1 (Mac OS 26.5.1; arm64) ghostty/1.3.1"}}'`,
         `echo '{"id":2,"result":{"ordinaryUsageAllowed":false,"rateLimits":{"credits":{"hasCredits":true},"primary":{"usedPercent":10}}}}'`,
-        'sleep 5',
+        'exec head -n 3 >/dev/null',
       ].join('\n'),
     );
     expect(snap).toMatchObject({
@@ -582,7 +611,7 @@ describe('readCodexRateLimits — the spawn, not just the parser', () => {
       [
         `echo '{"id":1,"result":{"userAgent":"x"}}'`,
         `echo '{"id":2,"result":{"ordinaryUsageAllowed":"yes","rateLimits":{"primary":{"usedPercent":10}}}}'`,
-        'sleep 5',
+        'exec head -n 3 >/dev/null',
       ].join('\n'),
     );
     expect(snap?.usedPercent).toBe(10);
@@ -598,7 +627,6 @@ describe('readCodexRateLimits — the spawn, not just the parser', () => {
         `printf '{"id":2,"result":{"rateLimits":'`,
         'sleep 0.2',
         `printf '{"rateLimitReachedType":"rate_limit_reached"}}}\\n'`,
-        'sleep 5',
       ].join('\n'),
     );
     expect(snap?.reached).toBe(true);
@@ -607,7 +635,7 @@ describe('readCodexRateLimits — the spawn, not just the parser', () => {
   it('resolves null — never hangs — when the child answers nothing', async () => {
     // The whole point of the preflight is speed; a silent daemon must not become a new stall.
     const started = Date.now();
-    expect(await withFake('sleep 30', 700)).toBeNull();
+    expect(await withFake('', 700)).toBeNull();
     expect(Date.now() - started).toBeLessThan(5000);
   });
 
@@ -751,5 +779,37 @@ describe('ship_judge_preflight — the remedy reaches the shell, the report stay
     expect(r.status, r.stderr).toBe(0);
     expect(r.stderr).toContain('guard-judge preflight');
     expect(r.stderr).toMatch(/\[[^\]]*GUARD_REVIEW_MODEL=[^\]]*\]/);
+  });
+
+  // The real preflight, both CLIs missing: the state whose stdout used to be empty.
+  it('hands the shell the both-dark warning when neither judge CLI resolves', () => {
+    const root = repo(['review'], {
+      model: 'gpt-5.6-terra',
+      escalationModel: 'gpt-5.6-sol',
+      correctnessModel: 'sonnet',
+    });
+    const bin = join(root, 'path-without-claude');
+    mkdirSync(bin);
+    for (const tool of ['dirname', 'git'])
+      symlinkSync(
+        testSpawnSync('/bin/sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).stdout.trim(),
+        join(bin, tool),
+      );
+    symlinkSync(process.execPath, join(bin, 'node'));
+    const script = '. "$1"; ship_judge_preflight "$2"; printf "[%s]" "$SHIP_JUDGE_REMEDY" >&2';
+    const r = testSpawnSync('/bin/bash', ['-c', script, 'sh', helper, root], {
+      env: {
+        ...process.env,
+        PATH: bin,
+        DEVKIT_GATE_EVENTS: join(root, 'gate-events.jsonl'),
+        GUARD_CODEX_BIN: join(root, 'no-codex'),
+      },
+      encoding: 'utf8',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toContain(
+      '[Both judge CLIs are dark, so no family move helps — install or authenticate one of them.]',
+    );
   });
 });

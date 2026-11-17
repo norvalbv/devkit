@@ -53,6 +53,17 @@ _ship_path_matches_base() {
   [ -z "$status" ]
 }
 
+# A briefed NEW path is a legitimate no-op only when pre-commit removed it from index AND disk (a
+# ratchet heal-delete). A clobbered index leaves the file on disk, so status still names it.
+_ship_path_removed_new() {
+  local wt=$1 base=$2 path=$3 status
+  git -C "$wt" cat-file -e "$base:$path" 2>/dev/null && return 1
+  [ ! -e "$wt/$path" ] && [ ! -L "$wt/$path" ] || return 1
+  status=$(git -C "$wt" status --porcelain=v1 --untracked-files=all --ignored=matching -- ":(top,literal)$path") \
+    || return 2
+  [ -z "$status" ]
+}
+
 # _ship_staged_missing_objects <worktree>
 # Print "<oid>\t<path>" for every index entry whose object is absent from the object database.
 #
@@ -185,6 +196,14 @@ ship_assert_commit_scope() {
             printf '↳ ship: %q normalized to its base content during pre-commit; treating it as a no-op.\n' "$path" >&2
             continue
           fi
+          if [ "$rc" -eq 1 ]; then
+            rc=0
+            _ship_path_removed_new "$wt" "$base" "$path" || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              printf '↳ ship: %q was removed during pre-commit; absent from base and commit, treating it as a no-op.\n' "$path" >&2
+              continue
+            fi
+          fi
         fi
         if [ "$rc" -gt 1 ]; then
           printf '🛑 ship: could not verify the post-commit state of %q.\n' "$path" >&2
@@ -219,10 +238,17 @@ ship_assert_commit_scope() {
     } >&2
     return 1
   fi
+
+  # (3) git commits an empty tree when pre-commit unstages every briefed change; never publish that.
+  if [ "$(git -C "$wt" rev-parse 'HEAD^{tree}')" = "$(git -C "$wt" rev-parse "$base^{tree}")" ]; then
+    echo "🛑 ship: ABORTED — pre-commit gates reduced every briefed change to a no-op; nothing to commit. Nothing pushed." >&2
+    return 1
+  fi
 }
 
 # ship_record_gate_adds <worktree> <base> <state-file> <out-file>
-# Write, NUL-delimited, every path the GATE CHAIN put in the commit that the caller never briefed.
+# Write, NUL-delimited, every path the GATE CHAIN authored: what it put in the commit that the caller
+# never briefed, plus briefed NEW paths it removed (absent from base, staged tree only, and HEAD).
 #
 # WHY: the check above deliberately TOLERATES a ratchet gate staging a lowered baseline so it rides
 # the same commit (see this file's header). ship-branch.sh's resume path did not, so a commit whose
@@ -255,5 +281,78 @@ ship_record_gate_adds() {
   # entries means "everything except these", so an empty briefed set correctly records the whole
   # changed set rather than nothing.
   git -C "$wt" diff --no-renames --name-only -z "$base" HEAD \
-    -- ${exclude[@]+"${exclude[@]}"} > "$out"
+    -- ${exclude[@]+"${exclude[@]}"} > "$out" || return 1
+  # Resume drops these from its rebuild: the caller's checkout still holds what the gate removed.
+  ( set -o pipefail
+    git -C "$wt" diff --no-renames --name-only -z --diff-filter=D "$tree" HEAD |
+      while IFS= read -r -d '' path; do
+        git -C "$wt" cat-file -e "$base:$path" 2>/dev/null || printf '%s\0' "$path"
+      done ) >> "$out"
+}
+
+# ship_sync_gate_rewrites <root> <state-file> <commit> [hint]
+#
+# The format gate rewrites briefed files inside the ship worktree, so the commit holds bytes the
+# caller lacks. Copy them back while the caller's copy still hashes to what ship staged.
+#
+# `hint` (--from-branch, whose next ship refuses worktree overlays) writes nothing, only names them.
+ship_sync_gate_rewrites() {
+  local root=$1 state=$2 commit=$3 mode=${4:-write} tree meta path omode nmode old new short h i
+  local -a keep=() cand=() cand_old=() cand_new=() hashes=() pending=() pending_new=() specs=()
+  local -a synced=() left=()
+  tree=$(_ship_state_tree "$state")
+  [ -n "$tree" ] || return 0
+  while IFS= read -r -d '' path; do keep+=(":(top,literal)$path"); done < <(_ship_state_paths "$state")
+  [ "${#keep[@]}" -gt 0 ] || return 0
+  # Briefed paths only: a ratchet gate also lowers baselines the caller never staged.
+  while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
+    read -r omode nmode old new _ <<<"${meta#:}"
+    case "$omode:$nmode" in 100644:100644|100644:100755|100755:100644|100755:100755) ;; *) continue ;; esac
+    if [ "$mode" != hint ] && { [ ! -f "$root/$path" ] || [ -L "$root/$path" ]; }; then
+      left+=("$path")
+      continue
+    fi
+    cand+=("$path")
+    cand_old+=("$old")
+    cand_new+=("$new")
+  done < <(git -C "$root" diff-tree -r -z --no-renames --diff-filter=M "$tree" "$commit" -- "${keep[@]}")
+  short=$(git -C "$root" rev-parse --short "$commit")
+  if [ "$mode" = hint ] && [ "${#cand[@]}" -gt 0 ]; then
+    echo "🎨 ship: a commit gate rewrote ${#cand[@]} briefed file(s) your branch lacks. To match the PR, run this and commit the result:" >&2
+    printf '     git restore --source=%s --worktree --' "$short" >&2
+    printf ' %q' "${cand[@]}" >&2
+    printf '\n' >&2
+    return 0
+  fi
+  if [ "${#cand[@]}" -gt 0 ]; then
+    # One hash-object for every candidate; a path it cannot read yields no line and so never matches.
+    while IFS= read -r h; do hashes+=("$h"); done < <(git -C "$root" hash-object -- "${cand[@]}" 2>/dev/null)
+    for i in "${!cand[@]}"; do
+      if [ "${hashes[$i]:-}" = "${cand_old[$i]}" ]; then
+        pending+=("${cand[$i]}"); pending_new+=("${cand_new[$i]}"); specs+=(":(top,literal)${cand[$i]}")
+      else
+        left+=("${cand[$i]}")
+      fi
+    done
+  fi
+  if [ "${#pending[@]}" -gt 0 ]; then
+    # hooksPath off: restore fires the caller's post-checkout hook. A re-hash decides what was written,
+    # because restore skips skip-worktree entries silently and can lose the caller's index.lock race.
+    git -c core.hooksPath=/dev/null -C "$root" restore --source="$commit" --worktree -- "${specs[@]}" \
+      >/dev/null 2>&1 || true
+    hashes=()
+    while IFS= read -r h; do hashes+=("$h"); done < <(git -C "$root" hash-object -- "${pending[@]}" 2>/dev/null)
+    for i in "${!pending[@]}"; do
+      if [ "${hashes[$i]:-}" = "${pending_new[$i]}" ]; then synced+=("${pending[$i]}"); else left+=("${pending[$i]}"); fi
+    done
+  fi
+  if [ "${#synced[@]}" -gt 0 ]; then
+    echo "🎨 ship: a commit gate rewrote ${#synced[@]} briefed file(s); synced your working copy to ${short}:" >&2
+    printf '     %s\n' "${synced[@]}" >&2
+  fi
+  if [ "${#left[@]}" -gt 0 ]; then
+    echo "🎨 ship: a commit gate rewrote ${#left[@]} briefed file(s) that differ from what ship staged, so they were left as-is. Compare with: git diff $short -- <path>" >&2
+    printf '     %s\n' "${left[@]}" >&2
+  fi
+  return 0
 }

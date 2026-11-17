@@ -3,7 +3,7 @@
  *  ship-base-preserves-base-changes.test.mts the base-conflict one. */
 import type { ExecFileSyncOptions } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { generationAt, NO_RECORD } from '../lib/ship/ship-intent-codec.mts';
@@ -508,8 +508,12 @@ describe('preflight ordering guard', () => {
   it('ship-branch.sh: each aborting preflight follows the record helper and routes through it', () => {
     const src = readFileSync(scriptPath, 'utf8');
     const lns = src.split('\n');
-    const helper = lns.findIndex((l) => /^ship_abort_resumable\(\)/.test(l));
-    expect(helper, 'ship_abort_resumable() must exist').toBeGreaterThan(-1);
+    const HELPER_FILE = 'ship-branch/staging-and-record.sh';
+    // The helper lives in a sourced file: its source line is the definition point.
+    const helper = lns.findIndex((l) => l.startsWith('. ') && l.includes(HELPER_FILE));
+    expect(helper, `ship-branch.sh must source ${HELPER_FILE}`).toBeGreaterThan(-1);
+    const helperSrc = readFileSync(join(dirname(scriptPath), HELPER_FILE), 'utf8');
+    expect(helperSrc, 'ship_abort_resumable() must exist').toMatch(/^ship_abort_resumable\(\)/m);
     const found = calls(src);
     expect(found.map((c) => c.name)).toEqual(
       expect.arrayContaining([

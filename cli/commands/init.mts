@@ -57,7 +57,7 @@ import { lockedCommand } from '../lib/install/init/init-lock.mts';
 import { applyScanRoots } from '../lib/install/init/scan-roots.mts';
 import { reviewPlanFromFlags } from '../lib/install/flags/review-profile.mts';
 import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mts';
-import { installFallow } from '../lib/install/install-fallow.mts';
+import { ensureFallow } from '../lib/install/install-fallow.mts';
 import { installSearchCode } from '../lib/install/install-search-code.mts';
 import * as oxcLifecycle from '../lib/install/oxc/lifecycle.mts';
 import { type PackageJson, patchPackageJson } from '../lib/install/package-json.mts';
@@ -274,11 +274,11 @@ function installHusky(sel: HookSelectionInput, hookRoot: string, pkgRel: string,
       console.log(`  [dry-run] write .husky/pre-commit${where} (assembled from selection)`);
       return;
     }
-    mkdirSync(join(hookRoot, '.husky'), { recursive: true });
-    writeFileSync(hookPath, buildFullHook(sel, pkgRel));
-    chmodSync(hookPath, 0o755);
-    console.log(`  ✓ created .husky/pre-commit${where}`);
-    return;
+    if (writeIfAbsent(hookPath, buildFullHook(sel, pkgRel)) === 'created') {
+      chmodSync(hookPath, 0o755);
+      console.log(`  ✓ created .husky/pre-commit${where}`);
+      return;
+    }
   }
   const current = readText(hookPath);
   const block = buildGuardBlock(sel, pkgRel);
@@ -383,7 +383,7 @@ function runFallowInit(cwd: string, dryRun: boolean): string {
 // fallow-ignore-next-line complexity
 async function applyFallow(cwd: string, dryRun: boolean, interactive: boolean, gateLine: string) {
   // The gate is the staged audit in devkit's hook block (step 3); fallow's installer is never run.
-  const r = installFallow({ cwd, dryRun });
+  const r = ensureFallow({ cwd, dryRun });
   console.log(`  ${r.ok ? '✓' : '!'} ${r.message}`);
 
   const doInit = await subConfirm('Run `fallow init`? (optional — fallow is zero-config)', {

@@ -26,7 +26,7 @@ type Picked = { pr: string } | { reason: string };
 const say = (line: string) => console.error(`devkit machine attach: ${line}`);
 
 /** The PR number `target` names in origin's repo, which is the repo devkit ship pushes to. */
-function prIn(repo: string, target: string | undefined): Picked {
+export function prIn(repo: string, target: string | undefined): Picked {
   if (!target) return { reason: 'usage: devkit machine attach <pr-number|pr-url>' };
   if (PR_NUMBER.test(target)) return { pr: target };
   const url = PR_URL.exec(target);

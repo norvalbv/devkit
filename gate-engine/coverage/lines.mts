@@ -1,7 +1,7 @@
 /** Line coverage from an istanbul/V8 coverage-final.json entry, and its intersection with the lines a
  * change added — the unit a "coverage of the new diff" target means (sc-3228). */
 
-import { parsePatchHunks } from '../comment-firewall/patch.mts';
+import { parsePatchHunks } from '../comment-firewall/staged/patch.mts';
 
 /** One istanbul per-file coverage entry (only the fields line coverage reads). */
 export interface LineCoverageEntry {

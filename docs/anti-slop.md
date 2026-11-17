@@ -1,8 +1,8 @@
 # Anti-slop capability
 
 Devkit vendors the complete 15-rule [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop)
-production ruleset at commit **e8c4880471b23ab7f216fba7b27d173a6ef07d4c** and composes two
-Devkit-owned external-record rules. All 17 rules default to error. The ruleset is an opt-in
+production ruleset at commit **e8c4880471b23ab7f216fba7b27d173a6ef07d4c** and composes three
+Devkit-owned rules: two external-record rules and one elapsed-time test rule. All 18 rules default to error. The ruleset is an opt-in
 capability on top of Devkit's
 exact Oxlint 1.78.0 and @oxlint/plugins 1.78.0 pins:
 
@@ -34,6 +34,7 @@ devkit anti-slop check --staged             # exact Git-index snapshot against H
 devkit anti-slop check --base <git-ref>     # full CI scan + baseline monotonicity
 devkit anti-slop inspect [--json]           # read-only debt inventory
 devkit anti-slop prune [paths...]           # shrink existing debt only
+devkit anti-slop rekey                      # one-time move of line-identity debt to span identity
 ```
 
 Paths are literal existing files/directories inside the repository and default to the repository
@@ -52,8 +53,10 @@ HEAD, or no committed baseline (bootstrap and overlay installs), create writes a
 unreadable committed baseline writes with a notice that growth was not pre-checked. The committed baseline is
 **.anti-slop-baseline.json**. Check never edits it: existing entries are allowed, a new
 error-severity finding fails, and a new warning-severity finding is reported without failing.
-Prune refuses to write while a new error exists, removes fixed fingerprints, and reduces the
-count when one of several identical occurrences is fixed. It cannot add a current finding.
+Prune removes fixed fingerprints and reduces the count when one of several identical occurrences
+is fixed. It cannot add a current finding. While a new error exists it keeps fixed debt, but an
+unscoped prune still drops the debt of deleted files, except a finding that reappears new elsewhere:
+that is a rename or move, so run adopt-renames or adopt-relocations first.
 Devkit clean deliberately keeps the baseline because it is the repository's debt record, not
 replaceable Devkit state.
 
@@ -106,7 +109,7 @@ while the source still exists (or is deleted), which Git reports as edits rather
 `check --staged` and `check --base` print such a finding as
 `RELOCATED <rule> <file>:<line> <- <source>` and summarize `FAIL — X new, Y relocated from
 <sources>` instead of counting it as new. A finding is relocated only when its rule, normalized
-diagnostic, and normalized source line match debt that a modified, renamed, or deleted file provably
+diagnostic, and normalized span context match debt that a modified, renamed, or deleted file provably
 gave up: the source's base baseline entry AND a lint of its base bytes must both carry it, and the
 candidate lint of the source must no longer, so unpruned stale credit is never spendable. Pairing is
 one-to-one in source path order, every candidate source is named, and excess copies stay new. Run the
@@ -127,7 +130,7 @@ local baseline and `HEAD` bound relocation, and `adopt-relocations --base` is re
 other base comparison.
 
 Occurrences with the same rule, repository-relative file, normalized diagnostic, and normalized
-source line are intentionally fungible and share one counted fingerprint. The ratchet prevents that
+span context are intentionally fungible and share one counted fingerprint. The ratchet prevents that
 debt class from growing; it does not assign provenance to otherwise indistinguishable occurrences.
 This keeps unrelated line-number shifts from reclassifying an adopted repository's existing debt.
 
@@ -146,20 +149,49 @@ Each fingerprint is SHA-256 over exactly:
 1. the namespaced rule id;
 2. the POSIX repository-relative file path;
 3. the whitespace-normalized diagnostic;
-4. the whitespace/line-ending-normalized reported source line.
+4. the whitespace-normalized first line of the reported span's text (sliced by Oxlint's UTF-8 byte
+   offset), or the reported source line for a diagnostic without a span.
 
+Keying on the span rather than the line around it means a formatter reflowing a signature, or an
+edit to a neighbouring parameter on the same line, leaves the unchanged findings baselined.
 Absolute checkout paths and line numbers are excluded. Identical fingerprints carry a count, so a
 third copy of an already-baselined two-copy pattern is still new. The file contains no timestamp and
 entries sort by fingerprint, making identical repositories byte-for-byte deterministic.
 
+A baseline written before span identity has no `"identity": "span-first-line"` field. Check, prune,
+create and the adopt verbs refuse it with `run devkit anti-slop rekey`; `devkit upgrade` re-keys it
+automatically. Rekey lints the tree the baseline describes (HEAD when HEAD commits one, else the
+working tree) and moves each entry onto the span fingerprints it observes, never more than the entry's
+count; entries no finding carries any more are dropped. Every gate re-keys a legacy committed base
+the same way when it reads it, so the migration commit compares like with like and real growth still
+reports `BASELINE-GROWTH`.
+
 ## Authoring-time check
 
 With the anti-slop component installed, `devkit init` also installs the `anti-slop-preflight.sh`
-agent hook (Claude PostToolUse `Edit|Write|MultiEdit`, Cursor `afterFileEdit`). It runs
+agent hook (Claude PostToolUse `Edit|Write|MultiEdit` and `Bash`, Cursor `afterFileEdit`). It runs
 `devkit anti-slop check <file>` on each JavaScript/TypeScript file an agent writes and feeds new
 findings back right away, so a violation shows after the first offending file instead of at commit.
 It blocks only on the check's own FAIL verdict and fails open otherwise (no capability, no
-resolvable `devkit` bin, a file outside the project). When a check fails, the output also prints a
+resolvable `devkit` bin, a file outside the workspace).
+
+The workspace is the Git toplevel of the hook payload's `cwd`, which follows Claude into a
+worktree, and also `CLAUDE_PROJECT_DIR`. The `cwd` root wins when both contain the file.
+
+A Bash call names no file, so the Bash registration (`--bash-writes`) checks the dirty files
+(staged, unstaged or untracked, never unmerged) whose modification time falls inside that call: the
+payload's `duration_ms` plus two seconds for coarse filesystem clocks. Each Bash call pays one
+`git status`, which measured about 85 ms in this repository. Some writes are not covered:
+
+- a Bash call that exits non-zero, which fires PostToolUseFailure instead;
+- a write made by a backgrounded command after it was launched;
+- a copy that preserves modification times (`cp -p`, `rsync -a`);
+- a file the same call also commits, which leaves it clean (the commit gates still check it);
+- any harness without `duration_ms`. Codex and Cursor do not get the Bash registration.
+
+A `cwd` outside any repository falls back to `CLAUDE_PROJECT_DIR`, still limited to that call's
+window. A file an Edit wrote within about two seconds before a short Bash call can be reported
+by both hooks. When a check fails, the output also prints a
 hint for each rule that has one (for example, a `deps` parameter instead of module mocking), plus the
 acceptance route for the install mode: a path-scoped override in the repository Oxlint config, or a
 local `create --force` in overlay. Anti-slop deliberately has no `GUARD_*` one-run bypass.
@@ -239,8 +271,14 @@ Devkit additionally registers `anti-slop/no-unsafe-external-record-access` and
 `anti-slop/no-unsafe-external-record-enumeration`; their scope, options, and accepted proof forms are
 documented in the [external-record extension guide](anti-slop-external-records.md).
 
+`anti-slop/no-elapsed-time-assertions` rejects an ordering matcher (`toBeLessThan`, `toBeGreaterThan`
+and their `OrEqual` forms, through `.not` and `expect.soft`) whose subject is elapsed wall-clock time:
+a `Date.now()` or `performance.now()` delta, or a stable `const` holding one. It never reads the bound,
+so it cannot push a deadline tighter. Equality matchers, product-reported durations and `let` bindings
+are out of scope; the testing skill's "Deadlines are hang detectors" section covers the shapes it cannot see.
+
 The packed E2E fixture asserts that all 15 upstream diagnostics load from the emitted package and
-that both Devkit extensions fire by default through the packed plugin API. It also proves that off, warn,
+that both external-record extensions fire by default through the packed plugin API. It also proves that off, warn,
 error, and scoped overrides work, that create to new violation to fix to prune preserves the
 shrink-only contract, both partial-staging directions, baseline-growth rejection, same-commit
 baseline persistence for Git renames, and a post-merge check against the packed consumer binary.
@@ -248,10 +286,10 @@ baseline persistence for Git renames, and a post-merge check against the packed 
 ## Intentional differences and limits
 
 - The 15 upstream rule/helper implementations are unchanged from the pinned source. Devkit owns the
-  plugin composition seam, the two external-record extensions, delivery, namespacing/config
+  plugin composition seam, the three Devkit-owned rules, delivery, namespacing/config
   ownership, and the baseline wrapper.
 - Oxc's JS-plugin API is alpha. The exact Oxlint/plugin API pair and packed fixture are the
-  compatibility boundary: it covers all 15 upstream rules and both Devkit extensions. Updating
+  compatibility boundary: it covers all 15 upstream rules and both external-record extensions. Updating
   either pin requires refreshing that evidence.
 - Like upstream, these are syntax/scope rules, not TypeScript type-aware rules. They do not replace
   TypeScript check with no emit.

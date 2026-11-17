@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { detectGitRoot } from '../detect-git-root.mts';
 import { canonicalPath, packageDir } from '../fs-helpers.mts';
-import { shellQuote } from './dist-integrity.mts';
+import { shellQuote } from '../../../gate-engine/review/valve/shell-word.mts';
 
 const DEVKIT_PACKAGE = '@norvalbv/devkit';
 const RELEASE_VERSION = /^\d+\.\d+\.\d+$/;

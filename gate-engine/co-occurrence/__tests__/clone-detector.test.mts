@@ -1,13 +1,41 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { hashFragment, relPath } from '../clone-detector.mts';
+import { GATE_REASON_ENV, readGateReason } from '../../deterministic/reason.mts';
 import { resolveJscpdBin } from '../jscpd-bin.mts';
 
 const HEX16 = /^[0-9a-f]{16}$/;
+const MARK = 'jscpd:ignore';
+// A no-op jscpd that reports the pinned version, so the version guard passes and the marker scan runs.
+const PINNED_JSCPD = JSON.parse(
+  readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'package.json'),
+    'utf8',
+  ),
+).optionalDependencies.jscpd;
+const STUB_JSCPD = `#!/bin/sh\n[ "$1" = --version ] && echo "jscpd ${PINNED_JSCPD}"\nexit 0\n`;
+
+/** A fresh temp dir holding `files` (relative path → content), parent dirs created. */
+function writeFixture(files: Record<string, string>): string {
+  const dir = mkdtempSync(join(tmpdir(), 'clone-marker-'));
+  for (const [rel, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, rel)), { recursive: true });
+    writeFileSync(join(dir, rel), content);
+  }
+  return dir;
+}
 const LINES_RE = /--lines \d+\b/;
 const RANGE_A_RE = /--range-a \d+-\d+\b/;
 const RANGE_B_RE = /--range-b \d+-\d+\b/;
@@ -94,6 +122,7 @@ describe('resolveJscpdBin', () => {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const DETECTOR = resolve(here, '..', 'clone-detector.mts');
+const ALLOWLIST_CLI = resolve(here, '..', 'allowlist-cli.mts');
 // devkit package root (where node_modules/.bin/jscpd lives): __tests__ → co-occurrence → gate-engine → devkit.
 const pkgRoot = resolve(here, '..', '..', '..');
 const JSCPD_BIN = process.env.JSCPD_BIN || resolve(pkgRoot, 'node_modules/.bin/jscpd');
@@ -116,11 +145,18 @@ const SHARED = `export function computeWidgetTotals(items) {
 }
 `;
 
+// Two files whose only shared code is `body` — one cross-file clone.
+function writeClonePair(dir: string, body: string): void {
+  writeFileSync(join(dir, 'a.ts'), `${body}\nexport const A_ONLY = 1;\n`);
+  writeFileSync(join(dir, 'b.ts'), `${body}\nexport const B_ONLY = 2;\n`);
+}
+
 // The gate's exit-code contract is what a pre-commit hook depends on:
-//   1 = new clone → block · 0 = clean · 2 = could-not-run → fail-open.
+//   1 = new or lapsed-approval clone → block · 0 = clean · 2 = could-not-run → fail-open.
 describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
   let tmp: string;
   let cloneFile: string | undefined; // a real reported clone path, for the --changed scoping test
+  let cloneFileB: string | undefined; // its partner path, for the reversed-pair lapsed test
   let cloneHash: string | undefined; // the reported fragmentHash, for the allowlist-suppression test
 
   function run(args, env) {
@@ -144,6 +180,7 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     // allowlist-suppression tests.
     const first = JSON.parse(run(['json', '--paths', tmp], {}).stdout)[0];
     cloneFile = first?.fileA;
+    cloneFileB = first?.fileB;
     cloneHash = first?.fragmentHash;
   });
 
@@ -169,6 +206,21 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     writeFileSync(join(mjs, 'b.mjs'), `${SHARED}\nexport const B_ONLY = 2;\n`);
     expect(run(['scan', '--gate', '--paths', mjs], {}).status).toBe(1);
     rmSync(mjs, { recursive: true, force: true });
+  });
+
+  it('exit 1 — one comment line pasted into a copy does not hide the clone', () => {
+    // SHARED is 77 code tokens; a comment after line 5 splits it 38/39, both under the 50 floor.
+    const lines = SHARED.split('\n');
+    const commented = [
+      ...lines.slice(0, 5),
+      '      // count only active widgets',
+      ...lines.slice(5),
+    ];
+    const dir = mkdtempSync(join(tmpdir(), 'clone-comment-'));
+    writeFileSync(join(dir, 'a.ts'), `${SHARED}\nexport const A_ONLY = 1;\n`);
+    writeFileSync(join(dir, 'b.ts'), `${commented.join('\n')}\nexport const B_ONLY = 2;\n`);
+    expect(run(['scan', '--gate', '--paths', dir], {}).status).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('exit 0 — an identical import preamble alone is not a clone (module-system forced)', () => {
@@ -245,19 +297,6 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     expect(status).toBe(1);
   });
 
-  it('--changed scopes to staged: in-scope blocks, out-of-scope clean', () => {
-    expect(cloneFile).toBeTruthy();
-    expect(
-      run(['scan', '--changed', '--gate', '--paths', tmp], { MATCHER_CHANGED_FILES: cloneFile })
-        .status,
-    ).toBe(1);
-    expect(
-      run(['scan', '--changed', '--gate', '--paths', tmp], {
-        MATCHER_CHANGED_FILES: 'src/totally/unrelated.ts',
-      }).status,
-    ).toBe(0);
-  });
-
   it('exit 0 — a clone covered by a LIVE allowlist entry is suppressed', () => {
     const al = join(tmp, 'allowlist-live.json');
     const today = new Date().toISOString().slice(0, 10);
@@ -271,16 +310,104 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     expect(run(['scan', '--gate', '--paths', tmp], { CO_OCCURRENCE_ALLOWLIST: al }).status).toBe(0);
   });
 
-  it('exit 1 — an EXPIRED allowlist entry re-surfaces the clone', () => {
-    const al = join(tmp, 'allowlist-expired.json');
-    writeFileSync(
-      al,
-      JSON.stringify({
-        pairs: [],
-        clones: [{ fragmentHash: cloneHash, date: '2000-01-01', decayDays: 1 }],
-      }),
-    );
-    expect(run(['scan', '--gate', '--paths', tmp], { CO_OCCURRENCE_ALLOWLIST: al }).status).toBe(1);
+  function gateWithClones(name, clones, env = {}) {
+    const al = join(tmp, name);
+    writeFileSync(al, JSON.stringify({ pairs: [], clones }));
+    return run(['scan', '--gate', '--paths', tmp], { CO_OCCURRENCE_ALLOWLIST: al, ...env });
+  }
+
+  it('exit 1 — an EXPIRED allowlist entry re-surfaces as a LAPSED approval, not a new clone', () => {
+    const { status, stdout } = gateWithClones('allowlist-expired.json', [
+      { fragmentHash: cloneHash, date: '2000-01-01', decayDays: 1, description: 'shared harness' },
+    ]);
+    expect(status).toBe(1);
+    expect(stdout).toContain('clone gate: 1 clone(s) under a lapsed approval — block.');
+    expect(stdout).toContain('approved 2000-01-01, 1-day lifetime: "shared harness"');
+    expect(stdout).toContain(`add-clone "${cloneHash}"`);
+    expect(stdout).not.toContain('new clone');
+  });
+
+  it('a lapsed legacy entry with no lifetime, reason or files reads as such, never "undefined"', () => {
+    const { status, stdout } = gateWithClones('allowlist-legacy.json', [
+      { fragmentHash: cloneHash, date: '2000-01-01' },
+    ]);
+    expect(status).toBe(1);
+    expect(stdout).toContain('no lifetime recorded (7-day default): "no reason recorded"');
+    expect(stdout).not.toContain('undefined');
+  });
+
+  it('a lapsed entry recorded for other files names them (a third paste, not the reviewed site)', () => {
+    const { stdout } = gateWithClones('allowlist-moved.json', [
+      { fragmentHash: cloneHash, date: '2000-01-01', fileA: 'x.ts', fileB: 'y.ts' },
+    ]);
+    expect(stdout).toContain('— approved for x.ts <> y.ts');
+  });
+
+  // The ship digest shows the gate's reason file, not its stdout — the label must reach it too.
+  it('the gate reason file carries the lapsed label, not "new clone"', () => {
+    const reasonFile = join(tmp, 'reason-lapsed.txt');
+    const clones = [{ fragmentHash: cloneHash, date: '2000-01-01' }];
+    gateWithClones('allowlist-reason.json', clones, { DEVKIT_GATE_REASON_FILE: reasonFile });
+    const reason = readFileSync(reasonFile, 'utf8');
+    expect(reason).toContain('clone gate: 1 clone(s) under a lapsed approval');
+    expect(reason).toContain(`${cloneHash}`);
+    expect(reason).toContain('[lapsed, approved 2000-01-01]');
+    expect(reason).not.toContain('new clone');
+  });
+
+  it('several expired entries for one hash show the NEWEST approval, whatever the file order', () => {
+    const { stdout } = gateWithClones('allowlist-renewed.json', [
+      { fragmentHash: cloneHash, date: '2000-06-01', description: 'second look' },
+      { fragmentHash: cloneHash, date: '2000-01-01', description: 'first look' },
+    ]);
+    expect(stdout).toContain('approved 2000-06-01');
+    expect(stdout).not.toContain('first look');
+  });
+
+  // jscpd's A/B order is not part of the approval: the same two files reversed are the reviewed site.
+  it('a lapsed entry recorded with the same files in reverse order is NOT flagged as a third paste', () => {
+    const { stdout } = gateWithClones('allowlist-reversed.json', [
+      { fragmentHash: cloneHash, date: '2000-01-01', fileA: cloneFileB, fileB: cloneFile },
+    ]);
+    expect(stdout).toContain('approved 2000-01-01');
+    expect(stdout).not.toContain('approved for');
+  });
+
+  // The header counts clones, not approval entries, even when several clones share a hash.
+  it('a three-way paste under one lapsed approval counts its clones, not phantom approvals', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'clone-3way-'));
+    try {
+      // Byte-identical files: every pair is a clone, each keyed by its file pair.
+      for (const f of ['a', 'b', 'c']) writeFileSync(join(dir, `${f}.ts`), SHARED);
+      const found = JSON.parse(run(['json', '--paths', dir], {}).stdout);
+      const al = join(dir, 'allowlist.json');
+      writeFileSync(
+        al,
+        JSON.stringify({
+          pairs: [],
+          clones: [...new Set(found.map((c) => c.fragmentHash))].map((fragmentHash) => ({
+            fragmentHash,
+            date: '2000-01-01',
+          })),
+        }),
+      );
+      const { stdout } = run(['scan', '--gate', '--paths', dir], { CO_OCCURRENCE_ALLOWLIST: al });
+      expect(found.length).toBeGreaterThan(1);
+      expect(stdout).toContain(
+        `clone gate: ${found.length} clone(s) under a lapsed approval — block.`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['expired first', ['2000-01-01', null]],
+    ['live first', [null, '2000-01-01']],
+  ])('exit 0 — a hash with a live AND an expired entry stays covered (%s)', (_label, dates) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const clones = dates.map((d) => ({ fragmentHash: cloneHash, date: d ?? today, decayDays: 1 }));
+    expect(gateWithClones('allowlist-dup.json', clones).status).toBe(0);
   });
 
   // A corrupt allowlist must FAIL OPEN (exit 2), not silently empty the approved set →
@@ -299,6 +426,167 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     expect(stdout).toMatch(LINES_RE);
     expect(stdout).toMatch(RANGE_A_RE);
     expect(stdout).toMatch(RANGE_B_RE);
+    // The command carries no --decay-days, so the output must say what lifetime that buys.
+    expect(stdout).toContain('lasts until the duplicated code changes');
+  });
+
+  // The control for a durable approval: it must cover the approved code and nothing else.
+  it('a default add-clone approval suppresses the clone, then blocks once its code changes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'clone-durable-'));
+    const al = join(tmp, 'allowlist-durable.json');
+    writeClonePair(dir, SHARED);
+    const { fragmentHash } = JSON.parse(run(['json', '--paths', dir], {}).stdout)[0];
+    execFileSync(
+      'node',
+      [ALLOWLIST_CLI, 'add-clone', fragmentHash, 'a.ts', 'b.ts', '--description', 'by design'],
+      { env: { ...process.env, CO_OCCURRENCE_ALLOWLIST: al } },
+    );
+    const gate = ['scan', '--gate', '--paths', dir];
+    expect(run(gate, { CO_OCCURRENCE_ALLOWLIST: al }).status).toBe(0);
+    writeClonePair(dir, SHARED.replace('item.value > 0', 'item.value > 1'));
+    expect(run(gate, { CO_OCCURRENCE_ALLOWLIST: al }).status).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  // jscpd drops a marked region from detection with no switch to disable it, so wrapping one
+  // copy of a clone would pass the gate silently. The gate blocks the marker itself instead.
+  it('exit 1 — a clone hidden by jscpd ignore markers blocks on the marker', () => {
+    const dir = writeFixture({
+      'a.ts': `/* ${MARK}-start */\n${SHARED}/* ${MARK}-end */\n`,
+      'b.ts': SHARED,
+    });
+    const reasonFile = join(dir, 'reason.txt');
+    try {
+      const { status, stdout } = run(['scan', '--gate', '--paths', dir], {
+        [GATE_REASON_ENV]: reasonFile,
+      });
+      expect(status).toBe(1);
+      expect(stdout).toContain(`marker  ${join(dir, 'a.ts')}:1`);
+      // The ship digest repeats the first reason line, so it must not read "0 new clone(s)" alone.
+      expect(readGateReason(reasonFile)[0]).toBe(
+        'clone gate: 0 new clone(s), 1 jscpd ignore marker(s)',
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('--changed scopes markers to staged files', () => {
+    const dir = writeFixture({
+      'a.ts': `// ${MARK}-start\n${SHARED}// ${MARK}-end\n`,
+      'b.ts': SHARED,
+    });
+    // --changed baselines against HEAD, so jscpd needs the fixture inside a git repo with a commit.
+    const git = (...args: string[]) =>
+      execFileSync('git', ['-C', dir, ...args], { stdio: 'ignore' });
+    git('init', '-q');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init');
+    const gate = (changedFiles: string) =>
+      run(['scan', '--changed', '--gate', '--paths', dir], { MATCHER_CHANGED_FILES: changedFiles });
+    try {
+      expect(gate(join(dir, 'a.ts')).status).toBe(1);
+      expect(gate('src/totally/unrelated.ts').status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('exit 1 — a marker inside a string literal blocks (jscpd matches raw text)', () => {
+    const dir = writeFixture({ 'a.ts': `const s = '${MARK}-start';\nexport const A = 1;\n` });
+    try {
+      expect(run(['scan', '--gate', '--paths', dir], {}).status).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a FILE given as a clone root is scanned itself, not walked (no ENOTDIR crash)', () => {
+    const dir = writeFixture({ 'a.ts': 'export const A = 1;\n', 'b.ts': `// ${MARK}-start\n` });
+    try {
+      expect(run(['scan', '--gate', '--paths', join(dir, 'a.ts')], {}).status).toBe(0);
+      expect(run(['scan', '--gate', '--paths', join(dir, 'b.ts')], {}).stdout).toContain(
+        `marker  ${join(dir, 'b.ts')}:1`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // jscpd 5 (a global install's PATH jscpd) skips a missing root where 4 fails; a stub stands in.
+  it('exit 0 — a missing clone root is skipped by the marker scan', () => {
+    const dir = writeFixture({
+      'jscpd-stub': STUB_JSCPD,
+      'src/a.ts': 'export const A = 1;\n',
+    });
+    chmodSync(join(dir, 'jscpd-stub'), 0o755);
+    try {
+      const args = ['scan', '--gate', '--paths', `${join(dir, 'nope')} ${join(dir, 'src')}`];
+      expect(run(args, { JSCPD_BIN: join(dir, 'jscpd-stub') }).status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // An fs error in the marker scan is could-not-run, like a jscpd failure: fail open, never block.
+  it.skipIf(process.getuid?.() === 0)(
+    'exit 2 — an unreadable dir in a clone root fails open',
+    () => {
+      const dir = writeFixture({ 'jscpd-stub': STUB_JSCPD, 'src/locked/a.ts': '' });
+      chmodSync(join(dir, 'jscpd-stub'), 0o755);
+      chmodSync(join(dir, 'src', 'locked'), 0o000);
+      try {
+        const args = ['scan', '--gate', '--paths', join(dir, 'src')];
+        expect(run(args, { JSCPD_BIN: join(dir, 'jscpd-stub') }).status).toBe(2);
+      } finally {
+        chmodSync(join(dir, 'src', 'locked'), 0o755);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('--changed reads only staged files: an unrelated unreadable dir cannot blind the gate', () => {
+    const dir = writeFixture({
+      'jscpd-stub': STUB_JSCPD,
+      'src/locked/x.ts': '',
+      'src/a.ts': `// ${MARK}-start\n`,
+    });
+    chmodSync(join(dir, 'jscpd-stub'), 0o755);
+    chmodSync(join(dir, 'src', 'locked'), 0o000);
+    try {
+      const { status, stdout } = run(['scan', '--changed', '--gate', '--paths', join(dir, 'src')], {
+        JSCPD_BIN: join(dir, 'jscpd-stub'),
+        MATCHER_CHANGED_FILES: join(dir, 'src', 'a.ts'),
+      });
+      expect(status).toBe(1);
+      expect(stdout).toContain(`marker  ${join(dir, 'src', 'a.ts')}:1`);
+    } finally {
+      chmodSync(join(dir, 'src', 'locked'), 0o755);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('exit 0 — a changed-set entry for a deleted file is skipped, not a could-not-run', () => {
+    const dir = writeFixture({ 'jscpd-stub': STUB_JSCPD, 'src/a.ts': '' });
+    chmodSync(join(dir, 'jscpd-stub'), 0o755);
+    try {
+      const args = ['scan', '--changed', '--gate', '--paths', join(dir, 'src')];
+      const env = {
+        JSCPD_BIN: join(dir, 'jscpd-stub'),
+        MATCHER_CHANGED_FILES: join(dir, 'src', 'gone.ts'),
+      };
+      expect(run(args, env).status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('exit 0 — a marker in a test file is out of scope, like its clones', () => {
+    const dir = writeFixture({ '__tests__/a.ts': `// ${MARK}-start\nexport const A = 1;\n` });
+    try {
+      expect(run(['scan', '--gate', '--paths', dir], {}).status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -311,35 +599,52 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate approve-command cap', () => {
   const APPROVE_CAP = 6; // must match clone-detector.mts
 
   // n distinct >50-token blocks, each duplicated across its own a<i>/b<i> pair → n novel
-  // cross-file clones. Blocks differ by token (compute_i, seen_i, *i, label-i) so a<i>
-  // matches ONLY b<i> — the shared lines between pairs (`for (...)`, `const average`) are
-  // single lines, far under jscpd's min-tokens, so no cross-pair or same-file inflation.
+  // cross-file clones. Blocks call differently named functions (callee names survive jscpd's
+  // --similarity normalisation, local names and literals do not), so a<i> matches ONLY b<i>.
   function writeNClones(dir, n) {
     for (let i = 1; i <= n; i++) {
       const block = `export function compute_${i}(items) {
-  let total = 0; let count = 0; let seen_${i} = 0;
+  let total = 0; let count = 0;
   for (const item of items) {
-    if (item.active_${i} && item.value > 0) { total += item.value * ${i}; count += 1; seen_${i} += 1; }
+    if (isActive_${i}(item) && weigh_${i}(item) > 0) { total += weigh_${i}(item) * ${i}; count += 1; }
   }
-  const average = count > 0 ? total / count : 0;
-  return { total, count, average, seen_${i}, label: 'block-number-${i}-summary' };
+  const average = divide_${i}(total, count);
+  return summarise_${i}({ total, count, average, label: 'block-number-${i}-summary' });
 }`;
       writeFileSync(join(dir, `a${i}.ts`), `${block}\nexport const A_${i} = 1;\n`);
       writeFileSync(join(dir, `b${i}.ts`), `${block}\nexport const B_${i} = 2;\n`);
     }
   }
 
-  function runGate(n) {
-    const dir = mkdtempSync(join(tmpdir(), 'clone-cap-'));
-    writeNClones(dir, n);
+  // `expireCount` writes that many of the run's own clone hashes to a temp allowlist as expired;
+  // the allowlist is always pinned so devkit's own .co-occurrence-allowlist.json never leaks in.
+  function gateIn(dir, env) {
     try {
-      execFileSync('node', [DETECTOR, 'scan', '--gate', '--paths', dir], {
-        env: { ...process.env, MATCHER_CHANGED_FILES: '', JSCPD_BIN },
-        encoding: 'utf8',
-      });
+      execFileSync('node', [DETECTOR, 'scan', '--gate', '--paths', dir], { env, encoding: 'utf8' });
       return { status: 0, stdout: '' };
     } catch (e) {
       return { status: e.status, stdout: `${e.stdout ?? ''}` };
+    }
+  }
+
+  function runGate(n, expireCount = 0) {
+    const dir = mkdtempSync(join(tmpdir(), 'clone-cap-'));
+    const al = join(dir, 'allowlist.json');
+    const env = {
+      ...process.env,
+      MATCHER_CHANGED_FILES: '',
+      JSCPD_BIN,
+      CO_OCCURRENCE_ALLOWLIST: al,
+    };
+    try {
+      writeNClones(dir, n);
+      const all = JSON.parse(
+        execFileSync('node', [DETECTOR, 'json', '--paths', dir], { env, encoding: 'utf8' }),
+      );
+      const expiredHashes = all.slice(0, expireCount).map((c) => c.fragmentHash);
+      const clones = expiredHashes.map((fragmentHash) => ({ fragmentHash, date: '2000-01-01' }));
+      writeFileSync(al, JSON.stringify({ pairs: [], clones }));
+      return { ...gateIn(dir, env), expiredHashes };
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -362,6 +667,19 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate approve-command cap', () => {
     expect(cmdCount(stdout)).toBe(APPROVE_CAP); // helper truncated to the cap
     expect(stdout).toContain('(+1 more'); // overflow count is exact
     expect(rowCount(stdout)).toBe(APPROVE_CAP + 1); // finding is NEVER truncated
+  });
+
+  it('new + lapsed share one cap, NEW commands first, every row still listed', () => {
+    const { status, stdout, expiredHashes } = runGate(APPROVE_CAP + 1, 4);
+    expect(status).toBe(1);
+    expect(stdout).toContain(
+      'clone gate: 3 new clone(s), 4 clone(s) under a lapsed approval — block.',
+    );
+    expect(cmdCount(stdout)).toBe(APPROVE_CAP);
+    expect(stdout).toContain('(+1 more');
+    expect(rowCount(stdout)).toBe(APPROVE_CAP + 1);
+    const commanded = [...stdout.matchAll(/add-clone "([0-9a-f]{16})"/g)].map((m) => m[1]);
+    expect(commanded.slice(0, 3).some((h) => expiredHashes.includes(h))).toBe(false);
   });
 });
 

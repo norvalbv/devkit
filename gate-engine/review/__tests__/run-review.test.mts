@@ -14,12 +14,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEEP_JUDGE_TIMEOUT_MS } from '../../judge/run-judge.mts';
 import { loadCache } from '../cache.mts';
-import {
-  buildCompletenessEvidence,
-  normalizeCommitMessage,
-  runCompleteness,
-  wrapCompleteness,
-} from '../completeness.mts';
+import { buildCompletenessEvidence, runCompleteness, wrapCompleteness } from '../completeness.mts';
+import { normalizeCommitMessage } from '../evidence/commit-message.mts';
 import { CORRECTNESS_LENSES, FOUR_WAY_LENS_GROUPS, lensGroupId } from '../lens/split.mts';
 import { readProgress, unfinishedReviewers, writeProgress } from '../progress.mts';
 import { OWN_PACKAGE_ROOT } from '../cascade/consumer-assets.mts';
@@ -1544,7 +1540,7 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     const out = err.mock.calls.flat().join('\n');
     expect(out).toContain('retrying once');
     expect(out).toContain('strict ship mode fails closed');
-    expect(out).toContain('re-run devkit ship');
+    expect(out).toContain('devkit ship --resume');
   });
 
   it('timeout outage is NOT retried (a re-run burns the same budget) — one attempt each, still exit 3', async () => {

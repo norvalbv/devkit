@@ -10,9 +10,9 @@
     "./tsconfig/next": "./dist/tsconfig/next.json",
     "./tsconfig/node": "./dist/tsconfig/node.json",
     "./gate-engine/config": "./dist/gate-engine/config.mjs",
-    "./gate-engine/structure/compile": "./dist/gate-engine/structure/compile.mjs",
-    "./gate-engine/structure/grammar": "./dist/gate-engine/structure/grammar.mjs",
-    "./gate-engine/structure/walk": "./dist/gate-engine/structure/walk.mjs",
+    "./gate-engine/structure/compile": "./dist/gate-engine/structure/tree/compile.mjs",
+    "./gate-engine/structure/grammar": "./dist/gate-engine/structure/tree/grammar.mjs",
+    "./gate-engine/structure/walk": "./dist/gate-engine/structure/tree/walk.mjs",
     "./gate-engine/structure/load-baseline": "./dist/gate-engine/structure/load-baseline.mjs",
     "./gate-engine/structure/eslint-config": "./dist/gate-engine/structure/eslint-config.mjs",
     "./gate-engine/decisions/decisions": "./dist/gate-engine/decisions/decisions.mjs",
@@ -74,7 +74,8 @@
     "typecheck": "node ./node_modules/@typescript/native/bin/tsc -p tsconfig.json --noEmit",
     "prepare": "husky",
     "guard:freeze": "node gate-engine/ratchets/folder-fanout.mjs freeze && node gate-engine/ratchets/size-disable.mjs freeze",
-    "build": "node ./node_modules/@typescript/native/bin/tsc -p tsconfig.build.json && node scripts/copy-dist-assets.mjs"
+    "build": "node ./node_modules/@typescript/native/bin/tsc -p tsconfig.build.json && node scripts/copy-dist-assets.mjs",
+    "build:new": "node scripts/build-new-dist.mts"
   },
   "devDependencies": {
     "@babel/core": "^8.0.9",
@@ -89,11 +90,12 @@
     "vitest": "^5.0.5"
   },
   "optionalDependencies": {
-    "jscpd": "^4.3.0"
+    "jscpd": "5.4.1"
   },
   "dependencies": {
     "@clack/prompts": "^1.8.1",
     "@oxlint/plugins": "1.78.0",
+    "diff": "^9.0.0",
     "@typescript-eslint/parser": "^8.72.0",
     "es-module-lexer": "^2.3.2",
     "eslint": "^10.13.0",

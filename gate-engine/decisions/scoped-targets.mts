@@ -65,6 +65,7 @@ function codeUnitOrder(x: string, y: string): number {
  * @param query free-text (plan terms) for the semantic supplement; '' skips it
  * @param k semantic top-k
  * @param from 'index' for commit-time gates; the CLI briefs from the worktree draft
+ * @param exclude slugs dropped from both channels before the semantic top-k is taken
  */
 export async function scopedTargets(
   files: string[],
@@ -72,13 +73,14 @@ export async function scopedTargets(
   k = 6,
   cwd = process.cwd(),
   from: DecisionSource = 'index',
+  exclude: readonly string[] = [],
 ): Promise<GoverningTarget[]> {
   const decisionsDir = resolveFromCwd(resolveGuardConfig(cwd), 'decisionsDir');
   if (decisionsDir == null) return []; // fail-open: nothing resolvable → nothing governs
   const texts = decisionTexts(decisionsDir, from, cwd);
   const scoped = files.length
     ? parseScopedTargets(texts)
-        .filter((t) => matchScope(files, t.scopeGlobs))
+        .filter((t) => matchScope(files, t.scopeGlobs) && !exclude.includes(t.slug))
         .sort(newestFirst)
     : [];
   const scopedSlugs = new Set(scoped.map((t) => t.slug));
@@ -94,8 +96,8 @@ export async function scopedTargets(
     // cache salt from the scope-match subset would see the salt move because a QUERY was supplied —
     // exactly what ship-gates-converge-not-restart forbids for the commit message.
     try {
-      const { rows } = await rankAxes(query, k, cwd);
-      for (const r of rows) {
+      const { rows } = await rankAxes(query, k + exclude.length, cwd);
+      for (const r of rows.filter((row) => !exclude.includes(row.slug)).slice(0, k)) {
         if (scopedSlugs.has(r.slug)) continue;
         const rf = rulingFor(r.slug, texts);
         if (rf) blocks.push({ slug: r.slug, ruling: rf.ruling, scope: rf.scope, via: 'semantic' });
@@ -140,7 +142,7 @@ interface HookSpec {
 function hookSpec(raw: string | undefined, arity: number, min: number): HookSpec | null {
   const [tool = '', ...nums] = raw?.split(',') ?? [];
   const valid =
-    /^[A-Za-z]{1,32}$/.test(tool) &&
+    /^[A-Za-z_]{1,32}$/.test(tool) &&
     nums.length === arity &&
     nums.every((n) => /^\d{1,9}$/.test(n) && Number(n) >= min);
   return valid ? { tool, ints: nums.map(Number) } : null;

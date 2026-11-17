@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "devkitVersion": "0.74.0",
+  "devkitVersion": "0.75.0",
   "upstreamCommit": "e8c4880471b23ab7f216fba7b27d173a6ef07d4c",
   "pluginApiVersion": "1.78.0",
   "ruleIds": [
@@ -20,10 +20,11 @@
     "anti-slop/no-widen-then-assert",
     "anti-slop/require-safety-comment-for-type-assertion",
     "anti-slop/no-unsafe-external-record-access",
-    "anti-slop/no-unsafe-external-record-enumeration"
+    "anti-slop/no-unsafe-external-record-enumeration",
+    "anti-slop/no-elapsed-time-assertions"
   ],
-  "pluginDigest": "987afb1b14334ad4bd7a5665d6e6d5f152f2b3b81ea265f7042ef2afcbf70298",
-  "configDigest": "50ad2d1deb51ce96445be08275533d8e502efe9dc9788b2148709cc06a1525da",
+  "pluginDigest": "dadbf76ea9fd4ce81aa846aee05bb3bb53b1ceae0b262952e8136ae13aa1165c",
+  "configDigest": "09e5458d89969252a2c0e5d44e327aa9215043176d2db857ca47fbab1d1fac0c",
   "probeDigest": "bf2c2181804ac4004aed98aa41133e080068be9b2e9bf9d47a459ce75c6cdb87",
   "probeConfigDigest": "b9bfbd93519b843df6bd175b91f5742bb67be649cac5c82492621e5a7bbd7604"
 }

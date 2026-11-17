@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCache, loadCache, savePasses } from '../cache.mts';
 import { MCP_DEGRADED_REMEDY } from '../evidence/base-context.mts';
+import { parseClaudeArgv } from '../../judge/codex/result.mts';
 import { FOUR_WAY_LENS_GROUPS, lensGroupId } from '../lens/split.mts';
 import { runReviewGate } from '../run-review.mts';
 import {
@@ -16,6 +17,11 @@ import {
 
 // sc-2837: a reviewer that ran without the codebase MCP server must never print a bare PASS — not
 // live, not split, not replayed — and the fleet warning must name the reviewers it weakened.
+
+// A checklist command, bare or single-quoted the way scriptCommand quotes an unusual path.
+const SCRIPT_COMMAND = /node (?:[^\s'`]+\/checklist\.mjs|'(?:[^']|'\\'')*\/checklist\.mjs')/;
+const GRANT_RULE = new RegExp(`^Bash\\(${SCRIPT_COMMAND.source}:\\*\\)$`);
+const PRINTED_COMMAND = new RegExp(SCRIPT_COMMAND.source, 'g');
 
 const ENV_KEYS = [
   'GUARD_AI_STRICT',
@@ -137,8 +143,20 @@ describe('reviewer fleet without the codebase MCP server (sc-2837)', () => {
       const bash = args[args.indexOf('--allowedTools') + 1]
         .split(',')
         .filter((tool: string) => tool.startsWith('Bash'));
-      expect(bash.length, label).toBeLessThanOrEqual(1);
-      for (const rule of bash) expect(rule, label).toMatch(/^Bash\(node \S+\/checklist\.mjs:\*\)$/);
+      const rules = bash.filter((rule: string) => rule !== 'Bash(guard-dup-allowlist check:*)');
+      expect(rules.length, label).toBeLessThanOrEqual(1);
+      expect(
+        rules.filter((rule: string) => !GRANT_RULE.test(rule)),
+        label,
+      ).toEqual([]);
+      // The prompt this same spawn carries must print only the spelling that rule grants.
+      const prompt = String(parseClaudeArgv(args).prompt);
+      const printed = Array.from(
+        prompt.matchAll(PRINTED_COMMAND),
+        ([command]) => `Bash(${command}:*)`,
+      );
+      expect(new Set(printed), label).toEqual(new Set(rules));
+      expect(prompt, label).not.toContain('$SCRIPT');
     }
   });
 
@@ -300,7 +318,7 @@ describe('commit-guard: the MCP cause is independent of retrieval (sc-2837 × sc
     expect(stderr.join('\n')).not.toContain('semantic retrieval');
     expect(
       events().filter((e) => e.type === 'gate_degraded' && e.judge === 'commit-guard'),
-    ).toHaveLength(1);
+    ).toEqual([expect.objectContaining({ kind: 'mcp-missing' })]);
     // Fully cached: no judge spawns, so no fleet "ran without" line either.
     expect(fleetLines(stderr)).toEqual([]);
   });
@@ -325,6 +343,8 @@ describe('commit-guard: the MCP cause is independent of retrieval (sc-2837 × sc
       'remote embeddings unreachable',
       expect.stringMatching(/^MCP codebase unavailable/),
     ]);
+    // The judge's "unreachable" is explained by the gate's own measurement: both rows name it.
+    expect(rows.map((r) => r.kind)).toEqual(['mcp-missing', 'mcp-missing']);
     const result = events().find(
       (e) => e.type === 'review_result' && e.reviewer === 'commit-guard',
     );

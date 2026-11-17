@@ -135,8 +135,10 @@ which ships **no structure preset**. Set it explicitly: `devkit init --stack rea
 The gate is deterministic and checks two things.
 
 **Long paragraphs block once.** A standalone JS/TS-family comment paragraph where the staged change
-adds or modifies three or more non-structural text lines blocks the first time it is shown. Comment
-groups separated only by blank lines count as one paragraph. One- and two-line changes, inline
+adds or modifies three or more non-structural text lines blocks the first time it is shown. A block
+comment is one paragraph, blank ` *` lines included, and same-style single-line comments separated
+only by blank lines count as one paragraph; blank lines are never counted. Each finding prints the
+count it judged. One- and two-line changes, inline
 comments after code, untouched comments, deletions, and pure renames pass. Shorten the comment where
 possible. A paragraph that justifies a workaround means the code is wrong: fix the code. If every
 line states something the code cannot, retry unchanged. The paragraph is remembered by the code
@@ -151,18 +153,23 @@ comment line citing a forbidden reference blocks on every attempt:
 ```json
 "comments": {
   "forbiddenRefs": ["\\bsc-\\d+\\b"],
-  "forbidDecisionRefs": true
+  "forbidDecisionRefs": true,
+  "forbidLineAnchors": true
 }
 ```
 
 `forbiddenRefs` holds regular expressions, for example a private tracker's ticket ids.
 `forbidDecisionRefs` matches the `decisionsDir` path and every committed decision record name that
-contains a hyphen. Both are off by default. A code-only edit beside an unchanged trailing reference
+contains a hyphen. `forbidLineAnchors` matches a `<file>.<ext>:<line>` anchor, which goes stale on
+the next edit to that file: cite the function or test name instead. All three are off by default. A code-only edit beside an unchanged trailing reference
 passes; rewording that comment, pasting a copy, or swapping the ticket blocks. State the fact the
 reference stands for, or move the ticket to the commit message or PR body.
 
 Exit 4 means the staged evidence was unreadable, a configured pattern does not compile, or a
 configured language has no lexer adapter. It is not a rejection, so follow the printed remedy.
+
+Each `comment_budget` telemetry event carries `policy: "show-once-v1"`, naming the rules it was
+recorded under. No model judges your comments at commit time.
 
 Older installs may still hold `.devkit/comment-firewall-receipts.json` and
 `<git-common-dir>/devkit/comment-firewall-rationales.json` from the retired rationale flow. Nothing
@@ -185,10 +192,11 @@ can still happen for exactly those, so open the named file and re-index if the s
 
 These index-freshness findings are advisory: they keep their warning glyph but do not make doctor exit
 nonzero. `DRIFT` means the owned index has file stamps behind the checkout; force-refresh the named files
-with `touch <files> && search-code index --seed-files "<files>"`. `MISSING` is common in a clone or linked
-worktree because the index is gitignored: build it locally, or link the primary checkout's `.search-code`
-directory (`devkit ship` does this automatically). Scan-time body verification remains the gate's source
-of truth while the index is stale or its freshness metadata cannot be inspected.
+with `touch <files> && search-code index --seed-files "<files>"`. The index is gitignored, so a linked
+worktree has none of its own: guard-dup and doctor read the primary checkout's index instead, the same one
+`devkit ship` links into its gate worktree. `MISSING` therefore means no checkout has a usable index: build
+it with your indexer (in the primary checkout, for a linked worktree). Scan-time body verification remains
+the gate's source of truth while the index is stale or its freshness metadata cannot be inspected.
 
 ## Commit blocked because I'm on a protected branch
 
@@ -200,6 +208,16 @@ Don't hand-roll a branch (that moves a shared checkout's HEAD). Use `devkit ship
 Don't `git pull` / `git restore` by hand on a shared tree. Run `devkit reconcile` (dry-run) then
 `devkit reconcile --apply` — it confirms each PR is merged, restores only still-pristine files, and never
 moves the shared HEAD or clobbers a concurrent edit.
+
+## The PR's evidence block reads `inconclusive`
+
+The block names the red and green failures it saw, up to three of each. When the run produced logs,
+ship prints `evidence: kept the red/green logs at <path>` under your temp directory: `evidence.md`,
+`evidence.json` and both runs' stdout and stderr. A green failure usually means the head itself fails
+one of the selected tests; push a fix and the next ship re-captures. If the cause was the
+environment (a flake, a missing install), re-capture the same head from a checkout at the PR head
+with `devkit pr-evidence <pr>`. It replaces only an inconclusive block, and the new detail keeps the
+previous outcome. Its merge verdict reads `human-review`, because no ship gate run vouches for it.
 
 ## `devkit ship` stopped at `⏱ ship: gate chain hit the …s ceiling (exit 124)`
 
@@ -216,7 +234,7 @@ it was mid-flight in and any reviewers missing a completion heartbeat. For more 
 The label means setup ran out of time **before** it reached the step under test. The two
 ceiling-sentinel tests in `cli/__tests__/review.test.mts` (the asset wedge and the
 `preflight-verify:deps-final` wedge) set `DEVKIT_PREFLIGHT_TIMEOUT` and assert that the ceiling fires
-*at the wedge*. When the wedge's marker is absent and review's own ceiling banner names an earlier
+_at the wedge_. When the wedge's marker is absent and review's own ceiling banner names an earlier
 phase, the test fails with `ceiling-timeout: the 90s setup ceiling fired during <phase> before
 reaching <phase>`. There are two possible causes, and the label names the likelier one:
 
@@ -258,6 +276,9 @@ too. A feature PR may only **add** dist files (new artifacts) or **delete** them
 - **Before shipping:** `devkit ship` lists rebuilt files as `release-only drift from <commit> — leave
   them out of the brief`, where `<commit>` is the PR's merge-base (on `--pr`) or the base it ships
   onto. Brief your source, plus only the **new** dist paths the preflight names.
+- **A new dist artifact is missing or stale:** run `bun run build:new <dist paths>`. It writes only
+  those untracked files from a fresh build and refuses tracked dist, so nothing needs restoring
+  afterwards. A full `bun run build` followed by `git checkout --` can revert the new artifact too.
 - **A reviewer asks for a rebuilt dist file:** leave it out anyway. A tracked dist file that lags its
   source (the CLI dispatcher missing a new command, say) is expected until the next release, and
   briefing the rebuilt file is refused here.
@@ -280,7 +301,7 @@ Move every judge **away from the CLI the message names**, in the shell the ship 
 **`codex` is dark** — move to the claude family. Set all four knobs, never a subset:
 
 ```
-export GUARD_REVIEW_MODEL=haiku GUARD_REVIEW_ESCALATION_MODEL=opus \
+export GUARD_REVIEW_MODEL=sonnet GUARD_REVIEW_ESCALATION_MODEL=opus \
   GUARD_CORRECTNESS_MODEL=claude-haiku-5-5 GUARD_CORRECTNESS_CHUNK=off
 unset GUARD_SENTRY_MODEL FRINK_SENTRY_MODEL
 devkit ship --resume <branch>
@@ -358,6 +379,40 @@ credits is usually the shared window crossing 100% while the ship ran. An answer
 row's `resets_at` (epoch milliseconds) is the window clearing. `no role` marks a judge on a model the preflight did
 not list. A ship id reused across attempts joins to its newest reading.
 
+## Which deterministic gate is slow?
+
+Each gate `guard-deterministic` spawns writes one `gate_step` row to
+`~/.devkit/telemetry/gate-events.jsonl`, whether the gate is built in, an `extraGates` command, or
+structure-lint. A row holds `gate`, `status` (`pass`, `fail` or `could_not_run`), `exit_code` and
+`duration_ms`. A gate skipped by a cached prefix writes none; coverage re-runs on a cache hit, so it
+still writes its row. To rank one repo's gates by their slowest run:
+
+```
+rg --no-filename '"type":"gate_step"' ~/.devkit/telemetry/gate-events.jsonl | jq -rs --arg repo devkit '
+  map(select(.repo == $repo and .run_origin == "gate")) | group_by(.gate)
+  | map({gate: .[0].gate, runs: length, max: (map(.duration_ms) | max),
+         p50: (map(.duration_ms) | sort | .[length / 2 | floor])})
+  | sort_by(-.max) | .[] | "\(.max)ms max\t\(.p50)ms p50\t\(.runs) runs\t\(.gate)"'
+```
+
+`run_origin == "gate"` keeps hook and ship runs and drops a hand-run `guard-deterministic`.
+
+## `codex tool gate inactive: saw K of N commands`
+
+A codex judge (`gpt-*` model) runs a PreToolUse hook that allows only reads: shell reads, git reads
+and the reviewer's checklist script. Every call it decides is logged. This warning means the judge
+ran N commands but the hook allowed only K, so some ran unchecked. The verdict stands, and the line is
+recorded as a `gate_degraded` event with cause `tool-gate-inactive`.
+
+The usual cause is a codex release that changed how it trusts or runs hooks. The hook is tested on
+codex-cli 0.150.0, 0.159.3 and 0.162.1. Check `codex --version`; to use a known build, set
+`GUARD_CODEX_BIN` to its path, or move the judge to a claude model. A managed codex config that
+allows only managed hooks has the same effect.
+
+A refused call is a different line: the reviewer's `denied` warning names it (for example
+`Bash: bun test`), and `judge_exec` counts it in `permission_denials`. Judges review by reading;
+tests run in the pre-push suite.
+
 ## A reviewer shows `PASS over an incomplete packet` (or `partial evidence`)
 
 Each AI reviewer reads a capped diff packet. On a large diff, files past the budget are OMITTED or
@@ -429,8 +484,18 @@ all-and-**aggregate**: instead of failing fast on the first, they collect every 
 naming each (`guard-<id>`). Fix each named gate (see **A pre-commit gate blocked my commit** above) and
 re-commit. To converge without a ship round, stage the paths and run `guard-deterministic` locally.
 `guard-comments(unreadable-evidence)` is not a rejection: the gate could not read the staged content.
-On a commit or ship, the decision and reviewer gates run only after this stage passes, one finding
-at a time, by design.
+`<gate>(timed-out:Ns)` is not a rejection either: the gate produced no exit within its deadline and
+was signalled, so re-run. A gate that is legitimately that slow needs a higher `gateTimeoutMs` in
+`guard.config.json`, or `export GUARD_GATE_TIMEOUT_MS=<ms>` for one run. Work the gate itself started
+may still be running after the signal.
+`guard-<id>(crashed)` is not one either: the gate threw before judging the diff. Act on the error
+line printed under it, often a setup step it names, not on your code.
+On a commit or ship, the staged fallow audit and overlay eslint/biome steps still run after a failure
+here, then `✗ commit blocked before the AI gates: <names>` stops the commit with every cheap finding
+above it. A slow `extraGates` entry declared `{ "cmd": …, "afterGreen": true }` runs last and only when
+every other gate passed, so a red run lists it under `NOT run (an earlier gate failed)` and it runs on the
+next attempt. `devkit review` runs it regardless. The decision and reviewer gates run only after all of
+them pass, one finding at a time, by design.
 
 ## `✗ staged gate blocked: <gate>`
 
@@ -471,6 +536,12 @@ attach <pr>` once the PR is open (the reminder fires inside the ship, so recordi
 To be reminded about paths
 the judge misses, add their globs to `uiEvidence.paths` in `guard.config.json`; to drop the reminder
 entirely, deselect the `ui-evidence` guard with `devkit init --guards <the guards you keep>`.
+
+`devkit ship --dry-gates` runs the path rule only, so a rehearsal shows the reminder before you write
+the PR body. Every ship that has a PR also leaves an unticked `📸` task item in its body, and a ship
+that skipped its gates (a `--resume`, or an adopted PR) applies the path rule to its commit instead.
+Devkit never ticks or removes the item; tick it yourself once the PR carries the screenshots or the
+no-visible-change note.
 
 ## `bun install` fails: `no commit matching "<sha>" found for "@norvalbv/devkit"`
 

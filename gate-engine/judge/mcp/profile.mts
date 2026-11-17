@@ -294,6 +294,13 @@ function missingReason(resolution: JudgeMcpResolution): string {
   return 'missing from the trusted MCP registry';
 }
 
+/** How to restore a verdict-bearing server a readable registry lacks; empty otherwise. */
+function registryRemedy(resolution: JudgeMcpResolution): string {
+  const lost = verdictBearingMissing(resolution).join(', ');
+  if (resolution.kind !== 'resolved' || !lost) return '';
+  return ` — to restore it, add or re-enable the \`${lost}\` MCP server for this project in ${resolution.registryPath}, or point ${REGISTRY_ENV} at a registry that defines it`;
+}
+
 /** One-line cause a DEGRADED reviewer verdict carries, or undefined when nothing verdict-bearing is
  * missing. */
 export function mcpDegradedCause(resolution: JudgeMcpResolution): string | undefined {
@@ -379,7 +386,7 @@ export function reportMissingMcpServers(
     warnOnce(
       resolution.warnKey,
       degraded
-        ? `${marker}guard-review: DEGRADED — no MCP ${servers} for ${agents.join(', ')} (${missingReason(resolution)}) under strict isolation; a judged PASS from them is marked DEGRADED`
+        ? `${marker}guard-review: DEGRADED — no MCP ${servers} for ${agents.join(', ')} (${missingReason(resolution)}) under strict isolation; a judged PASS from them is marked DEGRADED${registryRemedy(resolution)}`
         : `guard-review: no MCP ${servers} for ${agents.join(', ')} (${missingReason(resolution)}) — continuing under strict isolation`,
     );
     return;
@@ -398,7 +405,7 @@ export function reportMissingMcpServers(
   else
     warnOnce(
       resolution.warnKey,
-      `${marker}guard-review: named-agent MCP profile missing ${servers} — continuing with the configured subset under strict isolation${suffix}`,
+      `${marker}guard-review: named-agent MCP profile missing ${servers} — continuing with the configured subset under strict isolation${suffix}${registryRemedy(resolution)}`,
     );
 }
 

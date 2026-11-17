@@ -6,6 +6,14 @@ import { isAbsolute, win32 } from 'node:path';
 // reads and `.claude/` state writes resolve against the repository under review.
 if (process.env.DEVKIT_JUDGE_REPO_ROOT) process.chdir(process.env.DEVKIT_JUDGE_REPO_ROOT);
 
+// stdin stays closed: codex's Linux sandbox denies shutdown(2), so a piped stdin fails a sync spawn.
+export const gitOutput = (args) =>
+  execFileSync('git', args, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'inherit'] });
+
+/** Staged additions, copies, modifications and renames under `pathspecs`, one name per line. */
+export const stagedAcmrNames = (pathspecs) =>
+  gitOutput(['diff', '--cached', '--name-only', '--diff-filter=ACMR', '--', ...pathspecs]);
+
 const MAX_REVIEW_PATTERNS = 128;
 const MAX_REVIEW_PATTERN_LENGTH = 512;
 const REVIEW_PATH_KEYS = new Set(['include', 'exclude']);
@@ -349,9 +357,7 @@ export function resolveConfigRoots({ configKey, reviewerName }) {
 export function assertStagedSetSane(pathspecs, reviewerName) {
   let unfiltered;
   try {
-    unfiltered = execFileSync('git', ['diff', '--cached', '--name-only', '--', ...pathspecs], {
-      encoding: 'utf-8',
-    });
+    unfiltered = gitOutput(['diff', '--cached', '--name-only', '--', ...pathspecs]);
   } catch {
     // The ACMR query already succeeded, so git works here; a failure now is not evidence of anything.
     // Stay silent and let the caller report its honest "nothing staged".

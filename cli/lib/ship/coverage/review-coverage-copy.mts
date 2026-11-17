@@ -13,7 +13,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { CLEAR_MARKER_NAME } from '../../../../gate-engine/coverage/failures.mts';
+import { CLEAR_MARKER_NAME } from '../../../../gate-engine/coverage/clear-marker/store.mts';
 import { COVERAGE_DIR } from '../../../../gate-engine/coverage/produce.mts';
 import {
   MANIFEST_NAME,

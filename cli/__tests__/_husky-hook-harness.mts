@@ -13,7 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { gateBlockPrelude } from '../lib/husky/gate-policy/block-helpers.mts';
+import { CHEAP_GATE_FLUSH, gateBlockPrelude } from '../lib/husky/gate-policy/block-helpers.mts';
 import { buildFullHook, buildOverlayHook } from '../lib/husky/husky-block.mts';
 import { testSpawnSync } from './_helpers.mts';
 
@@ -43,7 +43,7 @@ export function runHookFragment(
   fragment: string,
   { cwd, env, shell = 'sh', binOpen = '' }: FragmentRun,
 ) {
-  const script = [...gateBlockPrelude(binOpen), fragment].join('\n');
+  const script = [...gateBlockPrelude(binOpen), fragment, CHEAP_GATE_FLUSH].join('\n');
   return testSpawnSync(shell, ['-e', '-c', script], { cwd, env, encoding: 'utf8' });
 }
 
@@ -165,6 +165,8 @@ case "$tool" in
   guard-comments) exit \${COMMENTS_RC:-0};;
   guard-decisions) exit \${DEC_RC:-0};;
   guard-review)
+    echo "\${DEVKIT_REMEDY_DIR:-none}" >> "$HOME/remedy-dirs.log"
+    [ -z "\${DEVKIT_REMEDY_DIR:-}" ] || [ -d "$DEVKIT_REMEDY_DIR" ] || echo missing >> "$HOME/remedy-dirs.log"
     case "$1" in
       completeness)
         # COMP_SLOW_TERM: a judge that does not die the instant it is signalled. It releases the

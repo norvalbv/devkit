@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { type GateEvent, readShipEvents, render, summarise } from './gate-digest.mts';
-import { issuesUnder } from './trend.mts';
+import { issuesUnder } from './trend/trend.mts';
 
 const SHIP = 'ship-1';
 const REVIEWER = 'correctness-reviewer';
@@ -69,6 +69,31 @@ describe('a blocking ID whose lens recorded several issues', () => {
       `⚠ review:${REVIEWER} — finding recorded — read it before retrying: ${LENS} [${FP}] · 3 ${MANY}`,
     );
     expect(text).not.toContain('did NOT block');
+  });
+});
+
+describe('a blocked reviewer that also wrote an advisory', () => {
+  it('shows the block first and the advisory as not blocking, counted under the same gate', () => {
+    const advised = ev({
+      type: 'advisory_result',
+      gate: `review:${REVIEWER}`,
+      status: 'finding',
+      detail: '`src/b.ts:9` — the buffer cap reads the whole staged set',
+    });
+    const both = digest([
+      ev({ type: 'ship_attempt' }),
+      fail([item(1)]),
+      advised,
+      shipResult('review'),
+    ]);
+    expect(both).toContain('Gate findings this run (1 gate(s) / 2 finding(s))');
+    const blocked = both.indexOf(`✗ review:${REVIEWER} — BLOCKED this run`);
+    const advisory = both.indexOf(
+      `⚠ review:${REVIEWER} — advisory, did NOT block this run: \`src/b.ts:9\``,
+    );
+    expect(blocked).toBeGreaterThan(-1);
+    expect(advisory).toBeGreaterThan(blocked);
+    expect(both).not.toContain(`review:${REVIEWER} — BLOCKED this run: \`src/b.ts:9\``);
   });
 });
 

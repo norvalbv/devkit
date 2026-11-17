@@ -21,7 +21,6 @@ import { extractGuardBlock } from './husky-block.mts';
 import {
   buildSelfHostBlock,
   isDevkitRepo,
-  SELF_HOST_EXTRAS,
   SELF_HOST_STRUCTURE_CMD,
   selfHostSelection,
 } from './self-host.mts';
@@ -132,7 +131,6 @@ export function selfHostHookParity(
     {
       ...selfHostSelection(components),
       structureCmd: SELF_HOST_STRUCTURE_CMD,
-      extras: SELF_HOST_EXTRAS,
     },
     pkgRel,
     cwd,
@@ -160,7 +158,7 @@ export function selfHostHookParity(
 /*
  * `--gate`: the pre-commit half.
  *
- * `--extra` gates run with failOpen2:false in the deterministic orchestrator, so EVERY non-zero exit
+ * Command gates run with failOpen2:false in the deterministic orchestrator, so EVERY non-zero exit
  * blocks the commit. Non-zero is therefore reserved for a hook that is genuinely absent, or drifted
  * because of this change; every environmental condition returns 0.
  */
@@ -185,6 +183,9 @@ export const HOOK_GENERATOR_FILES = [
   'gate-engine/deterministic/recheck.mts',
   'gate-engine/deterministic/registry.mts',
   'gate-engine/judge/judge-isolation.mts',
+  'gate-engine/judge/process/identity.mts',
+  'gate-engine/judge/process/process-lock.mts',
+  'gate-engine/review/valve/shell-word.mts',
 ] as const;
 /** Directory prefixes with the same effect. */
 export const HOOK_GENERATOR_PREFIXES = ['cli/lib/husky/'] as const;

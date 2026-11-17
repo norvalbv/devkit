@@ -56,23 +56,29 @@ import {
   trackMcpSpawns,
   withNamedAgentMcpTools,
 } from '../judge/mcp/profile.mts';
-import { STICKY_RULING, printCachedPass, reportMcpDegraded } from './evidence/base-context.mts';
+import {
+  STICKY_RULING,
+  printCachedPass,
+  reportAdvisories,
+  reportMcpDegraded,
+} from './evidence/base-context.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
-import type { JudgeOutage } from '../judge/outage/classify.mts';
+import { spawnWithRetry } from '../judge/outage/retry.mts';
 import {
   DEEP_JUDGE_TIMEOUT_MS,
   execJudgeAsync,
   type RemedyCause,
   remedyCause,
-  strictRemedy,
 } from '../judge/run-judge.mts';
+import { printStrictRemedy } from '../judge/outage/remedy-once.mts';
 import type { VerdictMeta } from '../judge/verdict-store.mts';
 import { loadCache, savePasses } from './cache.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { headTreeish } from '../ratchets/git-index.mts';
+import { judgedMessageId, normalizeCommitMessage } from './evidence/commit-message.mts';
 import { stagedTreeHash } from './evidence/staged-git.mts';
-import { type FindingTally, findingTally } from './contracts/response.mts';
+import { type FindingTally, findingTally, parseSeverityFindings } from './contracts/response.mts';
 import {
   cacheKey,
   parseReviewVerdict,
@@ -100,28 +106,6 @@ export function completenessJudgeSetup(
     capabilityFingerprint: judgeMcpCapabilityFingerprint(mcpProfile, allowedTools, mcpOptions),
     mcp: judgeMcpMissingServers(mcpProfile, mcpOptions), // what it runs without (sc-2837)
   };
-}
-
-// Trailing whitespace + blank-run normalisation, mirroring git's `--cleanup=whitespace` (the mode
-// a `-m`/`-F` commit gets). The gate is now judged from TWO message sources that must produce the
-// SAME cache key: the sc-1442 ship temp file at pre-commit (raw composed message) and git's
-// cleaned COMMIT_EDITMSG at commit-msg. Without this, a message with a trailing space or a double
-// blank line keys differently per hook and the pre-commit prewarm's cached PASS silently misses —
-// re-paying the full strong-model judgement the prewarm existed to avoid.
-const TRAILING_WS_RE = /[ \t]+$/gm;
-const BLANK_RUN_RE = /\n{3,}/g;
-export function normalizeCommitMessage(raw: string): string {
-  return raw.replace(TRAILING_WS_RE, '').replace(BLANK_RUN_RE, '\n\n').trim();
-}
-
-/** Which message a PASS covers (sc-3411): subject, size, short sha of the normalised bytes. The
- *  sticky PASS is diff-blind, so this is the log's only proof of which --resume body was judged. */
-function judgedMessageId(message: string): string {
-  const subject = message.split('\n', 1)[0] ?? '';
-  const chars = Array.from(subject); // code points: a UTF-16 slice can split an emoji's surrogates
-  const shown = chars.length > 60 ? `${chars.slice(0, 57).join('')}...` : subject;
-  const sha = createHash('sha256').update(message).digest('hex').slice(0, 12);
-  return `${JSON.stringify(shown)} ${Buffer.byteLength(message)}B sha:${sha}`;
 }
 
 /** The branch a sticky verdict is scoped to: the ship's exported branch, else the checkout's. */
@@ -202,8 +186,11 @@ export function wrapCompleteness(
     '───── END BRIEF ─────\n' +
     'Judge ONLY what this commit claims to be (per its message) against what it ships. A found gap does not end ' +
     'the review: check every remaining claim and touched surface, then list EVERY gap that matters (one line each, ' +
-    'with its file path, at most 12 lines). Never list to fill; minor nice-to-haves are not findings. END with ' +
-    'exactly one line:\nVERDICT: PASS | FAIL — <one-line reason; on FAIL the most severe gap first, then the gap count>\n' +
+    'with its file path, at most 12 lines). Never list to fill; minor nice-to-haves are not findings. A limitation ' +
+    'a code comment present at HEAD records as accepted, in code this commit reuses unchanged, is inherited, not a ' +
+    'gap; it IS one if the message claims a guarantee it rules out (e.g. "race-free") or this diff adds or edits ' +
+    'that note.\n' +
+    'END with exactly one line:\nVERDICT: PASS | FAIL — <one-line reason; on FAIL the most severe gap first, then the gap count>\n' +
     'FAIL only for a gap that makes the shipped change misleading or operationally unsafe.'
   );
 }
@@ -342,9 +329,8 @@ export async function runCompleteness(
       return finish(0, 'full', stickyDuration);
     }
     const changed = stagedTargetChanges(files, cwd);
-    const targets = (
-      await scopedTargets(files, message.split('\n')[0] ?? '', 6, cwd).catch(() => [])
-    ).filter((t) => !changed.includes(t.slug));
+    const subject = message.split('\n')[0] ?? '';
+    const targets = await scopedTargets(files, subject, 6, cwd, 'index', changed).catch(() => []);
     // The FULL --stat rides uncapped ahead of the evidence: on a branch-sized commit the caps
     // drop whole files, but the judge must at least SEE the complete file/churn map of what it
     // is being asked to gap-check. Diff prefixes are forced ON-config so a consumer's
@@ -408,23 +394,28 @@ export async function runCompleteness(
 
   // Its own process (backgrounded by the hook), so it names itself — only once a judge will spawn.
   const mcpSpawn = trackMcpSpawns(mcp, ['completeness'], capabilityFingerprint);
-  let outage: JudgeOutage | undefined;
-  const raw = await exec({
-    label: 'review:completeness',
-    args: ['-p', prompt, '--model', model, ...JUDGE_ISOLATION, '--allowedTools', allowedTools],
-    input: diff,
-    timeout: DEEP_JUDGE_TIMEOUT_MS,
-    cwd,
-    mcpProfile,
-    mcpProjectRoots,
-    codexReadOnly: true,
-    onMcpPrepared: (fingerprint, cause) => {
-      mcpSpawn.observe(cause, fingerprint);
-    },
-    onOutage: (kind) => {
-      outage = kind;
-    },
-  });
+  let transcriptRef: string | null = null;
+  const { result: raw, outage } = await spawnWithRetry(
+    (timeout, onOutage) =>
+      exec({
+        label: 'review:completeness',
+        args: ['-p', prompt, '--model', model, ...JUDGE_ISOLATION, '--allowedTools', allowedTools],
+        input: diff,
+        timeout,
+        cwd,
+        mcpProfile,
+        mcpProjectRoots,
+        codexReadOnly: true,
+        onMcpPrepared: (fingerprint, cause) => {
+          mcpSpawn.observe(cause, fingerprint);
+        },
+        onTranscript: (ref) => {
+          transcriptRef = ref;
+        },
+        onOutage,
+      }),
+    { retry: envFlag('AI_STRICT'), label: 'completeness', capMs: DEEP_JUDGE_TIMEOUT_MS },
+  );
   const mcpCause = mcpSpawn.cause();
   if (mcpSpawn.drift() === 'unexplained') {
     emitNoRun('mcp_capabilities_changed');
@@ -445,17 +436,17 @@ export async function runCompleteness(
     if (envFlag('AI_STRICT')) {
       // Name the CAUSE: a cap kill is not auth/quota (sc-1227), and a usage lock is its mirror —
       // CLI fine, account locked, generic remedy says re-run for a wait it never mentions.
-      const cause = remedyCause(outage);
-      const named = SKIP_WORDING[cause];
+      const named = SKIP_WORDING[remedyCause(outage)];
       console.error(
-        `guard-review: completeness SKIPPED (${named}) — strict ship mode fails closed.\n` +
-          `   Remedy: ${strictRemedy(cause, judgeBinForModel(model), outage?.resetsAt)} (an earned PASS is cached).`,
+        `guard-review: completeness SKIPPED (${named}) — strict ship mode fails closed.`,
       );
+      printStrictRemedy(outage, judgeBinForModel(model), 'an earned PASS is cached');
       return finish(3);
     }
     return finish(2); // fail-open on a normal commit
   }
   const { verdict, reason } = parseReviewVerdict(raw);
+  const findings = verdict === 'PASS' ? parseSeverityFindings(raw) : [];
   // Only a CONFIDENT PASS is cached — never a FAIL (the author fixes, the evidence changes), never
   // an unparseable verdict, and never the GUARD_COMPLETENESS_HARD=0 soften below (it exits 0 on a
   // FAIL the judge did make; caching it would make one softened run silence every later re-run).
@@ -468,6 +459,7 @@ export async function runCompleteness(
     // Names the snapshot the judge was shown; absent (no snapshot formed) never vouches.
     if (stagedIdentity) meta.diff_sha = stagedIdentity;
     if (mcpCause) meta.mcp_degraded_cause = mcpCause;
+    if (findings.length) meta.advisories = findings;
     // Both identities: the exact byte key (any caller, any order) and the branch+message sticky
     // key that lets a ship retry with a reshaped diff skip this judge (see the lookup above).
     savePasses(cwd, stickyKey ? { [key]: meta, [stickyKey]: meta } : { [key]: meta });
@@ -475,9 +467,11 @@ export async function runCompleteness(
   if (verdict === 'PASS') {
     emitVerdict('pass', reason || 'no gap found');
     console.error(
-      `guard-review: completeness — PASS${mcpCause ? ' (DEGRADED)' : ''} — message ${messageId}`,
+      `guard-review: completeness — PASS${mcpCause ? ' (DEGRADED)' : ''} — message ${messageId}` +
+        (transcriptRef ? ` · transcript ${transcriptRef}` : ''),
     );
     if (mcpCause) reportMcpDegraded('completeness', mcpCause);
+    reportAdvisories('completeness', findings, transcriptRef);
     return finish(0);
   }
   if (verdict !== 'FAIL') {

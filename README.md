@@ -12,7 +12,7 @@ A versioned developer toolkit that keeps agent instructions, project conventions
 | Shared configuration | Oxfmt/Oxlint starter configs and strict TypeScript presets for common stacks | Written by `devkit init`; TypeScript via stable package export paths |
 | Portable gate engine | Decision, review, duplication, structure, size, fan-out, Sentry, and advisory gates | `guard-*` command-line tools |
 | Repository setup | Stack detection, idempotent installation, upgrades, diagnostics, and cleanup | The `devkit` CLI |
-| Oxc + anti-slop | Exact Oxlint/Oxfmt pins, 15 vendored rules, 2 Devkit extensions, and incremental debt adoption | Opt-in managed capability |
+| Oxc + anti-slop | Exact Oxlint/Oxfmt pins, 15 vendored rules, 3 Devkit extensions, and incremental debt adoption | Opt-in managed capability |
 
 The package and agent assets use the same release tag. A prompt or skill cannot silently drift away from the installer and gate implementation that consumes it.
 
@@ -66,7 +66,10 @@ Package mode is the default. Standalone gates fail open when the pinned global C
 | `devkit sync-skills` / `sync-agents` | Refresh only the selected agent surfaces |
 | `devkit move` | Move or rename source files and rewrite imports safely |
 | `devkit prove-regression` | Capture one exact test command at explicit red/green refs in disposable clones |
+| `devkit subtraction-trial` | Run one test command with a suspected workaround removed, against a failing control |
 | `devkit ship` | Commit from an isolated worktree and run the configured gate chain |
+| `devkit pr-body` | Replace a PR description without deleting the evidence block ship wrote |
+| `devkit ci-verdict` | Report an open PR's CI verdict and whether its red checks are inherited from the base |
 | `devkit review` | Run the configured gate chain against a trusted checkout without committing |
 | `devkit reconcile` | Refresh a shared checkout after shipped work merges |
 | `devkit clean` | Remove the recorded installation |

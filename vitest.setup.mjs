@@ -113,9 +113,6 @@ export const SHIP_EXPORTED_ENV = [
   'DEVKIT_SHIP_REPO',
   'DEVKIT_SHIP_RESUMED',
   'DEVKIT_SHIP_ROOT',
-  // A version label rather than authority, but wait-ci and ship telemetry read it: inherited, a test
-  // would report the OUTER ship's version.
-  'DEVKIT_TELEMETRY_VERSION',
 ];
 
 // FRINK_AI_STRICT is the legacy alias gate-engine reads alongside GUARD_AI_STRICT; no devkit path
@@ -131,6 +128,12 @@ export const TEST_ONLY_ADDITIONS = [
   // The launching agent's session; inherited, it is stamped as every telemetry row's parent_session_id.
   'CLAUDE_CODE_SESSION_ID',
   'CODEX_THREAD_ID',
+  // An operator may export this for one ship; inherited through the related-tests gate, it would
+  // replace the deadline the deterministic gate tests assert.
+  'GUARD_GATE_TIMEOUT_MS',
+  'FRINK_GATE_TIMEOUT_MS',
+  // related-tests runs this suite as a gate: inherited, a spawned CLI's throw exits 70, not 1.
+  'DEVKIT_GATE_REASON_FILE',
 ];
 
 // One-run gate bypasses (BYPASS_FLAGS in cli/lib/ship/merge-verdict/bypasses.mts), in both
@@ -182,6 +185,9 @@ export const SHIP_QUEUE_ENV = [
   'DEVKIT_SHIP_SLOT',
   'DEVKIT_SHIP_SLOT_DIR',
   'DEVKIT_SHIP_SLOT_RELEASE',
+  // The dispatcher's queue timing (commands/ship.mts): inherited, a fixture reports the outer wait.
+  'DEVKIT_SHIP_QUEUED_S',
+  'DEVKIT_SHIP_GRANTED_AT',
 ];
 
 export const SCRUBBED_ENV = [
@@ -228,6 +234,10 @@ Object.assign(process.env, SUITE_GIT_IDENTITY);
   process.env.GIT_TEMPLATE_DIR = template;
 }
 
+// In a mach-lookup-denying sandbox, macOS git's xcrun shim caches into $TMPDIR/xcrun_db; pin it
+// here so a test's own TMPDIR stays empty there as it does locally.
+if (process.platform === 'darwin') process.env.xcrun_db ||= path.join(os.tmpdir(), 'xcrun_db');
+
 // The ship-path tests (ship-branch / reship / reconcile / …) spawn a REAL commit-with-gate-capture.sh
 // whose gate-events emitter defaults its sink to ~/.devkit/telemetry/gate-events.jsonl — the
 // developer's real ship telemetry. Redirect it to a throwaway per-worker temp file so test ships
@@ -267,6 +277,17 @@ process.env.DEVKIT_NO_TELEMETRY = '1';
   process.env.DEVKIT_JUDGE_MCP_CONFIG = file;
 }
 
+// EEXIST: an earlier host dir (or an earlier setupFiles pass) already linked this runtime; first wins.
+function linkRuntimes(dir, shimDir) {
+  for (const tool of ['bun', 'bunx', 'node'].filter((t) => existsSync(path.join(dir, t)))) {
+    try {
+      symlinkSync(path.join(dir, tool), path.join(shimDir, tool));
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+    }
+  }
+}
+
 // A developer's global devkit (e.g. ~/.bun/bin/guard-deterministic) made hook tests green locally and red
 // on CI. Drop PATH dirs holding a devkit bin; the shim re-exposes only the runtimes they also held.
 export function hermeticPath(pathValue, binNames, shimDir) {
@@ -274,16 +295,7 @@ export function hermeticPath(pathValue, binNames, shimDir) {
   const hosts = dirs.filter((dir) => binNames.some((bin) => existsSync(path.join(dir, bin))));
   if (hosts.length === 0) return pathValue;
   mkdirSync(shimDir, { recursive: true });
-  for (const dir of hosts) {
-    for (const tool of ['bun', 'bunx', 'node']) {
-      if (!existsSync(path.join(dir, tool))) continue;
-      try {
-        symlinkSync(path.join(dir, tool), path.join(shimDir, tool));
-      } catch (err) {
-        if (err.code !== 'EEXIST') throw err;
-      }
-    }
-  }
+  for (const dir of hosts) linkRuntimes(dir, shimDir);
   return [shimDir, ...dirs.filter((dir) => !hosts.includes(dir))].join(path.delimiter);
 }
 

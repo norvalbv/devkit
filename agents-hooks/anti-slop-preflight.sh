@@ -1,9 +1,14 @@
 #!/bin/bash
-# PostToolUse hook (Edit|Write|MultiEdit; Cursor: afterFileEdit) — the anti-slop authoring-time check
-# (sc-3469). Runs `devkit anti-slop check <files>` on the file(s) just written, so a policy violation
-# (e.g. no-module-mocking in a new test) surfaces after the FIRST offending write instead of at
-# commit, when a whole suite may already be built on it. The check is path-scoped and forgives
+# PostToolUse hook (Edit|Write|MultiEdit, and Bash; Cursor: afterFileEdit) — the anti-slop
+# authoring-time check. Runs `devkit anti-slop check <files>` on the file(s) just written, so a policy
+# violation (e.g. no-module-mocking in a new test) surfaces after the FIRST offending write instead of
+# at commit, when a whole suite may already be built on it. The check is path-scoped and forgives
 # baselined debt, so only NEW findings in these files can block.
+#
+# --bash-writes (the Bash registration): a Bash call names no file, so its writes are the dirty files
+# (staged, unstaged, untracked) whose mtime falls in that call's window: duration_ms plus 2 s for
+# coarse mtimes. A payload without duration_ms (an older harness) gets no Bash check. The workspace is the payload cwd's
+# git toplevel (it follows a worktree), then CLAUDE_PROJECT_DIR; the first root holding a file bounds it.
 #
 # Blocks (exit 2 + stderr) ONLY on the check's own `anti-slop: FAIL —` verdict. Node exits 1 on an
 # uncaught throw too (capability not installed, an older devkit without the verb), and that must
@@ -20,6 +25,7 @@ HOOK_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
 project="${CLAUDE_PROJECT_DIR:-$HOOK_DIR/../..}"
 # A payload cwd inside a linked worktree of the project's repository is where the agent writes; the
 # same checkout, or an unrelated repository, keeps the project root.
+config_project="$project"
 cwd=$(printf '%s' "$input" | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
 if [ -n "$cwd" ] &&
   { read -r cdup; read -r top; read -r common; } < <(git -C "$cwd" rev-parse --show-cdup --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null) &&
@@ -28,23 +34,47 @@ if [ -n "$cwd" ] &&
   project=$(cd "$cwd/$cdup" && pwd) || { echo '{}'; exit 0; }
 fi
 
-# Node resolves file_path/path at any payload level, realpaths it, and finds the nearest anti-slop
-# install inside the project. Output: `<package dir>\t<package-relative path>` per checkable file.
-targets=$(printf '%s' "$input" | ANTI_SLOP_PROJECT="$project" node -e '
+# Codex apply_patch carries no file_path: edit-targets-lib.mjs reads the patched paths instead.
+patched=$(printf '%s' "$input" | node "$HOOK_DIR/edit-targets-lib.mjs" 2>/dev/null)
+# Node resolves file_path/path at any payload level (or a Bash call's writes), realpaths it, and finds
+# the nearest anti-slop install in the workspace. Output: `<package dir>\t<package-relative path>` lines.
+bash_writes=0
+[ "$1" = "--bash-writes" ] && bash_writes=1
+targets=$(printf '%s' "$input" | ANTI_SLOP_PROJECT="$project" ANTI_SLOP_BASH_WRITES="$bash_writes" ANTI_SLOP_PATCHED="$patched" node -e '
+const { execFileSync } = require("node:child_process");
 const { existsSync, realpathSync, statSync } = require("node:fs");
 const { dirname, join, relative, sep } = require("node:path");
+const startedAt = Date.now();
+const gitEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
+const git = (dir, args) =>
+  execFileSync("git", ["-c", "core.fsmonitor=false", "-C", dir, ...args], { encoding: "utf8", env: gitEnv, maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
+const toplevel = (dir) => { try { return realpathSync(git(dir, ["rev-parse", "--show-toplevel"]).trim()); } catch { return null; } };
+// Porcelain -z with --no-renames: one `XY path` record per entry; unmerged (U*, *U, AA, DD) skipped.
+const bashWrites = (root, durationMs) =>
+  git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"])
+    .split("\0")
+    .filter((record) => record.length > 3 && !/U|AA|DD/.test(record.slice(0, 2)))
+    .map((record) => join(root, record.slice(3)))
+    .filter((path) => existsSync(path) && statSync(path).mtimeMs >= startedAt - durationMs - 2000);
 let raw = "";
 process.stdin.on("data", (chunk) => (raw += chunk)).on("end", () => {
   try {
     const payload = JSON.parse(raw);
-    const root = realpathSync(process.env.ANTI_SLOP_PROJECT);
+    const workspace = typeof payload?.cwd === "string" ? toplevel(payload.cwd) : null;
+    const project = realpathSync(process.env.ANTI_SLOP_PROJECT);
+    const roots = [workspace, project].filter(Boolean);
     const holders = [payload, payload?.tool_input, ...(Array.isArray(payload?.tool_input?.edits) ? payload.tool_input.edits : [])];
-    const named = holders.flatMap((h) => [h?.file_path, h?.path]).filter((p) => typeof p === "string" && p !== "");
+    const patched = (process.env.ANTI_SLOP_PATCHED || "").split("\n");
+    const named = [...holders.flatMap((h) => [h?.file_path, h?.path]), ...patched].filter((p) => typeof p === "string" && p !== "");
+    // Porcelain paths are relative to the repo toplevel, which a subdirectory project is not.
+    const bashRoot = workspace ?? toplevel(project);
+    if (process.env.ANTI_SLOP_BASH_WRITES === "1" && bashRoot && Number.isFinite(payload?.duration_ms)) named.push(...bashWrites(bashRoot, payload.duration_ms));
     const lines = new Set();
     for (const path of new Set(named)) {
       if (!/\.(?:[cm]?[jt]s|[jt]sx)$/.test(path) || !existsSync(path) || !statSync(path).isFile()) continue;
       const real = realpathSync(path);
-      if (!real.startsWith(root + sep) || /[\t\n]/.test(real)) continue;
+      const root = roots.find((candidate) => real.startsWith(candidate + sep));
+      if (!root || /[\t\n]/.test(real)) continue;
       for (let dir = dirname(real); dir.startsWith(root); dir = dirname(dir)) {
         if (existsSync(join(dir, ".devkit", "anti-slop", "manifest.json"))) {
           lines.add(`${dir}\t${relative(dir, real)}`);
@@ -72,6 +102,8 @@ EOF_TARGETS
     devkit_bin="$pkg/node_modules/.bin/devkit"
   elif [ -x "$project_real/node_modules/.bin/devkit" ]; then
     devkit_bin="$project_real/node_modules/.bin/devkit"
+  elif [ -x "$config_project/node_modules/.bin/devkit" ]; then
+    devkit_bin="$config_project/node_modules/.bin/devkit"
   elif command -v devkit &>/dev/null; then
     devkit_bin=devkit
   else

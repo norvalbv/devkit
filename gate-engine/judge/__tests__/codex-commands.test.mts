@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -37,6 +38,14 @@ const TURN_FAILED = JSON.stringify({
   type: 'turn.failed',
   error: { message: 'usage limit reached' },
 });
+
+// `sleep 10` processes still alive in this run's process group, i.e. ones a killed fake stranded.
+function strandedSleeps(): string[] {
+  const own = execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' });
+  return execFileSync('ps', ['-A', '-o', 'pgid=,command='], { encoding: 'utf8' })
+    .split('\n')
+    .filter((row) => row.trim().split(/\s+/)[0] === own.trim() && row.trim().endsWith('sleep 10'));
+}
 
 // Captured VERBATIM from `codex exec --json` (codex-cli 0.162.1, gpt-5.6-terra, 2026-10-12).
 const REAL_STREAM = [
@@ -159,7 +168,7 @@ describe('commands_ref on judge_exec', () => {
     expect(stored(lastEvent().commands_ref)).toContain('[exit 1]');
 
     const killed = fakeBin('codex-killed', [PASSING, STARTED]);
-    writeFileSync(killed, `${readFileSync(killed, 'utf8')}sleep 10\n`);
+    writeFileSync(killed, `${readFileSync(killed, 'utf8')}exec sleep 10\n`);
     process.env.GUARD_CODEX_BIN = killed;
     // Both spawn paths: reviewers run async, where the partial stdout arrives via the callback.
     for (const run of [execJudge, execJudgeAsync]) {
@@ -167,6 +176,8 @@ describe('commands_ref on judge_exec', () => {
       expect(lastEvent().outcome).toBe('timeout');
       expect(stored(lastEvent().commands_ref)).toContain("[in_progress] bash -lc 'ps aux'");
     }
+    // A stranded sleep keeps the group alive, so ship's evidence capture reports it never drained.
+    expect(strandedSleeps()).toEqual([]);
   });
 
   it('concurrent lens parts sharing one reviewer label never overwrite each other', async () => {
@@ -183,10 +194,42 @@ describe('commands_ref on judge_exec', () => {
     expect(headers.sort()).toEqual(lenses.map((l) => `lens: ${l}`));
   });
 
-  it('a claude judge stamps no commands_ref', () => {
-    fakeBin('claude', ['VERDICT: PASS']);
+  it('a claude judge stores its tool calls from the event stream, a killed one up to the kill', async () => {
+    const use = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }],
+      },
+      parent_tool_use_id: null,
+    });
+    const ran = JSON.stringify({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'SECRET=hunter2' }] },
+    });
+    const verdict = JSON.stringify({ type: 'result', subtype: 'success', result: 'VERDICT: PASS' });
     process.env.PATH = `${path.join(dir, 'bin')}:${process.env.PATH}`;
-    expect(execJudge({ label: 'review:x', args: ['-p', 'q'], timeout: 20_000 })).not.toBeNull();
+    const claude = { label: 'review:x', args: ['-p', 'q'], timeout: 20_000 };
+    fakeBin('claude', [use, ran, verdict]);
+    expect(execJudge(claude)).toBe('VERDICT: PASS');
+    expect(stored(lastEvent().commands_ref)).toBe('[ok] Bash: ls\n');
+
+    // Most judges run tool-less: no call means no sidecar, not an empty file per run.
+    fakeBin('claude', [verdict]);
+    expect(execJudge(claude)).toBe('VERDICT: PASS');
     expect(lastEvent()).not.toHaveProperty('commands_ref');
+
+    // Exit 0 without a result: an outage, and the stream (file bodies included) is stored nowhere.
+    fakeBin('claude', [use, ran]);
+    expect(execJudge(claude)).toBeNull();
+    expect(lastEvent()).toMatchObject({ outcome: 'transient' });
+    expect(lastEvent().transcript_ref).toBeUndefined();
+
+    const killed = fakeBin('claude', [use]);
+    writeFileSync(killed, `${readFileSync(killed, 'utf8')}sleep 10\n`);
+    for (const run of [execJudge, execJudgeAsync]) {
+      expect(await run({ ...claude, timeout: 3000 })).toBeNull();
+      expect(lastEvent().outcome).toBe('timeout');
+      expect(stored(lastEvent().commands_ref)).toBe('[no result] Bash: ls\n');
+    }
   });
 });

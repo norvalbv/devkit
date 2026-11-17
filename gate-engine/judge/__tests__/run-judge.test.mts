@@ -129,17 +129,29 @@ describe('strictRemedy', () => {
     expect(r).toContain('smaller commit');
   });
 
-  it('a genuine outage LEADS with the auth/quota remedy — that cause really is auth/quota', () => {
+  it('a genuine outage LEADS with the auth/quota check, then a resume that keeps cached PASSes', () => {
     expect(
-      strictRemedy('outage').startsWith('check `claude` CLI auth/quota, then re-run devkit ship'),
+      strictRemedy('outage').startsWith(
+        'check `claude` CLI auth/quota, then resume with `devkit ship --resume <branch>`',
+      ),
     ).toBe(true);
+  });
+
+  // A capacity blip on one call once read as an account outage: the operator took the family
+  // move, which discards every cached PASS, when a same-family resume re-judged only the failure.
+  it('a genuine outage offers the PASS-keeping resume before the PASS-discarding family move', () => {
+    const r = strictRemedy('outage', 'codex');
+    const move = r.indexOf(familyOverrideRemedy('codex', true));
+    expect(r.indexOf('every cached PASS replays')).toBeGreaterThan(-1);
+    expect(r.indexOf('every cached PASS replays')).toBeLessThan(move);
+    expect(r).toContain('Only if the account stays dark');
   });
 
   // sc-2769: every binary reaching the generic arm RAN (only ENOENT reads as absent), so doctor's
   // bind cannot apply there; the full env move stays, the dead doctor lever and absent clause go.
   it('a genuine outage names the family move in full, never the doctor route', () => {
     const r = strictRemedy('outage', 'codex');
-    expect(r).toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(r).toContain('GUARD_REVIEW_MODEL=sonnet');
     expect(r).toContain('GUARD_CORRECTNESS_CHUNK=off');
     expect(r).toContain('cached PASS is discarded');
     expect(r).not.toContain('devkit doctor --fix');
@@ -223,7 +235,7 @@ describe('strictRemedy', () => {
   it('an outage remedy names the binary that went dark — codex outages must not send you to claude auth', () => {
     const r = strictRemedy('outage', 'codex');
     const diagnosis = r.slice(0, r.indexOf(familyOverrideRemedy('codex', true)));
-    expect(diagnosis).toContain('check `codex` CLI auth/quota, then re-run devkit ship');
+    expect(diagnosis).toContain('check `codex` CLI auth/quota, then resume');
     expect(diagnosis).not.toContain('claude');
     expect(r).not.toContain('check `claude`');
     expect(r).not.toContain('claude CLI auth');
@@ -236,7 +248,7 @@ describe('strictRemedy', () => {
     expect(r).toContain('no family move is safe yet');
     expect(r).not.toContain('move the judges to the claude family');
     expect(r).not.toContain('the packaged codex family');
-    expect(r).not.toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(r).not.toContain('GUARD_REVIEW_MODEL=sonnet');
   });
 
   // Both directions must move a PINNED sentry judge too, or following the remedy is a partial move.
@@ -262,7 +274,7 @@ describe('strictRemedy', () => {
     });
     expect(set.some((l) => /^(GUARD|FRINK)_SENTRY_MODEL=/.test(l))).toBe(false);
     for (const pair of [
-      'GUARD_REVIEW_MODEL=haiku',
+      'GUARD_REVIEW_MODEL=sonnet',
       'GUARD_REVIEW_ESCALATION_MODEL=opus',
       'GUARD_CORRECTNESS_MODEL=claude-haiku-5-5',
       'GUARD_CORRECTNESS_CHUNK=off',
@@ -306,7 +318,7 @@ describe('strictRemedy', () => {
   it('the claude direction always names all four knobs together', () => {
     const r = familyOverrideRemedy('codex');
     for (const knob of [
-      'GUARD_REVIEW_MODEL=haiku',
+      'GUARD_REVIEW_MODEL=sonnet',
       'GUARD_REVIEW_ESCALATION_MODEL=opus',
       'GUARD_CORRECTNESS_MODEL=claude-haiku-5-5',
       'GUARD_CORRECTNESS_CHUNK=off',

@@ -10,8 +10,8 @@ import {
   isCodexModel,
   judgeBinForModel,
   judgeProviderOfBin,
-  parseModelSpec,
 } from '../../../../gate-engine/judge/codex/result.mts';
+import { parseModelSpec } from '../../../../gate-engine/judge/codex/model-spec.mts';
 import { formatResetDelta } from '../../../../gate-engine/judge/outage/classify.mts';
 import { familyOverrideRemedy } from '../../../../gate-engine/judge/outage/family-override.mts';
 import { claudeLoggedOut, codexLoggedOut } from '../../doctor/judge/judge-auth.mts';
@@ -31,7 +31,7 @@ type Reachability =
   | 'unavailable'
   | 'unknown';
 
-interface ModelStatus {
+export interface ModelStatus {
   role: JudgeRole;
   model: string;
   bin: string;
@@ -103,13 +103,20 @@ const DEFAULT_DEPS: PreflightDeps = {
 
 /** Classify every resolved judge model, cheapest check first. The rate-limit RPC runs at most ONCE
  *  per report even with three codex roles, because they share one account. */
-export async function judgeReachability(
+export function judgeReachability(
   root: string,
   deps: PreflightDeps = DEFAULT_DEPS,
   guards: JudgeGuards = { review: true, sentry: false },
 ): Promise<ModelStatus[]> {
-  const cfg = resolveGuardConfig(root);
-  const roles = resolvedJudgeRoles(cfg, guards);
+  return reachabilityOf(resolvedJudgeRoles(resolveGuardConfig(root), guards), root, deps);
+}
+
+/** Classify an explicit role list — the reviewer bench probes its own effective models this way. */
+export async function reachabilityOf(
+  roles: { role: JudgeRole; model: string }[],
+  root: string,
+  deps: PreflightDeps = DEFAULT_DEPS,
+): Promise<ModelStatus[]> {
   const models = roles.map((r) => r.model);
   const statuses: ModelStatus[] = [];
 
@@ -241,15 +248,23 @@ export function renderPreflight(
         `model the account serves: ${rows[0].served?.join(', ')}.`,
     );
   }
+  lines.push(`   ${remedyLine(statuses)}`);
+  return lines;
+}
+
+/** The report's closing remedy, which ship repeats as its last tail line; '' when no judge is dark. */
+export function remedyLine(statuses: ModelStatus[]): string {
+  const blocked = darkStatuses(statuses);
+  if (blocked.length === 0) return '';
   // Naming the override, never taking it: a runtime cross-family swap moves spend to an unwatched
   // subscription and puts its verdicts outside the model-keyed cache salt (review-gate-in-chain).
   const dark = singleDarkBin(blocked);
-  lines.push(
-    dark === undefined
-      ? '   Both judge CLIs are dark, so no family move helps — install or authenticate one of them.'
-      : `   To ship inside this window, ${familyOverrideRemedy(dark.bin, dark.present)}.`,
-  );
-  return lines;
+  if (dark === undefined)
+    return 'Both judge CLIs are dark, so no family move helps — install or authenticate one of them.';
+  const move = familyOverrideRemedy(dark.bin, dark.present);
+  // A compound bin names no move, so a "to ship inside this window" lead-in would contradict it.
+  if (judgeProviderOfBin(dark.bin) === null) return `${move[0].toUpperCase()}${move.slice(1)}.`;
+  return `To ship inside this window, ${move}.`;
 }
 
 const darkStatuses = (statuses: ModelStatus[]): ModelStatus[] =>
@@ -261,14 +276,6 @@ function singleDarkBin(blocked: ModelStatus[]): { bin: string; present: boolean 
   if (dark.length !== 1) return undefined;
   // Presence is resolved once per provider, so one absent row speaks for every role on that bin.
   return { bin: dark[0], present: !blocked.some((s) => s.state === 'absent') };
-}
-
-/** The family move ship repeats at the tail of a blocked attempt, or '' when no single move helps
- *  (nothing dark, both CLIs dark, or a compound bin whose dark family is unknown). */
-export function familyRemedy(statuses: ModelStatus[]): string {
-  const dark = singleDarkBin(darkStatuses(statuses));
-  if (dark === undefined || judgeProviderOfBin(dark.bin) === null) return '';
-  return familyOverrideRemedy(dark.bin, dark.present);
 }
 
 /** Bounds a provider-supplied value, which the wire can send as a non-string: the sink's rows stay
@@ -306,8 +313,9 @@ async function main(argv: string[]): Promise<number> {
   const statuses = await judgeReachability(root, DEFAULT_DEPS, guards);
   const informational = argv.includes('--informational');
   for (const line of renderPreflight(statuses, Date.now(), informational)) console.error(line);
-  // stdout carries ONLY the remedy: ship captures it for the blocked-attempt and dry-gates tails.
-  const remedy = familyRemedy(statuses);
+  // stdout carries ONLY the remedy line: ship prints it verbatim at the blocked-attempt and
+  // dry-gates tails, so a dark judge with no family move still reaches a reader who only tails.
+  const remedy = remedyLine(statuses);
   if (remedy) console.log(remedy);
   // Last, so a telemetry fault can never cost the report or the remedy. An informational reading
   // predicts no judge run, so it has no outcome to be joined with and records no row.

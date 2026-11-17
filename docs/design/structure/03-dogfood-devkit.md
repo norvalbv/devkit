@@ -7,7 +7,7 @@
 
 ## What shipped
 
-1. **`compileToEslint(treeSpec, exts, {baseline, exempt})`** (`gate-engine/structure/compile.mjs`) —
+1. **`compileToEslint(treeSpec, exts, {baseline, exempt})`** (`gate-engine/structure/tree/compile.mjs`) —
    translates a grammar tree into an `eslint-plugin-project-structure` `createFolderStructure(...)`
    config: `{token}` → regexParameters, `folders` → child rules, `recurse` → the `rules` map,
    `domainGate` → a closed-registry `{<key>_domain}` alternation, `ignoredDirs`/`__tests__` →

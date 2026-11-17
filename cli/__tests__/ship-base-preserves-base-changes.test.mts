@@ -13,7 +13,9 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { LINES_BASELINE } from '../../gate-engine/ratchets/baseline-paths.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
+import { advanceBase, PREFLIGHT_BLOCK, seedForked, shipBase } from './_ship-base-fixture.mts';
 import {
   dirs,
   dropWorktree,
@@ -22,44 +24,10 @@ import {
   recorded,
   remoteBranchExists,
   scriptPath,
-  seedShipRepoLocalRemote,
 } from './_ship-branch-fixture.mts';
 
-const PREFLIGHT_BLOCK = 'blocked before creating a branch or worktree';
 const anchorPath = join(scriptPath, '..', 'patch-anchor.sh');
 const TEN_LINES = Array.from({ length: 10 }, (_, i) => `l${i + 1}`).join('\n') + '\n';
-
-/** A checkout parked at the fork point A, plus an origin whose `base` branch is also at A and ready
- *  to be advanced. `seed(dir)` writes the fork-point content before it is committed and pushed. */
-function seedForked(seed: (dir: string) => void, { hookBody = 'exit 0' } = {}) {
-  const { dir, env, git, bare } = seedShipRepoLocalRemote({ hookBody });
-  seed(dir);
-  git(['add', '-A'], { stdio: 'ignore' });
-  git(['commit', '-q', '-m', 'fork point'], { stdio: 'ignore' });
-  git(['push', '-q', 'origin', 'work:base'], { stdio: 'ignore' });
-  const forkPoint = git(['rev-parse', 'HEAD']).trim();
-  return { dir, env, git, bare, forkPoint };
-}
-
-/** Advance origin/base with REAL new content, through a throwaway clone. The caller's checkout never
- *  fetches, so it stays at the fork point — which is the whole point of the bug. */
-function advanceBase(bare: string, mutate: (clone: string) => void, message = 'base advances') {
-  const clone = mkdtempSync(join(tmpdir(), 'shipbase-'));
-  dirs.push(clone);
-  const cgit = (a: string[]) =>
-    execFileSync('git', a, { cwd: clone, env: { ...process.env, ...GIT_ENV }, encoding: 'utf8' });
-  cgit(['clone', '-q', '--branch', 'base', bare, '.']);
-  cgit(['config', 'user.email', 'a@b.c']);
-  cgit(['config', 'user.name', 'a']);
-  mutate(clone);
-  cgit(['add', '-A']);
-  cgit(['commit', '-q', '-m', message]);
-  cgit(['push', '-q', 'origin', 'base']);
-  return execFileSync('git', ['-C', bare, 'rev-parse', 'base'], {
-    env: { ...process.env, ...GIT_ENV },
-    encoding: 'utf8',
-  }).trim();
-}
 
 function resume(dir: string, env: NodeJS.ProcessEnv, branch: string, extras: string[] = []) {
   const args = [scriptPath, '--resume', branch, ...(extras.length ? ['--', ...extras] : [])];
@@ -91,7 +59,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
     expect(git(['rev-parse', 'HEAD']).trim()).toBe(forkPoint); // never fetched, still stale
 
-    const r = ship(dir, env, 'feat/keep', ['f.txt']);
+    const r = shipBase(dir, env, 'feat/keep', ['f.txt']);
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).toBe(0);
@@ -112,7 +80,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     advanceBase(bare, (c) => writeFileSync(join(c, 'm.sh'), TEN_LINES.replace('l10', 'l10-BASE')));
     chmodSync(join(dir, 'm.sh'), 0o755); // mode-only change; bytes untouched
 
-    const r = ship(dir, env, 'feat/mode', ['m.sh']);
+    const r = shipBase(dir, env, 'feat/mode', ['m.sh']);
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).toBe(0);
@@ -133,7 +101,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     // change — git merge refuses the same case as a conflict.
     const { dir, env, git } = seedBinaryBothSides(Buffer.from([0x00, 0xff, 0x43]));
 
-    const r = ship(dir, env, 'feat/bin', ['b.dat']);
+    const r = shipBase(dir, env, 'feat/bin', ['b.dat']);
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -148,7 +116,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
   it('ships the caller’s bytes wholesale on a both-sides binary under GUARD_SHIP_REPLACE_OK', () => {
     const { dir, env, git } = seedBinaryBothSides(Buffer.from([0x00, 0xff, 0x43]));
 
-    const r = ship(dir, env, 'feat/binok', ['b.dat'], { GUARD_SHIP_REPLACE_OK: '1' });
+    const r = shipBase(dir, env, 'feat/binok', ['b.dat'], { GUARD_SHIP_REPLACE_OK: '1' });
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).toBe(0);
@@ -161,7 +129,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
   it('still refuses when GUARD_SHIP_REPLACE_OK=0', () => {
     const { dir, env, git } = seedBinaryBothSides(Buffer.from([0x00, 0xff, 0x43]));
 
-    const r = ship(dir, env, 'feat/binoff', ['b.dat'], { GUARD_SHIP_REPLACE_OK: '0' });
+    const r = shipBase(dir, env, 'feat/binoff', ['b.dat'], { GUARD_SHIP_REPLACE_OK: '0' });
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -173,7 +141,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     const { dir, env, git } = seedBinaryBothSides(same, same);
     writeFileSync(join(dir, 'f.txt'), 'caller\n'); // so the ship has something to carry
 
-    const r = ship(dir, env, 'feat/binsame', ['b.dat', 'f.txt']);
+    const r = shipBase(dir, env, 'feat/binsame', ['b.dat', 'f.txt']);
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).toBe(0);
@@ -192,7 +160,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     unlinkSync(join(dir, 'lnk'));
     symlinkSync('caller.txt', join(dir, 'lnk'));
 
-    const r = ship(dir, env, 'feat/lnkclash', ['lnk']);
+    const r = shipBase(dir, env, 'feat/lnkclash', ['lnk']);
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -215,7 +183,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     writeFileSync(join(dir, 'gone-on-base.dat'), Buffer.from([0x00, 0xff]));
     unlinkSync(join(dir, 'gone-here.dat'));
 
-    const r = ship(dir, env, 'feat/bindel', ['gone-on-base.dat', 'gone-here.dat']);
+    const r = shipBase(dir, env, 'feat/bindel', ['gone-on-base.dat', 'gone-here.dat']);
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -279,7 +247,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     symlinkSync('b.txt', join(dir, 'lnk'));
     writeFileSync(join(dir, 'b.txt'), 'b-CALLER\n'); // so the ship has something to carry
 
-    const r = ship(dir, env, 'feat/lnk', ['lnk', 'b.txt']);
+    const r = shipBase(dir, env, 'feat/lnk', ['lnk', 'b.txt']);
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).toBe(0);
@@ -297,7 +265,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     advanceBase(bare, (c) => writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l5', 'l5-BASE')));
     writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l5', 'l5-CALLER'));
 
-    const r = ship(dir, env, 'feat/clash', ['f.txt'], { TEST_HOOK_MARK: mark });
+    const r = shipBase(dir, env, 'feat/clash', ['f.txt'], { TEST_HOOK_MARK: mark });
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -404,7 +372,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
   it('ABORTS naming the generator — not a hand-merge — when only a generated file conflicts', () => {
     const { dir, env, git, bare } = seedManifestClash();
 
-    const r = ship(dir, env, 'feat/manifest', [MANIFEST]);
+    const r = shipBase(dir, env, 'feat/manifest', [MANIFEST]);
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -421,7 +389,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     advanceBase(bare, (c) => writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l5', 'l5-BASE')));
     writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l5', 'l5-CALLER'));
 
-    const r = ship(dir, env, 'feat/mixed', [MANIFEST, 'f.txt']);
+    const r = shipBase(dir, env, 'feat/mixed', [MANIFEST, 'f.txt']);
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -445,7 +413,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     );
     writeFileSync(join(dir, 'gen', 'api.json'), TEN_LINES.replace('l5', 'l5-CALLER'));
 
-    const r = ship(dir, env, 'feat/codegen', ['gen/api.json']);
+    const r = shipBase(dir, env, 'feat/codegen', ['gen/api.json']);
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -466,7 +434,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     advanceBase(bare, (c) => writeFileSync(join(c, name), TEN_LINES.replace('l5', 'l5-BASE')));
     writeFileSync(join(dir, name), TEN_LINES.replace('l5', 'l5-CALLER'));
 
-    const r = ship(dir, env, 'feat/tabname', [name]);
+    const r = shipBase(dir, env, 'feat/tabname', [name]);
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -491,7 +459,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     });
     writeFileSync(join(dir, 'gen', 'api.json'), TEN_LINES.replace('l5', 'l5-CALLER'));
 
-    const r = ship(dir, env, 'feat/basecfg', ['gen/api.json']);
+    const r = shipBase(dir, env, 'feat/basecfg', ['gen/api.json']);
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -504,7 +472,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
       writeFileSync(join(d, 'guard.config.json'), JSON.stringify({ generated: 'nope' })),
     );
 
-    const r = ship(dir, env, 'feat/badcfg', [MANIFEST]);
+    const r = shipBase(dir, env, 'feat/badcfg', [MANIFEST]);
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -522,7 +490,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     advanceBase(bare, (c) => unlinkSync(join(c, 'd.txt')));
     writeFileSync(join(dir, 'd.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
 
-    const r = ship(dir, env, 'feat/gone', ['d.txt']);
+    const r = shipBase(dir, env, 'feat/gone', ['d.txt']);
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -546,7 +514,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     advanceBase(bare, (c) => writeFileSync(join(c, 'f.txt'), identical));
     writeFileSync(join(dir, 'f.txt'), identical); // the same edit, made independently
 
-    const r = ship(dir, env, 'feat/dup', ['f.txt'], { TEST_HOOK_MARK: mark });
+    const r = shipBase(dir, env, 'feat/dup', ['f.txt'], { TEST_HOOK_MARK: mark });
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -561,7 +529,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     advanceBase(bare, (c) => writeFileSync(join(c, 'u.txt'), 'base owns this\n'));
     writeFileSync(join(dir, 'u.txt'), 'caller made this locally\n'); // untracked HERE, tracked on base
 
-    const r = ship(dir, env, 'feat/untracked', ['u.txt']);
+    const r = shipBase(dir, env, 'feat/untracked', ['u.txt']);
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -576,7 +544,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     const { dir, env, git } = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
     writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
 
-    const r = ship(dir, env, 'feat/insync', ['f.txt']);
+    const r = shipBase(dir, env, 'feat/insync', ['f.txt']);
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).toBe(0);
@@ -603,7 +571,7 @@ describe('ship --base: fork-point anchoring edge cases (sc-2451)', () => {
       TEN_LINES.replace('l3', 'l3-COMMITTED').replace('l1\n', 'l1-DIRTY\n'),
     );
 
-    const r = ship(dir, env, 'feat/commits', ['f.txt']);
+    const r = shipBase(dir, env, 'feat/commits', ['f.txt']);
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).toBe(0);
@@ -624,7 +592,7 @@ describe('ship --base: fork-point anchoring edge cases (sc-2451)', () => {
     );
     writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
 
-    const r = ship(dir, env, 'feat/detached', ['f.txt']);
+    const r = shipBase(dir, env, 'feat/detached', ['f.txt']);
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).toBe(0);
@@ -643,7 +611,7 @@ describe('ship --base: fork-point anchoring edge cases (sc-2451)', () => {
     advanceBase(bare, (c) => writeFileSync(join(c, 'b.dat'), baseBytes));
     writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n')); // b.dat untouched
 
-    const r = ship(dir, env, 'feat/binkeep', ['f.txt', 'b.dat']);
+    const r = shipBase(dir, env, 'feat/binkeep', ['f.txt', 'b.dat']);
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).toBe(0);
@@ -669,7 +637,7 @@ describe('ship --base: fork-point anchoring edge cases (sc-2451)', () => {
     symlinkSync('a.txt', join(dir, 's')); // untracked here, byte-identical to the base's
     writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
 
-    const r = ship(dir, env, 'feat/symkeep', ['f.txt', 's']);
+    const r = shipBase(dir, env, 'feat/symkeep', ['f.txt', 's']);
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).toBe(0);
@@ -700,7 +668,7 @@ describe('ship --base: fork-point anchoring edge cases (sc-2451)', () => {
 
     // GUARD_SHIP_BASE_OK: an unrelated base is exactly what sc-2357's relatedness check refuses, and
     // this test needs one to reach the staging fallback under test. The hatch is the audited way in.
-    const r = ship(dir, env, 'feat/orphan', ['f.txt'], { GUARD_SHIP_BASE_OK: '1' });
+    const r = shipBase(dir, env, 'feat/orphan', ['f.txt'], { GUARD_SHIP_BASE_OK: '1' });
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).toBe(0);
@@ -732,7 +700,7 @@ describe('ship --base: fork-point anchoring edge cases (sc-2451)', () => {
     rmSync(join(dir, 'sub'), { recursive: true, force: true });
     writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
 
-    const r = ship(dir, env, 'feat/gitlink', ['f.txt', 'sub']);
+    const r = shipBase(dir, env, 'feat/gitlink', ['f.txt', 'sub']);
     dropWorktree(git, r.stderr);
 
     // The gitlink never reached `git apply --3way`, so nothing conflicted and the ship completed.
@@ -758,7 +726,7 @@ describe('ship --base: fork-point anchoring edge cases (sc-2451)', () => {
     symlinkSync('a\n', join(dir, 'nl')); // untracked here, byte-identical to the base's
     writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
 
-    const r = ship(dir, env, 'feat/nlsym', ['f.txt', 'nl']);
+    const r = shipBase(dir, env, 'feat/nlsym', ['f.txt', 'nl']);
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).toBe(0);
@@ -786,7 +754,7 @@ describe('ship --base: fork-point anchoring edge cases (sc-2451)', () => {
     mkdirSync(join(dir, 'dist'), { recursive: true });
     writeFileSync(join(dir, 'dist/x.js'), 'caller built this\n'); // ignored + untracked HERE
 
-    const r = ship(dir, env, 'feat/ignored', ['dist/x.js']);
+    const r = shipBase(dir, env, 'feat/ignored', ['dist/x.js']);
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -845,7 +813,7 @@ describe('ship --base: the hunk-level verdict is taken before any branch exists 
     writeFileSync(join(dir, 'b.txt'), TEN_LINES.replace('l2', 'l2-CALLER'));
     writeFileSync(join(dir, 'c.txt'), TEN_LINES.replace('l7', 'l7-CALLER')); // base never touched it
 
-    const r = ship(dir, env, 'feat/multi', ['a.txt', 'b.txt', 'c.txt']);
+    const r = shipBase(dir, env, 'feat/multi', ['a.txt', 'b.txt', 'c.txt']);
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -865,7 +833,7 @@ describe('ship --base: the hunk-level verdict is taken before any branch exists 
     }
     writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l5', 'l5-CALLER'));
 
-    const r = ship(dir, env, 'feat/hot', ['f.txt']);
+    const r = shipBase(dir, env, 'feat/hot', ['f.txt']);
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -891,7 +859,7 @@ describe('ship --base: the hunk-level verdict is taken before any branch exists 
     );
     writeFileSync(join(dir, odd), TEN_LINES.replace('l5', 'l5-CALLER'));
 
-    const r = ship(dir, env, 'feat/odd', [odd]);
+    const r = shipBase(dir, env, 'feat/odd', [odd]);
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -918,7 +886,7 @@ describe('ship --base: the hunk-level verdict is taken before any branch exists 
     );
     writeFileSync(join(dir, nl), TEN_LINES.replace('l5', 'l5-CALLER'));
 
-    const r = ship(dir, env, 'feat/nl', [nl]);
+    const r = shipBase(dir, env, 'feat/nl', [nl]);
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -946,7 +914,7 @@ describe('ship --base: the hunk-level verdict is taken before any branch exists 
     git(['add', 'staged.txt']);
     const indexBefore = git(['ls-files', '-s']);
 
-    const r = ship(dir, env, 'feat/clean', ['f.txt'], { TMPDIR: tmp });
+    const r = shipBase(dir, env, 'feat/clean', ['f.txt'], { TMPDIR: tmp });
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
@@ -983,7 +951,7 @@ describe('ship --base: the hunk-level verdict is taken before any branch exists 
       writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l10', 'l10-BASE')),
     );
     writeFileSync(join(clean.dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
-    const ok = ship(clean.dir, clean.env, 'feat/old-git', ['f.txt'], shimEnv(clean.env));
+    const ok = shipBase(clean.dir, clean.env, 'feat/old-git', ['f.txt'], shimEnv(clean.env));
     dropWorktree(clean.git, ok.stderr);
     expect(ok.status, ok.stderr).toBe(0);
     expect(ok.stderr).not.toContain(PREFLIGHT_BLOCK);
@@ -993,7 +961,13 @@ describe('ship --base: the hunk-level verdict is taken before any branch exists 
       writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l5', 'l5-BASE')),
     );
     writeFileSync(join(clash.dir, 'f.txt'), TEN_LINES.replace('l5', 'l5-CALLER'));
-    const late = ship(clash.dir, clash.env, 'feat/old-git-clash', ['f.txt'], shimEnv(clash.env));
+    const late = shipBase(
+      clash.dir,
+      clash.env,
+      'feat/old-git-clash',
+      ['f.txt'],
+      shimEnv(clash.env),
+    );
     dropWorktree(clash.git, late.stderr);
     expect(late.status).toBe(1);
     expect(late.stderr).not.toContain(PREFLIGHT_BLOCK); // the trial stepped aside...
@@ -1003,17 +977,251 @@ describe('ship --base: the hunk-level verdict is taken before any branch exists 
 
   it('steps aside for an existing branch so a preserved-commit retry reaches its OWN refusal', () => {
     const { dir, env, git, bare } = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
-    git(['branch', 'feat/again']); // a prior attempt's branch, still at the fork point
+    // A prior attempt's branch holding its own commit; an empty one at the fork point is reclaimed.
+    const prior = git(['commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'prior attempt']).trim();
+    git(['branch', 'feat/again', prior]);
     advanceBase(bare, (c) => writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l5', 'l5-BASE')));
     writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l5', 'l5-CALLER'));
 
     // Non-dry: a dry run refuses any existing branch outright, before the trial could be reached.
-    const r = ship(dir, env, 'feat/again', ['f.txt'], { SHIP_DRY_RUN: '' });
+    const r = shipBase(dir, env, 'feat/again', ['f.txt'], { SHIP_DRY_RUN: '' });
     dropWorktree(git, r.stderr);
 
     expect(r.status).not.toBe(0);
     expect(r.stderr).not.toContain(PREFLIGHT_BLOCK);
     expect(r.stderr).toContain('branch already exists: feat/again');
     expect(remoteBranchExists(bare, 'feat/again')).toBe(false);
+  });
+});
+
+const SIZE_GATE = join(scriptPath, '../../../../gate-engine/ratchets/size-disable.mts');
+const TOOK = `ship: took origin/base's ${LINES_BASELINE}`;
+const lines = (n: number) =>
+  Array.from({ length: n }, (_, i) => `const x${i + 1} = 1;`).join('\n') + '\n';
+const runGate = (cwd: string, mode: string) =>
+  spawnSync(process.execPath, [SIZE_GATE, mode], {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, ...GIT_ENV },
+  });
+
+/** f1.ts and f2.ts grandfathered at 120 lines on ADJACENT baseline lines; the real line ratchet
+ *  is the pre-commit hook, so the ship worktree's commit re-lowers what it ships. */
+function seedBaseline() {
+  const fx = seedForked(
+    (d) => {
+      mkdirSync(join(d, 'src'));
+      writeFileSync(
+        join(d, 'guard.config.json'),
+        JSON.stringify({ scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 }),
+      );
+      for (const f of ['f1', 'f2']) writeFileSync(join(d, `src/${f}.ts`), lines(120));
+      writeFileSync(join(d, 'notes.txt'), 'shared\n');
+      expect(runGate(d, 'freeze').status).toBe(0);
+    },
+    { hookBody: `"${process.execPath}" "${SIZE_GATE}" gate` },
+  );
+  // A sibling's gated shrink of f1.ts lands on base first.
+  advanceBase(fx.bare, (c) => {
+    writeFileSync(join(c, 'src/f1.ts'), lines(80));
+    execFileSync('git', ['add', '-A'], { cwd: c, env: { ...process.env, ...GIT_ENV } });
+    expect(runGate(c, 'gate').status).toBe(0);
+  });
+  // The caller, still at the fork point, shrinks f2.ts through the same gate.
+  writeFileSync(join(fx.dir, 'src/f2.ts'), lines(90));
+  fx.git(['add', '-A'], { stdio: 'ignore' });
+  expect(runGate(fx.dir, 'gate').status).toBe(0);
+  return fx;
+}
+
+describe('ship --base: a conflicting gate-owned size-lines.json (sc-5147)', () => {
+  it('takes the base copy, and the gated commit re-lowers the shipped file', () => {
+    const { dir, env, git } = seedBaseline();
+
+    const r = ship(dir, env, 'feat/shrink', ['src/f2.ts', LINES_BASELINE]);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr.split(TOOK).length - 1, r.stderr).toBe(1); // staging only; the trial is silent
+    expect(r.stderr).not.toContain('changed the same region of');
+    const committed = JSON.parse(git(['show', `feat/shrink:${LINES_BASELINE}`])).files;
+    expect(committed).toEqual({ 'src/f1.ts': 80, 'src/f2.ts': 90 });
+    expect(git(['show', 'feat/shrink:src/f2.ts'])).toBe(lines(90));
+  });
+
+  it('still aborts on a mixed conflict, naming only the hand-mergeable path', () => {
+    const { dir, env, git, bare } = seedBaseline();
+    advanceBase(bare, (c) => writeFileSync(join(c, 'notes.txt'), 'base edit\n'));
+    writeFileSync(join(dir, 'notes.txt'), 'caller edit\n');
+
+    const r = ship(dir, env, 'feat/mixed', ['src/f2.ts', 'notes.txt', LINES_BASELINE]);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).not.toContain(TOOK);
+    expect(conflictListing(r.stderr)).toContain('notes.txt');
+    expect(conflictListing(r.stderr)).not.toContain('size-lines.json');
+    expect(commitListing(r.stderr)).not.toContain('size-lines.json');
+    expect(localBranchExists(git, 'feat/mixed')).toBe(false);
+  });
+
+  it('names the same path as the line ratchet', () => {
+    const helper = readFileSync(join(scriptPath, '..', 'gate-owned-baseline.sh'), 'utf8');
+    expect(/^SHIP_GATE_OWNED_BASELINE=(.+)$/m.exec(helper)?.[1]).toBe(LINES_BASELINE);
+  });
+});
+
+/** A caller commit on top of the fork point, with `.git/shallow` grafted at `graft`. Grafting at the
+ *  caller commit hides the fork point, so `merge-base` exits 1 exactly as in a depth-1 CI clone. */
+function shallowCaller(git: ReturnType<typeof seedForked>['git'], dir: string, graft?: string) {
+  writeFileSync(join(dir, 'other.txt'), 'caller commit\n');
+  git(['add', 'other.txt'], { stdio: 'ignore' });
+  git(['commit', '-q', '-m', 'caller commit'], { stdio: 'ignore' });
+  writeFileSync(join(dir, '.git', 'shallow'), `${graft ?? git(['rev-parse', 'HEAD']).trim()}\n`);
+  expect(git(['rev-parse', '--is-shallow-repository']).trim()).toBe('true');
+}
+
+function mergeBaseStatus(dir: string) {
+  execFileSync('git', ['fetch', '-q', 'origin', 'base'], {
+    cwd: dir,
+    env: { ...process.env, ...GIT_ENV },
+  });
+  return spawnSync('git', ['merge-base', 'FETCH_HEAD', 'HEAD'], { cwd: dir, encoding: 'utf8' })
+    .status;
+}
+
+describe('ship --base in a shallow clone (sc-3920)', () => {
+  it('REFUSES before any branch when the graft hides the fork point and the base moved', () => {
+    const { dir, env, git, bare } = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
+    advanceBase(bare, (c) => writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l10', 'l10-BASE')));
+    shallowCaller(git, dir);
+    expect(mergeBaseStatus(dir)).toBe(1); // non-vacuity: no fork point is visible
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
+
+    const r = ship(dir, env, 'feat/shallow', ['f.txt']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('cannot find where this checkout forked from origin/base');
+    expect(r.stderr).toContain('git fetch --unshallow');
+    expect(r.stderr).toContain(PREFLIGHT_BLOCK);
+    expect(localBranchExists(git, 'feat/shallow')).toBe(false);
+  });
+
+  it('REFUSES the same way when the base did NOT move — a shallow clone cannot tell the two apart', () => {
+    const { dir, env, git } = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
+    shallowCaller(git, dir);
+    expect(mergeBaseStatus(dir)).toBe(1);
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
+
+    const r = ship(dir, env, 'feat/shallowsync', ['f.txt']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('git fetch --unshallow');
+    expect(r.stderr).not.toContain('moved to'); // never claims a drift it cannot see
+    expect(localBranchExists(git, 'feat/shallowsync')).toBe(false);
+  });
+
+  it('three-way merges as usual when the fork point is still inside the shallow history', () => {
+    const { dir, env, git, bare, forkPoint } = seedForked((d) =>
+      writeFileSync(join(d, 'f.txt'), TEN_LINES),
+    );
+    advanceBase(bare, (c) => writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l10', 'l10-BASE')));
+    shallowCaller(git, dir, forkPoint);
+    expect(mergeBaseStatus(dir)).toBe(0);
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
+
+    const r = ship(dir, env, 'feat/shallowok', ['f.txt']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('anchored at the fork point');
+    const shipped = git(['show', 'feat/shallowok:f.txt']);
+    expect(shipped).toContain('l1-CALLER');
+    expect(shipped).toContain('l10-BASE');
+  });
+
+  it('never refuses a default-arm ship (no --base) from the same shallow clone', () => {
+    // BASE=HEAD there, so merge-base resolves even with every parent grafted away.
+    const { dir, env, git } = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
+    shallowCaller(git, dir);
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/shallowdef', 'ship it', '--', 'f.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toContain('cannot find where this checkout forked');
+    expect(git(['show', 'feat/shallowdef:f.txt'])).toContain('l1-CALLER');
+  });
+
+  it('does not claim "before creating a branch" when a preserved branch already exists', () => {
+    const { dir, env, git, bare } = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
+    advanceBase(bare, (c) => writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l10', 'l10-BASE')));
+    shallowCaller(git, dir);
+    git(['branch', 'feat/shallowagain']); // a prior attempt's branch
+    const before = git(['rev-parse', 'feat/shallowagain']).trim();
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
+
+    // Non-dry: a dry run refuses any existing branch before this check is reached.
+    const r = ship(dir, env, 'feat/shallowagain', ['f.txt'], { SHIP_DRY_RUN: '' });
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('git fetch --unshallow');
+    expect(r.stderr).not.toContain(PREFLIGHT_BLOCK);
+    expect(git(['rev-parse', 'feat/shallowagain']).trim()).toBe(before);
+    expect(remoteBranchExists(bare, 'feat/shallowagain')).toBe(false);
+  });
+
+  it('refuses rather than falling back to BASE when merge-base fails with an exit other than 1', () => {
+    // A full clone, so only the exit code separates this from the unrelated-histories fallback.
+    const { dir } = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
+    const bogus = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+    const probe = (base: string) =>
+      spawnSync(
+        '/bin/bash',
+        ['-c', '. "$1"; ship_patch_base "$2" "$3"', '_', anchorPath, dir, base],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, ...GIT_ENV },
+        },
+      );
+    expect(spawnSync('git', ['-C', dir, 'merge-base', bogus, 'HEAD']).status).toBe(128);
+
+    const r = probe(bogus);
+
+    expect(r.status).toBe(1);
+    expect(r.stdout).toBe('');
+  });
+});
+
+describe('ship --base: briefed paths only the base changed stay byte-identical to the base', () => {
+  it('keeps a base-modified, base-added and base-deleted file exactly as the base has them', () => {
+    const { dir, env, git, bare } = seedForked((d) => {
+      writeFileSync(join(d, 'f.txt'), TEN_LINES);
+      writeFileSync(join(d, 'm.txt'), 'fork\n');
+      writeFileSync(join(d, 'd.txt'), 'doomed\n');
+    });
+    const advancedTip = advanceBase(bare, (c) => {
+      writeFileSync(join(c, 'm.txt'), 'base edit\n');
+      writeFileSync(join(c, 'a.txt'), 'base add\n');
+      rmSync(join(c, 'd.txt'));
+    });
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
+
+    const r = ship(dir, env, 'feat/baseonly', ['f.txt', 'm.txt', 'a.txt', 'd.txt']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(git(['rev-parse', 'feat/baseonly^']).trim()).toBe(advancedTip);
+    // Every briefed path but the caller's own edit is byte-identical to the refreshed base.
+    expect(git(['diff', '--name-only', advancedTip, 'feat/baseonly']).trim()).toBe('f.txt');
   });
 });

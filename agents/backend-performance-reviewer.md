@@ -59,7 +59,9 @@ and do not go looking for Targets yourself.
 ## 1. Read skill for detailed rules:
 - `.claude/skills/backend-performance/SKILL.md`
 
+<!-- interactive-only -->
 SCRIPT=".claude/skills/backend-performance/scripts/checklist.mjs"
+<!-- /interactive-only -->
 
 ## 2. Generate the checklist
 ```bash

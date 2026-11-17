@@ -7,6 +7,8 @@ export interface StepFormatter {
   /** Non-empty: an empty list would render `if ; then`. */
   configProbes: readonly [string, ...string[]];
   stepArgs: string;
+  /** Formats stdin as the named path; the step appends that path directly after this. */
+  stdinArgs: string;
 }
 
 // Exactly the names Oxfmt discovers; the Oxc lifecycle manages the same set.
@@ -28,6 +30,7 @@ export const CONSUMER_FORMATTER = {
   bin: 'devkit',
   configProbes: OXFMT_CONFIGS,
   stepArgs: `oxc fmt ${OXFMT_WRITE_ARGS}`,
+  stdinArgs: 'oxc fmt --stdin-filepath=',
   scripts: {
     lint: `devkit oxc fmt --check --no-error-on-unmatched-pattern ${SCRIPT_GLOB} && devkit oxc lint`,
     format: `devkit oxc fmt --no-error-on-unmatched-pattern ${SCRIPT_GLOB}`,
@@ -41,10 +44,18 @@ export const OXFMT_STEP: StepFormatter = {
   bin: 'oxfmt',
   configProbes: OXFMT_CONFIGS,
   stepArgs: OXFMT_WRITE_ARGS,
+  stdinArgs: '--stdin-filepath=',
 };
 
 // The three constants toSelfHost re-points (tool setup, failure policy, scope) are interpolated
 // below, so its search strings are the emitted bytes by construction, not a hand-copied duplicate.
+
+/** The step's handles on one formatter: path mode over NUL-delimited paths, and stdin as one path. */
+function renderToolRunners(f: StepFormatter, bin: string): string {
+  return `        FMT_TOOL=${f.tool}; FMT_BIN=${bin}; FMT_FIX_ARGS='${f.stepArgs}'
+        __dk_fmt_run() { xargs -0 ${bin} ${f.stepArgs}; }
+        __dk_fmt_stdin() { ${bin} ${f.stdinArgs}"$1"; }`;
+}
 
 /** The first formatter whose config exists wins; a missing binary stands down rather than fail. */
 export function renderToolChain(fs: StepFormatter[], binDir: string): string {
@@ -55,8 +66,7 @@ export function renderToolChain(fs: StepFormatter[], binDir: string): string {
             echo "🎨 Found the ${f.tool} config but ${binDir}/${f.bin} is missing — install this repo's dependencies; staged files left as authored."
             return 0
         fi
-        FMT_TOOL=${f.tool}; FMT_BIN=${bin}
-        __dk_fmt_run() { xargs -0 ${bin} ${f.stepArgs}; }`;
+${renderToolRunners(f, bin)}`;
   });
   const probes = fs.flatMap((f) => f.configProbes).join(' / ');
   return `    ${arms.join('\n    el')}
@@ -73,21 +83,27 @@ export interface AgentHookLines {
   'agents-hooks/lint-check.sh': string[];
 }
 
+/** Trails every rendered line, so whoever edits one in a hook sees the lock on the line itself. */
+export const AGENT_HOOK_MARKER =
+  '# devkit: must equal renderAgentHookLines (cli/lib/husky/format-fragment.mts)';
+
+const marked = (lines: string[]): string[] => lines.map((l) => `${l} ${AGENT_HOOK_MARKER}`);
+
 /** The agent hooks run the repo's own Oxfmt bin: devkit's hoisted pin in package mode, the repo's
  *  own in overlay. Standalone has none there, so the hooks skip and the commit step formats. */
 export function renderAgentHookLines(f: StepFormatter = OXFMT_STEP): AgentHookLines {
   const bin = `./node_modules/.bin/${f.bin}`;
   const gate = `{ ${f.configProbes.map((p) => `[ -f "${p}" ]`).join(' || ')}; } && [ -x "${bin}" ]`;
   return {
-    'agents-hooks/format-after-edit.sh': [
+    'agents-hooks/format-after-edit.sh': marked([
       `if [[ "$file_path" =~ ${FORMAT_EXTENSIONS} ]] && ${gate}; then`,
       `  "${bin}" ${OXFMT_WRITE_ARGS} "$file_path" >/dev/null 2>&1 || true`,
-    ],
-    'agents-hooks/lint-check.sh': [
+    ]),
+    'agents-hooks/lint-check.sh': marked([
       `if ${gate}; then`,
       `    lint_output=$("${bin}" ${OXFMT_CHECK_ARGS} "\${oxfmt_files[@]}" 2>&1)`,
       `      echo "Run '${bin} --write <file>' to auto-fix." >&2`,
-    ],
+    ]),
   };
 }
 
@@ -103,13 +119,58 @@ export const FORMAT_EXTENSION_FILTER = `grep -E '${FORMAT_EXTENSIONS}'`;
  * must not become a commit outage. self-host replaces this whole branch with a hard `exit 1`.
  */
 
-// FMT_RC is XARGS's status, not the formatter's (xargs collapses 1-125 into one code of its own),
-// so the report points at the tool's diagnostics rather than claiming the number is its exit code.
-export const FORMAT_FAILURE_REPORT = `        if [ "$FMT_RC" -eq 127 ]; then
-            echo "🎨 $FMT_TOOL is missing or cannot start at $FMT_BIN — $FMT_N staged file(s) left UNFORMATTED. Install this repo's dependencies; this commit continues."
-        elif [ "$FMT_RC" -ne 0 ]; then
-            echo "🎨 $FMT_TOOL failed over $FMT_N staged file(s) (xargs exit $FMT_RC) — some may be UNFORMATTED; its diagnostics are above. This commit continues."
-        fi`;
+// Defined ONCE so self-host's single replace converts every caller. Args: status, what, status label;
+// the path branch labels xargs's status, which collapses 1-125, so it is not the tool's exit code.
+export const FORMAT_FAILURE_REPORT = `__dk_fmt_failed() {
+    if [ "$1" -eq 127 ]; then
+        echo "🎨 $FMT_TOOL is missing or cannot start at $FMT_BIN — $2 left UNFORMATTED. Install this repo's dependencies; this commit continues."
+    else
+        echo "🎨 $FMT_TOOL failed over $2 ($3 $1) — some may be UNFORMATTED; its diagnostics are above. This commit continues."
+    fi
+}`;
+
+// Index-blob rewrite (the git-format-staged technique): the bytes being committed are formatted
+// through stdin and written back to the index, so the working copy and its unstaged edits stay put.
+const STAGED_COPY_STEP = `    if [ -n "$FMT_SKIP" ]; then
+        FMT_TMP=$(mktemp -d); : >"$FMT_TMP/done"; : >"$FMT_TMP/left"; FMT_STDIN_RC=0
+        while IFS= read -r fmt_path; do
+            # Literal pathspec and the blob's oid: a \`:path\` revision misreads \`0:a.ts\` as stage 0 of a.ts.
+            fmt_entry=$(git --literal-pathspecs ls-files -s -- "$fmt_path" </dev/null)
+            fmt_mode=\${fmt_entry%% *}; fmt_oid=\${fmt_entry#* }; fmt_oid=\${fmt_oid%% *}
+            case "$fmt_mode" in 100644 | 100755) ;; *) printf '%s\\n' "$fmt_path" >>"$FMT_TMP/left"; continue ;; esac
+            # Biome applies its ignore config on stdin only to a path that exists on disk.
+            if [ ! -e "$fmt_path" ]; then printf '%s\\n' "$fmt_path" >>"$FMT_TMP/left"; continue; fi
+            git cat-file blob "$fmt_oid" >"$FMT_TMP/in" </dev/null
+            [ -s "$FMT_TMP/in" ] || continue
+            fmt_rc=0; __dk_fmt_stdin "$fmt_path" <"$FMT_TMP/in" >"$FMT_TMP/out" || fmt_rc=$?
+            if [ "$fmt_rc" -ne 0 ] || [ ! -s "$FMT_TMP/out" ]; then
+                [ "$fmt_rc" -eq 0 ] || FMT_STDIN_RC=$fmt_rc
+                printf '%s\\n' "$fmt_path" >>"$FMT_TMP/left"; continue
+            fi
+            cmp -s "$FMT_TMP/in" "$FMT_TMP/out" && continue
+            if fmt_oid=$(git hash-object -w --path="$fmt_path" --stdin <"$FMT_TMP/out") &&
+                git update-index --cacheinfo "$fmt_mode,$fmt_oid,$fmt_path" </dev/null; then
+                printf '%s\\n' "$fmt_path" >>"$FMT_TMP/done"
+            else
+                printf '%s\\n' "$fmt_path" >>"$FMT_TMP/left"
+            fi
+        done <<EOF
+$FMT_SKIP
+EOF
+        if [ -s "$FMT_TMP/done" ]; then
+            echo "🎨 $FMT_TOOL formatted the STAGED copy of $(grep -c '' "$FMT_TMP/done") path(s) that also carry unstaged edits; their working copies are untouched (to format those too, run: $FMT_BIN $FMT_FIX_ARGS <path>):"
+            sed 's/^/     /' "$FMT_TMP/done"
+        fi
+        if [ -s "$FMT_TMP/left" ]; then
+            echo "🎨 $FMT_TOOL left $(grep -c '' "$FMT_TMP/left") staged path(s) with unstaged edits exactly as staged, possibly UNFORMATTED (deleted from the working tree, or not formattable):"
+            sed 's/^/     /' "$FMT_TMP/left"
+        fi
+        if [ ! -s "$FMT_TMP/done" ] && [ ! -s "$FMT_TMP/left" ]; then
+            echo "🎨 $FMT_TOOL: the staged copy of every path that also carries unstaged edits is already formatted."
+        fi
+        rm -rf "$FMT_TMP"
+        [ "$FMT_STDIN_RC" -eq 0 ] || __dk_fmt_failed "$FMT_STDIN_RC" "the staged copies listed above" "exit"
+    fi`;
 
 /** The package-mode tool setup, which toSelfHost swaps for devkit's own pinned Oxfmt. */
 export const FORMAT_TOOL_SETUP = renderToolChain([CONSUMER_FORMATTER], '$__dk_package_bin_dir');
@@ -118,7 +179,7 @@ export const FORMAT_TOOL_SETUP = renderToolChain([CONSUMER_FORMATTER], '$__dk_pa
 export const formatFragment = (binDir: string, chain: StepFormatter[]) => `# devkit:format
 # Format staged files, then re-stage exactly those (scoped — never a blanket \`git add -u\`, which
 # would sweep unrelated working-tree changes into the commit). Only re-add files with NO unstaged
-# edits, so partially-staged files commit exactly as staged.
+# edits; a partially-staged file has only its staged copy formatted, in the index.
 #
 # EVERY branch reports, and each banner opens with the 🎨 stage anchor ship's log scraper keys on.
 # Silence used to be ambiguous: no staged match, a staged set entirely excluded by unstaged edits,
@@ -139,6 +200,7 @@ export const formatFragment = (binDir: string, chain: StepFormatter[]) => `# dev
 # body — self-host replaces the setup outright, and an unreachable arm must not survive into it.
 __dk_format_staged() {
 ${renderToolChain(chain, binDir)}
+${FORMAT_FAILURE_REPORT}
 # -M100%: an edited rename lists as A under its new path; an exact move stays R, skipped so its
 # bytes, and the rename the later gates key on, are left untouched.
 STAGED_FMT=$(git diff --cached --name-only -z -M100% --diff-filter=ACM | tr '\\0' '\\n' | ${FORMAT_EXTENSION_FILTER} || true)
@@ -150,20 +212,12 @@ else
     FMT_SAFE=$(printf '%s\\n' "$STAGED_FMT" | grep -Fxvf "$UNSTAGED_FMT_FILE" || true)
     FMT_SKIP=$(printf '%s\\n' "$STAGED_FMT" | grep -Fxf "$UNSTAGED_FMT_FILE" || true)
     rm -f "$UNSTAGED_FMT_FILE"
-    # Reported whether the exclusion is TOTAL or PARTIAL. A partial one is the dangerous shape: the
-    # success banner counts only what it formatted, so "formatted 3" over a staged set of 5 reads as
-    # a clean pass while two unformatted files ride into the commit.
-    if [ -n "$FMT_SKIP" ]; then
-        echo "🎨 $FMT_TOOL: skipped $(printf '%s\\n' "$FMT_SKIP" | grep -c '') staged path(s) that also carry unstaged edits, because formatting them would commit bytes you never staged:"
-        printf '%s\\n' "$FMT_SKIP" | sed 's/^/     /'
-    fi
-    if [ -z "$FMT_SAFE" ]; then
-        echo "🎨 $FMT_TOOL: every eligible path also carries unstaged edits — nothing left to format."
-    else
+${STAGED_COPY_STEP}
+    if [ -n "$FMT_SAFE" ]; then
         FMT_N=$(printf '%s\\n' "$FMT_SAFE" | grep -c '' || true)
         FMT_RC=0
         printf '%s\\n' "$FMT_SAFE" | tr '\\n' '\\0' | __dk_fmt_run || FMT_RC=$?
-${FORMAT_FAILURE_REPORT}
+        [ "$FMT_RC" -eq 0 ] || __dk_fmt_failed "$FMT_RC" "$FMT_N staged file(s)" "xargs exit"
         printf '%s\\n' "$FMT_SAFE" | tr '\\n' '\\0' | xargs -0 git add -f
         if [ "$FMT_RC" -eq 0 ]; then
             echo "🎨 $FMT_TOOL formatted and re-staged $FMT_N staged file(s)."

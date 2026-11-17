@@ -23,13 +23,14 @@
  */
 
 import { reportRetrievalDegraded, verdictToken } from '../contracts/checklist.mts';
-import { parseAdvisories } from '../contracts/response.mts';
+import { verdictAdvisories } from '../contracts/response.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mts';
 import { savePasses } from '../cache.mts';
 import {
   reportAdvisories,
   reportMcpDegraded,
+  reportVerdictTranscript,
   RETRIEVAL_REVIEWER,
   reviewBaseContext,
 } from '../evidence/base-context.mts';
@@ -96,7 +97,9 @@ export function settleReviewOutcome(
   const degraded = res.status === 'pass' ? res.degraded : undefined;
   const mcpDegraded = res.status === 'pass' ? res.mcpDegraded : undefined;
   const advisories =
-    res.status === 'pass' ? parseAdvisories(res.transcript ?? '') : firstPassAdvisory(res);
+    res.status === 'pass'
+      ? verdictAdvisories(res)
+      : [...verdictAdvisories(res), ...firstPassAdvisory(res)];
   // A retrieval-DEGRADED PASS describes the environment, not the diff: never cached, so a retry
   // re-attempts retrieval instead of replaying the outage.
   if (res.status === 'pass' && !degraded)
@@ -134,8 +137,9 @@ export function settleReviewOutcome(
     holdLensPart(ctx.splitParts, t.splitOf, { res, secs, task: t, retried }, taskLabel(t));
     return res;
   }
-  const transcriptRef = res.transcript
-    ? saveTranscript(`review-${res.name}`, composeTranscript(t.diffText, res.transcript))
+  const archived = res.fullTranscript ?? res.transcript;
+  const transcriptRef = archived
+    ? saveTranscript(`review-${res.name}`, composeTranscript(t.diffText, archived))
     : null;
   // What the judge's packet actually covered (sc-2305) — on the verdict row, so a PASS over a
   // partial packet reaches the digest as unverified instead of reading like a whole-diff PASS.
@@ -177,9 +181,10 @@ export function settleReviewOutcome(
   console.error(
     `guard-review: ${res.name} — ${verdictToken({ status: res.status, degraded, mcpDegraded })}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' && !degraded ? ' (checkpointed)' : ''}${tail}`,
   );
+  reportVerdictTranscript(res.name, res.status, transcriptRef);
   // commit-guard never lens-splits (only correctness does), so the split branch above needs no
   // retrieval report; an MCP-degraded split reviewer is reported once at its merge (lens/split.mts).
-  if (degraded) reportRetrievalDegraded(res.name, degraded.cause);
+  if (degraded) reportRetrievalDegraded(res.name, degraded.cause, degraded.kind);
   if (mcpDegraded) reportMcpDegraded(res.name, mcpDegraded.cause);
   reportAdvisories(res.name, advisories, transcriptRef);
   return res;

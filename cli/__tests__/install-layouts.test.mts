@@ -1,11 +1,19 @@
 // Both spawned-eslint sites against REAL installs behind a linked node_modules (ship worktree shape).
-// Run: DEVKIT_INSTALL_LAYOUTS=1 bun run test:run -- install-layouts (first run installs over the network).
+// Run: DEVKIT_INSTALL_LAYOUTS=1 bun run test:run -- install-layouts (installs over the network).
 
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { eslintOverlayContent } from '../lib/install/overlay-lint-configs.mts';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import { overlayStagedStep, runHookFragment } from './_husky-hook-harness.mts';
@@ -14,6 +22,7 @@ import {
   INSTALL_LAYOUTS_ENABLED,
   type InstallLayout,
   installLayout,
+  removeInstallLayouts,
 } from './_install-layouts.mts';
 
 const DEVKIT_ROOT = realpathSync(join(dirname(fileURLToPath(import.meta.url)), '../..'));
@@ -21,8 +30,12 @@ const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+afterAll(removeInstallLayouts);
+if (!INSTALL_LAYOUTS_ENABLED) console.info('install-layouts skipped: set DEVKIT_INSTALL_LAYOUTS=1');
 
-const ESLINT_CONFIG = `import {
+const ESLINT_CONFIG = `import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
   createFolderStructure,
   createIndependentModules,
   projectStructurePlugin,
@@ -30,6 +43,7 @@ const ESLINT_CONFIG = `import {
 
 const structure = createFolderStructure({
   structureRoot: 'src',
+  projectRoot: dirname(fileURLToPath(import.meta.url)),
   structure: {
     name: 'src',
     children: [
@@ -107,15 +121,24 @@ describe.skipIf(!INSTALL_LAYOUTS_ENABLED)('spawned eslint across real install la
           expect(result.status, output).toBe(1);
           expect(output).toContain('project-structure/folder-structure');
           expect(output).toContain('project-structure/independent-modules');
-        } else if (site === 'guard-structure preset') {
-          // An isolated store cannot take --preserve-symlinks, so the gate says it did not run.
-          expect(result.status, output).toBe(2);
-          expect(output).toContain('linked isolated install');
         } else {
-          // The overlay runs the repo's whole eslint config, so it lints on without the flag.
-          expect(result.status, output).toBe(0);
+          // No --preserve-symlinks on an isolated store: the absolute projectRoot still roots the
+          // folder rules here, while import walls (which ignore it) never report from this worktree.
+          expect(result.status, output).toBe(1);
+          expect(output).toContain('project-structure/folder-structure');
+          expect(output).not.toContain('project-structure/independent-modules');
+          if (site === 'guard-structure preset') {
+            expect(output).toContain('import walls (independent-modules) did not run');
+          }
         }
       });
     }
   }
+
+  it('reuses each install within a run, then removes it rather than caching it for the next', () => {
+    const paths = INSTALL_LAYOUTS.map(installLayout);
+    expect(INSTALL_LAYOUTS.map(installLayout)).toEqual(paths);
+    removeInstallLayouts();
+    for (const path of paths) expect(existsSync(path), path).toBe(false);
+  });
 });

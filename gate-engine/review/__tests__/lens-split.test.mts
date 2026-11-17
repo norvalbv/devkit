@@ -124,7 +124,7 @@ describe('wrapPrompt under a lens group', () => {
     expect(p).not.toContain('The reviewer brief owns checklist enumeration');
   });
 
-  it('still defers to the brief in review mode when NOT split (prompt bytes unchanged)', () => {
+  it('still defers to the brief in review mode when NOT split', () => {
     const p = wrapPrompt('# brief', base, files, '.devkit/assets');
     expect(p).toContain('The reviewer brief owns checklist enumeration');
     expect(p).not.toContain('--lens');
@@ -198,6 +198,8 @@ describe('planReviewWork — the two defects the gate caught', () => {
     expect(held).toHaveLength(1);
     expect(held?.[0].res.items).toEqual([{ name: 'concurrency-races' }]);
     expect(held?.[0].res.status).toBe('pass');
+    // Explicit, so a reader never has to infer "replayed" from a missing judge model.
+    expect(held?.[0].cached).toBe(true);
   });
 
   it('a fully cached split reviewer reports one cache hit and seeds nothing', () => {

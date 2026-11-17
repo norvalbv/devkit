@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { publishManifest, stageManifest } from '../../gate-engine/coverage/provenance.mts';
 import { FALLOW_STAGED } from '../lib/husky/gate-policy/fallow-staged.mts';
 import { rebaseWorktreeCoverage } from '../lib/ship/coverage/coverage-rebase.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
@@ -124,6 +125,14 @@ function fixture(pkgRel: string, artifact?: (file: string) => string): Fixture {
   return { top, cwd, report, bin, tmp };
 }
 
+/** Record `f`'s artifact as the output of `devkit coverage-run <args>`. */
+function bindRun(f: Fixture, args: string[]) {
+  const runDir = join(f.top, 'coverage/.runs');
+  mkdirSync(runDir);
+  const snapshot = { roots: [f.top], head: '', dirty: {}, args };
+  publishManifest(stageManifest(runDir, f.report, snapshot, 'run-1'), join(f.top, 'coverage'));
+}
+
 /** Run the generated staged-gate block as a hook would, in `cwd`. */
 function runGate(f: Fixture, cwd = f.cwd, env: Record<string, string> = {}, shell = 'sh') {
   const r = runHookFragment(FALLOW_STAGED, {
@@ -159,7 +168,7 @@ describe.skipIf(!hasFallow)('staged fallow gate — measured CRAP at commit', ()
     writeFileSync(join(wt, 'src/a.js'), MAIN);
     execFileSync('git', ['add', '-A'], { cwd: wt, env: GIT_ENV });
     const rekeyed = join(f.top, 'rekeyed.json');
-    expect(rebaseWorktreeCoverage(wt, join(f.top, 'coverage'), rekeyed)).toBe(f.top);
+    expect(rebaseWorktreeCoverage(wt, join(f.top, 'coverage'), rekeyed)).toEqual({ root: f.top });
 
     const ship = runGate(f, wt, { FALLOW_COVERAGE: rekeyed });
 
@@ -176,6 +185,31 @@ describe.skipIf(!hasFallow)('staged fallow gate — measured CRAP at commit', ()
     expect(gate.status).toBe(1);
     expect(gate.out).toMatch(BLOCKED);
   });
+
+  // No negative count here, so only the rekey can turn fallow's estimate into the measured block.
+  it.each(['', 'packages/app'])(
+    'rekeys an artifact produced in another checkout, as ship does (package dir %j)',
+    (pkgRel) => {
+      const foreign = join('/elsewhere/checkout', pkgRel, 'src/a.js');
+      const f = fixture(pkgRel, () => coverageOf(foreign, 0));
+      const before = readFileSync(f.report, 'utf8');
+      const diff = execFileSync('git', ['diff', '--cached'], { cwd: f.top, env: GIT_ENV });
+      const unaided = spawnSync('fallow', ['audit', '--diff-stdin', '--no-cache'], {
+        cwd: f.cwd,
+        encoding: 'utf8',
+        input: diff,
+        env: { ...BASE_ENV, FALLOW_COVERAGE: f.report },
+      });
+
+      const gate = runGate(f);
+
+      expect(unaided.status).toBe(0);
+      expect(gate.status).toBe(1);
+      expect(gate.out).toMatch(BLOCKED);
+      expect(gate.out).toContain('CRAP scores use Istanbul coverage');
+      expect(readFileSync(f.report, 'utf8')).toBe(before);
+    },
+  );
 
   it('still audits, and says CRAP is estimated, when the artifact cannot be read', () => {
     const f = fixture('', () => '{"/x/a.js":{"s":{"0":"many"}}}');
@@ -260,5 +294,65 @@ describe.skipIf(!hasFallow)('staged fallow gate — introduced duplication', () 
     const gate = runGate(stagedRepo({ 'b.js': 'export const b = () => 1;\n' }));
     expect(gate.out).not.toContain(DUPLICATION);
     expect(gate.status).toBe(0);
+  });
+});
+
+describe.skipIf(!hasFallow)('staged fallow gate — a scoped coverage-run', () => {
+  const SCOPED =
+    'the coverage artifact came from a scoped run (`devkit coverage-run src/a.test.js`)';
+
+  it('blocks on the measured 0% of a function the run loaded but never called', () => {
+    const f = fixture('', (file) => coverageOf(file, 0));
+
+    const gate = runGate(f);
+
+    expect(gate.status).toBe(1);
+    expect(gate.out).toMatch(BLOCKED);
+  });
+
+  it('scores that function from the estimate once the artifact is known to be scoped', () => {
+    const f = fixture('', (file) => coverageOf(file, 0));
+    bindRun(f, ['src/a.test.js']);
+
+    const gate = runGate(f);
+
+    // Exit 0 alone would also be fallow failing on a bad FALLOW_COVERAGE: it must have audited.
+    expect(gate.status).toBe(0);
+    expect(gate.out).toContain('fallow passed the staged diff (verdict pass)');
+    expect(gate.out).toContain(SCOPED);
+    expect(readdirSync(f.tmp).filter((name) => name.startsWith('devkit-fallow-coverage'))).toEqual(
+      [],
+    );
+  });
+
+  it("leaves an operator's FALLOW_COVERAGE in place", () => {
+    const f = fixture('', (file) => coverageOf(file, 0));
+    bindRun(f, ['src/a.test.js']);
+    const operator = join(f.tmp, 'operator.json');
+    writeFileSync(operator, readFileSync(f.report));
+
+    const gate = runGate(f, f.cwd, { FALLOW_COVERAGE: operator });
+
+    expect(gate.status).toBe(1);
+    expect(gate.out).toMatch(BLOCKED);
+    expect(readdirSync(f.bin)).toEqual(['guard-coverage']);
+  });
+
+  it('gives ship the verdict the commit got, through the rekey', () => {
+    const f = fixture('', (file) => coverageOf(file, 0));
+    bindRun(f, ['src/a.test.js']);
+    const wt = join(f.tmp, 'ship-wt');
+    execFileSync('git', ['worktree', 'add', '-q', '--detach', wt], { cwd: f.top, env: GIT_ENV });
+    writeFileSync(join(wt, 'src/a.js'), MAIN);
+    execFileSync('git', ['add', '-A'], { cwd: wt, env: GIT_ENV });
+    const rekeyed = join(f.top, 'rekeyed.json');
+    expect(rebaseWorktreeCoverage(wt, join(f.top, 'coverage'), rekeyed)).toEqual({
+      scopedArgs: ['src/a.test.js'],
+    });
+
+    const ship = runGate(f, wt, { FALLOW_COVERAGE: rekeyed });
+
+    expect(ship.status).toBe(0);
+    expect(ship.out).toContain('fallow passed the staged diff (verdict pass)');
   });
 });

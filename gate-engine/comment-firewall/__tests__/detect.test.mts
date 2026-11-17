@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { detectChangedComments, parsePatchHunks } from '../detect.mts';
-import { scanCommentTokens } from '../scan.mts';
+import { scanCommentTokens } from '../staged/scan.mts';
 import { runCommentFirewall } from '../gate.mts';
 
 const roots: string[] = [];
@@ -185,6 +185,21 @@ describe('detectChangedComments', () => {
     ]);
   });
 
+  it.each([
+    [2, []],
+    [3, [3]],
+  ])('counts only the %i edited lines of a six-line legacy paragraph', (edited, expected) => {
+    const root = fixture();
+    const legacy = ['one', 'two', 'three', 'four', 'five', 'six'].map((word) => `// ${word}`);
+    writeFileSync(path.join(root, 'src/a.ts'), `${legacy.join('\n')}\nconst x = 1;\n`);
+    commitAll(root, 'base');
+    const staged = legacy.map((line, index) => (index < edited ? `${line} edited` : line));
+    writeFileSync(path.join(root, 'src/a.ts'), `${staged.join('\n')}\nconst x = 1;\n`);
+    git(root, ['add', 'src/a.ts']);
+
+    expect(detectChangedComments(root).findings.map((item) => item.textLines)).toEqual(expected);
+  });
+
   it('inventories every touched comment by text-line bucket plus trailing comments', () => {
     const root = fixture();
     writeFileSync(
@@ -331,6 +346,40 @@ describe('detectChangedComments', () => {
     expect(paragraph?.comment).toBe(
       '// first half one\n// first half two\n\n\n// second half one\n// second half two',
     );
+  });
+
+  it('counts a block comment as one paragraph across its blank continuation lines', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '/** first half one\n * first half two\n *\n * second half one\n * second half two */\nconst x = 1;\n',
+    );
+    git(root, ['add', '.']);
+    const { findings } = detectChangedComments(root);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ startLine: 1, endLine: 5, textLines: 4 });
+  });
+
+  it('judges only the changed lines of a partly edited paragraph, not its whole range', () => {
+    const root = fixture();
+    const note = (edited: string) =>
+      `// one\n// ${edited} two\n// ${edited} three\n// ${edited} four\n// five\nconst x = 1;\n`;
+    writeFileSync(path.join(root, 'src/a.ts'), note('old'));
+    commitAll(root, 'base');
+    writeFileSync(path.join(root, 'src/a.ts'), note('new'));
+    git(root, ['add', 'src/a.ts']);
+    const [finding] = detectChangedComments(root).findings;
+    expect(finding).toMatchObject({ startLine: 1, endLine: 5, textLines: 3 });
+  });
+
+  it('splits a run where the comment style changes, even with no code between', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '// line one\n// line two\n/* block one */\n/* block two */\nconst x = 1;\n',
+    );
+    git(root, ['add', '.']);
+    expect(detectChangedComments(root).findings).toEqual([]);
   });
 
   it('keeps comment groups separated by code as distinct two-line notes', () => {
@@ -844,6 +893,20 @@ describe('gate outcome across attempts', () => {
     );
     git(root, ['add', 'src/a.ts']);
     expect(attempt(root).exit).toBe(0);
+  });
+
+  it('prints the changed-line count of a legacy paragraph, which deleting unchanged lines never lowers', () => {
+    const root = fixture();
+    const legacy = ['one', 'two', 'three', 'four', 'five', 'six'].map((word) => `// ${word}`);
+    writeFileSync(path.join(root, 'src/a.ts'), `${legacy.join('\n')}\nconst x = 1;\n`);
+    commitAll(root, 'base');
+    const staged = [...legacy.slice(0, 3).map((line) => `${line} edited`), ...legacy.slice(4)];
+    writeFileSync(path.join(root, 'src/a.ts'), `${staged.join('\n')}\nconst x = 1;\n`);
+    git(root, ['add', 'src/a.ts']);
+
+    const { exit, output } = attempt(root);
+    expect(exit).toBe(1);
+    expect(output).toContain('src/a.ts:1-5 (3 changed text lines)');
   });
 
   it('shares the shown store with a linked worktree, as a ship gate worktree does', () => {

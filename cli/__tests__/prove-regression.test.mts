@@ -24,9 +24,11 @@ import {
   type RegressionEvidence,
   type RegressionOperandEvidence,
   SKIPPED_ON_GREEN,
-} from '../lib/baseline-status/regression-evidence.mts';
-import * as windowsSupervisor from '../lib/baseline-status/regression-windows-supervisor.mts';
-import { captureRegressionEvidence } from '../lib/baseline-status/regression-proof.mts';
+} from '../lib/baseline-status/regression/evidence.mts';
+import { renderEvidenceBlock } from '../lib/ship/evidence/block.mts';
+import { inconclusive } from '../lib/ship/evidence/outcome.mts';
+import * as windowsSupervisor from '../lib/baseline-status/regression/windows-supervisor.mts';
+import { captureRegressionEvidence } from '../lib/baseline-status/regression/proof.mts';
 import {
   createRegressionClone,
   linkRegressionDependencies,
@@ -34,11 +36,11 @@ import {
   prepareRegressionRepository,
   snapshotRegressionCaller,
   splitNulPathBytes,
-} from '../lib/baseline-status/regression-repository.mts';
+} from '../lib/baseline-status/regression/repository.mts';
 
 // Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
 void (() => import('../commands/baseline/prove-regression.mts'));
-void (() => import('../lib/baseline-status/regression-exec.mts'));
+void (() => import('../lib/baseline-status/regression/exec.mts'));
 
 const roots: string[] = [];
 
@@ -778,6 +780,27 @@ describe('devkit prove-regression', () => {
       { redCloneRemoved: true, greenCloneRemoved: true },
     );
     expect(conclusion.status).toBe(status);
+  });
+
+  it('keeps the using-devkit skill quoting the evidence line a red load failure renders', () => {
+    const red = {
+      ...operand(1),
+      fileErrors: [{ fullName: 'a.test.mts', message: 'no ./fix.mjs' }],
+    };
+    const { reason } = concludeRegression(
+      red,
+      operand(0),
+      { red: new Map(), green: new Map() },
+      true,
+      { redCloneRemoved: true, greenCloneRemoved: true },
+    );
+    const skill = readFileSync(
+      new URL('../../skills/using-devkit/SKILL.md', import.meta.url),
+      'utf8',
+    ).replace(/\s+/g, ' ');
+    const quoted = /`(inconclusive: [^`]+?) …`/.exec(skill)?.[1];
+    expect(quoted).toBeDefined();
+    expect(renderEvidenceBlock(inconclusive(reason, 'head', 'base'), null)).toContain(quoted);
   });
 
   it('returns inconclusive unless red is nonzero and green is zero', () => {

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { checkRegistrations } from '../../doctor/asset-checks.mts';
 import { installHookRegistrations } from '../install-hooks.mts';
@@ -257,5 +257,157 @@ describe('checkRegistrations — rendering advisories', () => {
     expect(result).toMatchObject({ status: 'DRIFT', fixable: true });
     expect(result.detail).toContain('claude:retired-registration');
     expect(result.detail).toContain(`; also: claude:unrecognised-fallow-gate`);
+  });
+});
+
+const LEDGER = '.devkit/agent-hook-registrations-manifest.json';
+const read = (root: string, rel: string) => readFileSync(join(root, rel), 'utf8');
+
+function ledgerRels(root: string) {
+  const { entries } = JSON.parse(read(root, LEDGER));
+  return [...new Set(entries.map((entry: { destinationRel: string }) => entry.destinationRel))];
+}
+
+describe('scope switch — devkit registrations follow the scope to its own settings file', () => {
+  const ids = ['searchSteering'];
+  const shared = { targets: ['claude'] };
+
+  it('shared → overlay: doctor flags, init clears devkit hooks from an untracked settings.json', () => {
+    const root = gitRepo();
+    const rel = writeSettings(root, 'settings.json', 'echo mine');
+    installHookRegistrations(root, ids, shared);
+
+    expect(checkHookRegistrations(root, ids, overlay).missing).toContain(
+      `claude:scope-switch:${rel}`,
+    );
+    installHookRegistrations(root, ids, overlay);
+
+    const kept = read(root, rel);
+    expect(kept).not.toContain('search-tool');
+    expect(kept).toContain('echo mine');
+    expect(JSON.parse(kept).permissions).toEqual(PERMISSIONS);
+    expect(read(root, '.claude/settings.local.json')).toContain('search-tool-guard');
+    expect(ledgerRels(root)).toEqual(['.claude/settings.local.json']);
+    expect(checkHookRegistrations(root, ids, overlay)).toMatchObject({ ok: true, advisories: [] });
+  });
+
+  it("overlay → shared: settings.local.json keeps the user's hooks and permissions", () => {
+    const root = gitRepo();
+    const rel = writeSettings(root, 'settings.local.json', 'echo mine');
+    installHookRegistrations(root, ids, overlay);
+    installHookRegistrations(root, ids, shared);
+
+    const kept = read(root, rel);
+    expect(kept).not.toContain('search-tool');
+    expect(kept).toContain('echo mine');
+    expect(JSON.parse(kept).permissions).toEqual(PERMISSIONS);
+    expect(ledgerRels(root)).toEqual(['.claude/settings.json']);
+    expect(checkHookRegistrations(root, ids, shared).ok).toBe(true);
+  });
+
+  it('overlay leaves a committed settings.json byte-identical and only advises', () => {
+    const root = gitRepo();
+    installHookRegistrations(root, ids, shared);
+    const rel = '.claude/settings.json';
+    execFileSync('git', ['add', rel], { cwd: root });
+    const before = read(root, rel);
+
+    installHookRegistrations(root, ids, overlay);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    installHookRegistrations(root, ids, overlay);
+
+    const printed = log.mock.calls.flat().join('\n');
+    expect(read(root, rel)).toBe(before);
+    expect(printed).not.toContain(`removed ${rel}`);
+    expect(printed).toContain(`! ${rel} is git-tracked — devkit's hooks there are yours to remove`);
+    expect(checkHookRegistrations(root, ids, overlay)).toMatchObject({
+      ok: true,
+      advisories: [`claude:scope-switch:${rel}`],
+    });
+  });
+
+  it('advises on a superseded spelling left in a committed settings.json', () => {
+    const root = gitRepo();
+    installHookRegistrations(root, ids, shared);
+    const rel = '.claude/settings.json';
+    const downgrade = (text: string) => text.replaceAll('/dist/gate-engine/', '/gate-engine/');
+    writeFileSync(join(root, rel), downgrade(read(root, rel)));
+    writeFileSync(join(root, LEDGER), downgrade(read(root, LEDGER)));
+    execFileSync('git', ['add', rel], { cwd: root });
+    const before = read(root, rel);
+
+    installHookRegistrations(root, ids, overlay);
+
+    expect(read(root, rel)).toBe(before);
+    expect(checkHookRegistrations(root, ids, overlay)).toMatchObject({
+      ok: true,
+      advisories: [`claude:scope-switch:${rel}`],
+    });
+  });
+
+  // Committed too: releasing a row whose handler is gone never edits the file, so it is not advice.
+  it.each([false, true])('releases rows whose handlers are gone (committed: %s)', (committed) => {
+    const root = gitRepo();
+    installHookRegistrations(root, ids, shared);
+    const rel = writeSettings(root, 'settings.json', 'echo mine');
+    if (committed) execFileSync('git', ['add', rel], { cwd: root });
+
+    expect(checkHookRegistrations(root, ids, overlay).missing).toContain(
+      `claude:scope-switch:${rel}`,
+    );
+    installHookRegistrations(root, ids, overlay);
+
+    expect(ledgerRels(root)).toEqual(['.claude/settings.local.json']);
+    expect(checkHookRegistrations(root, ids, overlay).ok).toBe(true);
+  });
+
+  it("never adopts or removes the user's identical, unledgered copy in the other file", () => {
+    const root = gitRepo();
+    installHookRegistrations(root, ids, overlay);
+    const rel = '.claude/settings.json';
+    writeFileSync(join(root, rel), read(root, '.claude/settings.local.json'));
+    const before = read(root, rel);
+
+    installHookRegistrations(root, ids, { ...overlay, legacyOwnedComponentIds: ids });
+
+    expect(read(root, rel)).toBe(before);
+    expect(ledgerRels(root)).toEqual(['.claude/settings.local.json']);
+    expect(checkHookRegistrations(root, ids, overlay)).toMatchObject({ ok: true, advisories: [] });
+  });
+
+  it('leaves a drifted handler in the other file, moves the rest, and advises', () => {
+    const root = gitRepo();
+    installHookRegistrations(root, ids, shared);
+    const rel = '.claude/settings.json';
+    const settings = JSON.parse(read(root, rel));
+    settings.hooks.PreToolUse.push(...settings.hooks.PreToolUse); // a merge left it twice
+    writeFileSync(join(root, rel), JSON.stringify(settings));
+
+    expect(() => installHookRegistrations(root, ids, overlay)).not.toThrow();
+
+    const kept = read(root, rel);
+    expect(kept).not.toContain('search-tool-counter'); // the untouched one still moves
+    expect(kept.match(/search-tool-guard/g)).toHaveLength(2);
+    expect(checkHookRegistrations(root, ids, overlay)).toMatchObject({
+      ok: true,
+      advisories: [`claude:scope-switch:${rel}`],
+    });
+  });
+
+  it('never follows a symlinked settings file out of the repository', () => {
+    const root = gitRepo();
+    installHookRegistrations(root, ids, shared);
+    const rel = '.claude/settings.json';
+    const outside = join(mkdtempSync(join(tmpdir(), 'hook-check-outside-')), 'settings.json');
+    roots.push(dirname(outside));
+    writeFileSync(outside, read(root, rel));
+    rmSync(join(root, rel));
+    symlinkSync(outside, join(root, rel));
+    const before = readFileSync(outside, 'utf8');
+
+    expect(() => installHookRegistrations(root, ids, overlay)).not.toThrow();
+
+    expect(readFileSync(outside, 'utf8')).toBe(before);
+    expect(checkHookRegistrations(root, ids, overlay).ok).toBe(true);
   });
 });

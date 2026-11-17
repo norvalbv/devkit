@@ -147,7 +147,7 @@ describe('required-span initial diff visibility', () => {
     const input = {
       base: { 'café.ts': old },
       post: { 'new\tname.ts': current },
-      selectedFiles: ['"new\\tname.ts"'],
+      selectedFiles: ['new\tname.ts'],
       diff,
       rendered: buildCappedDiffEvidence(diff, ''),
     };

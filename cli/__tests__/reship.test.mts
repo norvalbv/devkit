@@ -278,7 +278,7 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
   });
 
   it('preserves the PR description when neither body flag is supplied, including piped commit text', () => {
-    const { dir, env, ghLog, ghBody } = bodyUpdateRepo();
+    const { bare, dir, env, g, ghLog, ghBody } = bodyUpdateRepo();
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
 
     const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, env, {
@@ -286,6 +286,9 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
     });
 
     expect(r.status, r.stderr).toBe(0);
+    // The help's follow-up remedy: the piped text must become the pushed commit's message.
+    const pushed = g(['--git-dir', bare, 'log', '-1', '--format=%b', 'refs/heads/feat/pr']);
+    expect(pushed).toBe('legacy piped commit body');
     expect(readFileSync(ghLog, 'utf8')).not.toContain('pr edit');
     expect(existsSync(ghBody)).toBe(false);
   });
@@ -431,6 +434,7 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
 
     expect(resumed.status, resumed.stderr).toBe(0);
     expect(readFileSync(ghBody, 'utf8')).toBe(body);
+    expect(resumed.stderr).toContain('no Git change to push — published the recorded PR body');
   }, 240_000);
 
   it('keeps the body intent when the publisher dies between push and PR edit', () => {
@@ -576,20 +580,6 @@ describe('reship — --ready marks the PR ready for review', () => {
     expect(r.stderr).toMatch(/gh pr ready 'feat\/pr'/);
   });
 
-  it('still marks the PR ready on a body-only run that exits before the normal tail', () => {
-    const { dir, env, ghLog, ghBody } = bodyUpdateRepo();
-    // a.ts is left byte-identical to origin/feat/pr → no delta, so only the body can change.
-    const r = run(
-      ['feat/pr', 'same content', '--pr', '--body', 'fresh body', '--ready', '--', 'a.ts'],
-      dir,
-      env,
-    );
-
-    expect(r.status, r.stderr).toBe(0);
-    expect(readFileSync(ghBody, 'utf8')).toBe('fresh body'); // the body-only path did run
-    expect(readFileSync(ghLog, 'utf8')).toMatch(/^pr ready 7 --repo acme\/app$/m);
-  });
-
   it('converges when the same --ready command is re-run after a transient flip failure', () => {
     const { bare, dir, env, g, ghLog } = bodyUpdateRepo();
     const before = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
@@ -720,6 +710,7 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
     );
     expect(preview.status, preview.stderr).toBe(0);
     expect(preview.stderr).toContain('skipped reconcile + the recorded PR-body update');
+    expect(preview.stderr).not.toContain('REWRITE —');
     expect(existsSync(ghBody)).toBe(false);
     expect(readFileSync(join(dir, '.devkit/reconcile-manifest.json'), 'utf8')).toBe(
       manifestBeforePreview,
@@ -754,6 +745,8 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
     expect(existsSync(gateRanOnResume), 'drifted recovery must refuse before gates').toBe(false);
     expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(accepted);
     writeFileSync(join(dir, 'conflict.txt'), 'main + feature\n');
+    const selection = { components: { guards: ['ui-evidence'] } };
+    writeFileSync(join(dir, '.devkit/config.json'), JSON.stringify(selection));
 
     const resumed = run(
       ['--resume', 'feat/pr'],
@@ -765,6 +758,8 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
     expect(resumed.status, resumed.stderr).toBe(0);
     expect(readFileSync(ghBody, 'utf8')).toBe(body);
     expect(existsSync(gateRanOnResume), 'resume must reuse the gated receipt').toBe(false);
+    // With the gates skipped, the screenshot reminder falls back to the commit's own paths.
+    expect(resumed.stderr).toContain('📸 ui-evidence: the gates were skipped');
     expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(accepted);
   }, 600_000);
 

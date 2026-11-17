@@ -49,3 +49,20 @@ ship_queue_slot_release() {
     *) echo "ship: the queue slot stays held until this ship exits; queued ships wait through this CI poll" >&2 ;;
   esac
 }
+
+# The pre-queue pass (DEVKIT_SHIP_PREQUEUE=1) runs a waiting ship's own refusals without a slot. It
+# writes nothing: it ends at ship_prequeue_done, before any record, reclaim or worktree.
+ship_prequeue_active() { [ -n "${DEVKIT_SHIP_PREQUEUE:-}" ]; }
+
+ship_prequeue_done() {
+  ship_prequeue_active || return 0
+  exit 0
+}
+
+# ship_prequeue_defer_if_ahead <branch> — a ship of <branch> ahead in the queue may push it, so what
+# would refuse now can pass by our turn: end the pass and let the queued run decide.
+ship_prequeue_defer_if_ahead() {
+  ship_prequeue_active && [ -n "$1" ] || return 0
+  printf '%s\n' "${DEVKIT_SHIP_PREQUEUE_AHEAD:-}" | grep -Fxq -- "$1" || return 0
+  exit 0
+}

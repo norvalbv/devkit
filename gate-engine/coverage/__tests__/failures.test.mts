@@ -1,29 +1,22 @@
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ResolvedConfig, Vitest } from 'vitest/node';
+import { readClearMarker, writeClearMarker } from '../clear-marker/store.mts';
 import {
-  type ClearMarker,
   formatClearMarker,
   formatDiagnosis,
   formatRerunNotice,
   formatRerunRescue,
-  headSha,
   humanAge,
   passEnv,
-  readClearMarker,
   readDiagnosis,
-  removeClearMarker,
-  stagedFiles,
-  stagedIntersection,
   RERUN_FLOOR_MS,
   RERUN_SCALE_ENV,
   raisedTimeoutMs,
   TL_SCALE_SNIPPET,
   TIMEOUT_FINGERPRINT,
-  writeClearMarker,
 } from '../failures.mts';
 import UnhandledReporter, { UNHANDLED_NAME, type UnhandledError } from '../unhandled-reporter.mts';
 
@@ -120,65 +113,66 @@ describe('readDiagnosis', () => {
   });
 });
 
-describe('the staged-diff claim', () => {
-  const git = (root: string, args: string[]) =>
-    execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-  const repo = () => {
-    const root = makeRoot();
-    git(root, ['init', '-q', '-b', 'main']);
-    git(root, ['config', 'user.email', 't@t.t']);
-    git(root, ['config', 'user.name', 't']);
-    return root;
-  };
+describe('whether a failure is yours', () => {
+  const fail = (failedFiles: string[], allTimedOut = false) =>
+    formatDiagnosis(
+      { failedFiles, flaky: [], failures: { tests: [], allTimedOut, timeoutMs: null } },
+      '/repo',
+      [],
+    );
+  const pointer = (file: string) =>
+    `   Already red on the default branch? Check in seconds: devkit baseline-status --file ${file}`;
 
-  it('finds a failed file that is staged', () => {
-    const root = repo();
-    mkdirSync(join(root, 'src'), { recursive: true });
-    writeFileSync(join(root, 'src', 'a.test.ts'), 'x');
-    git(root, ['add', 'src/a.test.ts']);
-
-    const staged = stagedFiles(root);
-    expect(stagedIntersection([join(root, 'src', 'a.test.ts')], staged)).toHaveLength(1);
-    expect(stagedIntersection([join(root, 'src', 'other.test.ts')], staged)).toEqual([]);
-  });
-
-  // FRINK'S ACTUAL MODEL. Every agent here runs in a `git worktree`, whose staged diff is its own and
-  // whose toplevel is NOT the main checkout's. Resolving against the wrong root would compare this
-  // agent's failures to a sibling agent's staged files and answer "not in your diff" about a file
-  // that is — the one sentence in this feature an agent would act on by shipping.
-  it('answers from the worktree it was run in, not the main checkout', () => {
-    const root = repo();
-    writeFileSync(join(root, 'seed.txt'), 'x');
-    git(root, ['add', 'seed.txt']);
-    git(root, ['commit', '-qm', 'seed']);
-    const tree = join(root, '..', `${basename(root)}-wt`);
-    git(root, ['worktree', 'add', '-q', '-b', 'side', tree]);
-    roots.push(tree);
-    mkdirSync(join(tree, 'src'), { recursive: true });
-    writeFileSync(join(tree, 'src', 'mine.test.ts'), 'x');
-    git(tree, ['add', 'src/mine.test.ts']);
-    // Staged in the MAIN checkout only — it must not leak into the worktree's answer.
-    writeFileSync(join(root, 'theirs.test.ts'), 'x');
-    git(root, ['add', 'theirs.test.ts']);
-
-    const staged = stagedFiles(tree);
-    expect(stagedIntersection([join(tree, 'src', 'mine.test.ts')], staged)).toHaveLength(1);
-    expect(stagedIntersection([join(root, 'theirs.test.ts')], staged)).toEqual([]);
-    expect(headSha(tree)).not.toBeNull();
-  });
-
-  it('cannot be answered outside a git work tree, and says so with null', () => {
-    const root = makeRoot(); // no git init
-    expect(stagedFiles(root)).toBeNull();
-    expect(stagedIntersection(['/repo/a.test.ts'], null)).toBeNull();
-    expect(headSha(root)).toBeNull();
-  });
-
-  it('omits the staged sentence entirely when git could not answer', () => {
+  it('omits the staged sentence and the pointer entirely when git could not answer', () => {
     const lines = formatDiagnosis({ failedFiles: ['/repo/a.test.ts'], flaky: [] }, '/repo', null);
-    expect(lines.join('\n')).not.toMatch(/staged/);
-    const answered = formatDiagnosis({ failedFiles: ['/repo/a.test.ts'], flaky: [] }, '/repo', []);
-    expect(answered.join('\n')).toMatch(/None of them are in your staged diff/);
+    expect(lines.join('\n')).not.toMatch(/staged|baseline-status/);
+  });
+
+  // Nothing is staged while an agent works in its worktree, so "not staged" must not read as "not mine".
+  it('does not call an unstaged failure pre-existing, and names the check that would say', () => {
+    expect(fail(['/repo/a.test.ts']).slice(-2)).toEqual([
+      '   None of them are staged — that alone does not make them pre-existing.',
+      pointer('a.test.ts'),
+    ]);
+  });
+
+  it('keeps a staged failure exactly as before, with no pointer', () => {
+    const lines = formatDiagnosis({ failedFiles: ['/repo/a.test.ts'], flaky: [] }, '/repo', [
+      '/repo/a.test.ts',
+    ]);
+    expect(lines).toEqual([
+      '🚫 1 test file(s) failed:',
+      '     a.test.ts',
+      '   In your staged diff: a.test.ts',
+    ]);
+  });
+
+  it('points at the unstaged file when only some failures are staged', () => {
+    const lines = formatDiagnosis(
+      { failedFiles: ['/repo/mine.test.ts', '/repo/red.test.ts'], flaky: [] },
+      '/repo',
+      ['/repo/mine.test.ts'],
+    );
+    expect(lines.slice(-2)).toEqual([
+      '   In your staged diff: mine.test.ts',
+      pointer('red.test.ts'),
+    ]);
+  });
+
+  it('quotes a path the shell would split', () => {
+    expect(fail(['/repo/app/[id]/page one.test.ts']).at(-1)).toBe(
+      pointer("'app/[id]/page one.test.ts'"),
+    );
+  });
+
+  it('leaves an all-timeout failure to the raised-budget remedy', () => {
+    expect(fail(['/repo/a.test.ts'], true).join('\n')).not.toMatch(/baseline-status/);
+  });
+
+  it('adds no pointer to a run that ended on an unhandled error', () => {
+    const unhandled = [{ file: '/repo/late.test.ts', message: 'Error: boom' }];
+    const lines = formatDiagnosis({ failedFiles: [], flaky: [], unhandled }, '/repo', []);
+    expect(lines.join('\n')).not.toMatch(/baseline-status/);
   });
 });
 
@@ -212,29 +206,6 @@ describe('formatDiagnosis', () => {
 });
 
 describe('the clear marker', () => {
-  it('round-trips, and is removable', () => {
-    const root = makeRoot();
-    const marker: ClearMarker = {
-      clearedAt: '2026-08-30T09:00:00.000Z',
-      previousMtime: 1234.5,
-      head: 'da19b37c',
-      failedFiles: ['/repo/a.test.ts'],
-    };
-    writeClearMarker(root, marker);
-    expect(readClearMarker(root)).toEqual(marker);
-    removeClearMarker(root);
-    expect(readClearMarker(root)).toBeNull();
-  });
-
-  // The gate's verdict must never depend on this file. A corrupt marker is a missing marker.
-  it('reads a corrupt marker as absent instead of throwing', () => {
-    const root = makeRoot();
-    writeFileSync(join(root, '.last-clear.json'), 'not json');
-    expect(readClearMarker(root)).toBeNull();
-    writeFileSync(join(root, '.last-clear.json'), '{"nope":1}');
-    expect(readClearMarker(root)).toBeNull();
-  });
-
   it('dates itself so the reader can judge whether it is still relevant', () => {
     const now = Date.parse('2026-08-30T10:00:00.000Z');
     const lines = formatClearMarker(
@@ -328,17 +299,6 @@ describe('a marker that is not the one we wrote', () => {
     ).join('\n');
     expect(lines).not.toMatch(/NaN/);
     expect(lines).toMatch(/last Tuesday/);
-  });
-
-  // 0 is a legitimate mtime (epoch), and `||` here would silently rewrite it to null — losing the
-  // one field that says WHICH artifact was discarded.
-  it('keeps a previousMtime of 0 instead of collapsing it to null', () => {
-    const root = makeRoot();
-    writeFileSync(
-      join(root, '.last-clear.json'),
-      JSON.stringify({ clearedAt: '2026-08-30T09:00:00.000Z', previousMtime: 0, failedFiles: [] }),
-    );
-    expect(readClearMarker(root)?.previousMtime).toBe(0);
   });
 
   // An older vitest ignores --outputFile.json, so a genuine clear can happen with no failed-file list
@@ -852,7 +812,7 @@ describe('a run that exits non-zero with no failed test', () => {
       '🚫 vitest exited non-zero, but no test failed — the run ended on:',
       '     late.test.ts — Error: boom',
       '     file unknown — Error: no path',
-      '   None of them are in your staged diff.',
+      '   None of them are staged — that alone does not make them pre-existing.',
       '   The coverage artifact was discarded: devkit publishes only from a run vitest calls green.',
     ]);
   });
@@ -884,36 +844,6 @@ describe('a run that exits non-zero with no failed test', () => {
       '   No test failed; the run ended on:',
       '     late.test.ts — Error: boom',
     ]);
-  });
-
-  it('reads a marker written before the field existed', () => {
-    const root = makeRoot();
-    writeFileSync(
-      join(root, '.last-clear.json'),
-      JSON.stringify({ clearedAt: new Date().toISOString(), failedFiles: [] }),
-    );
-
-    expect(readClearMarker(root)?.unhandledErrors).toBeUndefined();
-  });
-});
-
-describe('a marker whose unhandledErrors we did not write', () => {
-  // coverage/ is shared and symlinked into ship worktrees; a hand-edited entry must not crash the gate
-  // message that explains the block.
-  it('keeps only well-formed entries', () => {
-    const root = makeRoot();
-    const good = { file: null, message: 'Error: boom' };
-    writeFileSync(
-      join(root, '.last-clear.json'),
-      JSON.stringify({
-        clearedAt: '2026-10-06T09:00:00.000Z',
-        failedFiles: [],
-        unhandledErrors: [null, 'Error: bare string', { file: 3, message: 'x' }, good],
-      }),
-    );
-
-    const marker = readClearMarker(root);
-    expect(marker?.unhandledErrors).toEqual([good]);
   });
 });
 

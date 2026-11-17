@@ -30,8 +30,8 @@ import {
 } from '../config.mts';
 import { exitGate } from '../deterministic/reason.mts';
 import { overlayInstall } from '../overlay-mode.mts';
-import type { GrammarNode, TreeSpec } from '../structure/compile.mts';
-import { childGrammarNode } from '../structure/walk.mts';
+import type { GrammarNode, TreeSpec } from '../structure/tree/compile.mts';
+import { childGrammarNode } from '../structure/tree/walk.mts';
 import {
   FANOUT_BASELINE,
   readRatchetBaseline,

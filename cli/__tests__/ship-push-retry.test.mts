@@ -124,6 +124,30 @@ describe('ship-branch.sh — transient push failures', () => {
     expect(remoteBranchExists(bare, 'feat/outage')).toBe(true);
   });
 
+  // The retry rebuilds from the caller's files; unsynced formatter output used to refuse it as drift.
+  it('converges after the push fails when a gate reformatted the briefed file', () => {
+    const { dir, env, bare } = seedShipRepoLocalRemote({
+      hookBody: "printf 'formatted\\n' > note.txt\ngit add -- note.txt\nexit 0",
+    });
+    const failing = shipEnv(dir, env, { fails: 9, attempts: '1' });
+    expect(ship(dir, failing.env, 'feat/fmt-outage').status).toBe(1);
+    expect(readFileSync(join(dir, 'note.txt'), 'utf8')).toBe('formatted\n');
+
+    const retry = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/fmt-outage', 'ship it', '--', 'note.txt'],
+      {
+        cwd: dir,
+        input: 'pr body\n',
+        encoding: 'utf8',
+        env: shipEnv(dir, env).env,
+      },
+    );
+    expect(retry.status, retry.stderr).toBe(0);
+    expect(retry.stderr).toContain('gate receipt verified');
+    expect(remoteBranchExists(bare, 'feat/fmt-outage')).toBe(true);
+  });
+
   it('treats a failed push whose commit reached origin as landed, without a retry', () => {
     const { dir, env, bare } = seedShipRepoLocalRemote();
     const { count, env: runEnv } = shipEnv(dir, env, { fails: 1 });
@@ -185,7 +209,8 @@ describe('ship-branch.sh — origin already holds the preserved commit', () => {
   it('skips the push and opens the PR', () => {
     const { dir, env, git } = seedShipRepoLocalRemote();
     preservedOnOrigin(dir, env, git, 'feat/adopt');
-    const { count, env: runEnv } = shipEnv(dir, env);
+    const gh = 'case "$2" in list) echo 0 ;; *) echo https://github.com/acme/app/pull/42 ;; esac';
+    const { count, env: runEnv } = shipEnv(dir, env, { gh });
 
     const r = ship(dir, runEnv, 'feat/adopt');
 
@@ -234,11 +259,33 @@ describe('ship-branch.sh — origin already holds the preserved commit', () => {
     expect(existsSync(created)).toBe(false);
   });
 
+  // The second row has gh list a PR whose state view could not read: a zero exit is not "no PR".
+  it.each([
+    ['gh cannot answer at all', 'exit 1'],
+    ['gh lists a PR it could not read', 'echo 1'],
+  ])('refuses to adopt when %s', (_, list) => {
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    preservedOnOrigin(dir, env, git, 'feat/adopt-unread');
+    const created = join(dir, 'pr-created');
+    const gh = `case "$2" in view) exit 1 ;; list) ${list} ;; create) touch '${created}' ;; esac`;
+    const { count, env: runEnv } = shipEnv(dir, env, { gh });
+
+    const r = ship(dir, runEnv, 'feat/adopt-unread');
+
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toContain(
+      'could not confirm origin/feat/adopt-unread has no merged or closed PR',
+    );
+    expect(r.stderr).toContain("gh pr view 'feat/adopt-unread' --repo 'acme/app'");
+    expect(existsSync(count)).toBe(false);
+    expect(existsSync(created)).toBe(false);
+  });
+
   it('never publishes an adopted commit the receipt checks reject', () => {
     const { dir, env, git } = seedShipRepoLocalRemote();
     preservedOnOrigin(dir, env, git, 'feat/adopt-retitled');
     const created = join(dir, 'pr-created');
-    const gh = `case "$2" in create) touch '${created}' ;; esac`;
+    const gh = `case "$2" in list) echo 0 ;; create) touch '${created}' ;; esac`;
 
     const r = ship(dir, shipEnv(dir, env, { gh }).env, 'feat/adopt-retitled', 'a different title');
 

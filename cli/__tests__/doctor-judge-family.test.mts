@@ -80,7 +80,7 @@ const OPERATOR_DOCS = ['docs/troubleshooting.md', 'skills/commit-gates/SKILL.md'
 const DOCTOR_BULLET_ANCHOR = '`devkit doctor --fix` writes the same four keys';
 
 function readDoc(rel: string): string {
-  return readFileSync(join(__dirname, '..', '..', rel), 'utf8');
+  return readFileSync(join(import.meta.dirname, '..', '..', rel), 'utf8');
 }
 
 /** The doc bullet that offers the doctor route, whitespace-collapsed; '' when the anchor is gone. */
@@ -138,7 +138,8 @@ describe('bindClaudeFamily', () => {
     process.env.PATH = binDir('claude');
     expect(bindClaudeFamily(repo)).toBe(true);
     const review = resolveGuardConfig(repo).review;
-    expect(review.model).toBe('haiku');
+    // A haiku first pass leaves checklist reviewers INCONCLUSIVE, failing every strict ship closed.
+    expect(review.model).toBe('sonnet');
     expect(review.escalationModel).toBe('opus');
     expect(review.correctnessModel).toBe('claude-haiku-5-5');
     expect(review.correctnessChunkLoc).toBe(0);
@@ -244,6 +245,14 @@ describe('bindClaudeFamily', () => {
     for (const doc of OPERATOR_DOCS) {
       const lines = shellLines(readDoc(doc));
       for (const command of commands) expect(lines, doc).toContain(command);
+    }
+  });
+
+  // The docs hand-copy the escape-hatch export; a stale copy sends operators to the old family.
+  it('both operator docs quote every family knob at its current value', () => {
+    for (const doc of ['docs/troubleshooting.md', 'skills/commit-gates/SKILL.md']) {
+      const text = readFileSync(join(import.meta.dirname, '..', '..', doc), 'utf8');
+      for (const k of FAMILY_ENV_KEYS) expect(text).toContain(`${k.env}=${k.envValue}`);
     }
   });
 
@@ -454,6 +463,21 @@ describe('familyStaleResult', () => {
     expect(r?.status).toBe('DRIFT');
     expect(r?.advisory).toBe(true);
     expect(r?.detail).toContain('outlived');
+  });
+
+  // A bind an older devkit wrote still carries haiku; upgrading must not orphan it from the advisory.
+  it('a pin written with the previous family values is still called stale', () => {
+    const repo = repoWith({
+      ...TEMPLATE_CONFIG,
+      review: {
+        ...TEMPLATE_CONFIG.review,
+        ...CLAUDE_FAMILY_SET,
+        [FAMILY_PROVENANCE_KEY]: FAMILY_PROVENANCE_TEXT,
+        model: 'haiku',
+      },
+    });
+    process.env.PATH = binDir('claude', 'codex');
+    expect(familyStaleResult(repo)?.status).toBe('DRIFT');
   });
 
   it('a user-authored note under the provenance key is NOT a devkit pin — exact marker required', () => {

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,7 @@ import { relIntentPath } from '../lib/ship/ship-intent.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 import {
   createPreservedCommit,
+  dirs,
   ghStub,
   installHook,
   localBranchExists,
@@ -341,6 +342,30 @@ describe('ship --resume: record on block, replay on retry', () => {
     expect(r.stderr).toContain('full devkit ship command');
   });
 
+  it('--resume on a stale record refuses, then prints the full command that re-records it', () => {
+    const { dir, env, git } = seedResumableRepo({ hookBody: 'exit 1' });
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    const blocked = runShip(dir, env, ['feat/aged', 'aged title', '--', 'note.txt'], {
+      input: 'b\n',
+      extraEnv: { SHIP_DRY_RUN: '1' },
+    });
+    expect(blocked.status).not.toBe(0);
+    const file = intentFileOf(dir, 'feat/aged');
+    const record = JSON.parse(readFileSync(file, 'utf8'));
+    record.createdAt = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString();
+    writeFileSync(file, JSON.stringify(record));
+
+    const r = runShip(dir, env, ['--resume', 'feat/aged']);
+    expect(r.status).not.toBe(0);
+    const refusal = r.stderr.indexOf('stale or misdated');
+    expect(refusal).toBeGreaterThan(-1);
+    expect(r.stderr.indexOf("devkit ship feat/aged 'aged title' --body-file ")).toBeGreaterThan(
+      refusal,
+    );
+    expect(existsSync(file)).toBe(true); // the refusal keeps the record, so a re-run regenerates the hint
+    git(['worktree', 'prune']);
+  });
+
   it('a gate-blocked --draft ship still opens a DRAFT when replayed by --resume', () => {
     const { dir, env, git } = seedResumableRepo({ hookBody: 'exit 1' });
     writeFileSync(join(dir, 'note.txt'), 'hello\n');
@@ -474,8 +499,44 @@ describe('ship --resume: overrides and refusals', () => {
       expect(stale.stderr).toContain('--resume feat/drift --body-file ');
       // Before any gate: the warning precedes the worktree the gate chain runs in.
       expect(stale.stderr.indexOf(DRIFT)).toBeLessThan(stale.stderr.indexOf('devkit-ship-'));
+      // No PR opened, so no PR-URL tail; and the captured tail never leaks onto stdout (the URL's).
+      expect(stale.stdout + stale.stderr).not.toContain('the PR description is the RECORDED body');
       expect(git(['log', '-1', '--format=%b', 'feat/drift']).trim()).toBe('attempt one');
       git(['worktree', 'prune']);
+    });
+
+    it('repeats the drift on the line right after the PR URL; a re-passed --body-file does not', () => {
+      const TAIL = 'the PR description is the RECORDED body (12 bytes)';
+      const URL = 'https://github.com/acme/app/pull/42';
+      /** stderr merged into stdout, so the test sees the order a reader of the terminal sees. */
+      const merged = (dir, env, argv) =>
+        spawnSync('/bin/bash', ['-c', '/bin/bash "$@" 2>&1', '_', scriptPath, ...argv], {
+          cwd: dir,
+          encoding: 'utf8',
+          env,
+        }).stdout;
+      for (const [branch, extra, expectTail] of [
+        ['feat/stale', [], true],
+        ['feat/fresh', ['--body-file', 'body.md'], false],
+      ]) {
+        const { dir, env, git } = seedFileRecord(branch, 'attempt one\n');
+        installHook(dir, 'exit 0');
+        writeFileSync(join(dir, 'body.md'), 'attempt two, corrected\n');
+        const lines = merged(dir, publishEnvFor(dir, env).publishEnv, [
+          '--resume',
+          branch,
+          ...extra,
+        ]).split('\n');
+        const at = lines.indexOf(URL);
+        expect(at, lines.join('\n')).toBeGreaterThan(-1);
+        expect(lines.filter((l) => l.includes(TAIL))).toHaveLength(expectTail ? 1 : 0);
+        if (expectTail) {
+          expect(lines[at + 1]).toContain(TAIL);
+          expect(lines[at + 1]).toContain(`devkit ship --pr ${branch} x --body-file `);
+          expect(count(lines.join('\n'), DRIFT)).toBe(1); // the early line is still printed once
+        }
+        git(['worktree', 'prune']);
+      }
     });
 
     it('re-passing --body-file on the resume commits the edit and prints no warning', () => {
@@ -735,6 +796,44 @@ describe('ship --body-file and attempt telemetry', () => {
     expect(intents[0].ship_id).toBe(attempts[0].ship_id);
     expect(intents[1].ship_id).toBe(attempts[1].ship_id);
     expect(attempts[0].ship_id).not.toBe(attempts[1].ship_id);
+    git(['worktree', 'prune']);
+  });
+
+  it('telemetry: a ship launched from a linked worktree names that worktree as root', () => {
+    const { dir, env, git } = seedResumableRepo();
+    const linked = mkdtempSync(join(tmpdir(), 'ship-linked-'));
+    dirs.push(linked);
+    git(['worktree', 'add', '-q', '-b', 'linked-src', linked]);
+    // The seed's hook and manifest ignore are untracked, so a fresh linked checkout has neither.
+    mkdirSync(join(linked, '.husky/_'), { recursive: true });
+    installHook(linked, 'exit 0');
+    writeFileSync(join(linked, '.gitignore'), '.devkit/\n');
+    writeFileSync(join(linked, 'note.txt'), 'hello\n');
+    const sink = join(dir, 'events.jsonl');
+
+    const shipped = runShip(linked, env, ['feat/linked', 'x', '--', 'note.txt'], {
+      input: 'b\n',
+      extraEnv: { SHIP_DRY_RUN: '1', DEVKIT_GATE_EVENTS: sink },
+    });
+    expect(shipped.status, shipped.stderr).toBe(0);
+
+    const toplevel = (cwd) =>
+      execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, env, encoding: 'utf8' }).trim();
+    const roots = Object.fromEntries(
+      readFileSync(sink, 'utf8')
+        .trim()
+        .split('\n')
+        .map((l) => JSON.parse(l))
+        .filter((e) => e.type.startsWith('ship_'))
+        .map((e) => [e.type, e.root]),
+    );
+    // The caller's checkout: neither the main checkout nor the ephemeral worktree the gates ran in.
+    expect(toplevel(linked)).not.toBe(toplevel(dir));
+    expect(roots).toEqual({
+      ship_intent: toplevel(linked),
+      ship_attempt: toplevel(linked),
+      ship_result: toplevel(linked),
+    });
     git(['worktree', 'prune']);
   });
 });

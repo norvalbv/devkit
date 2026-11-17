@@ -16,12 +16,12 @@ baseline walk from it. Result: works on ANY repo (incl. devkit's own `.mjs` `cli
 ```
 guard.config.json `structure`   (the ONE spec = data)
         │
-        ▼  gate-engine/structure/grammar.mjs   (interpreter devkit ships = the generator)
+        ▼  gate-engine/structure/tree/grammar.mjs   (interpreter devkit ships = the generator)
         ├─► compileToEslint(treeSpec)  → createFolderStructure arg object  → eslint.config.mjs shim
         ├─► (emit eslint/domains.mjs from libDomains, for IDE ergonomics)
         └─► resolvePatterns(names, exts) → the {token}→regex table, extension-aware
         │
-        ▼  gate-engine/structure/walk.mjs
+        ▼  gate-engine/structure/tree/walk.mjs
         └─► walkTree(treeSpec, absRoot)  → grandfather seed (baseline string[])
 ```
 Single source → 3 derived artifacts → zero hand-sync. This generalizes frink's "rule + generator import
@@ -100,7 +100,7 @@ The other four fall out the same way:
 - **node-backend** — 1 tree `root:"src"`, `folders:{api,lib}`.
 - **monorepo** — 1 tree per package, `root:"packages/<x>/src"` (future: `roots:["packages/*"]` glob).
 
-## The ONE generic walker (`gate-engine/structure/walk.mjs`)
+## The ONE generic walker (`gate-engine/structure/tree/walk.mjs`)
 
 `walkTree(treeSpec, absRoot)` — recursive descent carrying a **grammar cursor** (current grammar node) +
 `broken` flag (generalizes the `ancestorBroken`/`broken` boolean already threaded through every existing
@@ -159,8 +159,8 @@ path. (Generalizing electron itself onto `{ grammar }` is a future refinement, n
 ## File changes
 
 **New:**
-- `gate-engine/structure/grammar.mjs` — `{token}` table parameterized by sourceExtensions + `resolvePatterns(names, exts)` + `compileToEslint(treeSpec)` (→ createFolderStructure arg) + `compileWalls(walls)` + `emitDomains(trees)`.
-- `gate-engine/structure/walk.mjs` — `walkTree(treeSpec, absRoot)`.
+- `gate-engine/structure/tree/grammar.mjs` — `{token}` table parameterized by sourceExtensions + `resolvePatterns(names, exts)` + `compileToEslint(treeSpec)` (→ createFolderStructure arg) + `compileWalls(walls)` + `emitDomains(trees)`.
+- `gate-engine/structure/tree/walk.mjs` — `walkTree(treeSpec, absRoot)`.
 
 **Modify:**
 - `gate-engine/config.mjs` — add `structure` to DEFAULTS + resolveGuardConfig (deep-merge); add `resolveTreeExtensions`. KEEP `sourceMatchers`, env ladder, `resolveFromCwd` verbatim.

@@ -1,0 +1,195 @@
+// One module-scope classifier per gate event type, so summarise() only dispatches and attributes.
+import { blockingFindings, judgeFinding } from './blocking.mts';
+import {
+  baseDriftDetail,
+  earlierDiffDetail,
+  partialPacket,
+  partialPacketDetail,
+} from './cache-detail.mts';
+import { oneLine, textOf } from './fields.mts';
+import type { DigestRow, GateEvent } from './gate-digest.mts';
+import { SKIP_CONTROLS } from './skip-controls.mts';
+
+/** A row that COULD have stopped the run, so its blocking status must be computed, never assumed. */
+export interface Attributable {
+  gate: string;
+  family: string;
+  detail: string;
+  state: 'finding' | 'could-not-run';
+  fp?: string;
+  findings?: number;
+}
+
+/** Where each event lands. Only `attributable` rows can block; the rest hold no exit by design. */
+export interface Buckets {
+  attributable: Attributable[];
+  advisory: DigestRow[];
+  unverified: DigestRow[];
+  /** A gate a flag or config skipped: it never ran, so it cannot be what stopped the run. */
+  bypassed: DigestRow[];
+  cached: DigestRow[];
+  /** The provider's own words per judge, from its last failed judge_exec row. */
+  outageWords: Map<string, string>;
+}
+
+/** The parallel judge's gate name — a `gate_result` row, not a fleet `review_result`. */
+export const COMPLETENESS = 'completeness';
+/** Never the bare word "transient": it reads as "a retry clears it", and a usage lock wore it. */
+const UNCLASSIFIED =
+  'judge failed, cause unclassified — read the guard-judge preflight lines at the top of the log';
+/** Causes whose judge_exec ledger row holds the words that explain them; a response-contract
+ *  inconclusive is a judge that answered, so an earlier failed spawn's words would mislead. */
+const OUTAGE_CAUSES = new Set(['outage', 'rate-limited', 'transient', 'unauthenticated', 'absent']);
+
+/** Sorts one event into its bucket. A switch, not a keyed lookup: a sink row's `type` is untrusted. */
+export function classify(e: GateEvent, b: Buckets): void {
+  const skip = bypassRow(e);
+  if (skip) {
+    b.bypassed.push(skip);
+    return;
+  }
+  switch (e.type) {
+    case 'review_result':
+      return reviewResult(e, b);
+    case 'gate_result':
+      return gateResult(e, b);
+    case 'gate_infra_failure':
+      b.attributable.push(infraFailureRow(e, b.outageWords));
+      return;
+    case 'advisory_result':
+      b.advisory.push(advisoryRow(e));
+      return;
+    case 'gate_degraded':
+      b.unverified.push(degradedRow(e));
+      return;
+    case 'cache_hit':
+      return cacheHit(e, b);
+  }
+}
+
+/** Built only on an arm that emits a row: a malformed reviewer must not throw on a row-less status. */
+const reviewGate = (e: GateEvent): string => `review:${e.reviewer ?? 'unknown'}`;
+
+function reviewResult(e: GateEvent, b: Buckets): void {
+  if (e.status === 'fail') {
+    const gate = reviewGate(e);
+    for (const f of blockingFindings(e)) {
+      b.attributable.push({ gate, family: 'review', state: 'finding', ...f });
+    }
+  } else if (e.status === 'inconclusive') {
+    // Strict ship fails closed on every one of these, so omitting them hid most of what blocked.
+    const gate = reviewGate(e);
+    const cause = textOf(e.inconclusive_cause);
+    const words = OUTAGE_CAUSES.has(cause) ? b.outageWords.get(gate) : undefined;
+    b.attributable.push({
+      gate,
+      family: 'review',
+      detail: (words ?? oneLine(e.reason)) || oneLine(cause) || 'could not run',
+      state: 'could-not-run',
+    });
+  } else if (e.status === 'pass' && partialPacket(e)) {
+    // A clean PASS adds no row; one whose capped packet left files out was not fully judged.
+    b.unverified.push(unverifiedRow(reviewGate(e), partialPacketDetail(e)));
+  }
+}
+
+function gateResult(e: GateEvent, b: Buckets): void {
+  const gate = e.gate ?? 'unknown';
+  // A row without its own family IS its family — only the deterministic chain reports finer
+  // than the blocked_gate vocabulary.
+  const family = e.family ?? gate;
+  if (e.status === 'fail') {
+    b.attributable.push({ gate, family, state: 'finding', ...judgeFinding(e) });
+  } else if (e.status === 'could_not_run' || e.status === 'bypassed') {
+    b.attributable.push({
+      gate,
+      family,
+      // A bypassed gate verified NOTHING; naming the flag spares the reader a hunt for SKIP lines.
+      detail: e.bypass ? `bypassed via ${e.bypass} — verified nothing` : oneLine(e.detail),
+      state: 'could-not-run',
+    });
+  }
+}
+
+function infraFailureRow(e: GateEvent, outageWords: Map<string, string>): Attributable {
+  const gate = e.gate ?? 'unknown';
+  return {
+    gate,
+    family: e.family ?? gate,
+    // `cause` says WHY (see classifyJudgeOutage), which decides between checking quota and a re-run.
+    detail:
+      oneLine(e.detail) ||
+      (OUTAGE_CAUSES.has(textOf(e.cause)) ? outageWords.get(`review:${gate}`) : '') ||
+      (e.cause === 'transient' ? UNCLASSIFIED : oneLine(e.cause)) ||
+      'could not run',
+    state: 'could-not-run',
+  };
+}
+
+/** A stage that CANNOT block (the self-host fallow audit, the skill-projection check). */
+function advisoryRow(e: GateEvent): DigestRow {
+  return {
+    gate: e.gate ?? 'unknown',
+    state: e.status === 'could_not_run' ? 'could-not-run' : 'finding',
+    blocking: false,
+    detail: textOf(e.detail), // whole: groupAdvisories reads it, then cuts it to one line
+    advisory: true,
+  };
+}
+
+/** A judge that stripped its own blocking authority; one naming its degradation supplies `detail`. */
+function degradedRow(e: GateEvent): DigestRow {
+  return unverifiedRow(
+    e.judge ?? 'unknown',
+    oneLine(e.detail) ||
+      `downgraded to advisory: ${oneLine(e.cause) || 'cause not recorded'} — could not block this commit`,
+  );
+}
+
+/** A reused PASS. A partial packet may ALSO sit on an earlier diff or a drifted base, and one row
+ *  per gate survives, so that row names every reason. */
+function cacheHit(e: GateEvent, b: Buckets): void {
+  const staleDiff = earlierDiffDetail(e);
+  const drifted = baseDriftDetail(e);
+  if (partialPacket(e)) {
+    const detail = [partialPacketDetail(e), staleDiff, drifted].filter(Boolean).join('; ');
+    b.unverified.push(unverifiedRow(cacheGate(e), detail));
+  } else if (staleDiff) b.unverified.push(unverifiedRow(cacheGate(e), staleDiff));
+  else if (drifted) b.unverified.push(unverifiedRow(e.judge ?? 'unknown', drifted));
+  else b.cached.push({ gate: e.judge ?? 'unknown', state: 'cached', blocking: false, detail: '' });
+}
+
+const unverifiedRow = (gate: string, detail: string): DigestRow => ({
+  gate,
+  state: 'unverified',
+  blocking: false,
+  detail,
+});
+
+/** A cache_hit's gate label; completeness's intent key reports under the judge's own gate name. */
+const cacheGate = (e: GateEvent): string =>
+  e.judge === `review:${COMPLETENESS}` ? COMPLETENESS : (e.judge ?? 'unknown');
+
+/** No-LLM mode skips the whole fleet, and either the env flag or the repo's config can set it. */
+const NO_LLM = 'GUARD_DECISION_NO_LLM or noLlm config';
+
+/** An env-authorized skip, or a PASS a bypass flag produced: it verified nothing and never blocks. */
+function bypassRow(e: GateEvent): DigestRow | undefined {
+  const skip = e.type === 'review_skipped';
+  const reason = textOf(e.reason);
+  const flag = skip
+    ? reason === 'no_llm'
+      ? NO_LLM
+      : SKIP_CONTROLS.get(reason)
+    : e.type === 'gate_result' && e.status === 'pass' && textOf(e.bypass);
+  if (!flag) return undefined;
+  const reviewer = textOf(e.reviewer);
+  const gate = skip ? (reviewer ? `review:${reviewer}` : 'review') : (e.gate ?? 'unknown');
+  return {
+    gate,
+    state: 'could-not-run',
+    blocking: false,
+    detail: `bypassed via ${flag} — verified nothing`,
+    skipped: true,
+  };
+}

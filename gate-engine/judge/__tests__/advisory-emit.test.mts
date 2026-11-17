@@ -2,11 +2,17 @@
  * sc-2526: the advisory channel. The pure verdict reader carries the risk — it decides whether a
  * finding reaches the terminus at all, and its predecessor (the exit code) missed a whole class.
  */
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { emitAdvisoryResult, reportFallowAudit, summariseFallowAudit } from '../advisory/emit.mts';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  emitAdvisoryResult,
+  reportFallowAudit,
+  reportFallowSkipped,
+  summariseFallowAudit,
+} from '../advisory/emit.mts';
 
 // vitest.setup holds DEVKIT_NO_TELEMETRY=1 suite-wide; an explicit sink + ship id opts back in.
 const ENV_KEYS = ['DEVKIT_GATE_EVENTS', 'DEVKIT_SHIP_ID', 'DEVKIT_SHIP_BRANCH'];
@@ -47,7 +53,7 @@ describe('summariseFallowAudit', () => {
     // EXIT 0 while still reporting the clone group. An exit-code row would miss exactly this run.
     expect(
       summariseFallowAudit('{"verdict":"warn","attribution":{"duplication_introduced":1}}'),
-    ).toEqual({
+    ).toMatchObject({
       token: 'findings',
       detail: 'verdict=warn · 1 duplication introduced — read the fallow section of the log',
     });
@@ -146,6 +152,16 @@ describe('reportFallowAudit', () => {
     ).toBe('unreadable');
     expect(events()[0]).toMatchObject({ status: 'could_not_run' });
   });
+
+  it('names a skipped audit as having verified nothing, carrying the reason the hook gave', () => {
+    expect(reportFallowSkipped('could not capture the staged diff')).toBe('unreadable');
+    expect(events()).toHaveLength(1);
+    expect(events()[0]).toMatchObject({
+      gate: 'fallow-advisory',
+      status: 'could_not_run',
+      detail: 'could not capture the staged diff',
+    });
+  });
 });
 
 describe('emitAdvisoryResult', () => {
@@ -227,5 +243,331 @@ describe('degraded and boundary inputs', () => {
       ),
     ).toBe('findings');
     expect(events()).toEqual([]);
+  });
+});
+
+/** fallow 3.10.0 tags each complexity finding; the report itself carries no estimation flag. */
+describe('estimated CRAP marker', () => {
+  interface Finding {
+    path?: string;
+    line?: number;
+    exceeded?: string;
+    coverage_source?: string;
+    introduced?: boolean;
+  }
+  const MEASURED =
+    'verdict=fail · 1 complexity introduced: a.ts:1 — read the fallow section of the log';
+  const UNNAMED = 'verdict=fail · 1 complexity introduced — read the fallow section of the log';
+  const finding = (over: Finding = {}): Finding => ({
+    path: 'a.ts',
+    line: 1,
+    exceeded: 'crap',
+    coverage_source: 'estimated',
+    introduced: true,
+    ...over,
+  });
+  const findings = (...list: Finding[]) => JSON.stringify({ findings: list });
+  const audit = (complexity: string, verdict = 'fail', introduced = 1) =>
+    `{"verdict":"${verdict}","attribution":{"complexity_introduced":${introduced}},"complexity":${complexity}}`;
+  const detail = (complexity: string) => summariseFallowAudit(audit(complexity))?.detail;
+
+  it('names the devkit remedy when a CRAP-only finding was scored without coverage', () => {
+    const estimated =
+      'verdict=fail (CRAP estimated, no coverage: run `devkit coverage-run <their tests>` in this checkout, then re-ship) · 1 complexity introduced: a.ts:1 — read the fallow section of the log';
+    expect(detail(findings(finding()))).toBe(estimated);
+    expect(detail(findings(finding({ coverage_source: 'estimated_component_inherited' })))).toBe(
+      estimated,
+    );
+  });
+
+  it('leaves a measured audit byte-identical to the line it printed before', () => {
+    expect(detail(findings(finding({ coverage_source: 'istanbul' })))).toBe(MEASURED);
+  });
+
+  it('marks a mixed audit when any introduced CRAP-only finding is estimated', () => {
+    expect(detail(findings(finding({ coverage_source: 'istanbul' }), finding()))).toContain(
+      'CRAP estimated',
+    );
+  });
+
+  it('stays silent for an inherited finding and for breaches coverage cannot clear', () => {
+    expect(detail(findings(finding({ introduced: false })))).toBe(UNNAMED);
+    for (const exceeded of ['cognitive_crap', 'cyclomatic_crap', 'all', 'cognitive'])
+      expect(detail(findings(finding({ exceeded })))).toBe(MEASURED);
+  });
+
+  it('reads a malformed complexity block as no marker, never a throw', () => {
+    for (const complexity of [
+      'null',
+      '"x"',
+      '3',
+      '[]',
+      '{"findings":"x"}',
+      '{"findings":[null,3,"y"]}',
+    ])
+      expect(detail(complexity)).toBe(UNNAMED);
+    expect(detail(findings(finding({ coverage_source: 'estimatedish' })))).toBe(MEASURED);
+  });
+
+  it('keeps a clean audit silent even beside an inherited estimated finding', () => {
+    const text = audit(findings(finding({ introduced: false })), 'pass', 0);
+    expect(summariseFallowAudit(text)?.token).toBe('clean');
+    expect(reportFallowAudit(() => text, false)).toBe('clean');
+    expect(events()).toEqual([]);
+  });
+
+  it('marks a finding from a gate=all audit, which publishes no `introduced` field', () => {
+    // Probed on fallow 3.10.0: `--gate all` skips attribution, so every counter is 0 and each
+    // finding omits `introduced` while still deciding the verdict.
+    const { introduced: _, ...unattributed } = finding();
+    const text = audit(findings(unattributed), 'fail', 0);
+    expect(summariseFallowAudit(text)?.detail).toContain('CRAP estimated');
+  });
+
+  it('carries the marker into the advisory row the ship digest renders', () => {
+    expect(reportFallowAudit(() => audit(findings(finding())), false, true)).toBe('findings');
+    expect(events()[0].detail).toContain('devkit coverage-run');
+  });
+});
+
+// Pins the fixture shapes above to the real binary: a field rename in a fallow upgrade fails here.
+const hasFallow = spawnSync('fallow', ['--version'], { encoding: 'utf8' }).status === 0;
+const FALLOW_ENV = {
+  ...Object.fromEntries(
+    Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_') && !k.startsWith('FALLOW_')),
+  ),
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_SYSTEM: '/dev/null',
+};
+
+describe.skipIf(!hasFallow)('estimated CRAP marker against the real fallow binary', () => {
+  it('marks an untested CRAP-only function and drops the marker once coverage measures it', () => {
+    const repo = realpathSync(mkdtempSync(path.join(tmpdir(), 'advisory-fallow-')));
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, env: FALLOW_ENV });
+    const file = path.join(repo, 'a.js');
+    writeFileSync(path.join(repo, 'package.json'), '{"name":"x","version":"1.0.0","main":"a.js"}');
+    writeFileSync(file, 'export const z = 1;\n');
+    git('init', '-q');
+    git('add', '.');
+    git('-c', 'user.email=a@b.c', '-c', 'user.name=a', 'commit', '-qm', 'base');
+    // Seven paths keep cyclomatic and cognitive under fallow's limits, so only CRAP can breach.
+    const cases = [1, 2, 3, 4, 5, 6].map((n) => `    case ${n}: return '${n}';`);
+    const lines = [
+      'export function g(a) {',
+      '  switch (a) {',
+      ...cases,
+      "    default: return 'z';",
+    ];
+    writeFileSync(file, `${[...lines, '  }', '}'].join('\n')}\n`);
+    git('add', 'a.js');
+    const audit = (env: Record<string, string> = {}) =>
+      spawnSync('fallow', ['audit', '--base', 'HEAD', '--no-cache', '--format', 'json'], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { ...FALLOW_ENV, ...env },
+      }).stdout;
+
+    expect(summariseFallowAudit(audit())?.detail).toContain('CRAP estimated');
+
+    const statementMap = Object.fromEntries(
+      Array.from({ length: 11 }, (_, i) => [
+        i,
+        { start: { line: i + 1, column: 0 }, end: { line: i + 1, column: 30 } },
+      ]),
+    );
+    const loc = { start: { line: 1, column: 0 }, end: { line: 11, column: 1 } };
+    const fnMap = { 0: { name: 'g', decl: loc, loc, line: 1 } };
+    const s = Object.fromEntries(Object.keys(statementMap).map((k) => [k, 3]));
+    const map = {
+      [file]: { path: file, statementMap, fnMap, branchMap: {}, s, f: { 0: 3 }, b: {} },
+    };
+    const coverage = path.join(repo, 'coverage-final.json');
+    writeFileSync(coverage, JSON.stringify(map));
+    expect(summariseFallowAudit(audit({ FALLOW_COVERAGE: coverage }))).toMatchObject({
+      token: 'clean',
+      detail: '',
+    });
+  });
+});
+
+/** Trimmed from a real fallow 3.10.0 `audit --format json`: one new complex function beside an
+ * inherited one, one new clone group, one new unused export. */
+const REAL_AUDIT = {
+  verdict: 'fail',
+  attribution: {
+    gate: 'new-only',
+    complexity_introduced: 1,
+    complexity_inherited: 1,
+    duplication_introduced: 1,
+    dead_code_introduced: 1,
+  },
+  complexity: {
+    findings: [
+      { path: 'src/old.ts', name: 'old', line: 1, introduced: false },
+      { path: 'src/old.ts', name: 'fresh', line: 5, introduced: true },
+    ],
+  },
+  duplication: {
+    clone_groups: [
+      {
+        instances: [
+          { file: 'src/clone-a.ts', start_line: 1 },
+          { file: 'src/clone-b.ts', start_line: 1 },
+        ],
+        introduced: true,
+      },
+    ],
+  },
+  dead_code: {
+    schema_version: 7,
+    unused_exports: [{ path: 'src/clone-a.ts', export_name: 'orphan', line: 12, introduced: true }],
+  },
+};
+
+describe('naming the findings this diff introduced', () => {
+  it('names each introduced finding in the row, and never an inherited one', () => {
+    const summary = summariseFallowAudit(JSON.stringify(REAL_AUDIT));
+    expect(summary?.named).toEqual([
+      'src/old.ts:5 fresh',
+      'src/clone-a.ts:1',
+      'src/clone-a.ts:12 orphan',
+    ]);
+    expect(summary?.detail).toBe(
+      'verdict=fail · 1 complexity, 1 duplication, 1 dead code introduced: old.ts:5 fresh, clone-a.ts:1, clone-a.ts:12 orphan — read the fallow section of the log',
+    );
+  });
+
+  it('names nothing under --gate all, where fallow sets no per-finding flag', () => {
+    const findings = [{ path: 'src/old.ts', name: 'fresh', line: 5 }];
+    const summary = summariseFallowAudit(
+      JSON.stringify({
+        ...REAL_AUDIT,
+        attribution: { gate: 'all' },
+        complexity: { findings },
+      }),
+    );
+    expect(summary?.named).toEqual([]);
+    expect(summary?.detail).toBe('verdict=fail — read the fallow section of the log');
+  });
+
+  it('withholds only the category whose flags disagree with its counter', () => {
+    // fallow counts unique keys that carry no line, so two flagged callbacks can count as one.
+    const findings = [
+      { path: 'a.ts', name: '<arrow>', line: 3, introduced: true },
+      { path: 'a.ts', name: '<arrow>', line: 9, introduced: true },
+    ];
+    const summary = summariseFallowAudit(
+      JSON.stringify({
+        ...REAL_AUDIT,
+        attribution: { complexity_introduced: 1, dead_code_introduced: 1 },
+        complexity: { findings },
+      }),
+    );
+    expect(summary?.unattributed).toEqual(['complexity']);
+    expect(summary?.named).toEqual(['src/clone-a.ts:12 orphan']);
+    expect(summary?.detail).toContain('1 complexity, 1 dead code introduced: clone-a.ts:12 orphan');
+  });
+
+  it('locates a finding that has no path from its other fields, never printing undefined', () => {
+    const dead_code = {
+      circular_dependencies: [{ files: ['src/a.ts', 'src/b.ts'], introduced: true }],
+      duplicate_exports: [
+        { export_name: 'x', locations: [{ path: 'src/c.ts', line: 4 }], introduced: true },
+      ],
+      unlisted_dependencies: [{ introduced: true }],
+    };
+    const summary = summariseFallowAudit(
+      JSON.stringify({
+        ...REAL_AUDIT,
+        attribution: { dead_code_introduced: 3 },
+        dead_code,
+      }),
+    );
+    expect(summary?.named).toEqual(['src/a.ts', 'src/c.ts:4 x', '(no location)']);
+    expect(summary?.detail).not.toContain('undefined');
+  });
+
+  it('ignores lists fallow reshaped rather than throwing in the hook', () => {
+    for (const patch of [
+      { complexity: { findings: 'many' } },
+      { complexity: null, duplication: { clone_groups: [null, 4] } },
+      { dead_code: 'none', duplication: 7 },
+      { complexity: { findings: [{ introduced: true, path: 3, line: '5' }] } },
+    ]) {
+      expect(summariseFallowAudit(JSON.stringify({ ...REAL_AUDIT, ...patch }))?.token).toBe(
+        'findings',
+      );
+    }
+  });
+
+  it('keeps the row short: three names, then a count of the rest', () => {
+    const findings = Array.from({ length: 5 }, (_, i) => ({
+      path: `gate-engine/deep/module-${i}.mts`,
+      name: `fn${i}`,
+      line: i + 1,
+      introduced: true,
+    }));
+    const summary = summariseFallowAudit(
+      JSON.stringify({
+        ...REAL_AUDIT,
+        attribution: { complexity_introduced: 5 },
+        complexity: { findings },
+      }),
+    );
+    expect(summary?.named).toHaveLength(5);
+    expect(summary?.detail).toContain(
+      ': module-0.mts:1 fn0, module-1.mts:2 fn1, module-2.mts:3 fn2, +2 more —',
+    );
+  });
+
+  it('prints the full-path list to the log on a finding, and nothing on a clean audit', () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      expect(reportFallowAudit(() => JSON.stringify(REAL_AUDIT), false)).toBe('findings');
+      expect(stderr.mock.calls.map(([chunk]) => chunk).join('')).toBe(
+        "fallow — introduced by this diff (fallow's own attribution):\n" +
+          '  src/old.ts:5 fresh\n  src/clone-a.ts:1\n  src/clone-a.ts:12 orphan\n',
+      );
+      stderr.mockClear();
+      expect(reportFallowAudit(() => '{"verdict":"pass"}', false)).toBe('clean');
+      expect(stderr).not.toHaveBeenCalled();
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it('tells the log which category it could not name', () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      reportFallowAudit(
+        () => '{"verdict":"fail","attribution":{"complexity_introduced":2}}',
+        false,
+      );
+      expect(stderr.mock.calls.map(([chunk]) => chunk).join('')).toContain(
+        "complexity: fallow's per-finding flags do not match its counter — not named",
+      );
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it('cannot forge or erase a log line through a committed file name', () => {
+    // git allows a newline or an escape sequence in a path, and the block prints it unescaped.
+    const path = 'src/a\n✓ guard-review PASS\u001b[2K.ts';
+    const findings = [{ path, name: 'f', line: 1, introduced: true }];
+    const report = {
+      verdict: 'fail',
+      attribution: { complexity_introduced: 1 },
+      complexity: { findings },
+    };
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      reportFallowAudit(() => JSON.stringify(report), false);
+      const block = stderr.mock.calls.map(([chunk]) => chunk).join('');
+      expect(block.split('\n').filter(Boolean)).toHaveLength(2); // the header and ONE finding
+      expect(block).not.toContain('\u001b');
+    } finally {
+      stderr.mockRestore();
+    }
   });
 });

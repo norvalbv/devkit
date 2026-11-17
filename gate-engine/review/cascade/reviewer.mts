@@ -3,10 +3,12 @@ import { judgeBinForModel } from '../../judge/codex/result.mts';
 import { JUDGE_ISOLATION } from '../../judge/judge-isolation.mts';
 import { mcpSpawnTracker, namedAgentMcpProfile } from '../../judge/mcp/profile.mts';
 import type { JudgeOutage } from '../../judge/outage/classify.mts';
+import { spawnWithRetry } from '../../judge/outage/retry.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, remedyCause } from '../../judge/run-judge.mts';
 import { outageReason } from '../../judge/outage/wording.mts';
 import { renderGoverningClaudeMd } from '../claude-md.mts';
 import { renderStagedLineCounts } from '../evidence/line-counts.mts';
+import { renderMovedLines } from '../evidence/packet/moved-lines.mts';
 import { parseReviewVerdict } from '../contracts/response.mts';
 import { buildCappedDiffEvidence } from '../diff-evidence.mts';
 import { omissionHintFor } from '../evidence/packet/omission-hint.mts';
@@ -18,7 +20,6 @@ import { lensGroupId } from '../lens/groups.mts';
 import { applyOverrideValve } from '../overrides.mts';
 import {
   allowedToolsFor,
-  escalatePrompt,
   hasChecklist,
   type PromptExtras,
   resolveEscalationModel,
@@ -44,6 +45,7 @@ import {
 } from '../runtime.mts';
 import { retryableReason } from '../recovery/settle.mts';
 import { checklistAssetRoot } from './consumer-assets.mts';
+import { escalateOverReopened, escalatePrompt, labelPasses } from './escalation.mts';
 
 /** One reviewer cascade outcome, including its persisted transcript when a judge ran. */
 export type CascadeResult = ReviewOutcome;
@@ -164,18 +166,19 @@ export async function runCascade(
       },
       spawn.denied,
     );
-    if (!retryableReason(res)) reportDeniedCalls(sel.reviewer, res.status, spawn.denied);
     const disposition = applyOverrideValve(sel, res, cwd, {
       readState: () => readChecklistState(cwd, sel.reviewer),
       stagedDiff: () => gitCached(cwd, [], sel.files),
     });
     const finalState = readChecklistState(cwd, sel.reviewer) ?? captureState;
+    if (!retryableReason(res)) reportDeniedCalls(sel.reviewer, res, spawn.denied, finalState);
     attachItems(res, finalState, disposition, { full: opts.fullItems });
     // Read before the finally deletes the artifact — the flag lives nowhere else (sc-2317).
-    const degraded = retrievalDegradation(sel.reviewer.name, finalState, res.status);
+    const mcpCause = mcpSpawn.cause();
+    const evidence = { mcpCause, denied: spawn.denied };
+    const degraded = retrievalDegradation(sel.reviewer.name, finalState, res.status, evidence);
     if (degraded) res.degraded = degraded;
     // A named skip judged nothing, so a missing tool weakened nothing — same rule as retrieval.
-    const mcpCause = mcpSpawn.cause();
     if (mcpCause && res.status === 'pass' && !isNamedSkip(finalState))
       res.mcpDegraded = { cause: mcpCause };
     return res;
@@ -237,7 +240,7 @@ async function cascadeVerdict(
   // A shell-less judge gets a Read hint beside each OMITTED/TRUNCATED marker (sc-2305).
   const input = buildCappedDiffEvidence(
     gitCached(cwd, [], files),
-    inventory,
+    `${inventory}${renderMovedLines(cwd, files, promptExtras?.stagedFiles ?? [])}`,
     omissionHintFor(reviewer, passModel),
   );
   const allowedTools = allowedToolsFor(reviewer, cfg, checklistRoot);
@@ -264,29 +267,25 @@ async function cascadeVerdict(
     lens,
     codexWritableFile: reviewer.stateFile,
   };
-  let firstOutage: JudgeOutage | undefined;
   const firstOpts = {
     ...shared,
     label: `review:${reviewer.name}`,
     args: args(prompt, passModel),
-    timeout: budgetLeft(),
-    onOutage: (outage: JudgeOutage) => {
-      firstOutage = outage;
-    },
   };
-  let first = await exec(firstOpts);
-  let initialRetryUsed = false;
-  // `permanent`, not `!== 'timeout'`: a usage lock cannot clear inside a retry, and re-spawning it
-  // cost EIGHT wasted judge calls per ship for six days. A timeout stays permanent as before.
-  if (first === null && retryFirst && !firstOutage?.permanent) {
-    initialRetryUsed = true;
-    console.error(
-      `guard-review: ${reviewer.name}: judge run failed (${firstOutage?.kind ?? 'transient'}), retrying once…`,
-    );
-    cleanupChecklistState(cwd, reviewer);
-    initializeCommitGuardChecklist(cwd, reviewer, checklistRoot, env);
-    first = await exec(firstOpts);
-  }
+  const firstRun = await spawnWithRetry(
+    (timeout, onOutage) => exec({ ...firstOpts, timeout, onOutage }),
+    {
+      retry: retryFirst,
+      label: reviewer.name,
+      capMs: budgetLeft(),
+      beforeRetry: () => {
+        cleanupChecklistState(cwd, reviewer);
+        initializeCommitGuardChecklist(cwd, reviewer, checklistRoot, env);
+      },
+    },
+  );
+  let first = firstRun.result;
+  const { outage: firstOutage, retried: initialRetryUsed } = firstRun;
   if (first === null) {
     const outcome: ReviewOutcome = {
       name: reviewer.name,
@@ -331,6 +330,7 @@ async function cascadeVerdict(
         let contractRetryOutage: JudgeOutage | undefined;
         const retried = await exec({
           ...firstOpts,
+          timeout: budgetLeft(),
           args: args(`${prompt}\n\n${responseContract.retryInstruction}`, passModel),
           onOutage: (outage: JudgeOutage) => {
             contractRetryOutage = outage;
@@ -420,15 +420,17 @@ async function cascadeVerdict(
       transcript: first,
     };
   let secondOutage: JudgeOutage | undefined;
-  const second = await exec({
-    ...shared,
-    label: `review:${reviewer.name}:escalate`,
-    args: args(escalatePrompt(prompt, first), escalationModel),
-    timeout: escalationBudget,
-    onOutage: (outage: JudgeOutage) => {
-      secondOutage = outage;
-    },
-  });
+  const second = await escalateOverReopened(cwd, reviewer, (reopened) =>
+    exec({
+      ...shared,
+      label: `review:${reviewer.name}:escalate`,
+      args: args(escalatePrompt(prompt, first, reopened), escalationModel),
+      timeout: escalationBudget,
+      onOutage: (outage: JudgeOutage) => {
+        secondOutage = outage;
+      },
+    }),
+  );
   if (second === null) {
     const outcome: ReviewOutcome = {
       name: reviewer.name,
@@ -445,42 +447,34 @@ async function cascadeVerdict(
     return outcome;
   }
   const finalVerdict = parseReviewVerdict(second);
-  if (finalVerdict.verdict === 'FAIL' && responseContract && lensesOf(second).length === 0)
-    return {
-      name: reviewer.name,
-      status: 'inconclusive',
-      reason: responseContract.missingEvidenceReason(true),
-      inconclusiveCause: 'response-contract',
-      escalated: true,
-      model: passModel,
-      transcript: second,
-    };
-  if (finalVerdict.verdict === 'FAIL')
-    return {
-      name: reviewer.name,
-      status: 'fail',
-      reason: finalVerdict.reason,
-      escalated: true,
-      model: passModel,
-      transcript: second,
-      ...(responseContract && { blockingLenses: lensesOf(second) }),
-    };
-  if (finalVerdict.verdict === 'PASS')
-    return {
-      name: reviewer.name,
-      status: 'pass',
-      reason: finalVerdict.reason,
-      escalated: true,
-      model: passModel,
-      transcript: second,
-    };
-  return {
+  // The escalation's verdict is final; the archive keeps both passes, each under its own model.
+  const escalated = {
     name: reviewer.name,
-    status: 'inconclusive',
-    reason: 'no VERDICT line',
-    inconclusiveCause: 'response-contract',
     escalated: true,
     model: passModel,
     transcript: second,
+    fullTranscript: labelPasses(passModel, first, escalationModel, second),
+  };
+  if (finalVerdict.verdict === 'FAIL' && responseContract && lensesOf(second).length === 0)
+    return {
+      ...escalated,
+      status: 'inconclusive',
+      reason: responseContract.missingEvidenceReason(true),
+      inconclusiveCause: 'response-contract',
+    };
+  if (finalVerdict.verdict === 'FAIL')
+    return {
+      ...escalated,
+      status: 'fail',
+      reason: finalVerdict.reason,
+      ...(responseContract && { blockingLenses: lensesOf(second) }),
+    };
+  if (finalVerdict.verdict === 'PASS')
+    return { ...escalated, status: 'pass', reason: finalVerdict.reason };
+  return {
+    ...escalated,
+    status: 'inconclusive',
+    reason: 'no VERDICT line',
+    inconclusiveCause: 'response-contract',
   };
 }

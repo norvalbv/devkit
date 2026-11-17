@@ -24,13 +24,6 @@ node_modules
 .devkit/*.generation
 # vitest blob reports: gate.yml shards write them and the test-report job merges them
 .vitest/
-# Codex projections of devkit's own agents/skills, written by external codex tooling. Deliberately
-# NOT tracked, unlike .claude/ and .cursor/: those are emitted by devkit's own sync-agents/
-# sync-skills and drift-checked by `devkit doctor` against a manifest, whereas nothing here can
-# regenerate or verify these — committing them would guarantee silent staleness the moment an agent
-# or skill changes. Track them once `codex` is a real AGENT_TARGETS entry and devkit emits them.
-.agents/
-.codex/
 # decision-log embedding cache (query); rebuildable via `guard-decisions reindex`. docs/decisions/ IS committed.
 .decisions/
 # Derived embedding cache the recall bench writes beside its corpus (DECISIONS_INDEX). Rebuildable
@@ -117,3 +110,7 @@ gate-engine/edge-cases/eval/cases.jsonl
 !.devkit/oxc/**
 !.devkit/vendored-skills/
 !.devkit/vendored-skills/**
+# sc-1119 bench working data: synthetic guards carry frink diff excerpts (same privacy posture as
+# cases.jsonl above; regenerate via guards-generate.mts). NOTE: eval/results.baseline.json IS
+# committed (IDs + numbers only, enforced by the results-privacy test) — do not add it here.
+gate-engine/edge-cases/eval/guards-synthetic.jsonl

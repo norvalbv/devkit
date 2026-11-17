@@ -30,7 +30,16 @@ function harness() {
       events.push('queue');
       return { env: {} };
     },
+    queueAhead: (): string[] | undefined => undefined,
+    runPrequeue(): number {
+      events.push('prequeue');
+      return 0;
+    },
     showQueue: () => 'running: (none)',
+    listAdvisories: (_cwd: string, branch: string) => ({
+      text: `advisories for ${branch}`,
+      code: 0,
+    }),
   } satisfies ShipDependencies;
   return {
     dependencies,
@@ -136,6 +145,29 @@ describe('devkit ship machine-wide queue wiring (sc-3785)', () => {
     expect(calls).toEqual(['script', 'release']);
   });
 
+  it('hands the script how long the slot took to grant, and when', async () => {
+    const test = harness();
+    let seenEnv: NodeJS.ProcessEnv | undefined;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-10-05T08:20:00Z'));
+      test.dependencies.enterQueue = async () => {
+        vi.setSystemTime(new Date('2026-10-05T08:21:30Z'));
+        return { env: {} };
+      };
+      test.dependencies.runManagedScript = (_s, _a, options) => {
+        seenEnv = options.env;
+        return 0;
+      };
+
+      await ship(['feat/q', 'ship it', 'a.txt'], '/consumer', test.dependencies);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(seenEnv?.DEVKIT_SHIP_QUEUED_S).toBe('90');
+    expect(seenEnv?.DEVKIT_SHIP_GRANTED_AT).toBe(String(Date.UTC(2026, 9, 5, 8, 21, 30) / 1000));
+  });
+
   it('releases the slot even when the script dispatch throws', async () => {
     const test = harness();
     const release = vi.fn();
@@ -198,6 +230,41 @@ describe('devkit ship machine-wide queue wiring (sc-3785)', () => {
     error.mockRestore();
   });
 
+  it("lists a branch's advisories for --advisories <branch> without queueing or running a script", () => {
+    const test = harness();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    expect(ship(['--advisories', 'feat/a'], '/consumer', test.dependencies)).toBe(0);
+    expect(log).toHaveBeenCalledWith('advisories for feat/a');
+    expect(test.events).toEqual([]);
+    log.mockRestore();
+  });
+
+  it.each([[['--advisories']], [['--advisories', 'a', 'b']]])(
+    'rejects %j: --advisories takes exactly one branch',
+    (args) => {
+      const test = harness();
+      const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      expect(ship(args, '/consumer', test.dependencies)).toBe(1);
+      expect(error.mock.calls.flat().join('\n')).toContain('devkit ship --advisories <branch>');
+      expect(test.events).toEqual([]);
+      error.mockRestore();
+    },
+  );
+
+  it('fails --advisories with a message when the history cannot be read', () => {
+    const test = harness();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    test.dependencies.listAdvisories = () => {
+      throw new Error('not a git repository');
+    };
+
+    expect(ship(['--advisories', 'feat/a'], '/consumer', test.dependencies)).toBe(1);
+    expect(error.mock.calls.flat().join('\n')).toContain('could not read the advisories');
+    error.mockRestore();
+  });
+
   it('names the mode from the parsed flags, so --dry-gates as a --body value is not a rehearsal', async () => {
     const test = harness();
     const modes: string[] = [];
@@ -244,5 +311,52 @@ describe('devkit ship machine-wide queue wiring (sc-3785)', () => {
       await ship(['feat/q', 't', '--body', '--queue', 'a.txt'], '/consumer', test.dependencies),
     ).toBe(0);
     expect(test.events).toEqual(['provenance', 'queue', 'script']);
+  });
+
+  it('skips the pre-queue pass when the ship is not waiting', async () => {
+    const test = harness();
+
+    expect(await ship(['feat/q', 't', 'a.txt'], '/consumer', test.dependencies)).toBe(0);
+    expect(test.events).toEqual(['provenance', 'queue', 'script']);
+  });
+
+  it("runs a waiting ship's pass after its ticket is published, slot-free, then the script", async () => {
+    const test = harness();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let passEnv: NodeJS.ProcessEnv | undefined;
+    let passScript = '';
+    vi.stubEnv('DEVKIT_SHIP_SLOT', 'leaked-token');
+    try {
+      test.dependencies.queueAhead = () => ['feat/a', 'feat/b'];
+      test.dependencies.runPrequeue = (script, _args, options) => {
+        test.events.push('prequeue');
+        passScript = script;
+        passEnv = options.env;
+        return 0;
+      };
+      expect(await ship(['--pr', 'feat/q', 't', 'a.txt'], '/consumer', test.dependencies)).toBe(0);
+    } finally {
+      vi.unstubAllEnvs();
+      error.mockRestore();
+    }
+    expect(test.events).toEqual(['provenance', 'queue', 'prequeue', 'script']);
+    expect(passScript).toBe('reship.sh');
+    expect(passEnv?.DEVKIT_SHIP_PREQUEUE).toBe('1');
+    expect(passEnv?.DEVKIT_SHIP_PREQUEUE_AHEAD).toBe('feat/a\nfeat/b');
+    expect(passEnv?.DEVKIT_SHIP_SLOT).toBeUndefined();
+  });
+
+  it('returns a pass refusal without running the ship, naming a full re-run', async () => {
+    const test = harness();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    test.dependencies.queueAhead = () => ['feat/a'];
+    test.dependencies.runPrequeue = () => 1;
+
+    expect(await ship(['feat/q', 't', 'a.txt'], '/consumer', test.dependencies)).toBe(1);
+    expect(test.scripts).toEqual([]);
+    expect(error.mock.calls.flat().join('\n')).toContain(
+      'refused before queueing — nothing was queued or recorded',
+    );
+    error.mockRestore();
   });
 });

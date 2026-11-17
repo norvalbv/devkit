@@ -14,6 +14,7 @@ const GIT_INTEGRATION_TESTS = [
   'cli/__tests__/baseline-status-edges.test.mts',
   'cli/__tests__/baseline-status-tests.test.mts',
   'cli/__tests__/baseline-status-run.test.mts',
+  'cli/__tests__/baseline-status-compare.test.mts',
   'cli/__tests__/dist-integrity-release-only.test.mts',
   'cli/__tests__/electron-cli-grammar-mixed.test.mts',
   'cli/__tests__/doctor-hookspath-owner.test.mts',
@@ -31,6 +32,7 @@ const GIT_INTEGRATION_TESTS = [
   'cli/__tests__/prepare-gate-worktree.test.mts',
   'cli/__tests__/reconcile.test.mts',
   'cli/__tests__/reship-anchor.test.mts',
+  'cli/__tests__/reship-no-delta-body.test.mts',
   'cli/__tests__/reship-pr-state.test.mts',
   'cli/__tests__/reship-publish-lock.test.mts',
   'cli/__tests__/reship-release-only-drift.test.mts',
@@ -68,6 +70,9 @@ const SHARED_TEST_CONFIG = {
   // Off, as before vitest 5.0.4: the module cache lives in a node_modules that worktrees and test
   // fixtures share, and a run that sees a different lockfile deletes it under the others.
   fsModuleCache: false,
+  // The worker must load the same module text a spawned `node x.mts` child does, or the two V8
+  // profiles of one file merge with mismatched offsets and its coverage is wrong.
+  experimental: { viteModuleRunner: false },
 };
 // One value for both projects: vitest throws when one groupOrder mixes maxWorkers.
 // Leaves headroom for concurrent local development; VITEST_MAX_WORKERS overrides it per run.

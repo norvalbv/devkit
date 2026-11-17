@@ -122,6 +122,8 @@ prefer established libraries over custom implementations. Before building custom
 and evaluate existing options. Before extending existing custom code, check whether replacing it
 with an established solution is the better path; prefer a ticket to "investigate and adopt X" over
 adding more custom code.
+Writing a whole file into a consumer repo: create it with `writeIfAbsent` (`cli/lib/fs-helpers.mts`,
+exclusive create), and replace one only with `writeFileAtomic` (`cli/lib/atomic-write.mts`).
 </rule>
 
 <rule name="research_is_key" severity="EXTREME">
@@ -162,7 +164,7 @@ comments citing Shortcut tickets, autonomous reports or decision records.
 
 <rule name="file_size">
 `guard.config.json` caps source files at 500 lines and test files at 2000; oversized files are
-grandfathered shrink-only. When shrinking a file below its ratchet, move whole functions, and move a
+grandfathered shrink-only. `maxLinesExtensions` puts shell scripts under the same cap. When shrinking a file below its ratchet, move whole functions, and move a
 function's tests alongside it. `guard-size preflight` previews the real ceiling before a ship.
 </rule>
 
@@ -215,7 +217,8 @@ when you need one. A plain `git push` runs the full suite through the pre-push h
 Coverage of a diff means the lines the change added. `node cli/index.mts coverage-run <test files>`
 followed by `node cli/index.mts coverage-diff` prints, per file, how many added executable lines ran
 and which did not. Scope the run to your own test files: a failed run publishes no
-report.
+report. Shell scripts are listed apart as not measurable: for each added shell branch, name the test
+that runs it, and confirm that reverting the edit fails that test.
 
 `bun run test:run:coverage:changed` prints whole-file coverage for the files changed since the
 remote `main` branch (vitest's `--changed` picks the covering tests). It still prints when a test
@@ -223,9 +226,28 @@ fails, exits non-zero, and under-reports the files whose tests failed. Run `git 
 first, since a stale ref widens the set; `COVERAGE_BASE=<ref>` picks another base (a second
 `--changed` flag makes vitest refuse to start). Untracked files count as changed, and every changed
 file gets a row under its full name, fully covered ones included. A file no test imports reads 0%,
-as it should. Spawned `node cli/index.mts` children are counted, but a module that is both imported
-and spawned under-reports. A diff touching `package.json` or `vitest.config.mjs` runs the whole
-suite.
+as it should. Spawned `node cli/index.mts` children are counted, and their hits add to the
+in-process hits of the same module. A diff touching `package.json` or `vitest.config.mjs` runs the
+whole suite.
+</workflow>
+
+<workflow name="replaying_a_ship_digest">
+A ship digest change proves itself on one past ship, rendered from a checkout of the remote `main`
+and from the branch. The id is the first line of that ship's gate log
+(`devkit-ship-hook-start:<id>`):
+
+```
+node cli/lib/ship/digest/gate-digest.mts digest "$HOME"/.devkit/telemetry/gate-events.jsonl <id>
+```
+
+The reader scans only the sink's last 16 MB, so an older ship prints nothing, or only its newest
+rows. Extract its rows first and pass that file in place of the sink:
+
+```
+rg -F '<id>' "$HOME"/.devkit/telemetry/gate-events.jsonl > /tmp/ship.jsonl
+```
+
+The trend line also needs `DEVKIT_SHIP_REPO`, `DEVKIT_SHIP_BRANCH` and the full sink.
 </workflow>
 
 </workflows>

@@ -94,6 +94,15 @@
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/comment-budget-preflight.mjs\""
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/anti-slop-preflight.sh\" --bash-writes"
+          }
+        ]
       }
     ]
   }

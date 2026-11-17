@@ -60,7 +60,7 @@ function binSourceRel(target: string): string {
     .replace(/\.mjs$/, '.mts');
 }
 
-/** Every .mts under gate-engine/ and cli/, minus eval benches and test files. */
+/** Every .mts/.mjs under gate-engine/, cli/ and scripts/, minus eval benches and test files. */
 function listSources(): string[] {
   const out: string[] = [];
   const walk = (rel: string): void => {
@@ -68,13 +68,14 @@ function listSources(): string[] {
       if (e.isDirectory()) {
         if (e.name === 'eval' || e.name === '__tests__' || e.name === 'node_modules') continue;
         walk(`${rel}/${e.name}`);
-      } else if (e.name.endsWith('.mts')) {
+      } else if (/\.m[tj]s$/.test(e.name)) {
         out.push(`${rel}/${e.name}`);
       }
     }
   };
   walk('gate-engine');
   walk('cli');
+  walk('scripts');
   return out;
 }
 
@@ -110,11 +111,12 @@ describe('every published bin dispatches through its shim', () => {
 
 // The bins are what ship, but the class is wider: `guard-decisions` rewrites argv[1] and imports a
 // sub-engine (decisions/cli.mts:40), so a SUB-engine's own guard decides whether the verb runs.
-// Sweep every non-eval gate/CLI module rather than only the 15 entry points.
+// Sweep every non-eval gate/CLI module rather than only the 15 entry points. scripts/ is in too:
+// the commit hook runs devkit's own gate scripts from there.
 //
 // eval/** is exempt: dev-only benches invoked as `node <real path>`, never published, and two of
 // them still use the raw form.
-describe('no non-realpath run-as-main guard anywhere in gate-engine/ or cli/', () => {
+describe('no non-realpath run-as-main guard anywhere in gate-engine/, cli/ or scripts/', () => {
   const files = listSources();
 
   it('finds sources to check (guards against an empty-loop pass)', () => {
@@ -159,6 +161,9 @@ describe('runAsMainComparisons', () => {
   it('flags the raw form and clears the realpathed one', () => {
     expect(
       nonRealpathGuards('if (import.meta.url === pathToFileURL(process.argv[1]).href) main();'),
+    ).toHaveLength(1);
+    expect(
+      nonRealpathGuards('if (import.meta.url === `file://${process.argv[1]}`) main();'),
     ).toHaveLength(1);
     expect(
       nonRealpathGuards(

@@ -4,14 +4,14 @@
  * simulating a clack TTY: it covers the same install/remove logic the wizard drives.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock the fallow installer so the fallow apply step never shells out to bun/npm/cargo/fallow.
 // hoisted spies let each test assert the exact call order applyInit drives.
 const fallowSpies = vi.hoisted(() => ({
-  installFallow: vi.fn(() => ({ ok: true, method: 'bun', message: 'installed fallow' })),
+  ensureFallow: vi.fn(() => ({ ok: true, message: 'installed fallow' })),
 }));
 vi.mock('../lib/install/install-fallow.mts', () => fallowSpies);
 
@@ -190,6 +190,10 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(existsSync(join(root, 'tsconfig.json'))).toBe(true);
     expect(existsSync(join(root, '.claude/skills'))).toBe(false);
     expect(existsSync(join(root, '.husky/pre-commit'))).toBe(true);
+    expect(
+      statSync(join(root, '.husky/pre-commit')).mode & 0o111,
+      'git runs only an executable hook',
+    ).not.toBe(0);
     expect(existsSync(join(root, '.devkit/oxc/manifest.json'))).toBe(true);
     expect(existsSync(join(root, '.oxlintrc.json'))).toBe(true);
     expect(existsSync(join(root, '.oxfmtrc.json'))).toBe(true);
@@ -740,7 +744,7 @@ describe('fallow apply step (mocked installer — never shells out)', () => {
       },
       devkitRef: 'v0.3.0',
     });
-    expect(fallowSpies.installFallow).toHaveBeenCalledTimes(1);
+    expect(fallowSpies.ensureFallow).toHaveBeenCalledTimes(1);
     expect(log.mock.calls.flat().join('\n')).toContain('fallow gate not wired');
     expect(existsSync(join(root, 'fallow-baselines'))).toBe(false);
     expect(config(root).components.fallow).toBe(true);
@@ -774,7 +778,7 @@ describe('fallow apply step (mocked installer — never shells out)', () => {
       selection: { ...defaultSelection(), fallow: false },
       devkitRef: 'v0.3.0',
     });
-    expect(fallowSpies.installFallow).not.toHaveBeenCalled();
+    expect(fallowSpies.ensureFallow).not.toHaveBeenCalled();
     expect(readFileSync(join(root, '.husky', 'pre-commit'), 'utf8')).not.toContain('fallow');
     expect(config(root).components.fallow).toBe(false);
   });
@@ -1008,8 +1012,7 @@ describe('self-host mode (devkit dogfooding itself)', () => {
     const hook = readFileSync(join(root, '.husky', 'pre-commit'), 'utf8');
     expect(hook).toContain('node gate-engine/deterministic/run.mts');
     expect(hook).toContain('node gate-engine/review/cli.mts --gate');
-    expect(hook).toContain('--extra "lint=bun run lint"');
-    expect(hook).not.toContain('--extra "anti-slop=');
+    expect(hook).not.toContain('--extra');
     expect(hook).not.toContain('$__dk_package_bin_dir/guard-');
 
     expect(config(root)).toMatchObject({

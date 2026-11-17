@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -78,7 +78,6 @@ const SHIP_ENV = {
   DEVKIT_SHIP_RESUMED: '0',
   DEVKIT_SHIP_ROOT: '/outer/ship/worktree',
   DEVKIT_SHIP_SOURCE_HEAD: 'b'.repeat(40),
-  DEVKIT_TELEMETRY_VERSION: '9.9.9',
   FRINK_AI_STRICT: '1',
   GUARD_AI_STRICT: '1',
   GUARD_DECISIONS_DIR: '/elsewhere/docs/decisions',
@@ -149,12 +148,10 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
   });
 
   it('reads the real inline and sourced-library exports, not only synthetic ones', () => {
-    // reship.sh exports its PR base only inside `then`, and telemetry.sh is sourced, never listed:
-    // a parser or script-set regression that drops either still passes on the other scripts' names.
+    // reship.sh exports its PR base only inside `then`, and run-gates-with-capture.sh is sourced, never
+    // listed: a parser or script-set regression that drops either still passes on the other names.
     expect(exportedNames(read('cli/lib/ship/reship.sh'))).toContain('DEVKIT_SHIP_PR_BASE_SHA');
-    expect(SHIP_SCRIPTS.flatMap((f) => exportedNames(read(f)))).toContain(
-      'DEVKIT_TELEMETRY_VERSION',
-    );
+    expect(SHIP_SCRIPTS.flatMap((f) => exportedNames(read(f)))).toContain('DEVKIT_GATE_LOG');
   });
 
   it('leaves no scrubbed name in a process launched from a ship environment', () => {
@@ -204,6 +201,11 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
     expect(env.CODEX_THREAD_ID).toBeUndefined();
   });
 
+  it("scrubs an inherited gate reason file, which turns a spawned CLI's throw into the crash exit", () => {
+    const env = envAfterSetup({ DEVKIT_GATE_REASON_FILE: '/tmp/outer/reason.txt' });
+    expect(env.DEVKIT_GATE_REASON_FILE).toBeUndefined();
+  });
+
   it('covers every one-run bypass `devkit ship --help` documents, in both envFlag spellings', () => {
     const envBlock = meta.help.split('\nEnv:\n')[1]?.split('\n\n')[0] ?? '';
     const flags = [...envBlock.matchAll(/\bGUARD_([A-Z_]+)=1/g)].map((m) => m[1]);
@@ -237,8 +239,9 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
     for (const name of knobs) expect(env[name], name).toBeUndefined();
   });
 
-  it('scrubs the queue slot of the ship running the suite', () => {
-    const slot = [SLOT_ENV, SLOT_DIR_ENV, SLOT_RELEASE_ENV];
+  it('scrubs the queue slot and queue wait of the ship running the suite', () => {
+    const timing = ['DEVKIT_SHIP_QUEUED_S', 'DEVKIT_SHIP_GRANTED_AT'];
+    const slot = [SLOT_ENV, SLOT_DIR_ENV, SLOT_RELEASE_ENV, ...timing];
     expect([...SHIP_QUEUE_ENV].sort()).toEqual([...slot].sort());
     const env = envAfterSetup(Object.fromEntries(slot.map((name) => [name, '1'])));
     for (const name of slot) expect(env[name], name).toBeUndefined();
@@ -384,6 +387,39 @@ describe('vitest.setup.mjs keeps git auto-maintenance out of fixture repos', () 
         expect(auto, gitDir).toBe('false');
         expect(readdirSync(path.join(gitDir, 'objects', 'pack')), gitDir).toEqual([]);
       }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+// Nested sandbox-exec is refused inside a sandbox (exit 71), as when a sandboxed reviewer runs this.
+const SANDBOX_OK =
+  process.platform === 'darwin' &&
+  spawnSync('sandbox-exec', ['-p', '(version 1)(allow default)', '/usr/bin/true']).status === 0;
+
+describe('vitest.setup.mjs pins the macOS xcrun cache out of a redirected TMPDIR', () => {
+  /** /usr/bin/git (the xcrun shim) under a mach-lookup-denying sandbox, as codex runs it. */
+  const sandboxedGit = (env: Record<string, string | undefined>) =>
+    spawnSync(
+      'sandbox-exec',
+      ['-p', '(version 1)(allow default)(deny mach-lookup)', '/usr/bin/git', '--version'],
+      { env },
+    );
+
+  it.skipIf(!SANDBOX_OK)('a git spawn leaves the test-owned TMPDIR empty', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'devkit-suite-xcrun-'));
+    try {
+      const { xcrun_db, ...unpinned } = envAfterSetup({ xcrun_db: '' });
+      expect(xcrun_db).toBe(path.join(os.tmpdir(), 'xcrun_db'));
+      const [bare, pinned] = ['bare', 'pinned'].map((d) => path.join(root, d));
+      mkdirSync(bare);
+      mkdirSync(pinned);
+      // Control: without the pin the sandbox reproduces the fallback, so the pinned run is not vacuous.
+      expect(sandboxedGit({ ...unpinned, TMPDIR: bare }).status).toBe(0);
+      expect(readdirSync(bare)).toContain('xcrun_db');
+      expect(sandboxedGit({ ...unpinned, xcrun_db, TMPDIR: pinned }).status).toBe(0);
+      expect(readdirSync(pinned)).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
