@@ -39,6 +39,7 @@ tester.run(
       'function read(raw: string) { const parsed = JSON.parse(raw); if (typeof parsed !== "object" || mutate(parsed)) return []; if (parsed === null) return []; if (Array.isArray(parsed)) return []; return Object.entries(parsed); }',
       'function read(raw: string) { const parsed = JSON.parse(raw); if (typeof parsed !== "object") return []; sideEffect.value; if (parsed === null) return []; if (Array.isArray(parsed)) return []; return Object.entries(parsed); }',
       'function read(raw: string) { const parsed = JSON.parse(raw); if (typeof parsed !== "object") return []; if (parsed === null) return []; if (Array.isArray(parsed)) return []; sideEffect.value = parsed; return Object.entries(parsed); }',
+      'const v = JSON.parse(raw); if (typeof v === "object" && v !== null && !Array.isArray(v)) { class C { keys = Object.keys(v); } }',
       'const e = JSON.parse(raw).entries; if (typeof e === "object" && e !== null && !Array.isArray(e)) Object.keys(e);',
       'const value = JSON.parse(text); if (typeof value === "object" && value !== null && !Array.isArray(value)) { const keys = Object.keys(value); const entries = Object.entries(value); }',
       'const value = JSON.parse(raw, reviver); if (typeof value === "object" && value !== null && !Array.isArray(value)) { Object.keys(value); mutate(value); Object.entries(value); }',

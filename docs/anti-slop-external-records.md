@@ -28,7 +28,7 @@ implementations and applies the debt record.
 | Rule                                    | Reports                                                                                                                                                                    | Accepted local proof                                                                                                          |
 | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `no-unsafe-external-record-access`      | Dynamic keys and prototype-sensitive literal keys such as `constructor`, `prototype`, and `toString` on a direct, member, or stable-`const` alias of a `JSON.parse` result | `Object.hasOwn(files, key)` controls the same access through a branch, short circuit, or terminating rejection guard          |
-| `no-unsafe-external-record-enumeration` | `Object.entries(value)` or `Object.keys(value)` where `value` has a locally provable JSON origin                                                                           | A non-null object proof (`Object(value) === value`, or `typeof value === "object" && value !== null`) plus an array rejection |
+| `no-unsafe-external-record-enumeration` | `Object.entries(value)` or `Object.keys(value)` where `value` has a locally provable JSON origin                                                                           | A non-null object proof (`Object(value) === value`, or `typeof value === "object" && value !== null`) plus an array rejection; a member with a prototype name such as `parsed.entries` needs the `typeof` form |
 
 ```js
 const payload = JSON.parse(body);
@@ -47,7 +47,11 @@ if (typeof payload === 'object' && payload !== null && !Array.isArray(payload)) 
 ```
 
 The access proof must still hold at the read: a call, property getter, assignment, update, or `delete`
-between `Object.hasOwn` and the computed access invalidates it.
+between `Object.hasOwn` and the computed access invalidates it. A proof made outside a loop does not
+cover a read inside that loop, and a proof outside a class does not cover an instance field
+initializer, because the read runs again or later; guard inside the loop or initializer instead.
+The enumeration proof is about the value's type, which cannot change for a stable `const`, so later
+calls do not invalidate it.
 Repeated member syntax is not identity proof because a getter or proxy can return a different value;
 capture a JSON-derived member in a stable `const`, then guard and access that binding.
 
@@ -65,6 +69,9 @@ It remains opt-in even after the rule itself is enabled.
 These rules deliberately do not infer provenance across function calls or validate primitive fields
 such as booleans. The access rule keeps non-literal keys conservative but does not require an own-key
 proof for fixed literals outside prototype names reachable from JSON values and the standard
-pollution path. Calls with a reviver (including spread arguments) and opted-in `Record` parameters
+pollution path. That exemption is lost when the file passes the record's binding to
+`Object.setPrototypeOf`, `Reflect.setPrototypeOf` or `Reflect.set(…, "__proto__", …)`, or assigns its
+`__proto__`; a value read through a prototype-named member (`parsed.toString`) also needs proof for
+function keys such as `call` and `name`. Calls with a reviver (including spread arguments) and opted-in `Record` parameters
 keep the stricter all-computed-key proof because they can produce custom prototypes. Broader
 guarantees require explicit boundary validation or a type-aware rule.

@@ -26,7 +26,7 @@ function rootIdentifier(expression: ESTree.Expression): ESTree.IdentifierReferen
   return current.type === 'Identifier' ? current : null;
 }
 
-/** Whether a reference to the record is a setPrototypeOf target or a `__proto__` write. */
+/** Whether a reference to the record is a setPrototypeOf target or a `__proto__` write or Reflect.set. */
 function setsPrototype(sourceCode: SourceCode, identifier: ESTree.Node): boolean {
   let current = identifier;
   let parent = current.parent;
@@ -50,7 +50,11 @@ function setsPrototype(sourceCode: SourceCode, identifier: ESTree.Node): boolean
     parent?.type === 'CallExpression' &&
     parent.arguments[0] === current &&
     (isGlobalMemberCall(sourceCode, parent, 'Object', 'setPrototypeOf') ||
-      isGlobalMemberCall(sourceCode, parent, 'Reflect', 'setPrototypeOf'))
+      isGlobalMemberCall(sourceCode, parent, 'Reflect', 'setPrototypeOf') ||
+      (isGlobalMemberCall(sourceCode, parent, 'Reflect', 'set') &&
+        parent.arguments[1]?.type !== 'SpreadElement' &&
+        parent.arguments[1] !== undefined &&
+        literalPropertyKey(parent.arguments[1]) === '__proto__'))
   );
 }
 
@@ -81,9 +85,12 @@ function needsOwnPropertyProof(
   );
 }
 
-/** A loop re-runs `child` on every iteration, except a for-in/of `right` and a for `init`. */
-function repeatsChild(loop: ESTree.Node, child: ESTree.Node): boolean {
+/** `child` runs again, or later, after code that follows it: a loop body or an instance field value. */
+function rerunsChild(loop: ESTree.Node, child: ESTree.Node): boolean {
   switch (loop.type) {
+    case 'PropertyDefinition':
+    case 'AccessorProperty':
+      return child === loop.value && !loop.static;
     case 'ForStatement':
       return child !== loop.init;
     case 'ForInStatement':
@@ -97,10 +104,10 @@ function repeatsChild(loop: ESTree.Node, child: ESTree.Node): boolean {
   }
 }
 
-function enclosingLoop(node: ESTree.Node): ESTree.Node | null {
+function rerunScope(node: ESTree.Node): ESTree.Node | null {
   let current = node;
   while (current.parent !== null && !isFunctionBoundary(current)) {
-    if (repeatsChild(current.parent, current)) return current.parent;
+    if (rerunsChild(current.parent, current)) return current.parent;
     current = current.parent;
   }
   return null;
@@ -192,11 +199,11 @@ function guarded(
   object: ESTree.Expression,
   key: ESTree.Expression,
 ): boolean {
-  // A proof made outside a loop does not survive a later iteration's mutation.
-  const loopStart = enclosingLoop(node)?.start ?? -1;
+  // A proof made outside a loop or field initializer can be stale when the access runs again or later.
+  const rerunStart = rerunScope(node)?.start ?? -1;
   if (
     branchConditions(node).some(({ condition, truthy, branch }) => {
-      if (condition.start < loopStart) return false;
+      if (condition.start < rerunStart) return false;
       const proof = truthy
         ? truthyHasOwnProof(sourceCode, condition, object, key)
         : falsyHasOwnProof(sourceCode, condition, object, key);
@@ -217,7 +224,7 @@ function guarded(
     return true;
   }
   return precedingTerminatingGuards(node).some(({ condition, boundary }) => {
-    if (condition.start < loopStart) return false;
+    if (condition.start < rerunStart) return false;
     const proof = falsyHasOwnProof(sourceCode, condition, object, key);
     return (
       proof !== null &&

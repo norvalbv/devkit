@@ -177,6 +177,10 @@ tester.run('anti-slop/no-unsafe-external-record-access', noUnsafeExternalRecordA
       errors: [error],
     },
     {
+      code: 'const record = JSON.parse(raw); Reflect.set(record, "__proto__", proto); record["extra"];',
+      errors: [error],
+    },
+    {
       code: 'const r = JSON.parse(raw); const k = next(); if (Object.hasOwn(r, k)) { for (const _ of xs) { r[k]; Reflect.deleteProperty(r, k); } }',
       errors: [error],
     },

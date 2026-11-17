@@ -295,15 +295,10 @@ function isTerminating(statement: ESTree.Statement): boolean {
 }
 
 export function isFunctionBoundary(node: ESTree.Node): boolean {
-  const parent = node.parent;
   return (
     node.type === 'ArrowFunctionExpression' ||
     node.type === 'FunctionDeclaration' ||
-    node.type === 'FunctionExpression' ||
-    // An instance field initializer runs later, during construction.
-    ((parent?.type === 'PropertyDefinition' || parent?.type === 'AccessorProperty') &&
-      parent.value === node &&
-      !parent.static)
+    node.type === 'FunctionExpression'
   );
 }
 
