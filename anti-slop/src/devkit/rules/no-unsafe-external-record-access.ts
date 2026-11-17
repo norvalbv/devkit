@@ -4,9 +4,15 @@ import {
   branchConditions,
   externalOrigin,
   hasPotentialMutationWithin,
+  isFunctionBoundary,
   isGlobalMemberCall,
+  isTransparentExpression,
   isUnaryNot,
+  JSON_VALUE_PROTOTYPE_KEYS,
+  literalPropertyKey,
+  memberKey,
   precedingTerminatingGuards,
+  resolveVariable,
   sameExpression,
   unwrapExpression,
 } from '../shared/external-records.ts';
@@ -14,50 +20,90 @@ import {
 import type { ESTree, SourceCode } from '@oxlint/plugins';
 import type { ExternalOrigin, MutationEvidence } from '../shared/external-records.ts';
 
-function literalPropertyKey(expression: ESTree.Expression): string | null {
-  const candidate = unwrapExpression(expression);
-  if (candidate.type === 'TemplateLiteral' && candidate.expressions.length === 0) {
-    return candidate.quasis[0]?.value.cooked ?? null;
-  }
-  if (
-    candidate.type === 'UnaryExpression' &&
-    (candidate.operator === '+' || candidate.operator === '-')
-  ) {
-    const argument = unwrapExpression(candidate.argument);
-    if (argument.type === 'Literal' && argument.value === Number(argument.value)) {
-      const value = Number(argument.value);
-      return String(candidate.operator === '-' ? -value : value);
-    }
-    if (
-      candidate.operator === '-' &&
-      argument.type === 'Literal' &&
-      'bigint' in argument
-    ) {
-      return String(-argument.value);
-    }
-  }
-  if (candidate.type !== 'Literal') return null;
-  if ('regex' in candidate) return null;
-  return String(candidate.value);
+function rootIdentifier(expression: ESTree.Expression): ESTree.IdentifierReference | null {
+  let current = unwrapExpression(expression);
+  while (current.type === 'MemberExpression') current = unwrapExpression(current.object);
+  return current.type === 'Identifier' ? current : null;
 }
 
-const JSON_VALUE_PROTOTYPE_KEYS = new Set([
-  ...[
-    Object.prototype,
-    Array.prototype,
-    String.prototype,
-    Number.prototype,
-    Boolean.prototype,
-  ].flatMap((prototype) => Object.getOwnPropertyNames(prototype)),
-  // `prototype` is not inherited from these values, but allowing it beside `constructor` makes the
-  // classic constructor/prototype pollution path too easy to split across fixed accesses.
-  'prototype',
-]);
+/** Whether a reference to the record is a setPrototypeOf target or a `__proto__` write. */
+function setsPrototype(sourceCode: SourceCode, identifier: ESTree.Node): boolean {
+  let current = identifier;
+  let parent = current.parent;
+  while (
+    parent !== null &&
+    ((parent.type === 'MemberExpression' && parent.object === current) ||
+      isTransparentExpression(parent))
+  ) {
+    if (
+      parent.type === 'MemberExpression' &&
+      memberKey(parent) === '__proto__' &&
+      parent.parent?.type === 'AssignmentExpression' &&
+      parent.parent.left === parent
+    ) {
+      return true;
+    }
+    current = parent;
+    parent = current.parent;
+  }
+  return (
+    parent?.type === 'CallExpression' &&
+    parent.arguments[0] === current &&
+    (isGlobalMemberCall(sourceCode, parent, 'Object', 'setPrototypeOf') ||
+      isGlobalMemberCall(sourceCode, parent, 'Reflect', 'setPrototypeOf'))
+  );
+}
 
-function needsOwnPropertyProof(key: ESTree.Expression, origin: ExternalOrigin): boolean {
-  if (origin !== 'json') return true;
+function prototypeMayChange(sourceCode: SourceCode, object: ESTree.Expression): boolean {
+  const root = rootIdentifier(object);
+  const variable = root === null ? null : resolveVariable(sourceCode, root);
+  return (
+    variable !== null &&
+    variable.references.some((reference) => setsPrototype(sourceCode, reference.identifier))
+  );
+}
+
+const FUNCTION_PROTOTYPE_KEYS = new Set(Object.getOwnPropertyNames(Function.prototype));
+
+function needsOwnPropertyProof(
+  sourceCode: SourceCode,
+  object: ESTree.Expression,
+  key: ESTree.Expression,
+  origin: ExternalOrigin,
+): boolean {
+  if (origin !== 'json' && origin !== 'json-inherited') return true;
   const literal = literalPropertyKey(key);
-  return literal === null || JSON_VALUE_PROTOTYPE_KEYS.has(literal);
+  return (
+    literal === null ||
+    JSON_VALUE_PROTOTYPE_KEYS.has(literal) ||
+    (origin === 'json-inherited' && FUNCTION_PROTOTYPE_KEYS.has(literal)) ||
+    prototypeMayChange(sourceCode, object)
+  );
+}
+
+/** A loop re-runs `child` on every iteration, except a for-in/of `right` and a for `init`. */
+function repeatsChild(loop: ESTree.Node, child: ESTree.Node): boolean {
+  switch (loop.type) {
+    case 'ForStatement':
+      return child !== loop.init;
+    case 'ForInStatement':
+    case 'ForOfStatement':
+      return child !== loop.right;
+    case 'WhileStatement':
+    case 'DoWhileStatement':
+      return true;
+    default:
+      return false;
+  }
+}
+
+function enclosingLoop(node: ESTree.Node): ESTree.Node | null {
+  let current = node;
+  while (current.parent !== null && !isFunctionBoundary(current)) {
+    if (repeatsChild(current.parent, current)) return current.parent;
+    current = current.parent;
+  }
+  return null;
 }
 
 function samePropertyKey(
@@ -146,8 +192,11 @@ function guarded(
   object: ESTree.Expression,
   key: ESTree.Expression,
 ): boolean {
+  // A proof made outside a loop does not survive a later iteration's mutation.
+  const loopStart = enclosingLoop(node)?.start ?? -1;
   if (
     branchConditions(node).some(({ condition, truthy, branch }) => {
+      if (condition.start < loopStart) return false;
       const proof = truthy
         ? truthyHasOwnProof(sourceCode, condition, object, key)
         : falsyHasOwnProof(sourceCode, condition, object, key);
@@ -168,6 +217,7 @@ function guarded(
     return true;
   }
   return precedingTerminatingGuards(node).some(({ condition, boundary }) => {
+    if (condition.start < loopStart) return false;
     const proof = falsyHasOwnProof(sourceCode, condition, object, key);
     return (
       proof !== null &&
@@ -217,7 +267,7 @@ export const noUnsafeExternalRecordAccessRule = defineRule({
           const origin = externalOrigin(context.sourceCode, node.object, includeRecordParameters);
           if (
             origin !== null &&
-            needsOwnPropertyProof(node.property, origin) &&
+            needsOwnPropertyProof(context.sourceCode, node.object, node.property, origin) &&
             !guarded(context.sourceCode, mutations, node, node.object, node.property)
           ) {
             context.report({
