@@ -562,7 +562,8 @@ describe('ship-branch.sh — a briefed new baseline its own gate removed', () =>
   it('records the removed path and resumes on it', () => {
     const repo = seedShipRepoLocalRemote();
     seedUpgradedSizeBaseline(repo);
-    installHook(repo.dir, [...REMOVE_CANONICAL_HOOK, 'sleep 30 &'].join('\n'));
+    installHook(repo.dir, REMOVE_CANONICAL_HOOK.join('\n'));
+    installPostCommitHang(repo.dir);
     const { hookCount, publishEnv } = publishEnvFor(repo.dir, repo.env);
     const argv = [
       scriptPath,
@@ -582,7 +583,7 @@ describe('ship-branch.sh — a briefed new baseline its own gate removed', () =>
     });
 
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(REAPED_15S_BANNER);
+    expect(first.stderr).toMatch(POST_COMMIT_CEILING_BANNER);
     const preserved = repo.git(['rev-parse', 'feat/upgrade-resume']).trim();
     expect(repo.git(['cat-file', 'blob', 'refs/devkit/ship-gate-adds/feat/upgrade-resume'])).toBe(
       `${CANONICAL_SIZE}\0`,

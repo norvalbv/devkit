@@ -90,13 +90,13 @@ describe('ship_resume_extras_notice', () => {
 
   it('reship.sh: its cleanup() trap is only installed after the notice is disarmed', () => {
     // cleanup() runs other commands before rewrite_ref_cleanup, so it must never be the live EXIT
-    // trap while the notice is armed.
+    // trap while the notice is armed. The disarm sits inside the non-pre-queue block, which the
+    // pre-queue pass leaves by exiting before the trap is installed.
     const source = readFileSync(here('reship.sh'), 'utf8');
+    const disarm = source.search(/\n\s*RESUME_EXTRAS_UNRECORDED=0\n/);
 
-    expect(source.indexOf('\nRESUME_EXTRAS_UNRECORDED=0\n')).toBeGreaterThan(0);
-    expect(source.indexOf('\ntrap cleanup EXIT\n')).toBeGreaterThan(
-      source.indexOf('\nRESUME_EXTRAS_UNRECORDED=0\n'),
-    );
+    expect(disarm).toBeGreaterThan(0);
+    expect(source.indexOf('\ntrap cleanup EXIT\n')).toBeGreaterThan(disarm);
   });
 });
 

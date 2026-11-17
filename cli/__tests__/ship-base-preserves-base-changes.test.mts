@@ -977,7 +977,9 @@ describe('ship --base: the hunk-level verdict is taken before any branch exists 
 
   it('steps aside for an existing branch so a preserved-commit retry reaches its OWN refusal', () => {
     const { dir, env, git, bare } = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
-    git(['branch', 'feat/again']); // a prior attempt's branch, still at the fork point
+    // A prior attempt's branch holding its own commit; an empty one at the fork point is reclaimed.
+    const prior = git(['commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'prior attempt']).trim();
+    git(['branch', 'feat/again', prior]);
     advanceBase(bare, (c) => writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l5', 'l5-BASE')));
     writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l5', 'l5-CALLER'));
 
