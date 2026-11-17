@@ -354,6 +354,100 @@ describe('advisory hooks on the captured patch', () => {
     expect(readFileSync(log, 'utf8')).toContain(join(root, 'pkg/src/m.ts'));
   });
 
+  it('size-headroom-check measures the surviving files against the root config', () => {
+    const root = codexRepo();
+    applyCapturedPatch(root);
+    write(root, 'guard.config.json', '{}');
+    const log = join(root, 'argv.log');
+    const overrun = `echo '🚫 1 file(s) exceed the line limit' >&2\nexit 1\n`;
+    stubBin(root, 'guard-size', `echo "$*" >> '${log}'\n${overrun}`);
+    const hook = join(HOOKS, 'size-headroom-check.mjs');
+    const run = runHook(hook, codexPayload(root, 'PostToolUse'), join(root, 'pkg'));
+    expect(readFileSync(log, 'utf8').trim()).toBe(
+      'preflight --base HEAD -- pkg/src/a.test.ts pkg/src/b.ts pkg/src/n.ts',
+    );
+    expect(JSON.parse(run.stdout).hookSpecificOutput.additionalContext).toContain('guard-size');
+  });
+
+  it('fanout-brief counts every file a patch adds to one folder in one preflight', () => {
+    const root = codexRepo();
+    const log = join(root, 'argv.log');
+    stubBin(root, 'guard-fanout', `echo "$*" >> '${log}'\necho 'over the cap'\nexit 1\n`);
+    const adds = ['x1', 'x2', 'x3'].map((n) => `*** Add File: src/${n}.ts\n+x`);
+    const payload = codexPayload(root, 'PreToolUse', patch(...adds));
+    const run = runHook(join(HOOKS, 'fanout-brief.mjs'), payload, join(root, 'pkg'));
+    expect(readFileSync(log, 'utf8').trim()).toBe(
+      'preflight -- pkg/src/x1.ts pkg/src/x2.ts pkg/src/x3.ts pkg/src/b.ts',
+    );
+    const context = JSON.parse(run.stdout).hookSpecificOutput.additionalContext;
+    expect(context).toContain('`pkg/src/x3.ts` will block your commit');
+    expect(context).toContain('place them in a subfolder');
+  });
+
+  it('fanout-brief keeps patch files inside a project dir named through a symlink', () => {
+    const root = codexRepo();
+    const link = join(mkTmp('codex-link-'), 'repo');
+    symlinkSync(root, link);
+    const log = join(root, 'argv.log');
+    stubBin(root, 'guard-fanout', `echo "$*" >> '${log}'\necho 'over the cap'\nexit 1\n`);
+    const payload = codexPayload(root, 'PreToolUse', patch('*** Add File: src/x1.ts\n+x'));
+    runHook(join(HOOKS, 'fanout-brief.mjs'), payload, join(root, 'pkg'), {
+      CLAUDE_PROJECT_DIR: link,
+    });
+    expect(readFileSync(log, 'utf8').trim()).toBe('preflight -- pkg/src/x1.ts pkg/src/b.ts');
+  });
+
+  it('fanout-brief preflights each folder of a patch apart and still prints one result', () => {
+    const root = codexRepo();
+    const log = join(root, 'argv.log');
+    stubBin(root, 'guard-fanout', `echo "$*" >> '${log}'\necho "over: $3"\nexit 1\n`);
+    const adds = patch('*** Add File: src/a1.ts\n+x', '*** Add File: ../top/b1.ts\n+x');
+    const payload = codexPayload(root, 'PreToolUse', adds);
+    const run = runHook(join(HOOKS, 'fanout-brief.mjs'), payload, join(root, 'pkg'));
+    expect(readFileSync(log, 'utf8').trim().split('\n').sort()).toEqual([
+      'preflight -- pkg/src/a1.ts pkg/src/b.ts',
+      'preflight -- top/b1.ts',
+    ]);
+    const context = JSON.parse(run.stdout).hookSpecificOutput.additionalContext;
+    expect(context).toContain('over: pkg/src/a1.ts');
+    expect(context).toContain('over: top/b1.ts');
+  });
+
+  it('placement-brief runs each new file from the nearest config root of a monorepo', () => {
+    const root = codexRepo();
+    write(root, 'guard.config.json', '{}');
+    write(root, 'pkg/guard.config.json', '{}');
+    const log = join(root, 'argv.log');
+    stubBin(root, 'guard-structure', `echo "$PWD $*" >> '${log}'\necho "blocks: $3"\nexit 1\n`);
+    const adds = patch('*** Add File: src/new.ts\n+x', '*** Add File: ../top/x.ts\n+x');
+    const payload = codexPayload(root, 'PreToolUse', adds);
+    const run = runHook(join(HOOKS, 'placement-brief.mjs'), payload, join(root, 'pkg'));
+    expect(readFileSync(log, 'utf8').trim().split('\n').sort()).toEqual([
+      `${root} preflight -- top/x.ts`,
+      `${root}/pkg preflight -- src/new.ts`,
+    ]);
+    const context = JSON.parse(run.stdout).hookSpecificOutput.additionalContext;
+    expect(context).toContain('blocks: src/new.ts');
+    expect(context).toContain('blocks: top/x.ts');
+  });
+
+  it('placement-brief preflights only the files the patch creates, from the root config', () => {
+    const root = codexRepo();
+    write(root, 'pkg/src/c.ts', 'c\n');
+    write(root, 'pkg/src/m.ts', 'm\n');
+    write(root, 'guard.config.json', '{}');
+    const log = join(root, 'argv.log');
+    stubBin(root, 'guard-structure', `echo "$PWD $*" >> '${log}'\necho 'blocks: n.ts'\nexit 1\n`);
+    const hook = join(HOOKS, 'placement-brief.mjs');
+    const run = runHook(hook, codexPayload(root, 'PreToolUse'), join(root, 'pkg'));
+    expect(readFileSync(log, 'utf8').trim()).toBe(
+      `${root} preflight -- pkg/src/a.test.ts pkg/src/n.ts`,
+    );
+    const context = JSON.parse(run.stdout).hookSpecificOutput.additionalContext;
+    expect(context).toContain('`pkg/src/n.ts`) break the folder-structure gate');
+    expect(context).toContain('blocks: n.ts');
+  });
+
   it('scoped-targets records brief telemetry for the apply_patch tool name', () => {
     const sink = join(mkTmp('codex-events-'), 'events.jsonl');
     spawnSync(
@@ -379,7 +473,9 @@ describe('edit-targets-lib ownership', () => {
       adhd: false,
       priorArtGate: false,
     };
-    expect(hookScriptsFor({ ...none, comments: true })).toContain(EDIT_TARGETS_LIB);
+    for (const owner of ['comments', 'fanout', 'placement', 'size']) {
+      expect(hookScriptsFor({ ...none, [owner]: true })).toContain(EDIT_TARGETS_LIB);
+    }
     expect(hookScriptsFor({ ...none, agentHooks: true })).toContain(EDIT_TARGETS_LIB);
     expect(hookScriptsFor({ ...none, fallow: true, adhd: true })).not.toContain(EDIT_TARGETS_LIB);
   });

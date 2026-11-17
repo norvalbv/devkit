@@ -59,10 +59,12 @@ describe('placement-brief', () => {
     expect(calls()).toEqual([`${root} preflight -- src/helpers.ts`]);
   });
 
-  it('answers a Cursor payload with agent_message', () => {
+  it('answers a Cursor payload with additional_context, never a deny-only or permission key', () => {
     stub(root, 'guard-structure', 'blocks: Allowed names = index.ts', 1);
     const out = JSON.parse(run({ target_file: 'src/helpers.ts' }, { cursor_version: '1.7' }));
-    expect(out.agent_message).toContain('Allowed names = index.ts');
+    expect(out).toEqual({
+      additional_context: expect.stringContaining('Allowed names = index.ts'),
+    });
   });
 
   it.each([0, 2])('stays silent when the preflight exits %i', (status) => {

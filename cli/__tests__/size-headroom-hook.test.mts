@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { nativeProjection } from '../lib/install/hook-registration-ledger/lifecycle.mts';
 import { HOOK_REGISTRATIONS } from '../lib/install/hook-registration-ledger/registrations.mts';
 import {
+  EDIT_TARGETS_LIB,
   hookScriptsFor,
   selectedHookAssets,
   SIZE_HEADROOM_HOOK,
@@ -203,7 +204,7 @@ describe('size-headroom-check ownership', () => {
   };
 
   it('is installed by the size guard alone, never by the agent-hook bundle', () => {
-    expect(hookScriptsFor({ ...none, size: true })).toEqual([SIZE_HEADROOM_HOOK]);
+    expect(hookScriptsFor({ ...none, size: true })).toEqual([EDIT_TARGETS_LIB, SIZE_HEADROOM_HOOK]);
     expect(hookScriptsFor({ ...none, agentHooks: true })).not.toContain(SIZE_HEADROOM_HOOK);
     const assets = selectedHookAssets({ guards: ['size'] });
     expect(assets.components).toContain('size');
