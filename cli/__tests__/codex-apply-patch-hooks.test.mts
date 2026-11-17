@@ -397,6 +397,20 @@ describe('advisory hooks on the captured patch', () => {
     expect(readFileSync(log, 'utf8').trim()).toBe('preflight -- pkg/src/x1.ts pkg/src/b.ts');
   });
 
+  it('fanout-brief never maps a patch path outside the repo into a symlinked project dir', () => {
+    const root = codexRepo();
+    const link = join(mkTmp('codex-link-'), 'repo');
+    symlinkSync(root, link);
+    const log = join(root, 'argv.log');
+    stubBin(root, 'guard-fanout', `echo "$*" >> '${log}'\necho 'over the cap'\nexit 1\n`);
+    const outside = join(dirname(root), 'repo', 'src', 'x.ts');
+    const payload = codexPayload(root, 'PreToolUse', patch(`*** Add File: ${outside}\n+x`));
+    runHook(join(HOOKS, 'fanout-brief.mjs'), payload, join(root, 'pkg'), {
+      CLAUDE_PROJECT_DIR: link,
+    });
+    expect(existsSync(log)).toBe(false);
+  });
+
   it('fanout-brief preflights each folder of a patch apart and still prints one result', () => {
     const root = codexRepo();
     const log = join(root, 'argv.log');

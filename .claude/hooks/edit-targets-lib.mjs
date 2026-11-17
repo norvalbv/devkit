@@ -44,7 +44,8 @@ export function writtenFiles(input, root) {
   if (input?.tool_name !== 'Write') {
     // Patch paths are physical; re-spell them under `root`, which may name the project via a symlink.
     const real = baseDir(root);
-    return patchTargets(input).map((p) => path.resolve(root, path.relative(real, p)));
+    const inside = (p) => p.startsWith(real + path.sep);
+    return patchTargets(input).map((p) => (inside(p) ? path.join(root, path.relative(real, p)) : p));
   }
   const toolInput = input.tool_input ?? {};
   const key = ['file_path', 'path', 'target_file', 'target_path'].find((k) => toolInput[k]?.trim?.());
@@ -54,7 +55,7 @@ export function writtenFiles(input, root) {
 /** Claude names the project root; Codex runs the hook from the session cwd, maybe a subdirectory. */
 export function projectRoot() {
   if (process.env.CLAUDE_PROJECT_DIR) return process.env.CLAUDE_PROJECT_DIR;
-  const run = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+  const run = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 5000 });
   return (run.status === 0 && run.stdout.trim()) || process.cwd();
 }
 
