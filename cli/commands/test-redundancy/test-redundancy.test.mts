@@ -113,6 +113,7 @@ describe('devkit test-redundancy', () => {
 
     expect(code).toBe(0);
     expect(out).toContain('Not judged: fallow 3.35.0 has no --kill-matrix-for; it needs 3.40.0');
+    expect(out).toContain('bun add -g fallow@3.42.0');
     expect(runFallow).not.toHaveBeenCalled();
   });
 
