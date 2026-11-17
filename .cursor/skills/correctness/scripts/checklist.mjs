@@ -17,7 +17,8 @@
  * discarded returns ride the recovery half of the state lens (see the brief's category text).
  */
 
-import { readFileSync, rmSync } from 'node:fs';
+import { readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { createChecklistStore } from '../../_devkit/checklist-store.mjs';
 import {
   authoritativeStagedFilesOverride,
@@ -80,6 +81,37 @@ const lensPath = (lens, chunk) => {
 };
 
 const log = console.log;
+
+// Non-empty lens checklists as `--lens` values (best-effort: an fs error yields none). Chunk suffixes
+// are dropped: chunks share item names, so a chunk menu could steer a judge into another's file.
+function lensGroupsPresent() {
+  const dir = dirname(CHECKLIST_PATH);
+  try {
+    const groups = readdirSync(dir).flatMap((name) => {
+      const m = /^\.correctness-review-(.+)\.json$/.exec(name);
+      if (!m || !statSync(join(dir, name), { throwIfNoEntry: false })?.size) return [];
+      return [m[1].replace(/\+c\d+$/, '').replaceAll('+', ',')];
+    });
+    return [...new Set(groups)].sort();
+  } catch {
+    return [];
+  }
+}
+
+// Names the path read and the lens checklists present, never picking one. A lensed call sees only
+// its own group, so the hint cannot steer one parallel judge into another's file.
+function exitMissingChecklist(path, lens, chunk) {
+  log(`❌ No checklist at ${path}`);
+  const own = lens && [...lens].sort().join(',');
+  const flags = own ? ` --lens ${own}${chunk != null ? ` --chunk ${chunk}` : ''}` : '';
+  const groups = own && chunk != null ? [] : lensGroupsPresent().filter((g) => !own || g === own);
+  if (groups.length === 0) log(`Run: generate${flags}`);
+  else
+    log(
+      `Found lens checklist(s): ${groups.map((g) => `--lens ${g}`).join(', ')} — repeat this command with the --lens (and any --chunk) your prompt's command shows.`,
+    );
+  process.exit(1);
+}
 
 // Union of declared roots — from guard.config.json (NOT hardcoded), so the checklist scopes to
 // ANY repo's layout. No/unreadable config or no declared roots → all staged files (the gate
@@ -223,6 +255,8 @@ const { chunk, rest } = extractChunk(afterLens);
 ACTIVE_PATH = lensPath(lens, chunk);
 const args = rest;
 const cmd = args[0];
+if (['status', 'check-item', 'finalize'].includes(cmd) && !store.load())
+  exitMissingChecklist(ACTIVE_PATH, lens, chunk);
 switch (cmd) {
   case 'generate':
     generate(lens);

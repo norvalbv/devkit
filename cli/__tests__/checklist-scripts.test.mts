@@ -762,3 +762,119 @@ describe('checklist scripts — git runs with stdin closed', () => {
     expect(calls.filter((c) => c.startsWith('piped'))).toEqual([]);
   });
 });
+
+describe('correctness checklist — a missing artifact names the path read and the lens groups', () => {
+  const CORRECTNESS = fileURLToPath(
+    new URL('../../skills/correctness/scripts/checklist.mjs', import.meta.url),
+  );
+  const correctness = (repo, args) =>
+    spawnSync('node', [CORRECTNESS, ...args], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: { ...process.env, DEVKIT_CHECKLIST_KEEP: '1' },
+    });
+
+  function stagedRepo() {
+    const repo = mkdtempSync(join(tmpdir(), 'checklist-lens-hint-'));
+    dirs.push(repo);
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'src', 'a.ts'), 'export const a = 1;\n');
+    execFileSync('git', ['add', '-A'], { cwd: repo });
+    return repo;
+  }
+
+  const lensFile = (repo, group, body = '{"items":[]}') => {
+    const p = join(repo, '.claude', `.correctness-review-${group}.json`);
+    mkdirSync(join(repo, '.claude'), { recursive: true });
+    writeFileSync(p, body);
+    return p;
+  };
+
+  it('check-item without --lens after a lensed generate names the path and the --lens remedy', () => {
+    const repo = stagedRepo();
+    const gen = correctness(repo, ['generate', '--lens', 'writer-reader-contracts']);
+    expect(gen.status, gen.stdout + gen.stderr).toBe(0);
+    const p = join(repo, '.claude', '.correctness-review-writer-reader-contracts.json');
+    const before = readFileSync(p, 'utf8');
+
+    const r = correctness(repo, ['check-item', 'writer-reader-contracts', '--pass']);
+
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('No checklist at .claude/.correctness-review.json');
+    expect(r.stdout).toContain('--lens writer-reader-contracts');
+    expect(r.stdout).not.toContain('Run: generate');
+    expect(readFileSync(p, 'utf8')).toBe(before);
+    expect(existsSync(join(repo, '.claude', '.correctness-review.json'))).toBe(false);
+  });
+
+  it("a dropped --chunk lists only the caller's own group, once, and never a chunk menu", () => {
+    const repo = stagedRepo();
+    const c0 = lensFile(repo, 'state-transitions+c0');
+    const c1 = lensFile(repo, 'state-transitions+c1');
+    lensFile(repo, 'concurrency-races+writer-reader-contracts');
+
+    const r = correctness(repo, [
+      'check-item',
+      'state-transitions',
+      '--pass',
+      '--lens',
+      'state-transitions',
+    ]);
+
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain(
+      'No checklist at .claude/.correctness-review-state-transitions.json',
+    );
+    expect(r.stdout.match(/--lens state-transitions\b/g)).toHaveLength(1);
+    expect(r.stdout).not.toContain('writer-reader-contracts');
+    expect(r.stdout).not.toMatch(/--chunk \d/);
+    expect(readFileSync(c0, 'utf8')).toBe('{"items":[]}');
+    expect(readFileSync(c1, 'utf8')).toBe('{"items":[]}');
+  });
+
+  it('skips empty placeholders and the un-lensed file', () => {
+    const repo = stagedRepo();
+    lensFile(repo, 'concurrency-races', '');
+    lensFile(repo, 'writer-reader-contracts');
+
+    const r = correctness(repo, ['status']);
+
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('--lens writer-reader-contracts');
+    expect(r.stdout).not.toContain('concurrency-races');
+  });
+
+  it('a chunked call whose own chunk is absent points at its own generate, not a sibling chunk', () => {
+    const repo = stagedRepo();
+    lensFile(repo, 'state-transitions+c0');
+
+    const r = correctness(repo, ['finalize', '--lens', 'state-transitions', '--chunk', '1']);
+
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('Run: generate --lens state-transitions --chunk 1');
+    expect(r.stdout).not.toContain('Found lens checklist');
+  });
+
+  it('a lensed call whose own group is absent points at its own generate, not a sibling', () => {
+    const repo = stagedRepo();
+    lensFile(repo, 'writer-reader-contracts');
+
+    const r = correctness(repo, ['finalize', '--lens', 'state-transitions']);
+
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('Run: generate --lens state-transitions');
+    expect(r.stdout).not.toContain('writer-reader-contracts');
+  });
+
+  it('with no .claude directory, exits 1 with the path and the generate remedy', () => {
+    const repo = stagedRepo();
+
+    const r = correctness(repo, ['finalize']);
+
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('No checklist at .claude/.correctness-review.json');
+    expect(r.stdout).toContain('Run: generate');
+    expect(r.stderr).toBe('');
+  });
+});
