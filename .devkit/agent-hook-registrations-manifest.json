@@ -111,6 +111,30 @@
       }
     },
     {
+      "registrationId": "fanout:new-file-brief",
+      "ownerId": "fanout",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "PreToolUse",
+        "matcher": "Write",
+        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/fanout-brief.mjs\""
+      }
+    },
+    {
+      "registrationId": "placement:brief",
+      "ownerId": "placement",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "PreToolUse",
+        "matcher": "Write",
+        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/placement-brief.mjs\""
+      }
+    },
+    {
       "registrationId": "prior-art-gate:post-task",
       "ownerId": "priorArtGate",
       "provider": "claude",
@@ -156,6 +180,18 @@
         "event": "PreToolUse",
         "matcher": "ExitPlanMode|Task|Agent",
         "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs\""
+      }
+    },
+    {
+      "registrationId": "size:post-edit",
+      "ownerId": "size",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "PostToolUse",
+        "matcher": "Edit|Write|MultiEdit",
+        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/size-headroom-check.mjs\""
       }
     },
     {
@@ -255,6 +291,30 @@
       }
     },
     {
+      "registrationId": "fanout:new-file-brief",
+      "ownerId": "fanout",
+      "provider": "codex",
+      "installScope": "shared",
+      "destinationRel": ".codex/hooks.json",
+      "native": {
+        "event": "PreToolUse",
+        "matcher": "Write",
+        "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/fanout-brief.mjs\""
+      }
+    },
+    {
+      "registrationId": "placement:brief",
+      "ownerId": "placement",
+      "provider": "codex",
+      "installScope": "shared",
+      "destinationRel": ".codex/hooks.json",
+      "native": {
+        "event": "PreToolUse",
+        "matcher": "Write",
+        "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/placement-brief.mjs\""
+      }
+    },
+    {
       "registrationId": "prior-art-gate:post-task",
       "ownerId": "priorArtGate",
       "provider": "codex",
@@ -288,6 +348,18 @@
         "event": "PreToolUse",
         "matcher": "ExitPlanMode|Task|Agent",
         "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/prior-art-gate.mjs\""
+      }
+    },
+    {
+      "registrationId": "size:post-edit",
+      "ownerId": "size",
+      "provider": "codex",
+      "installScope": "shared",
+      "destinationRel": ".codex/hooks.json",
+      "native": {
+        "event": "PostToolUse",
+        "matcher": "Edit|Write|MultiEdit",
+        "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/size-headroom-check.mjs\""
       }
     },
     {
@@ -348,6 +420,18 @@
         "event": "preToolUse",
         "matcher": "Write",
         "command": ".cursor/hooks/decision-scope-brief.mjs"
+      }
+    },
+    {
+      "registrationId": "placement:brief",
+      "ownerId": "placement",
+      "provider": "cursor",
+      "installScope": "shared",
+      "destinationRel": ".cursor/hooks.json",
+      "native": {
+        "event": "preToolUse",
+        "matcher": "Write",
+        "command": ".cursor/hooks/placement-brief.mjs"
       }
     }
   ]
