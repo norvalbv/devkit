@@ -16,7 +16,7 @@ import { pathToFileURL } from 'node:url';
 
 /**
  * Pinned fallow version. NEVER @latest — a floating tag makes the gate non-deterministic
- * and can drift below FALLOW_GATE_MIN_VERSION. 3.35.0 sits well above the default floor
+ * and can drift below FALLOW_GATE_MIN_VERSION. 3.42.0 sits well above the default floor
  * (2.46.0), so a pinned install always satisfies the gate's version check.
  *
  * The floor here is >=3.4.2, not just "newer is nicer". Through 2.x, `fallow audit`
@@ -34,7 +34,7 @@ import { pathToFileURL } from 'node:url';
  * fallow 3.0.0 is a platform milestone, NOT a breaking change: CLI flags, config, and the
  * `audit --format json` contract the staged gate reads are unchanged across the major.
  */
-export const FALLOW_PINNED_VERSION = '3.35.0';
+export const FALLOW_PINNED_VERSION = '3.42.0';
 
 // Shared shape for every command helper's options object (the destructured `opts` arg).
 interface FallowCommandOptions {
