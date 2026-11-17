@@ -3187,14 +3187,6 @@
       "count": 3
     },
     {
-      "fingerprint": "57a3ecd4aa6d6f52ffdf79b29f6d69069648cbe91f547372d747d201f174dbb2",
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "gate-engine/edge-cases/__tests__/results-privacy.test.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "typeof v",
-      "count": 1
-    },
-    {
       "fingerprint": "57ddf564e07ae56ea4ed7870276379209c8b5e17ea60ad311b7b8fe975f37bc2",
       "ruleId": "anti-slop/no-known-value-widening",
       "file": "gate-engine/eval/render.mts",

@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { findLeaks } from '../eval/lib/scrub.mts';
 
 const baselinePath = path.join(
@@ -32,15 +33,18 @@ const WORD_RE = /^[a-zA-Z0-9 _.:/+-]{1,80}$/; // short labels: story ids, model 
 
 /** Recursively collect every string LEAF value (keys are checked separately). */
 const stringLeaves = (v, out = []) => {
-  if (typeof v === 'string') out.push(v);
+  const str = z.string().safeParse(v);
+  const rec = z.record(z.string(), z.unknown()).safeParse(v);
+  if (str.success) out.push(str.data);
   else if (Array.isArray(v)) for (const x of v) stringLeaves(x, out);
-  else if (v && typeof v === 'object') for (const x of Object.values(v)) stringLeaves(x, out);
+  else if (rec.success) for (const x of Object.values(rec.data)) stringLeaves(x, out);
   return out;
 };
 const allKeys = (v, out = []) => {
+  const rec = z.record(z.string(), z.unknown()).safeParse(v);
   if (Array.isArray(v)) for (const x of v) allKeys(x, out);
-  else if (v && typeof v === 'object')
-    for (const [k, x] of Object.entries(v)) {
+  else if (rec.success)
+    for (const [k, x] of Object.entries(rec.data)) {
       out.push(k);
       allKeys(x, out);
     }

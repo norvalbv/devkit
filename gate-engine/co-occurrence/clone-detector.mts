@@ -30,7 +30,6 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdtempSync,
@@ -54,10 +53,12 @@ import {
 import { flagReader } from './argv.mts';
 import { loadChangedSet } from './changed-files.mts';
 import { isExpired } from './decay.mts';
-import { cloneRow, lapsedNote, loc } from './clones/clone-format.mts';
+import { cloneKey, cloneRow, lapsedNote, loc } from './clones/clone-format.mts';
 import type { Clone, JscpdReport } from './clones/clone-types.mts';
 import { IMPORT_IGNORE_PATTERNS } from './clones/import-ignore-patterns.mts';
 import { JSCPD_OWN_ROOT, jscpdVersionMismatch, resolveJscpdBin } from './jscpd-bin.mts';
+
+export { hashFragment } from './clones/clone-format.mts';
 
 // Resolve config against the consumer cwd (W-3). Scan roots, allowlist, jscpd cwd all key off it.
 const cfg = resolveGuardConfig(process.cwd());
@@ -198,7 +199,6 @@ export function detectClones({
 }
 
 const BACKSLASH_RE = /\\/g;
-const WHITESPACE_RE = /\s+/g;
 /**
  * Repo-root-relative, forward-slash allowlist key. Repo-root-relative is the ONLY normalisation:
  * it is what git reports, so `--changed` scoping and the allowlist agree with the paths a human
@@ -219,18 +219,6 @@ export function relPath(f: string): string {
     if (path.startsWith(`${root}/`)) return path.slice(root.length + 1);
   }
   return path;
-}
-
-/** Stable key: hash the fragment with whitespace collapsed so reformatting
- * doesn't change the key, but real code changes do. */
-export function hashFragment(fragment: string): string {
-  const normalised = fragment.replace(WHITESPACE_RE, ' ').trim();
-  return createHash('sha256').update(normalised).digest('hex').slice(0, 16);
-}
-
-/** Allowlist key: the file pair plus the fragment, so approving one copy never approves a third. */
-function cloneKey(fileA: string, fileB: string, fragment = ''): string {
-  return hashFragment(`${[fileA, fileB].sort().join(' ')} ${fragment}`);
 }
 
 /** HEAD when it exists; null on an unborn branch or outside git (every clone is then new). */

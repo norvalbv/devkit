@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { z } from 'zod';
 import { execJudgeAsync } from '../../judge/run-judge.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../../judge/judge-isolation.mts';
 import {
@@ -28,6 +29,15 @@ import {
   writeTranscript,
 } from './bench.mts';
 import { matchFindings } from './lib/match.mts';
+
+// The slice of the committed baseline the `--fail` gate reads, parsed once at the file boundary.
+const BaselineSchema = z.object({
+  winner: z.string().nullish(),
+  best: z.string().nullish(),
+  hashes: z.record(z.string(), z.string()),
+  winnerPerCaseBinary: z.record(z.string(), z.number()),
+  winnerGuardFired: z.record(z.string(), z.boolean()),
+});
 import { bcaCI, mcnemarMidP, mean, percentileCI, wilcoxonSignedRank } from './lib/stats.mts';
 import { CEILING_PROMPT } from './prompts.mts';
 
@@ -318,7 +328,7 @@ export async function main() {
       console.error('bench --fail: no baseline');
       process.exit(2);
     }
-    const base = JSON.parse(readFileSync(baselinePath, 'utf8'));
+    const base = BaselineSchema.parse(JSON.parse(readFileSync(baselinePath, 'utf8')));
     const now = comparabilityHashes();
     const mismatches = ['corpusHash', 'guardsHash', 'matcherHash', 'benchCodeHash'].filter(
       (k) => base.hashes[k] !== now[k],

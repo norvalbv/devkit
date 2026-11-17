@@ -236,13 +236,14 @@ export function emitGateStep(
   optedOut: boolean,
 ): void {
   const gate = label.replace(GUARD_PREFIX_RE, '');
+  const exitCode = Number(rc);
   const unverified = failure ? !failure.verdict : optedOut || selfBypassed(gate);
   emitGateEvent({
     type: 'gate_step',
     gate,
     family: 'deterministic',
     status: unverified ? 'could_not_run' : failure ? 'fail' : 'pass',
-    exit_code: typeof rc === 'number' ? rc : undefined,
+    exit_code: Number.isInteger(exitCode) ? exitCode : undefined,
     duration_ms: Math.max(0, Date.now() - startedAt),
   });
 }

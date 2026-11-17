@@ -21,6 +21,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { z } from 'zod';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../../judge/judge-isolation.mts';
 import { isolateBenchTelemetry } from '../../judge/run-context.mts';
 import { execJudgeAsync } from '../../judge/run-judge.mts';
@@ -122,7 +123,7 @@ export const parseFindings = (raw) => {
   if (!Array.isArray(obj.findings)) throw new Error('no findings array');
   return obj.findings.map((f) => ({
     claim: String(f.claim ?? ''),
-    files: Array.isArray(f.files) ? f.files.filter((p) => typeof p === 'string') : [],
+    files: Array.isArray(f.files) ? f.files.filter((p) => z.string().safeParse(p).success) : [],
     category: CATEGORIES.includes(f.category) ? f.category : 'other',
     severity: ['high', 'medium', 'low'].includes(f.severity) ? f.severity : 'unstated',
   }));
