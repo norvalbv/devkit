@@ -27,7 +27,7 @@ afterEach(() => {
 
 describe('FALLOW_PINNED_VERSION', () => {
   it('pins the approved fallow release exactly, never a floating tag', () => {
-    expect(FALLOW_PINNED_VERSION).toBe('3.35.0');
+    expect(FALLOW_PINNED_VERSION).toBe('3.42.0');
   });
 });
 
