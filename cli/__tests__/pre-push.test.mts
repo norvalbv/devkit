@@ -53,6 +53,7 @@ function seedRepository(): {
     'cli/lib/husky/pre-push-validation.sh',
     'cli/lib/ship/dependency-preflight.mts',
     'cli/lib/ship/prepare-gate-worktree.sh',
+    'cli/lib/ship/prepare-gate-worktree/node-modules-source.sh',
   ]) {
     const destination = join(root, relativePath);
     mkdirSync(dirname(destination), { recursive: true });
