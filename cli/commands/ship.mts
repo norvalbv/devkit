@@ -35,7 +35,7 @@ export interface ShipDependencies {
   listAdvisories: (cwd: string, branch: string) => { text: string; code: number };
 }
 
-const DEFAULT_DEPENDENCIES: ShipDependencies = {
+export const DEFAULT_DEPENDENCIES: ShipDependencies = {
   reportRuntimeProvenance: reportShipRuntimeProvenance,
   runManagedScript: runManagedPackagedScript,
   enterQueue: enterShipQueue,
