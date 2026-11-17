@@ -19,6 +19,10 @@ export const COMMENT_PREFLIGHT_HOOK = 'comment-budget-preflight.mjs';
 export const FANOUT_BRIEF_HOOK = 'fanout-brief.mjs';
 /** The pre-write structure-grammar advisory; owned by the placement group (fanout guard or structure). */
 export const PLACEMENT_BRIEF_HOOK = 'placement-brief.mjs';
+/** Codex apply_patch → edited paths; imported by edit hooks of five components, never wired alone. */
+export const EDIT_TARGETS_LIB = 'edit-targets-lib.mjs';
+/** The after-edit line-ceiling advisory; owned by the size guard whose ceiling it reports. */
+export const SIZE_HEADROOM_HOOK = 'size-headroom-check.mjs';
 export function bundledHookNames() {
     return readdirSync(join(packageDir(), 'agents-hooks'), {
         withFileTypes: true,
@@ -31,7 +35,7 @@ export function hookScriptsFor({ agentHooks, decisions, fallow, adhd, priorArtGa
 // Optional, not required: tsconfig excludes tests, so a required key omitted by a test caller is
 // a type error nothing in CI ever surfaces. Absent means "not selected", which is the same answer
 // an explicit false gives.
-baseDrift = false, antiSlop = false, comments = false, fanout = false, placement = false, }) {
+baseDrift = false, antiSlop = false, comments = false, fanout = false, placement = false, size = false, }) {
     const all = bundledHookNames();
     // Scripts owned by a component OTHER than agentHooks — selecting agent hooks must not drag them
     // in, and deselecting agent hooks must not prune them.
@@ -52,10 +56,13 @@ baseDrift = false, antiSlop = false, comments = false, fanout = false, placement
         COMMENT_PREFLIGHT_HOOK,
         FANOUT_BRIEF_HOOK,
         PLACEMENT_BRIEF_HOOK,
+        EDIT_TARGETS_LIB,
+        SIZE_HEADROOM_HOOK,
         ...decisionsOwned,
         ...adhdOwned,
         ...baseDriftOwned,
     ]);
+    const editHooks = agentHooks || decisions || baseDrift || antiSlop || comments;
     return all.filter((name) => (agentHooks && !independentlyOwned.has(name)) ||
         (decisions && decisionsOwned.has(name)) ||
         (fallow && name === FALLOW_STAGED_GATE) ||
@@ -65,7 +72,9 @@ baseDrift = false, antiSlop = false, comments = false, fanout = false, placement
         (antiSlop && name === ANTI_SLOP_PREFLIGHT_HOOK) ||
         (comments && name === COMMENT_PREFLIGHT_HOOK) ||
         (fanout && name === FANOUT_BRIEF_HOOK) ||
-        (placement && name === PLACEMENT_BRIEF_HOOK));
+        (placement && name === PLACEMENT_BRIEF_HOOK) ||
+        (editHooks && name === EDIT_TARGETS_LIB) ||
+        (size && name === SIZE_HEADROOM_HOOK));
 }
 /** Structure can be gated without the structure component (self-host), so fanout selects it too.
  * Neither folder gate runs without husky. */
@@ -77,6 +86,7 @@ function hookComponents(selection, searchSteering) {
     const decisions = selection.guards?.includes('decisions') ?? false;
     const comments = selection.guards?.includes('comments') ?? false;
     const fanout = selection.guards?.includes('fanout') ?? false;
+    const size = selection.guards?.includes('size') ?? false;
     return [
         searchSteering && selection.searchSteering && 'searchSteering',
         selection.agentHooks && 'agentHooks',
@@ -89,6 +99,7 @@ function hookComponents(selection, searchSteering) {
         comments && 'comments',
         fanout && 'fanout',
         placementSelected(selection) && 'placement',
+        size && 'size',
     ].filter((value) => Boolean(value));
 }
 /** Derive the hook-owning components and exact script set from one recorded selection. */
@@ -108,6 +119,7 @@ export function selectedHookAssets(selection, { searchSteering = true } = {}, pr
             comments: selection.guards?.includes('comments') ?? false,
             fanout: selection.guards?.includes('fanout') ?? false,
             placement: placementSelected(selection),
+            size: selection.guards?.includes('size') ?? false,
         }),
     };
 }

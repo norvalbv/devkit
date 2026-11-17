@@ -187,9 +187,18 @@ function syncOxcCapabilityUnlocked(cwd, dryRun, plan) {
         if (skew?.kind === 'older')
             manifest.writtenUnderSkew = true;
         if (dryRun) {
+            // Every root config the real run writes: a starter it creates or an unedited one it refreshes.
+            const starters = [
+                ...(hadOxlint ? [] : [oxlint.path]),
+                ...(hadOxfmt ? [] : [oxfmt.path]),
+                ...(rewrites ?? []).map(([path]) => path),
+            ];
+            const roots = starters.length
+                ? `write the devkit starter to ${starters.join(' + ')}`
+                : 'preserve existing root configs';
             console.log(overlay
                 ? `  [dry-run] sync ${BASE_REL} + ${MANIFEST_REL} + ${OVERLAY_ENTRY_REL} (git-excluded); touch no consumer config`
-                : `  [dry-run] sync ${BASE_REL} + ${MANIFEST_REL}; preserve existing root configs`);
+                : `  [dry-run] sync ${BASE_REL} + ${MANIFEST_REL}; ${roots}`);
             return;
         }
         // The pin is re-read once more before the manifest — the LAST write — because nothing devkit

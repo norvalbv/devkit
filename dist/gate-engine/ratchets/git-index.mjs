@@ -104,16 +104,19 @@ export function assertBaselineTrackable(root, rel) {
 export function stageBaselineMigration(root, from, to) {
     if (!isGitWorktree(root))
         return;
-    const legacyWasTracked = indexTracksBaseline(root, from);
     stagePathStrict(root, to);
     if (!indexTracksBaseline(root, to)) {
         throw new Error(`Git did not stage migrated ratchet baseline ${to}.`);
     }
-    if (!legacyWasTracked)
+    stageBaselineRemoval(root, from);
+}
+/** Strictly stage the deletion of a tracked legacy baseline; an untracked one needs nothing. */
+export function stageBaselineRemoval(root, rel) {
+    if (!isGitWorktree(root) || !indexTracksBaseline(root, rel))
         return;
-    stagePathStrict(root, from, { missingIsSuccess: true });
-    if (indexTracksBaseline(root, from)) {
-        throw new Error(`Git did not stage removal of legacy ratchet baseline ${from}.`);
+    stagePathStrict(root, rel, { missingIsSuccess: true });
+    if (indexTracksBaseline(root, rel)) {
+        throw new Error(`Git did not stage removal of legacy ratchet baseline ${rel}.`);
     }
 }
 // Best-effort `git add` for a baseline the gate rewrote OR deleted, so the change rides the same
@@ -182,7 +185,7 @@ export function renamesFrom(records) {
     }
     return renames;
 }
-function mergeInProgress(root) {
+export function mergeInProgress(root) {
     return (spawnSync('git', ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'], {
         cwd: root,
         env: commitIndexEnv(root),

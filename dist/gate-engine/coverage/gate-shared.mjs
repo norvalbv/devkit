@@ -5,7 +5,8 @@ import { sourceMatchers } from '../config.mjs';
 import { appendReviewNotice } from '../deterministic/reason.mjs';
 import { emitGateEvent } from '../judge/gate-events.mjs';
 import { canonicalPath } from './dependencies.mjs';
-import { displayPath, formatClearMarker, readClearMarker } from './failures.mjs';
+import { readClearMarker } from './clear-marker/store.mjs';
+import { displayPath, formatClearMarker } from './failures.mjs';
 import { COVERAGE_DIR, COVERAGE_FILE } from './produce.mjs';
 export { canonicalPath };
 // Every failure arm names its escape hatch. `export` on its own line, never an inline env prefix,
@@ -20,6 +21,14 @@ export const OPT_OUT_REMEDY = [
     '   Repo-wide opt-out: "coverage": false in guard.config.json — but `devkit ship`',
     '   reads that file from the COMMITTED tree, so a local-only edit changes nothing.',
 ];
+/** The run that measures every changed file a test reaches: vitest's --changed walks its import graph. */
+export function changedRunHint(sha) {
+    return [
+        `   Measure them: \`devkit coverage-run --changed=${sha}\` runs every test that imports a changed file`,
+        '   (every suite if package.json or a vite/vitest config changed). Still unmeasured after it, or it',
+        "   measured no files? No test imports them (spawned, mocked or computed imports don't count): write one.",
+    ];
+}
 const MAX_LISTED = 10;
 export function listPaths(paths, cwd, top) {
     const lines = paths.slice(0, MAX_LISTED).map((p) => `     ${displayPath(resolve(top, p), cwd)}`);

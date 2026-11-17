@@ -7,7 +7,9 @@ import { isSafeAgentAssetPath } from '../agent-asset-manifest/lifecycle.mjs';
 import { LEGACY_AGENT_PROVIDERS, SUPPORTED_AGENT_PROVIDERS, } from '../agent-assets/agent-providers.mjs';
 import { dataRecord } from './plain-data.mjs';
 import { encodeHookRegistrationLedger, HOOK_REGISTRATION_LEDGER_REL, hookRegistrationDestination, } from './codec.mjs';
-import { checkProjectedHookRegistrations, projectHookRegistrations, writeHookRegistrationLedger, } from './lifecycle.mjs';
+import { reconcileLegacyHookCommands } from './legacy-commands.mjs';
+import { checkProjectedHookRegistrations, projectHookRegistrations, removeLedgerAuthorizedHookRegistrations, transferHookRegistrationScope, writeHookRegistrationLedger, } from './lifecycle.mjs';
+import { HOOK_REGISTRATIONS } from './registrations.mjs';
 export const ledgerOf = (entries = []) => ({
     schemaVersion: 1,
     kind: 'agent_hook_registration_ownership',
@@ -141,11 +143,11 @@ export function reportDropped(rel, dropped, dryRun) {
 }
 export const asDropped = (entries, verb) => entries.map(({ native, ownerId }) => ({ ...native, reason: `${verb}: ${ownerId}` }));
 const OTHER_SCOPE = { shared: 'overlay', overlay: 'shared' };
-/** The Claude settings file the scope does NOT own; Claude Code runs both. */
-export function otherClaudeSettings(root, provider, scope) {
-    if (provider !== 'claude')
-        return null;
+/** The file the OTHER scope writes, when it differs from this scope's (only Claude's do today). */
+export function otherScopeFile(root, provider, scope) {
     const rel = hookRegistrationDestination(provider, OTHER_SCOPE[scope]);
+    if (rel === hookRegistrationDestination(provider, scope))
+        return null;
     // A missing file reads as `{}`, so only a symlinked or non-file path needs refusing here.
     if (!isSafeAgentAssetPath(root, rel, true))
         return null;
@@ -156,25 +158,39 @@ export function otherClaudeSettings(root, provider, scope) {
         return null; // Not the scope's file: its parse errors are the user's, never a devkit failure.
     }
 }
-/** A retired command in the Claude settings file the scope does NOT own. */
-export function retiredElsewhere(root, provider, scope, other = otherClaudeSettings(root, provider, scope)) {
-    if (!other)
+/** Reconcile one destination, then take out devkit's ledgered registrations for `ids`. No writes. */
+export function reclaimPass(root, provider, scope, ids, entries, legacyOwnedComponentIds) {
+    const rel = hookRegistrationDestination(provider, scope);
+    const legacy = reconcileLegacyHookCommands(entries, provider, rel);
+    const document = providerDocument(root, provider, rel);
+    const retired = stripReclaimedCommands(document, provider, legacy.stripped);
+    let next = adoptExactLegacy(legacy.entries, retired.document, legacyOwnedComponentIds, provider, scope);
+    next = transferHookRegistrationScope(next, provider, scope);
+    const removed = removeLedgerAuthorizedHookRegistrations(retired.document, projectHookRegistrations(ids, [provider], scope), ledgerOf(next), provider, scope);
+    next = release(next, [...removed.removed, ...removed.alreadyAbsent]);
+    return { rel, legacy, retired, removed, entries: next };
+}
+/** devkit's registrations left in the file the OTHER scope writes, when it differs (a switch). */
+export function otherScopePass(root, provider, scope, entries) {
+    // One file for both scopes (codex, cursor) returns null: transferHookRegistrationScope covers it.
+    const file = otherScopeFile(root, provider, scope);
+    if (!file || !dataRecord(file.document))
         return null;
-    const { rel, document } = other;
-    const stripped = stripReclaimedCommands(document, provider);
-    if (!stripped.changed)
+    const { rel } = file;
+    // Never adopt: an unledgered identical handler in a file this scope doesn't own is the user's.
+    const ids = Object.keys(HOOK_REGISTRATIONS);
+    const pass = reclaimPass(root, provider, OTHER_SCOPE[scope], ids, entries);
+    const changed = pass.retired.changed || pass.removed.changed;
+    const retiredFound = pass.retired.dropped.some(({ reason }) => reason === 'retired');
+    const superseded = pass.retired.dropped.some(({ reason }) => reason !== 'retired');
+    const switched = superseded || pass.entries.length !== entries.length;
+    // Drifted or blocked rows stay put (never thrown: not the scope's file), so only doctor names them.
+    const stranded = pass.removed.drifted.length + pass.removed.blocked.length > 0;
+    if (!changed && !switched && !stranded)
         return null;
     // Overlay must stay git-invisible, so a committed settings.json is reported, never edited.
-    const repairable = scope === 'shared' || !isTracked(root, rel);
-    return { rel, document: stripped.document, dropped: stripped.dropped, repairable };
-}
-export function reclaimRetiredElsewhere(root, provider, scope, dryRun) {
-    const elsewhere = retiredElsewhere(root, provider, scope);
-    if (!elsewhere?.repairable)
-        return;
-    if (!dryRun)
-        writeProvider(root, { provider, ...elsewhere, changed: true });
-    reportDropped(elsewhere.rel, elsewhere.dropped, dryRun);
+    const repairable = !changed || scope === 'shared' || !isTracked(root, rel);
+    return { ...pass, changed, switched, retiredFound, repairable, stranded };
 }
 export function providerDocument(root, provider, rel) {
     const path = join(root, rel);
@@ -201,7 +217,7 @@ export function adoptExactLegacy(entries, document, componentIds, provider, scop
     return adopt(entries, exact.present);
 }
 export function skipProvider(root, provider, rel, overlay) {
-    if (overlay && provider !== 'claude' && isTracked(root, rel)) {
+    if (overlay && isTracked(root, rel)) {
         console.log(`  ! ${rel} is git-tracked — skipping (can't hide a tracked edit)`);
         return true;
     }

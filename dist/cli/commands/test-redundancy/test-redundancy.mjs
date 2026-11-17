@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { addedProductionLines, diffClassifier } from '../../../gate-engine/coverage/diff-gate.mjs';
-import { detectFallow } from '../../lib/install/install-fallow.mjs';
+import { detectFallow, FALLOW_PINNED_VERSION } from '../../lib/install/install-fallow.mjs';
 import { gitRunner, line, ok } from '../../lib/ship/base-drift/git-run.mjs';
 import { mergeBaseOf, nulList } from '../coverage/diff.mjs';
 import { changedLines, killMatrixReport, redundancy } from './report.mjs';
@@ -149,7 +149,7 @@ function askFallow(deps, cwd, change, budget) {
     if (!available || !version)
         return notJudged('fallow was not found. `devkit init` installs it.');
     if (!atLeastFloor(version)) {
-        return notJudged(`fallow ${version} has no --kill-matrix-for; it needs ${FALLOW_FLOOR.join('.')} or later.`);
+        return notJudged(`fallow ${version} has no --kill-matrix-for; it needs ${FALLOW_FLOOR.join('.')} or later. devkit installs ${FALLOW_PINNED_VERSION} on a machine with no fallow and leaves an installed one alone, so upgrade yours, for example: bun add -g fallow@${FALLOW_PINNED_VERSION}`);
     }
     const ran = deps.runFallow([
         'mutation',

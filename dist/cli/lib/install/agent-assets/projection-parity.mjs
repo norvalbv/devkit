@@ -11,7 +11,6 @@
  * Enumeration and selection reuse the writers' own `walk` / `listAgents` / `skillNamesForSelection`
  * rather than re-deriving them — reader and writer drifted apart once already (components.mts:346).
  */
-import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { listAgents } from '../../../commands/sync/sync-agents.mjs';
@@ -32,10 +31,6 @@ export function fsReader(root) {
             }
         },
     };
-}
-// An ignored projection is a per-machine copy that no commit carries, so committed parity skips it.
-function gitIgnores(root, dir) {
-    return spawnSync('git', ['-C', root, 'check-ignore', '-q', '--', `${dir}/`]).status === 0;
 }
 /** The logical files the writer would ship for `kind`, after the shared selection filter. */
 export function projectedLogicals({ root, kind, srcDir, selection = {}, reader, }) {
@@ -62,9 +57,6 @@ export function projectionDrift(input) {
     const { root, kind, srcDir, targets } = input;
     if (!targets.length)
         return [`unchecked ${kind}/ — no agentTargets configured, nothing compared`];
-    const committed = targets.filter((target) => !gitIgnores(root, agentAssetDir(target, kind)));
-    if (!committed.length)
-        return [`unchecked ${kind}/ — every agentTarget projection is gitignored`];
     const reader = input.reader ?? fsReader(root);
     const drift = [];
     // A source the snapshot lists but cannot read (a symlink staged in place of a file) is reported
@@ -78,7 +70,7 @@ export function projectionDrift(input) {
         else
             drift.push(`unreadable ${srcDir}/${logical}`);
     }
-    for (const target of committed) {
+    for (const target of targets) {
         const dir = agentAssetDir(target, kind);
         const expected = new Map(logicals.map((rel) => [projectedAssetRel(target, kind, rel), rel]));
         const present = new Set(reader.list(dir));

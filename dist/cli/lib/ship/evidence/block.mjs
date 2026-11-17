@@ -2,7 +2,7 @@
 // caller or another tool; ship only ever replaces the span between them.
 import { stripVTControlCharacters } from 'node:util';
 import { z } from 'zod';
-import { codeSpan, fencedJson, MAX_FAILURES, } from '../../baseline-status/regression-evidence.mjs';
+import { codeSpan, fencedJson, MAX_FAILURES, } from '../../baseline-status/regression/evidence.mjs';
 import { EVIDENCE_ABSTENTIONS, EVIDENCE_STATUSES, } from './outcome.mjs';
 export const EVIDENCE_BEGIN = '<!-- devkit:evidence:begin -->';
 export const EVIDENCE_END = '<!-- devkit:evidence:end -->';
@@ -93,6 +93,15 @@ function operandRow(name, tree, operand) {
         : 'n/a | n/a | n/a';
     return `| ${name} | ${tree} | ${exit} | ${cells} |`;
 }
+/** Green is expected clean, so any failure or unloaded file it has is what made a capture inconclusive. */
+function greenLists(green) {
+    const { failures, fileErrors, testCounts } = green;
+    const failed = testCounts?.failed ?? failures.length;
+    return [
+        ...failureList(`Failed on green (${counted(failed, 'test')})`, failures, failed),
+        ...failureList(`Did not load on green (${counted(fileErrors.length, 'file')})`, fileErrors, fileErrors.length),
+    ];
+}
 function runLines(evidence) {
     const { argv } = evidence.command;
     const shown = argv.length > SHOWN_ARGS
@@ -110,6 +119,7 @@ function runLines(evidence) {
         '',
         ...failureList(`Failed on red (${counted(failed, 'test')})`, failures, failed),
         ...failureList(`Did not load on red (${unloaded}): red's counts leave out the tests inside`, fileErrors, fileErrors.length),
+        ...greenLists(evidence.green),
         ...details('Test command', [fencedJson(shown)]),
     ];
 }

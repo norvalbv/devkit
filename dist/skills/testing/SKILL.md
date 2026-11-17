@@ -58,7 +58,9 @@ file-level only. `unknown` is never a pass. An `unknown` carrying a remedy line
 (`workflow-missing`, or `no-usable-run` with no artifact) means this repo's CI does not produce
 the report yet — follow the remedy (`devkit test-report-run --help`) rather than re-running tests.
 The answer names the branch `head` it walked back from and `commitsBehindHead`; above 0, read
-`skippedRuns` and `commitsWithoutRun` for why the newer commits could not answer.
+`skippedRuns` and `commitsWithoutRun` for why the newer commits could not answer. For a whole run,
+`devkit baseline-status --at <base sha> --against <run's summary.json>` splits its failures into
+NEW (not failing at the base run) and inherited, by test name where both runs recorded names.
 
 ## Fixing failures — max 2 cycles
 
@@ -93,6 +95,12 @@ So:
 - Never assert an elapsed-time *lower* bound (`expect(elapsed).toBeGreaterThan(n)`) to prove something waited. Raising `n` makes it strictly more flaky; assert the effect of waiting instead.
 - Put the budget in one named constant per file, with a comment, so it is not quietly tightened later.
 
+With the anti-slop capability on, `anti-slop/no-elapsed-time-assertions` enforces the elapsed-time bullets. It fails any ordering matcher (`toBeLessThan`, `toBeGreaterThan` and their `OrEqual` forms) whose subject is a `Date.now()` or `performance.now()` delta, or a `const` holding one, whatever the bound. Three shapes it cannot see stay with the author and the reviewer:
+
+- a per-call subprocess `timeout` set below the suite's shared subprocess default;
+- a short deadline passed into the code under test when the test then expects real work to finish inside it. A 700ms read timeout is fine when the test expects `null`, and wrong when it expects a parsed result;
+- a product ceiling set through an environment string, such as a 3-second commit timeout that can fire before the hook starts.
+
 Making these changes is fixing a broken test, not weakening a real one — the timing claim was never what the test was protecting.
 
 A test that asserts a product's **own** timeout (for example, "the ceiling fires and names the stuck step") races setup against that timeout. Have the stuck step print a marker. Before the strict assertions, check for it: if the timeout fired and the marker is absent, the timeout won the race before the step under test ran. Fail with a distinct, greppable label that says so, and include the machine load. Do not reuse the assertion's message. A reached marker with the wrong outcome is a real regression and must keep failing on the strict assertions.
@@ -106,7 +114,7 @@ Before treating a low number on a CLI module as untested code, rule out the meas
 - **The child's environment.** A spawn that replaces `env` (`{ HOME, PATH }`) instead of spreading `process.env` drops `NODE_V8_COVERAGE`, so that child is never measured.
 - **How the child ended.** Node writes the profile on a normal exit. A child killed with `SIGKILL`, or still running when the test file finishes, contributes nothing.
 - **The path.** The child reports its real path. A project root reached through a symlink (macOS `/tmp` is `/private/tmp`) matches none of it and scores 0%.
-- **A module both imported and spawned.** A runner can merge the in-process profile and the child's profile of the same file before converting them, so the combined number is wrong in either direction: real hits are lost and phantom hits appear (labelled examples: vitest 5.0.3). It is neither a floor nor a ceiling; don't use it as evidence for or against a coverage target.
+- **A module both imported and spawned.** When the test process runs a transformed copy of a file and the child runs the file itself, a runner that merges the two profiles before converting them gets a number that is wrong in either direction: real hits are lost and phantom hits appear. It is neither a floor nor a ceiling; don't use it as evidence for or against a coverage target. The cure is to run the tests on the same module text the child runs (labelled example: vitest 5 has this fault under its default Vite module runner, and `experimental.viteModuleRunner: false`, set on each project that does not extend the root config, removes it).
 
 A number explained by one of these is a measurement gap. Say so in the report rather than writing tests to chase it.
 
@@ -123,5 +131,10 @@ When judging whether a change is adequately tested, ask:
   the host, so the test command and BOTH refs must be trusted; never point it at an unreviewed
   branch. It captures execution evidence; it does not prove the red failure had the cause you
   claim, so read the retained red output before publishing it.
+- Is the code under test still needed? When a fix sits on top of a workaround (retry, reopen,
+  fallback), `devkit subtraction-trial --baseline <ref> --candidate <ref> --control <ref> --oracle
+  <file> --vitest-report <path> -- <test command>` (labelled example: --vitest-report) runs the same tests with the workaround removed (the candidate) and against a deliberately broken control. `tests-preserved` means these tests
+  still pass without it; `oracle_blind` means the control did not fail, so the tests could not have
+  noticed. It never proves the code redundant, and the same trust rule applies.
 - Are the meaningful edge cases (empty, boundary, error) covered, not just the happy path?
 - Do the tests assert on observable behaviour, not implementation detail that will break on any refactor?

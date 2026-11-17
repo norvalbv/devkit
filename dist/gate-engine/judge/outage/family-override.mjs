@@ -6,7 +6,8 @@ import { judgeProviderOfBin } from '../codex/result.mjs';
 /** The complete claude family. Chunking stays off: no large-diff bench compares chunked with whole
  *  review for claude-haiku-5-5 (its 2026-10-10 run chunked 4 of 285 cases). */
 export const CLAUDE_FAMILY_SET = {
-    model: 'haiku',
+    // Not haiku: its checklist reviewers left items unresolved even on the serial recovery retry.
+    model: 'sonnet',
     escalationModel: 'opus',
     correctnessModel: 'claude-haiku-5-5',
     correctnessChunkLoc: 0,

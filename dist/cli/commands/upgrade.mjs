@@ -28,6 +28,7 @@ import { selfHostSelection } from '../lib/husky/self-host.mjs';
 import { resolveExistingAgentProviders } from '../lib/install/agent-assets/agent-providers.mjs';
 import { adoptAgentAssetCollisions } from '../lib/install/agent-assets/agent-surfaces.mjs';
 import { adoptActivatedAntiSlopFindings, captureAntiSlopBaselineActivation, } from '../lib/install/anti-slop/managed-state.mjs';
+import { rekeyWorkingBaseline } from '../lib/install/anti-slop/baseline-envelope.mjs';
 import { collectAntiSlopGroups } from '../lib/install/anti-slop/runner.mjs';
 import { lockedCommand } from '../lib/install/init/init-lock.mjs';
 import { retiredBiomeNotice } from '../lib/install/oxc/root-configs.mjs';
@@ -37,6 +38,10 @@ import doctor from './doctor.mjs';
 import { applyInit } from './init.mjs';
 import { computeMigration } from './migrate-config.mjs';
 import update, { DEP, fetchLatestTag, needsRerun, repinPackageJson } from './update.mjs';
+/** Re-key a line-identity baseline, then adopt a release's newly activated rule debt. */
+function adoptAntiSlopBaseline(cwd, previewActivation, dryRun) {
+    return adoptActivatedAntiSlopFindings(cwd, previewActivation, dryRun, () => collectAntiSlopGroups(cwd, []), (legacy) => rekeyWorkingBaseline(cwd, legacy));
+}
 export const meta = {
     name: 'upgrade',
     agentFacing: true,
@@ -118,8 +123,7 @@ async function upgrade(args, cwd) {
             dryRun,
             regenStructureBaselines: false,
         });
-        const baselineReady = !selection.antiSlop ||
-            adoptActivatedAntiSlopFindings(cwd, previousAntiSlopRuleIds, dryRun, () => collectAntiSlopGroups(cwd, []));
+        const baselineReady = !selection.antiSlop || adoptAntiSlopBaseline(cwd, previousAntiSlopRuleIds, dryRun);
         if (dryRun) {
             console.log('\nDry-run complete — nothing written.');
             return 0;
@@ -227,8 +231,7 @@ async function upgrade(args, cwd) {
             console.log('\n3. --force: adopt consumer-authored asset collisions');
             resyncOverlayAgentSurfaces(cwd, sel, cfg.components, () => true, dryRun);
         }
-        const overlayBaselineReady = !sel.antiSlop ||
-            adoptActivatedAntiSlopFindings(cwd, previousAntiSlopRuleIds, dryRun, () => collectAntiSlopGroups(cwd, []));
+        const overlayBaselineReady = !sel.antiSlop || adoptAntiSlopBaseline(cwd, previousAntiSlopRuleIds, dryRun);
         if (dryRun) {
             console.log('\nDry-run complete — nothing written.');
             return 0;
@@ -353,8 +356,7 @@ async function upgrade(args, cwd) {
         undecided,
         disabledGuards,
     });
-    const baselineReady = !sel.antiSlop ||
-        adoptActivatedAntiSlopFindings(cwd, previousAntiSlopRuleIds, dryRun, () => collectAntiSlopGroups(cwd, []));
+    const baselineReady = !sel.antiSlop || adoptAntiSlopBaseline(cwd, previousAntiSlopRuleIds, dryRun);
     // ── 5. --force asset adoption (assets only — never configs) ─────────────────
     // --force is driven by the `override` OPT (args only carry --dry-run). Re-syncs the selected
     // surfaces adopting consumer-authored same-named collisions; a tuned tsconfig is untouched.

@@ -8,6 +8,8 @@ export const ANTI_SLOP_MANAGED_REL = '.devkit/anti-slop';
 export const ANTI_SLOP_MANIFEST_REL = `${ANTI_SLOP_MANAGED_REL}/manifest.json`;
 export const ANTI_SLOP_CONFIG_REL = `${ANTI_SLOP_MANAGED_REL}/oxlint.json`;
 export const ANTI_SLOP_BASELINE_REL = '.anti-slop-baseline.json';
+/** A baseline keyed on the reported span's first line; one without it keys on the whole line. */
+export const ANTI_SLOP_IDENTITY = 'span-first-line';
 export const ANTI_SLOP_BASELINE_UPGRADE_REL = '.devkit/anti-slop-baseline-upgrade.json';
 export const ANTI_SLOP_LOCK_REL = '.devkit/anti-slop.lock';
 export const ANTI_SLOP_BASELINE_LOCK_REL = '.devkit/anti-slop-baseline.lock';
@@ -35,6 +37,7 @@ export const ANTI_SLOP_UPSTREAM_RULE_NAMES = [
 export const ANTI_SLOP_DEVKIT_RULE_NAMES = [
     'no-unsafe-external-record-access',
     'no-unsafe-external-record-enumeration',
+    'no-elapsed-time-assertions',
 ];
 export const ANTI_SLOP_RULE_NAMES = [
     ...ANTI_SLOP_UPSTREAM_RULE_NAMES,
@@ -43,6 +46,12 @@ export const ANTI_SLOP_RULE_NAMES = [
 export const ANTI_SLOP_RULE_IDS = ANTI_SLOP_RULE_NAMES.map((name) => `anti-slop/${name}`);
 export const ANTI_SLOP_UPSTREAM_RULE_IDS = ANTI_SLOP_UPSTREAM_RULE_NAMES.map((name) => `anti-slop/${name}`);
 export const ANTI_SLOP_DEVKIT_RULE_IDS = ANTI_SLOP_DEVKIT_RULE_NAMES.map((name) => `anti-slop/${name}`);
+/** The 17-rule surface Devkit emitted from v0.60.0 until the elapsed-time rule was added. */
+export const ANTI_SLOP_V060_RULE_IDS = [
+    ...ANTI_SLOP_UPSTREAM_RULE_IDS,
+    'anti-slop/no-unsafe-external-record-access',
+    'anti-slop/no-unsafe-external-record-enumeration',
+];
 /**
  * Every managed rule-surface/default pair Devkit has emitted. Keep this append-only when rules or
  * defaults change: upgrade evidence is trusted only when both sets match a known profile, never
@@ -54,8 +63,12 @@ const ANTI_SLOP_MANAGED_ACTIVATION_PROFILES = [
         activeRuleIds: ANTI_SLOP_UPSTREAM_RULE_IDS,
     },
     {
-        ruleIds: ANTI_SLOP_RULE_IDS,
+        ruleIds: ANTI_SLOP_V060_RULE_IDS,
         activeRuleIds: ANTI_SLOP_UPSTREAM_RULE_IDS,
+    },
+    {
+        ruleIds: ANTI_SLOP_V060_RULE_IDS,
+        activeRuleIds: ANTI_SLOP_V060_RULE_IDS,
     },
     {
         ruleIds: ANTI_SLOP_RULE_IDS,

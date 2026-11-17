@@ -2,9 +2,11 @@ import { z } from 'zod';
 // Paths and lenses may hold spaces or shell metacharacters. zsh's extendedglob reads a bare `#` as
 // a glob operator and its EQUALS option expands a leading `=` to a command path, so both are quoted.
 const SHELL_SAFE_WORD_RE = /^(?!=)[\w@%+=:,./-]+$/;
+/** POSIX single-quoted, always: for a word that must be quoted, or a list quoted uniformly. */
+export const shellQuote = (word) => `'${word.replaceAll("'", "'\\''")}'`;
 /** One shell word for a pasteable command: a plain word stays byte-identical, anything else is
- * single-quoted. Shared by blockingNote, the ship digest and the diff-evidence hint. */
-export const shellWord = (word) => SHELL_SAFE_WORD_RE.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
+ * single-quoted. */
+export const shellWord = (word) => SHELL_SAFE_WORD_RE.test(word) ? word : shellQuote(word);
 /** The rationale a printed waive command carries; waive rejects it unedited, by design. */
 export const WAIVE_RATIONALE_PLACEHOLDER = 'why this finding is waived';
 /** What a waiver says about its finding, chosen by the author at waive time (`--kind`). */

@@ -1,6 +1,6 @@
 // The evidence vocabulary ship writes into a PR body and a merge verdict reads back. One definition:
 // the verdict imports these, it never re-declares them.
-import { SKIPPED_ON_GREEN, } from '../../baseline-status/regression-evidence.mjs';
+import { SKIPPED_ON_GREEN, } from '../../baseline-status/regression/evidence.mjs';
 export const EVIDENCE_STATUSES = ['captured', 'inconclusive', 'not-run'];
 /** Why no red/green pair was captured. Set only on `not-run`, a deliberate abstention. */
 export const EVIDENCE_ABSTENTIONS = [

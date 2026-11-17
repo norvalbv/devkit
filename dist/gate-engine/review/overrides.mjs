@@ -334,3 +334,11 @@ export function reviewerSkipRemedy(reviewerName) {
         `This skips only ${reviewerName}; ` +
         `every other reviewer still runs. GUARD_NO_REVIEW=1 skips the entire review gate.`);
 }
+/** GUARD_REVIEW_SKIP / FRINK_REVIEW_SKIP: comma-list of reviewer names to drop from a run — the
+ * per-reviewer rollback lever (GUARD_NO_REVIEW kills the whole gate; this surgically disables one). */
+export function skippedReviewers() {
+    return new Set((process.env.GUARD_REVIEW_SKIP ?? process.env.FRINK_REVIEW_SKIP ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean));
+}

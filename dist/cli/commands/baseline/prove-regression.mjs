@@ -1,4 +1,4 @@
-import { proveRegression } from '../../lib/baseline-status/regression-proof.mjs';
+import { proveRegression } from '../../lib/baseline-status/regression/proof.mjs';
 export const meta = {
     name: 'prove-regression',
     agentFacing: true,

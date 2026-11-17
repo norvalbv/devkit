@@ -32,14 +32,15 @@ import { resolveSupersession } from './recall/supersession.mjs';
 const BACKSLASH_RE = /\\/g;
 const RESCOPE_REMEDY = 'Fix with `guard-decisions rescope <slug> --scope "<live-glob>" --reason "<why>"` — an ' +
     'append-only correction that leaves the original Scope line untouched.';
-const MAX_FILES = 20000;
+// A bound, not a sample: statSync follows symlinks, so a link cycle under a scoped root never ends.
+const MAX_FILES = 100000;
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', '.next', '.turbo']);
 /**
  * Repo-relative paths of tracked-ish files. Walks the tree rather than shelling out to git so the
  * check works in a fixture or an unstaged worktree, and skips the usual generated/vendored trees —
  * a scope that only matches inside node_modules governs nothing in any meaningful sense.
  */
-export function repoFiles(root, max = MAX_FILES, dotDirs = new Set()) {
+export function repoFiles(root, max = MAX_FILES, dotDirs = new Set(), start = root) {
     const out = [];
     const walk = (dir) => {
         if (out.length >= max)
@@ -70,27 +71,69 @@ export function repoFiles(root, max = MAX_FILES, dotDirs = new Set()) {
                 return;
         }
     };
-    walk(root);
+    walk(start);
     return out;
+}
+/** The segments before a glob's first wildcard: `*` and `?` never cross a `/`, so every match lies
+ * under them. `''` when the glob opens with a wildcard. */
+export function literalPrefix(glob) {
+    const segs = glob.trim().split('/');
+    const wild = segs.findIndex((s) => s.includes('*') || s.includes('?'));
+    return (wild === -1 ? segs : segs.slice(0, wild)).join('/');
+}
+// Shortest first, so an ancestor is kept before its descendants; `''` absorbs every other root.
+function scopeRoots(globs) {
+    const kept = [];
+    for (const p of [...new Set(globs.map(literalPrefix))].sort((a, b) => a.length - b.length))
+        if (!kept.some((q) => q === '' || p.startsWith(`${q}/`)))
+            kept.push(p);
+    return kept;
+}
+// Exact-name membership per segment rejects `.`, `..` and a case-only match, as git paths would.
+function resolvePrefix(root, prefix) {
+    let abs = root;
+    try {
+        for (const seg of prefix ? prefix.split('/') : []) {
+            if (SKIP_DIRS.has(seg) || !readdirSync(abs).includes(seg))
+                return null;
+            abs = path.join(abs, seg);
+        }
+        return { abs, isDir: statSync(abs).isDirectory() };
+    }
+    catch {
+        return null;
+    }
 }
 // Only dot-entries a Scope names are walked: a blanket walk would spend the file cap on `.venv`.
 function scopeHealth(root, decisionsDir, max = MAX_FILES) {
     const targets = loadScopedTargets(decisionsDir).filter((t) => t.scopeGlobs.length);
     const dotDirs = new Set(targets.flatMap((t) => t.scopeGlobs.flatMap((g) => g.split('/').filter((s) => s.startsWith('.')))));
-    const files = targets.length ? repoFiles(root, max, dotDirs) : [];
-    if (!files.length)
-        return { drifted: [], partial: [] }; // nothing to match against → no conclusion
     const drifted = [];
     const partial = [];
-    const capped = files.length >= max; // an unwalked remainder may hold the "dead" glob's file
+    if (!targets.length || !repoFiles(root, 1, dotDirs).length)
+        return { drifted, partial, capped: false }; // nothing to match against → no conclusion
+    const files = [];
+    for (const prefix of scopeRoots(targets.flatMap((t) => t.scopeGlobs))) {
+        const hit = files.length < max ? resolvePrefix(root, prefix) : null;
+        if (!hit)
+            continue;
+        if (hit.isDir)
+            for (const f of repoFiles(root, max - files.length, dotDirs, hit.abs))
+                files.push(f);
+        else
+            files.push(path.relative(root, hit.abs).replace(BACKSLASH_RE, '/'));
+    }
+    // An unwalked remainder may hold any "dead" glob's file, so a truncated walk concludes nothing.
+    if (files.length >= max)
+        return { drifted, partial, capped: true };
     for (const t of targets) {
         const deadGlobs = t.scopeGlobs.filter((g) => !matchScope(files, [g]));
         if (deadGlobs.length === t.scopeGlobs.length)
             drifted.push({ slug: t.slug, globs: t.scopeGlobs });
-        else if (deadGlobs.length && !capped)
+        else if (deadGlobs.length)
             partial.push({ slug: t.slug, deadGlobs });
     }
-    return { drifted, partial };
+    return { drifted, partial, capped: false };
 }
 /**
  * Every scoped axis whose globs match no file in the tree.
@@ -99,22 +142,26 @@ function scopeHealth(root, decisionsDir, max = MAX_FILES) {
  * asks when it runs. A separate glob implementation could disagree with the gate and report an
  * axis as live when it is not — which is the failure this exists to catch.
  */
-export function findDrift(root, decisionsDir) {
-    return scopeHealth(root, decisionsDir).drifted;
+export function findDrift(root, decisionsDir, max) {
+    return scopeHealth(root, decisionsDir, max).drifted;
 }
 /** Axes still loaded through one live glob whose other globs match nothing — a file they moved. */
 export function findPartialDrift(root, decisionsDir, max) {
     return scopeHealth(root, decisionsDir, max).partial;
 }
 /** `guard-decisions drift` — exit 1 when any ruling has silently stopped being loaded, a
- * `**Supersedes:**` id resolves to nothing, or an axis carries more than one un-superseded Target. */
-export function runDrift(root, decisionsDir) {
+ * `**Supersedes:**` id resolves to nothing, or an axis carries more than one un-superseded Target.
+ * Exit 2 when it could not look: a missing root, or Scope roots holding at least `max` files. */
+export function runDrift(root, decisionsDir, max = MAX_FILES) {
     if (!existsSync(root)) {
         console.error(`guard-decisions drift: no such directory ${root}`);
         return 2;
     }
-    const { drifted, partial } = scopeHealth(root, decisionsDir);
+    const { drifted, partial, capped } = scopeHealth(root, decisionsDir, max);
     const { unresolved, multipleLive } = resolveSupersession(decisionsDir);
+    if (capped)
+        console.error(`⚠ guard-decisions drift: Scope globs reach at least ${max} files, so the walk stopped — ` +
+            'Scope drift not concluded. A glob that opens with a wildcard walks the whole repository.');
     if (partial.length) {
         console.error(`⚠ ${partial.length} live decision record(s) carry Scope globs that match nothing — files they ` +
             'govern may have moved out of reach (report-only):');
@@ -123,6 +170,8 @@ export function runDrift(root, decisionsDir) {
         console.error(`   ${RESCOPE_REMEDY}`);
     }
     if (!drifted.length && !unresolved.length && !multipleLive.length) {
+        if (capped)
+            return 2;
         if (!partial.length)
             console.log('decision drift: every scoped ruling still matches code ✓');
         return 0;

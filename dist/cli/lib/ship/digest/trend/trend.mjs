@@ -352,9 +352,7 @@ export function renderVersionChange(rows, key) {
 /** The digest's branch-history lines (stalled reviewers, then a devkit upgrade), or ''. */
 export function renderBranchHistory(sink, key) {
     const rows = readBranchHistory(sink, key);
-    return [trendNarration(rows, key), renderVersionChange(rows, key)]
-        .filter(Boolean)
-        .join('\n');
+    return [trendNarration(rows, key), renderVersionChange(rows, key)].filter(Boolean).join('\n');
 }
 /** Pure: streaks → at most two lines per reviewer, or '' for silence. */
 export function renderTrend(lines) {
