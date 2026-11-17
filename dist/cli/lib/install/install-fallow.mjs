@@ -15,7 +15,7 @@ import { pathToFileURL } from 'node:url';
 import { cmpSemver } from '../../../gate-engine/devkit-version.mjs';
 /**
  * Pinned fallow version. NEVER @latest — a floating tag makes the gate non-deterministic
- * and can drift below FALLOW_GATE_MIN_VERSION. 3.35.0 sits well above the default floor
+ * and can drift below FALLOW_GATE_MIN_VERSION. 3.42.0 sits well above the default floor
  * (2.46.0), so a pinned install always satisfies the gate's version check. It is also the
  * minimum: `ensureFallow` keeps a fallow at or above it and never downgrades one.
  *
@@ -34,7 +34,7 @@ import { cmpSemver } from '../../../gate-engine/devkit-version.mjs';
  * fallow 3.0.0 is a platform milestone, NOT a breaking change: CLI flags, config, and the
  * `audit --format json` contract the staged gate reads are unchanged across the major.
  */
-export const FALLOW_PINNED_VERSION = '3.35.0';
+export const FALLOW_PINNED_VERSION = '3.42.0';
 /**
  * Single spawn seam. Every external command in this module funnels through here so dryRun
  * print-and-skip and the test mock have ONE place to intercept. Inherits stdio by default
