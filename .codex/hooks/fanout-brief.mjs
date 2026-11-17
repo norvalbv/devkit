@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Pre-write advisory: a Write creating a new file would push its folder past the fan-out cap.
- * It relays `guard-fanout preflight` verbatim, before a gated ship round discovers the same block.
+ * Pre-write advisory: a Write or Codex apply_patch creating new files would push a folder past the
+ * fan-out cap. It relays `guard-fanout preflight` verbatim, before a gated ship round blocks on it.
  *
  * Advisory and fail-safe: `additionalContext`, never a `permissionDecision`; any failure is silence.
  * Preflight reads the tracked index only, so the folder's untracked siblings are named explicitly.
@@ -11,8 +11,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { projectRoot, writtenFiles } from './edit-targets-lib.mjs';
 
-const PATH_KEYS = ['file_path', 'path', 'target_file', 'target_path'];
 const TIMEOUT_MS = 10_000;
 
 function readInput() {
@@ -21,13 +21,6 @@ function readInput() {
   } catch {
     return null;
   }
-}
-
-function filePathOf(input) {
-  const ti = input?.tool_input ?? {};
-  // `.trim?.()` is absent on every non-string, so only a non-empty string path survives.
-  for (const k of PATH_KEYS) if (ti[k]?.trim?.()) return ti[k];
-  return null;
 }
 
 /** The consumer's own guard-fanout, then a PATH one. Absent ⇒ this repo does not use the guard. */
@@ -61,34 +54,48 @@ function claimed(sessionId, root, dir) {
   }
 }
 
-function main() {
-  const input = readInput();
-  if (input?.tool_name !== 'Write') return;
-  const file = filePathOf(input);
-  if (!file) return;
+/** The new files of this call, grouped by folder, relative to `root` and posix-spelled. */
+function newFilesByFolder(input, root) {
+  const byFolder = new Map();
+  for (const abs of writtenFiles(input, root)) {
+    const rel = path.relative(root, abs).split(path.sep).join('/');
+    if (!rel || rel === '..' || rel.startsWith('../') || existsSync(abs)) continue;
+    const dir = path.posix.dirname(rel);
+    byFolder.set(dir, [...(byFolder.get(dir) ?? []), rel]);
+  }
+  return byFolder;
+}
 
-  const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-  const abs = path.resolve(root, file);
-  const rel = path.relative(root, abs).split(path.sep).join('/');
-  if (!rel || rel === '..' || rel.startsWith('../') || existsSync(abs)) return;
-
-  const bin = resolveBin(root);
-  if (!bin) return;
-  const dir = path.posix.dirname(rel);
-  const siblings = untrackedSiblings(root, dir).filter((sibling) => sibling !== rel);
-  const run = spawnSync(bin, ['preflight', '--', rel, ...siblings], {
+/** One preflight per folder: the call's new files there count together with its untracked ones. */
+function folderAdvisory(bin, root, dir, rels) {
+  const siblings = untrackedSiblings(root, dir).filter((sibling) => !rels.includes(sibling));
+  const run = spawnSync(bin, ['preflight', '--', ...rels, ...siblings], {
     cwd: root,
     encoding: 'utf8',
     timeout: TIMEOUT_MS,
   });
-  if (run.status !== 1 || !run.stdout?.trim()) return;
-  if (claimed(input.session_id, root, dir)) return;
+  if (run.status !== 1 || !run.stdout?.trim()) return null;
+  const named = rels.map((rel) => `\`${rel}\``).join(', ');
+  const place = rels.length === 1 ? 'place it' : 'place them';
+  return `Writing ${named} will block your commit at guard-fanout — ${place} in a subfolder instead.\n\n${run.stdout.trim()}`;
+}
 
-  const text =
-    `Writing \`${rel}\` will block your commit at guard-fanout — place it in a subfolder instead.\n\n` +
-    run.stdout.trim();
+function main() {
+  const input = readInput();
+  const root = projectRoot();
+  const byFolder = newFilesByFolder(input, root);
+  if (byFolder.size === 0) return;
+  const bin = resolveBin(root);
+  if (!bin) return;
+  const texts = [];
+  for (const [dir, rels] of byFolder) {
+    const text = folderAdvisory(bin, root, dir, rels);
+    if (text && !claimed(input.session_id, root, dir)) texts.push(text);
+  }
+  if (texts.length === 0) return;
+  const additionalContext = texts.join('\n\n');
   process.stdout.write(
-    `${JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: text } })}\n`,
+    `${JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext } })}\n`,
   );
 }
 

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { HOOK_REGISTRATIONS } from '../lib/install/hook-registration-ledger/registrations.mts';
 import {
+  EDIT_TARGETS_LIB,
   FANOUT_BRIEF_HOOK,
   hookScriptsFor,
 } from '../lib/install/hook-registration-ledger/selection.mts';
@@ -32,7 +33,10 @@ describe('fanout-brief ownership', () => {
 
   it('is owned by the fanout guard, independently of the agentHooks bundle', () => {
     expect(hookScriptsFor({ ...base, agentHooks: true })).not.toContain(FANOUT_BRIEF_HOOK);
-    expect(hookScriptsFor({ ...base, fanout: true })).toEqual([FANOUT_BRIEF_HOOK]);
+    expect(hookScriptsFor({ ...base, fanout: true })).toEqual([
+      EDIT_TARGETS_LIB,
+      FANOUT_BRIEF_HOOK,
+    ]);
   });
 
   it('registers on Write only, with no Cursor mirror', () => {

@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-// PostToolUse (Edit|Write|MultiEdit): report an edit that left a file over its guard-size line
+// PostToolUse (Edit|Write|MultiEdit, and Codex apply_patch): report an edit that left a file over its guard-size line
 // ceiling, so the overrun is fixed now instead of surfacing as a blocked commit.
 //
 // Advisory only: it adds context and never blocks. Any failure prints `{}`.
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
+import { patchTargets, projectRoot } from './edit-targets-lib.mjs';
 
-const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'apply_patch']);
 // preflight's own overrun verdict: exit 1 alone also means an uncaught throw.
 const OVERRUN_RE = /^🚫 \d+ file\(s\) exceed the line limit/m;
 
@@ -34,6 +35,7 @@ function editedFilesByConfig(input, root) {
   const groups = new Map();
   // `.trim?.()` exists only on strings, so it also drops every non-string value.
   const named = [input?.tool_input?.file_path, input?.tool_input?.path].filter((p) => p?.trim?.());
+  named.push(...patchTargets(input));
   for (const path of new Set(named)) {
     const abs = resolve(root, path);
     if (!existsSync(abs) || !statSync(abs).isFile()) continue;
@@ -66,7 +68,7 @@ function main() {
   let output = {};
   try {
     const input = JSON.parse(readFileSync(0, 'utf8'));
-    const reports = overruns(input, process.env.CLAUDE_PROJECT_DIR || process.cwd());
+    const reports = overruns(input, projectRoot());
     if (reports.length > 0) {
       const additionalContext = `guard-size, measured after this edit:\n${reports.join('\n')}\nNet growth past the ceiling blocks the commit: trim this change, or move whole functions (with their tests) to another file.`;
       output = { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext } };
