@@ -3,6 +3,7 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { basename, dirname, extname, join, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { chromium, type Page } from 'playwright-core';
 import { z } from 'zod';
@@ -70,21 +71,46 @@ function withTimeout(work: Promise<void>, ms: number): Promise<void> {
   return Promise.race([work, expired]).finally(() => clearTimeout(timer));
 }
 
+async function connect(devtools: string, remedy: string) {
+  return chromium.connectOverCDP(devtools).catch((cause) => {
+    throw new Error(`nothing answers DevTools at ${devtools} (${errorMessage(cause)}); ${remedy}`);
+  });
+}
+
 /** The first page of whatever answers the box's DevTools port: its Chromium, or an app the agent
  * started with --remote-debugging-port=9222. Closing only disconnects. */
 async function openInBox(box: Box): Promise<Opened> {
-  const devtools = `http://127.0.0.1:${box.cdp}`;
-  const browser = await chromium.connectOverCDP(devtools).catch((cause) => {
-    const remedy = 'start Chromium or your app in the box with --remote-debugging-port=9222';
-    throw new Error(
-      `nothing in the box answers DevTools at ${devtools} (${errorMessage(cause)}); ${remedy}`,
-    );
-  });
+  const remedy = 'start Chromium or your app in the box with --remote-debugging-port=9222';
+  const browser = await connect(`http://127.0.0.1:${box.cdp}`, remedy);
   const context = browser.contexts()[0] ?? (await browser.newContext());
   return { page: context.pages()[0] ?? (await context.newPage()), close: () => browser.close() };
 }
 
-/** How a run films itself: the page's own screencast when headless, the whole screen in a box. */
+/** DevTools answers before an app shows its first window, so an attach waits this long for one. */
+const APP_PAGE_MS = 30_000;
+const NOT_THE_APP = /^(devtools:|chrome-extension:|chrome-error:|about:blank$)/;
+
+/** The app's own page among DevTools targets: no inspector, extension, blank or failed-load page. */
+export const appPage = <P extends { url: () => string }>(pages: P[]): P | undefined =>
+  pages.find((page) => !NOT_THE_APP.test(page.url()));
+
+/** The window of the app serving DevTools on the slot's port. Closing only disconnects. */
+async function openApp(devtools: string): Promise<Opened> {
+  const remedy =
+    'start your app with --remote-debugging-port={port}, or drop "devtools" from the recipe';
+  const browser = await connect(devtools, remedy);
+  const pages = () => browser.contexts().flatMap((context) => context.pages());
+  for (const deadline = Date.now() + APP_PAGE_MS; !appPage(pages()) && Date.now() < deadline;)
+    await sleep(100);
+  const page = appPage(pages());
+  if (page) return { page, close: () => browser.close() };
+  const seen = pages().map((other) => other.url());
+  await browser.close();
+  const waited = `the app at ${devtools} showed no window within ${APP_PAGE_MS / 1000}s`;
+  throw new Error(`${waited} (${seen.length} other page(s): ${seen.join(', ')})`);
+}
+
+/** How a run films itself: the page's own screencast on this Mac, the whole screen in a box. */
 interface Recorder {
   video: string;
   start: () => Promise<void>;
@@ -133,6 +159,17 @@ export interface RunInput {
   profile: string;
   evidence: string;
   box?: Box | null;
+  /** The recipe's `devtools`: `url` is the app's DevTools endpoint, and the page is the app's own. */
+  devtools?: boolean;
+}
+
+/** The page a run drives, and the address its flow is given. */
+async function openPage({ box, devtools, url, profile }: RunInput) {
+  if (box) return { ...(await openInBox(box)), url };
+  if (!devtools) return { ...(await openHeadless(profile)), url };
+  const app = await openApp(url);
+  // An attached flow's url is its app's own address, so `goto(url)` reloads the app.
+  return { ...app, url: app.page.url() };
 }
 
 export interface RunResult {
@@ -144,7 +181,7 @@ export interface RunResult {
 
 /** Record `flowPath` on the slot's page; a throw or a timeout fails it (passed:false, kept locally). */
 export async function runFlow(input: RunInput): Promise<RunResult> {
-  const { root, flowPath, url, profile, evidence, box } = input;
+  const { root, flowPath, evidence, box } = input;
   const flow = input.name ?? basename(flowPath, extname(flowPath));
   if (!FLOW_NAME.test(flow))
     throw new Error(
@@ -155,7 +192,7 @@ export async function runFlow(input: RunInput): Promise<RunResult> {
   mkdirSync(evidence, { recursive: true });
   const facts = provenance(root);
   const files: CapturedFile[] = [];
-  const { page, close } = await (box ? openInBox(box) : openHeadless(profile));
+  const { page, close, url } = await openPage(input);
   const recorder = box ? boxRecorder(box, evidence, flow) : pageRecorder(page, evidence, flow);
   const shot = async (name: string) => {
     if (!SHOT_NAME.test(name))

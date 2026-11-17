@@ -101,7 +101,7 @@ function parseOptions(args: string[]): Options | Failure {
 }
 
 /** The merge-base sha plus a label naming what it was taken against. */
-function mergeBaseOf(
+export function mergeBaseOf(
   run: GitRun,
   base: string | undefined,
 ): { sha: string; label: string } | Failure {
@@ -125,7 +125,7 @@ function mergeBaseOf(
   return { sha: line(mb), label };
 }
 
-const nulList = (out: string): string[] => out.split('\0').filter(Boolean);
+export const nulList = (out: string): string[] => out.split('\0').filter(Boolean);
 
 /** Every line of an untracked file is added. */
 function allLines(top: string, path: string): Set<number> {
