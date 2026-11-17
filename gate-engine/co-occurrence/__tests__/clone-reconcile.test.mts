@@ -116,7 +116,7 @@ describe.skipIf(!HAS_JSCPD)('guard-clone reconcile', () => {
   it('a jscpd that cannot run removes nothing and says why', () => {
     const r = run(consumer, ['reconcile', '--apply'], { JSCPD_BIN: '/nonexistent/jscpd' });
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain('jscpd failed');
+    expect(r.stderr).toContain('jscpd could not run');
     expect(r.stderr).toContain('Nothing removed');
     expect(readFileSync(allowlist, 'utf8')).toBe(original);
   });
