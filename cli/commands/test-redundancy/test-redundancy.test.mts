@@ -1,4 +1,5 @@
 /** `devkit test-redundancy` against real git repos, with fallow replaced by its recorded answer. */
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cleanupRepos,
@@ -9,15 +10,19 @@ import {
 import type { KillMatrixReport } from './report.mts';
 import testRedundancy, { type Deps } from './test-redundancy.mts';
 
-let savedBase: string | undefined;
+const saved = new Map<string, string | undefined>();
 beforeEach(() => {
-  // A host-set base would silently redirect the default base below.
-  savedBase = process.env.DEVKIT_BASE_REF;
-  delete process.env.DEVKIT_BASE_REF;
+  // A host-set base would silently redirect the default base below; the command sets the run id.
+  for (const key of ['DEVKIT_BASE_REF', 'DEVKIT_AGENT_RUN_ID']) {
+    saved.set(key, process.env[key]);
+    delete process.env[key];
+  }
 });
 afterEach(() => {
-  if (savedBase === undefined) delete process.env.DEVKIT_BASE_REF;
-  else process.env.DEVKIT_BASE_REF = savedBase;
+  for (const [key, value] of saved) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   cleanupRepos();
   vi.restoreAllMocks();
 });
@@ -26,7 +31,7 @@ const ADDS = 'src/a.test.mts::adds';
 const ADDS_AGAIN = 'src/a.test.mts::adds again';
 const answer: KillMatrixReport = {
   elapsed_ms: 2000,
-  summary: { counts: { total: 7 } },
+  summary: { counts: { total: 7, pending: 0 } },
   kill_matrix: {
     candidates: [ADDS_AGAIN],
     coverage_without_kills: [],
@@ -64,6 +69,14 @@ function featureRepo(pkg = '') {
   return r;
 }
 
+/** The run's telemetry row, as written to the sink vitest.setup.mjs points at a temp file. */
+function lastRow(): string {
+  const rows = readFileSync(process.env.DEVKIT_GATE_EVENTS ?? '', 'utf8')
+    .trim()
+    .split('\n');
+  return rows.findLast((r) => r.includes('"type":"test_redundancy_run"')) ?? '';
+}
+
 const addTest = (root: string) =>
   write(root, 'src/a.test.mts', 'test("adds", () => {});\ntest("adds again", () => {});\n');
 
@@ -73,10 +86,31 @@ describe('devkit test-redundancy', () => {
     write(root, 'src/a.mts', 'export const a = 2;\n');
     addTest(root);
     const { deps, runFallow } = fallow('3.41.0');
+    let runIdSeenByFallow: string | undefined = 'unread';
+    runFallow.mockImplementation(() => {
+      runIdSeenByFallow = process.env.DEVKIT_AGENT_RUN_ID;
+      return { status: 0, stdout: JSON.stringify(answer) };
+    });
 
     const { code, out } = run(root, deps);
 
     expect(code).toBe(0);
+    expect(runIdSeenByFallow).toBeUndefined();
+    const row = lastRow();
+    expect(row).not.toContain('src/');
+    expect(JSON.parse(row)).toMatchObject({
+      outcome: 'judged',
+      run_mode: 'agent',
+      fallow_version: '3.41.0',
+      head: git(root, 'rev-parse', 'HEAD'),
+      dirty: true,
+      mutants_total: 7,
+      mutants_ran: 7,
+      redundant: 1,
+      kills_nothing: 0,
+      changed_uncaught: 0,
+      wall_ms: expect.any(Number),
+    });
     expect(runFallow.mock.calls[0][0]).toEqual([
       'mutation',
       'src/a.mts',
@@ -101,6 +135,7 @@ describe('devkit test-redundancy', () => {
 
     expect(run(root, deps).out).toContain('nothing to judge');
     expect(runFallow).not.toHaveBeenCalled();
+    expect(JSON.parse(lastRow())).toMatchObject({ outcome: 'no_test_change' });
   });
 
   it('is not judged on a fallow older than the kill matrix, naming the version it needs', () => {
@@ -115,6 +150,75 @@ describe('devkit test-redundancy', () => {
     expect(out).toContain('Not judged: fallow 3.35.0 has no --kill-matrix-for; it needs 3.40.0');
     expect(out).toContain('bun add -g fallow@3.42.0');
     expect(runFallow).not.toHaveBeenCalled();
+    expect(JSON.parse(lastRow())).toMatchObject({
+      outcome: 'fallow_too_old',
+      fallow_version: '3.35.0',
+    });
+  });
+
+  const otherTarget = { target: 'src/b.test.mts', status: 'incomplete', test_ids: [] };
+  it.each([
+    ['mutants left pending', { ...answer, summary: { counts: { total: 7, pending: 2 } } }, false],
+    ['pending not reported', { ...answer, summary: { counts: { total: 7 } } }, false],
+    ['total not reported', { ...answer, summary: { counts: { pending: 0 } } }, false],
+    [
+      'another target unjudged',
+      {
+        ...answer,
+        kill_matrix: {
+          ...answer.kill_matrix,
+          targets: [...(answer.kill_matrix?.targets ?? []), otherTarget],
+        },
+      },
+      false,
+    ],
+    ['a changed test file fallow did not list', answer, true],
+  ])('records a run with one complete target as partial, not judged: %s', (_, report, twoFiles) => {
+    const { root } = featureRepo();
+    write(root, 'src/a.mts', 'export const a = 2;\n');
+    addTest(root);
+    if (twoFiles) write(root, 'src/b.test.mts', 'test("b", () => {});\n');
+
+    run(root, fallow('3.41.0', JSON.stringify(report)).deps);
+
+    expect(JSON.parse(lastRow())).toMatchObject({ outcome: 'partial', redundant: 1 });
+  });
+
+  it('records no complete target with the mutant counts fallow did not report left out', () => {
+    const { root } = featureRepo();
+    write(root, 'src/a.mts', 'export const a = 2;\n');
+    addTest(root);
+    const noneComplete: KillMatrixReport = {
+      kill_matrix: {
+        targets: [{ target: 'src/a.test.mts', status: 'incomplete', test_ids: [ADDS] }],
+      },
+    };
+
+    run(root, fallow('3.41.0', JSON.stringify(noneComplete)).deps);
+
+    const row = JSON.parse(lastRow());
+    expect(row.outcome).toBe('no_target_complete');
+    for (const field of ['mutants_total', 'mutants_ran', 'redundant', 'kills_nothing']) {
+      expect(row).not.toHaveProperty(field);
+    }
+  });
+
+  it('records a complete target with no tests as judged, not as no complete target', () => {
+    const { root } = featureRepo();
+    write(root, 'src/a.mts', 'export const a = 2;\n');
+    addTest(root);
+    const noTests: KillMatrixReport = {
+      ...answer,
+      kill_matrix: { targets: [{ target: 'src/a.test.mts', status: 'complete', test_ids: [] }] },
+    };
+
+    run(root, fallow('3.41.0', JSON.stringify(noTests)).deps);
+
+    expect(JSON.parse(lastRow())).toMatchObject({
+      outcome: 'judged',
+      redundant: 0,
+      kills_nothing: 0,
+    });
   });
 
   it('needs the source named for a test-only change, then mutates what it is given', () => {
@@ -139,6 +243,10 @@ describe('devkit test-redundancy', () => {
 
     expect(code).toBe(0);
     expect(out).toContain('Not judged: fallow could not run: vitest is not installed');
+    expect(JSON.parse(lastRow())).toMatchObject({
+      outcome: 'not_judged',
+      fallow_version: '3.41.0',
+    });
     for (const noReport of ['null', 'not json']) {
       expect(run(root, fallow('3.41.0', noReport).deps).out).toContain(
         'Not judged: fallow printed no report (exit 0).',
