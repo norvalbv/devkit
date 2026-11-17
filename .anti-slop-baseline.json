@@ -2499,14 +2499,6 @@
       "count": 1
     },
     {
-      "fingerprint": "43629b75103f1773628f41af2ae77c6830f63c55482a52714713c9d509944d13",
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "gate-engine/co-occurrence/clone-detector.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "typeof v",
-      "count": 1
-    },
-    {
       "fingerprint": "4367804d7ca4e9e7d73a212f09f0fa9fde278cd4ebdbdd6f7f218055589d2fff",
       "ruleId": "anti-slop/no-known-value-widening",
       "file": "cli/__tests__/review-cache-root.test.mts",
@@ -3193,6 +3185,14 @@
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
       "context": "unknown",
       "count": 3
+    },
+    {
+      "fingerprint": "57a3ecd4aa6d6f52ffdf79b29f6d69069648cbe91f547372d747d201f174dbb2",
+      "ruleId": "anti-slop/no-runtime-typeof",
+      "file": "gate-engine/edge-cases/__tests__/results-privacy.test.mts",
+      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
+      "context": "typeof v",
+      "count": 1
     },
     {
       "fingerprint": "57ddf564e07ae56ea4ed7870276379209c8b5e17ea60ad311b7b8fe975f37bc2",
