@@ -64,7 +64,7 @@ describe('overlay with a git-tracked settings.local.json', () => {
     vi.mocked(console.log).mockClear();
     expect(await doctorRun([], root)).toBe(0);
     expect(logged()).toMatch(
-      /hook registrations: committed, so overlay never edits it .*claude:tracked:\.claude\/settings\.local\.json.*git rm --cached.*fallow-gate\.sh hooks devkit will not remove: claude:retired-registration:\.claude\/settings\.json/,
+      /hook registrations: committed, so overlay never edits it .*claude:tracked:\.claude\/settings\.local\.json.*git rm --cached.*hooks devkit will not remove: claude:retired-registration:\.claude\/settings\.json/,
     );
     expect(await doctorRun(['--fix'], root)).toBe(0);
     expect(read(root, LOCAL)).toBe(before);
