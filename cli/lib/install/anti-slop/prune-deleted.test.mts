@@ -14,8 +14,8 @@ afterEach(() => {
   for (const cwd of roots.splice(0)) rmSync(cwd, { recursive: true, force: true });
 });
 
-/** One error-severity finding per name; distinct names keep path-free relocation keys distinct. */
-const bad = (name: string) => `export function ${name}(value: object) { return value; }\n`;
+/** One error-severity finding per name; the parameter name is in the diagnostic, which keeps path-free relocation keys distinct. */
+const bad = (name: string) => `export function f(${name}: object) { return ${name}; }\n`;
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@test.invalid', ...args], {
