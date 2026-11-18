@@ -1,4 +1,4 @@
-function isTransparentExpression(node) {
+export function isTransparentExpression(node) {
     return (node.type === 'ChainExpression' ||
         node.type === 'ParenthesizedExpression' ||
         node.type === 'TSAsExpression' ||
@@ -94,6 +94,45 @@ function isDefinitelyNonCallable(sourceCode, expression) {
             return false;
     }
 }
+export function literalPropertyKey(expression) {
+    const candidate = unwrapExpression(expression);
+    if (candidate.type === 'TemplateLiteral' && candidate.expressions.length === 0) {
+        return candidate.quasis[0]?.value.cooked ?? null;
+    }
+    if (candidate.type === 'UnaryExpression' &&
+        (candidate.operator === '+' || candidate.operator === '-')) {
+        const argument = unwrapExpression(candidate.argument);
+        if (argument.type === 'Literal' && argument.value === Number(argument.value)) {
+            const value = Number(argument.value);
+            return String(candidate.operator === '-' ? -value : value);
+        }
+        if (candidate.operator === '-' && argument.type === 'Literal' && 'bigint' in argument) {
+            return String(-argument.value);
+        }
+    }
+    if (candidate.type !== 'Literal')
+        return null;
+    if ('regex' in candidate)
+        return null;
+    return String(candidate.value);
+}
+export function memberKey(node) {
+    if (node.computed)
+        return literalPropertyKey(node.property);
+    return node.property.type === 'Identifier' ? node.property.name : null;
+}
+export const JSON_VALUE_PROTOTYPE_KEYS = new Set([
+    ...[
+        Object.prototype,
+        Array.prototype,
+        String.prototype,
+        Number.prototype,
+        Boolean.prototype,
+    ].flatMap((prototype) => Object.getOwnPropertyNames(prototype)),
+    // `prototype` is not inherited from these values, but allowing it beside `constructor` makes the
+    // classic constructor/prototype pollution path too easy to split across fixed accesses.
+    'prototype',
+]);
 function isRecordType(type) {
     if (type.type === 'TSParenthesizedType')
         return isRecordType(type.typeAnnotation);
@@ -121,7 +160,12 @@ export function externalOrigin(sourceCode, expression, includeRecordParameters =
     if (jsonOrigin !== null)
         return jsonOrigin;
     if (unwrapped.type === 'MemberExpression') {
-        return externalOrigin(sourceCode, unwrapped.object, includeRecordParameters, visited);
+        const origin = externalOrigin(sourceCode, unwrapped.object, includeRecordParameters, visited);
+        const key = memberKey(unwrapped);
+        // A member that may be inherited (`parsed.toString`) is a function, not an ordinary JSON value.
+        return origin === 'json' && key !== null && JSON_VALUE_PROTOTYPE_KEYS.has(key)
+            ? 'json-inherited'
+            : origin;
     }
     if (unwrapped.type !== 'Identifier')
         return null;
@@ -152,15 +196,25 @@ export function sameExpression(sourceCode, left, right) {
         return true;
     return false;
 }
+function runsDuringClassEvaluation(scope) {
+    const field = scope.block.parent;
+    return (scope.type === 'class-static-block' ||
+        (scope.type === 'class-field-initializer' &&
+            (field?.type === 'PropertyDefinition' || field?.type === 'AccessorProperty') &&
+            field.static));
+}
+/** A static block or static field value runs while its class is evaluated, so it also mutates there. */
 export function appendMutationEvidence(sourceCode, mutations, node) {
-    mutations.push({
-        start: node.start,
-        end: node.end,
-        scope: sourceCode.getScope(node).variableScope,
-    });
+    const scopes = [sourceCode.getScope(node).variableScope];
+    let scope = scopes[0];
+    while (scope.upper !== null && runsDuringClassEvaluation(scope)) {
+        scope = scope.upper.variableScope;
+        scopes.push(scope);
+    }
+    mutations.push({ start: node.start, end: node.end, scopes });
 }
 export function hasPotentialMutationWithin(mutations, scope, start, end) {
-    return mutations.some((mutation) => mutation.scope === scope && mutation.start >= start && mutation.end <= end);
+    return mutations.some((mutation) => mutation.scopes.includes(scope) && mutation.start >= start && mutation.end <= end);
 }
 function isTerminating(statement) {
     if (statement.type === 'ReturnStatement' ||
@@ -174,7 +228,7 @@ function isTerminating(statement) {
     const last = statement.body.at(-1);
     return last !== undefined && isTerminating(last);
 }
-function isFunctionBoundary(node) {
+export function isFunctionBoundary(node) {
     return (node.type === 'ArrowFunctionExpression' ||
         node.type === 'FunctionDeclaration' ||
         node.type === 'FunctionExpression');

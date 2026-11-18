@@ -82,7 +82,7 @@ export async function reachabilityOf(roles, root, deps = DEFAULT_DEPS) {
             else if (codexLimits?.reached)
                 status.state = 'rate-limited';
             else if (codexLimits) {
-                status.state = 'ok';
+                status.state = codexLimits.onCredits ? 'unverified' : 'ok';
                 if (codexLimits.onCredits)
                     status.onCredits = true;
             }
@@ -144,18 +144,18 @@ export function renderPreflight(statuses, now = Date.now(), informational = fals
             detail.push(`resets in ${formatResetDelta(s.resetsAt, now)}`);
         const suffix = detail.length > 0 ? ` (${detail.join(', ')})` : '';
         const verdict = s.state === 'ok'
-            ? s.onCredits
-                ? 'reachable — plan limit reached, running on credits'
-                : 'reachable'
-            : s.state === 'absent'
-                ? `\`${s.bin}\` not installed or not on PATH`
-                : s.state === 'unauthenticated'
-                    ? `\`${s.bin}\` not authenticated`
-                    : s.state === 'rate-limited'
-                        ? 'EXHAUSTED — USAGE LIMIT REACHED'
-                        : s.state === 'unavailable'
-                            ? `NOT AVAILABLE ON THIS ACCOUNT (plan ${s.planType})`
-                            : 'not verified';
+            ? 'reachable'
+            : s.state === 'unverified'
+                ? 'plan limit reached — credit service unverified'
+                : s.state === 'absent'
+                    ? `\`${s.bin}\` not installed or not on PATH`
+                    : s.state === 'unauthenticated'
+                        ? `\`${s.bin}\` not authenticated`
+                        : s.state === 'rate-limited'
+                            ? 'EXHAUSTED — USAGE LIMIT REACHED'
+                            : s.state === 'unavailable'
+                                ? `NOT AVAILABLE ON THIS ACCOUNT (plan ${s.planType})`
+                                : 'not verified';
         lines.push(`  ${s.role}: ${s.model} via ${s.bin} — ${verdict}${suffix}`);
     }
     const blocked = darkStatuses(statuses);
@@ -178,8 +178,9 @@ export function renderPreflight(statuses, now = Date.now(), informational = fals
     for (const model of new Set(refused.map((s) => s.model))) {
         const rows = refused.filter((s) => s.model === model);
         const knobs = rows.map((s) => `${s.role} via ${ROLE_ENV[s.role]}`).join('; ');
-        lines.push(`   This plan does not serve ${model}, so re-running will not help. Move ${knobs} — to a ` +
-            `model the account serves: ${rows[0].served?.join(', ')}.`);
+        const served = rows[0].served ?? [];
+        const target = served.length > 0 ? ` — to a model the account serves: ${served.join(', ')}` : '';
+        lines.push(`   This plan does not serve ${model}, so re-running will not help. Move ${knobs}${target}.`);
     }
     lines.push(`   ${remedyLine(statuses)}`);
     return lines;
@@ -200,7 +201,7 @@ export function remedyLine(statuses) {
         return `${move[0].toUpperCase()}${move.slice(1)}.`;
     return `To ship inside this window, ${move}.`;
 }
-const darkStatuses = (statuses) => statuses.filter((s) => s.state !== 'ok' && s.state !== 'unknown');
+const darkStatuses = (statuses) => statuses.filter((s) => s.state !== 'ok' && s.state !== 'unverified' && s.state !== 'unknown');
 /** The one dark judge CLI, or undefined when both are dark. */
 function singleDarkBin(blocked) {
     const dark = [...new Set(blocked.map((s) => s.bin))];

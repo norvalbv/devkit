@@ -12,8 +12,6 @@ const MAX_OUTPUT = 512 * 1024;
 const INITIALIZE_ID = 1;
 const READ_ID = 2;
 const MODEL_LIST_ID = 3;
-/** Plans whose credits are not trusted to serve `codex exec` past a spent plan limit. */
-const UNCREDITED_PLANS = new Set(['free', 'go']);
 /** A field is reported only when it is a usable number — this also rejects a wrong-typed value,
  *  because `Number.isFinite` is false for strings, null and undefined alike. */
 const usableNumber = (v) => Number.isFinite(v) ? v : undefined;
@@ -83,10 +81,7 @@ export function parseRateLimitsReply(line) {
     const planLimited = reachedType !== undefined || exhaustedWindow !== undefined;
     const planType = usableText(limits.planType);
     // An allowlist: workspace_* kinds void credits upstream, and an unknown kind stays a lock.
-    // Free/Go credits did not serve codex exec on a live account; paid plans' did (a heuristic).
-    const covered = creditsUsable &&
-        (reachedType === undefined || reachedType === 'rate_limit_reached') &&
-        !(planType !== undefined && UNCREDITED_PLANS.has(planType));
+    const covered = creditsUsable && (reachedType === undefined || reachedType === 'rate_limit_reached');
     const snapshot = {
         reached: planLimited && !covered,
         onCredits: planLimited && covered,

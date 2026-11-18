@@ -188,7 +188,9 @@ function deniedIds(events) {
  * ended before the call returned. Only the call is kept, never its result body.
  */
 export function claudeCommandLines(raw) {
-    const events = claudeEvents(raw);
+    return commandLinesOf(claudeEvents(raw));
+}
+function commandLinesOf(events) {
     const calls = new Map();
     for (const event of events)
         for (const block of event.message?.content ?? []) {
@@ -206,7 +208,12 @@ export function claudeCommandLines(raw) {
     const denied = deniedIds(events);
     return [...calls].map(([id, c]) => `[${denied.has(id) ? 'denied' : c.status}] ${c.line}`);
 }
-/** Store the tool calls as `<label>.commands`; the ref, or null when the judge called no tool. */
-export function saveClaudeCommands(label, raw, lens) {
-    return saveSidecar(`${label}.commands`, raw ? claudeCommandLines(raw) : [], lens);
+/** Store the tool calls as `<label>.commands`; the ref, or null when the judge called no tool.
+ * `onToolCalls` hears them from any claude stream, a killed one too; bare text is not measured. */
+export function saveClaudeCommands(label, raw, lens, onToolCalls) {
+    const events = claudeEvents(raw);
+    const lines = commandLinesOf(events);
+    if (events.length > 0)
+        onToolCalls?.(lines);
+    return saveSidecar(`${label}.commands`, lines, lens);
 }

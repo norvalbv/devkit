@@ -41,12 +41,31 @@ const outcomeSchema = z.strictObject({
     })
         .optional(),
 });
+/** `value` as JSON in an HTML comment line; `<` and `>` are escaped so no text can close it. */
+export const commentLine = (open, value) => `${open}${JSON.stringify(value).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e')}${DATA_CLOSE}`;
+/** The `schema` value a `commentLine` holds within `text`; null when absent or malformed. */
+export function readCommentJson(text, open, schema) {
+    const line = text
+        ?.split('\n')
+        .map((row) => row.trimEnd())
+        .find((row) => row.startsWith(open) && row.endsWith(DATA_CLOSE));
+    try {
+        return line
+            ? (schema.safeParse(JSON.parse(line.slice(open.length, -DATA_CLOSE.length))).data ?? null)
+            : null;
+    }
+    catch {
+        return null;
+    }
+}
 /** A zero-width space after the namespace keeps quoted marker text from ever parsing as a marker. */
 const defuse = (text) => text.replace(MARKER, '<!-- devkit:evidence​:');
 /** Caller-authored text never carries evidence: a pasted block is dropped, a stray marker defused. */
 export const callerText = (body) => defuse(body.replace(BLOCKS, ''));
 const clip = (text, limit) => text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 const flat = (text) => stripVTControlCharacters(text).replace(/\s+/g, ' ').trim();
+/** One line of untrusted text, bounded; still raw markdown, so a renderer escapes it for its context. */
+export const oneLine = (text) => clip(flat(text), MAX_DETAIL_CHARS);
 export const plain = (text) => clip(flat(text).replaceAll('<', '&lt;'), MAX_DETAIL_CHARS);
 /** A failure's name, less the `depth` describe titles the list already printed above it. */
 function failureLine(item, depth) {
@@ -63,7 +82,7 @@ function sharedDescribe(items) {
     return first.slice(0, depth);
 }
 /** `n` and its noun; `plus` marks a floor, from a list the report summary cut at its cap. */
-const counted = (n, noun, plus = '') => `${n}${plus} ${noun}${n === 1 && !plus ? '' : 's'}`;
+export const counted = (n, noun, plus = '') => `${n}${plus} ${noun}${n === 1 && !plus ? '' : 's'}`;
 /** A collapsed section; `summary` is raw HTML, so it carries no markdown. */
 export const details = (summary, body) => [
     `<details><summary>${summary}</summary>`,
@@ -138,14 +157,13 @@ export function renderEvidenceBlock(outcome, evidence, verdict) {
         ]),
     ].join('\n');
     const record = verdict?.verdict ? { ...outcome, mergeVerdict: verdict.verdict } : outcome;
-    const data = JSON.stringify(record).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e');
     return [
         EVIDENCE_BEGIN,
         '## Automated evidence',
         // A line opening with a comment is a raw HTML block, so the slot trails the verdict's markdown.
         `${verdict ? `${plain(verdict.line)} ` : ''}${VERDICT_SLOT}`,
         defuse(content),
-        `${DATA_OPEN}${data}${DATA_CLOSE}`,
+        commentLine(DATA_OPEN, record),
         EVIDENCE_END,
     ].join('\n');
 }
@@ -190,19 +208,6 @@ export function carryEvidenceBlock(callerBody, currentBody) {
 }
 /** The recorded outcome, stale when it was produced at another head; null when absent or malformed. */
 export function readEvidenceBlock(body, currentHead) {
-    const line = BLOCK.exec(body)?.[0]
-        .split('\n')
-        .map((text) => text.trimEnd())
-        .find((text) => text.startsWith(DATA_OPEN) && text.endsWith(DATA_CLOSE));
-    if (!line)
-        return null;
-    let data;
-    try {
-        data = JSON.parse(line.slice(DATA_OPEN.length, -DATA_CLOSE.length));
-    }
-    catch {
-        return null;
-    }
-    const parsed = outcomeSchema.safeParse(data);
-    return parsed.success ? { ...parsed.data, stale: parsed.data.headSha !== currentHead } : null;
+    const data = readCommentJson(BLOCK.exec(body)?.[0] ?? null, DATA_OPEN, outcomeSchema);
+    return data ? { ...data, stale: data.headSha !== currentHead } : null;
 }

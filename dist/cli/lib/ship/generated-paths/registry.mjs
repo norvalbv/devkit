@@ -12,8 +12,7 @@ export const SYNC_AGENTS = 'devkit sync-agents';
 export const DEVKIT_GENERATED = Object.freeze([
     { glob: '.devkit/skills-manifest.json', command: SYNC_SKILLS },
     { glob: '.devkit/agents-manifest.json', command: SYNC_AGENTS },
-    // Not `devkit sync-hooks`: it installs every hook script, ignoring the recorded selection.
-    { glob: '.devkit/agent-hooks-manifest.json', command: 'devkit init' },
+    { glob: '.devkit/agent-hooks-manifest.json', command: 'devkit sync-hooks' },
 ]);
 const LEADING_DOT_SLASH = /^(?:\.\/)+/;
 // Controls, format (bidi, zero-width) and line/paragraph separators: invisible or line-breaking.

@@ -3,6 +3,7 @@
 export const DEGRADED_KINDS = [
     'mcp-missing',
     'denied',
+    'unobserved',
     'unrecorded',
     'skipped',
     'unclassified',

@@ -1,8 +1,12 @@
 /** Pinned upstream identity and the complete Devkit-managed anti-slop rule surface. */
 import { digest } from '../../fs-helpers.mjs';
-export const ANTI_SLOP_UPSTREAM = 'e8c4880471b23ab7f216fba7b27d173a6ef07d4c';
+export const ANTI_SLOP_UPSTREAM = '2a0fcf324de7804f5396e845a689243fdb1acfbe';
 /** Earlier pins a baseline may still carry; append-only, since an untouched baseline keeps its pin. */
-export const ANTI_SLOP_PRIOR_UPSTREAMS = ['446268e5d15baa968eaec669ff65358d36ae6259'];
+export const ANTI_SLOP_PRIOR_UPSTREAMS = [
+    '446268e5d15baa968eaec669ff65358d36ae6259',
+    'e8c4880471b23ab7f216fba7b27d173a6ef07d4c',
+    'b9dbc740905baa1123a3ee4f512fe0933d9e916b',
+];
 export const ANTI_SLOP_PLUGIN_API_VERSION = '1.78.0';
 export const ANTI_SLOP_MANAGED_REL = '.devkit/anti-slop';
 export const ANTI_SLOP_MANIFEST_REL = `${ANTI_SLOP_MANAGED_REL}/manifest.json`;

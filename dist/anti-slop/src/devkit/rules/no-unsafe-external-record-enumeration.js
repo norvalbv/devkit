@@ -1,5 +1,5 @@
 import { defineRule } from '@oxlint/plugins';
-import { appendMutationEvidence, branchConditions, externalOrigin, isGlobalIdentifier, isGlobalMemberCall, isUnaryNot, precedingTerminatingGuards, sameExpression, unwrapExpression, } from '../shared/external-records.js';
+import { branchConditions, externalOrigin, isGlobalIdentifier, isGlobalMemberCall, isUnaryNot, precedingTerminatingGuards, sameExpression, unwrapExpression, } from '../shared/external-records.js';
 function isGlobalObjectCall(sourceCode, expression, value) {
     const candidate = unwrapExpression(expression);
     const callee = candidate.type === 'CallExpression' ? unwrapExpression(candidate.callee) : null;
@@ -62,82 +62,26 @@ function findClause(expression, operator, predicate) {
     return (findClause(candidate.right, operator, predicate) ??
         findClause(candidate.left, operator, predicate));
 }
-function recordParts(sourceCode, condition, value) {
+/** What a condition proves when it is `truthy`: each `&&` clause, or each `||` clause negated. */
+function recordFacts(sourceCode, condition, value, truthy) {
+    const holds = (predicate) => findClause(condition, truthy ? '&&' : '||', predicate) !== null;
     return {
-        identity: findClause(condition, '&&', (clause) => objectComparison(sourceCode, clause, value, true)),
-        objectType: findClause(condition, '&&', (clause) => typeofObjectComparison(sourceCode, clause, value, true)),
-        nonNull: findClause(condition, '&&', (clause) => nullComparison(sourceCode, clause, value, false)),
-        array: findClause(condition, '&&', (clause) => arrayCheck(sourceCode, clause, value, false)),
+        identity: holds((clause) => objectComparison(sourceCode, clause, value, truthy)),
+        object: holds((clause) => typeofObjectComparison(sourceCode, clause, value, truthy)),
+        nonNull: holds((clause) => nullComparison(sourceCode, clause, value, !truthy)),
+        notArray: holds((clause) => arrayCheck(sourceCode, clause, value, !truthy)),
     };
 }
-function rejectionParts(sourceCode, condition, value) {
-    return {
-        identity: findClause(condition, '||', (clause) => objectComparison(sourceCode, clause, value, false)),
-        nonObjectType: findClause(condition, '||', (clause) => typeofObjectComparison(sourceCode, clause, value, false)),
-        nullValue: findClause(condition, '||', (clause) => nullComparison(sourceCode, clause, value, true)),
-        array: findClause(condition, '||', (clause) => arrayCheck(sourceCode, clause, value, true)),
-    };
-}
-function recordProofExpressions(proof) {
-    return [proof.identity, proof.objectType, proof.nonNull, proof.array].filter((expression) => expression !== null);
-}
-function rejectionProofExpressions(proof) {
-    return [proof.identity, proof.nonObjectType, proof.nullValue, proof.array].filter((expression) => expression !== null);
-}
-function proofCandidateRemainsValid(mutations, scope, required, trustedProofs, mutationRanges, ignoredRanges = []) {
-    return required.every((proof) => proof !== null &&
-        !mutations.some((mutation) => mutation.scope === scope &&
-            mutationRanges(proof).some((range) => mutation.start >= range.start && mutation.end <= range.end) &&
-            !trustedProofs.some((trusted) => mutation.start >= trusted.start && mutation.end <= trusted.end) &&
-            !ignoredRanges.some((range) => mutation.start >= range.start && mutation.end <= range.end)));
-}
-function guarded(sourceCode, mutations, node, value, origin) {
-    if (branchConditions(node).some(({ condition, truthy, branch }) => {
-        const scope = sourceCode.getScope(node).variableScope;
-        const mutationRanges = (proof) => [
-            { start: proof.end, end: condition.end },
-            { start: branch.start, end: node.start },
-        ];
-        if (truthy) {
-            const proof = recordParts(sourceCode, condition, value);
-            const trustedProofs = recordProofExpressions(proof);
-            return ((origin === 'json' &&
-                proofCandidateRemainsValid(mutations, scope, [proof.identity, proof.array], trustedProofs, mutationRanges)) ||
-                proofCandidateRemainsValid(mutations, scope, [proof.objectType, proof.nonNull, proof.array], trustedProofs, mutationRanges));
-        }
-        const proof = rejectionParts(sourceCode, condition, value);
-        const trustedProofs = rejectionProofExpressions(proof);
-        return ((origin === 'json' &&
-            proofCandidateRemainsValid(mutations, scope, [proof.identity, proof.array], trustedProofs, mutationRanges)) ||
-            proofCandidateRemainsValid(mutations, scope, [proof.nonObjectType, proof.nullValue, proof.array], trustedProofs, mutationRanges));
-    })) {
-        return true;
-    }
-    const guards = precedingTerminatingGuards(node)
-        .sort((left, right) => left.condition.start - right.condition.start)
-        .map(({ condition, boundary }) => ({
-        condition,
-        boundary,
-        proof: rejectionParts(sourceCode, condition, value),
-    }));
-    const combined = guards.reduce((known, { proof: next }) => {
-        return {
-            identity: next.identity ?? known.identity,
-            nonObjectType: next.nonObjectType ?? known.nonObjectType,
-            nullValue: next.nullValue ?? known.nullValue,
-            array: next.array ?? known.array,
-        };
-    }, { identity: null, nonObjectType: null, nullValue: null, array: null });
-    const scope = sourceCode.getScope(node).variableScope;
-    const trustedProofs = guards.flatMap(({ proof }) => rejectionProofExpressions(proof));
-    const mutationRanges = (proof) => [{ start: proof.end, end: node.start }];
-    const ignoredRanges = guards.map(({ condition, boundary }) => ({
-        start: condition.end,
-        end: boundary,
-    }));
-    return ((origin === 'json' &&
-        proofCandidateRemainsValid(mutations, scope, [combined.identity, combined.array], trustedProofs, mutationRanges, ignoredRanges)) ||
-        proofCandidateRemainsValid(mutations, scope, [combined.nonObjectType, combined.nullValue, combined.array], trustedProofs, mutationRanges, ignoredRanges));
+/** Every enclosing branch and preceding terminating guard holds on the path to `node`, and calls
+ * cannot change a const binding's typeof, null-ness or array-ness, so the facts combine. */
+function guarded(sourceCode, node, value, origin) {
+    const facts = [
+        ...branchConditions(node).map(({ condition, truthy }) => recordFacts(sourceCode, condition, value, truthy)),
+        ...precedingTerminatingGuards(node).map(({ condition }) => recordFacts(sourceCode, condition, value, false)),
+    ];
+    const known = (fact) => facts.some((established) => established[fact]);
+    return (known('notArray') &&
+        ((origin === 'json' && known('identity')) || (known('object') && known('nonNull'))));
 }
 /** Require local positive record-shape proof before enumerating a JSON-derived value. */
 export const noUnsafeExternalRecordEnumerationRule = defineRule({
@@ -151,16 +95,7 @@ export const noUnsafeExternalRecordEnumerationRule = defineRule({
         },
     },
     createOnce(context) {
-        const mutations = [];
-        const recordMutation = (node) => {
-            appendMutationEvidence(context.sourceCode, mutations, node);
-        };
         return {
-            Program() {
-                mutations.length = 0;
-            },
-            AssignmentExpression: recordMutation,
-            AwaitExpression: recordMutation,
             CallExpression(node) {
                 const method = isGlobalMemberCall(context.sourceCode, node, 'Object', 'entries')
                     ? 'entries'
@@ -172,26 +107,13 @@ export const noUnsafeExternalRecordEnumerationRule = defineRule({
                     node.arguments[0]?.type !== 'SpreadElement') {
                     const value = node.arguments[0];
                     const origin = externalOrigin(context.sourceCode, value);
-                    if ((origin === 'json' || origin === 'json-reviver') &&
-                        !guarded(context.sourceCode, mutations, node, value, origin)) {
+                    if (origin !== null &&
+                        origin !== 'record-parameter' &&
+                        !guarded(context.sourceCode, node, value, origin)) {
                         context.report({ node, messageId: 'unsafeEnumeration', data: { method } });
                     }
                 }
-                recordMutation(node);
             },
-            ImportExpression: recordMutation,
-            MemberExpression(node) {
-                recordMutation(node);
-            },
-            NewExpression: recordMutation,
-            SpreadElement: recordMutation,
-            TaggedTemplateExpression: recordMutation,
-            UnaryExpression(node) {
-                if (node.operator === 'delete')
-                    recordMutation(node);
-            },
-            UpdateExpression: recordMutation,
-            YieldExpression: recordMutation,
         };
     },
 });

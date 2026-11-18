@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { resolveGuardConfig } from '../config.mjs';
 import { readRatchetBaseline } from './baseline-paths.mjs';
 import { fanoutSplitHints } from './folder-fanout.mjs';
-import { stagedSet, treeTextAtRef } from './git-index.mjs';
+import { stagedSet, treeTextAtRef, workingTreeText } from './git-index.mjs';
 import { decodeLineBaseline, effectiveLineCeiling, measureLines, normalizeCandidateLineBaseline, normalizeLineBaseline, } from './size-line-authority.mjs';
 import { LINES_BASELINE, lineMatchers, SIZE_SKIP_DIRS } from './size-policy.mjs';
 function readLinesBaseline(contents, label) {
@@ -22,14 +22,6 @@ function readLinesBaselineAtRef(root, ref) {
     if (text === null)
         return null;
     return normalizeLineBaseline(readLinesBaseline(text, ref), (file) => treeTextAtRef(root, ref, file));
-}
-function workingText(root, file) {
-    try {
-        return readFileSync(join(root, file), 'utf8');
-    }
-    catch {
-        return null;
-    }
 }
 function sourcePaths(root, cfg, selected) {
     const match = lineMatchers(cfg);
@@ -62,7 +54,7 @@ export function preflightLines(root, ref, requested = []) {
         console.error(`guard-size preflight unavailable at ${ref}: ${String(error)}`);
         return 2;
     }
-    local = normalizeCandidateLineBaseline(root, local, [ref], (file) => workingText(root, file));
+    local = normalizeCandidateLineBaseline(root, local, [ref], (file) => workingTreeText(root, file));
     const match = lineMatchers(cfg);
     const cap = (file) => (match.isTest(file) ? cfg.maxTestLines : cfg.maxLines);
     const selected = requested.length > 0 ? requested : [...(stagedSet(root) ?? [])];

@@ -147,10 +147,11 @@ export function runManagedPackagedScript(scriptName, args, { command, cwd, env }
             finish(requestedSignal ? SIGNAL_STATUS[requestedSignal] : 1);
         });
         child.once('close', (status, signal) => {
-            if (requestedSignal)
-                return finish(SIGNAL_STATUS[requestedSignal]);
+            // A child that chose its exit owns it; a latched signal speaks only for a child it killed.
             if (status !== null)
                 return finish(status);
+            if (requestedSignal)
+                return finish(SIGNAL_STATUS[requestedSignal]);
             const forwarded = signal && FORWARDED_SIGNALS.includes(signal)
                 ? signal
                 : undefined;

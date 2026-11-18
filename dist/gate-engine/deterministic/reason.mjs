@@ -46,9 +46,10 @@ export function withReasonFiles(fn) {
         }
     }
 }
-/** The environment a gate runs under: the caller's, with THIS gate's reason file named. */
-export function gateEnv(reasonFile) {
-    return { ...process.env, [GATE_REASON_ENV]: reasonFile };
+export const GATE_LABEL_ENV = 'DEVKIT_GATE_LABEL';
+/** The environment a gate runs under: the caller's, with THIS gate's reason file and label named. */
+export function gateEnv(reasonFile, label = '') {
+    return { ...process.env, [GATE_REASON_ENV]: reasonFile, [GATE_LABEL_ENV]: label };
 }
 /** One line for review-target.sh's verdict line. Written only into this review's own temp root, so a
  * nested run cannot reach an outer review's file. Advisory: never throws. */
@@ -89,6 +90,19 @@ export function exitGate(code, lines) {
     if (code !== 0)
         writeGateReason(lines);
     process.exit(code);
+}
+/** Bound on waiting for stdout: a reader that never drains the pipe must not hang the exit. */
+const DRAIN_MS = 10_000;
+/** Resolves once stdout has handed every queued write to the OS, or after `ms`. process.exit drops
+ * a pipe's unflushed tail (about 64 KB survives on macOS), so a piped --json answer would be cut. */
+export function stdoutDrained(ms = DRAIN_MS) {
+    return new Promise((done) => {
+        const timer = setTimeout(done, ms);
+        process.stdout.write('', () => {
+            clearTimeout(timer);
+            done();
+        });
+    });
 }
 /** A gate threw instead of reaching a verdict: keep the stack in the log, record its first line. */
 export function crashExit(error) {

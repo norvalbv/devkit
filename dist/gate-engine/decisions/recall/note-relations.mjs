@@ -22,12 +22,16 @@
  * independently they drift, and a perfectly valid reference reads as dangling — the gate then cries
  * wolf on correct work, which is how a gate gets switched off.
  */
+import { currentTarget, renderNote } from '../decision-format.mjs';
 import { sections } from './markdown.mjs';
 import { axisEntryIds, parseSupersedesId } from './supersession.mjs';
 /** A dated note bullet: `- <date> — <text>`. Shared with retrieval.mts so both read notes alike. */
 export const NOTE_LINE_RE = /^-\s+(\d{4}-\d{2}-\d{2})\s+—\s+(.+)$/;
 /** Top-level: axisNotes runs this once per note, per file, on every scan. */
 const WS_RE = /\s+/;
+const TRAILING_WS_RE = /\s*$/;
+const TARGET_HEADING_RE = /^## Target · (\d{4}-\d{2}-\d{2})/gm;
+const LEGACY_HEADING_RE = /^## (\d{4}-\d{2}-\d{2}) /gm;
 /**
  * A note's declared relation: `**Amends:** <id> — <text>`.
  *
@@ -68,8 +72,12 @@ export function axisNotes(body) {
     const out = [];
     const seenDates = new Map();
     const all = sections(body);
-    for (const [sectionIndex, section] of all.entries()) {
-        if (section.depth !== 2)
+    let sectionIndex = -1;
+    for (const [index, section] of all.entries()) {
+        // A `#`/`###` line in a Target's free-text field parses as a heading; its bullets stay the `##`'s.
+        if (section.depth === 2)
+            sectionIndex = index;
+        if (sectionIndex === -1)
             continue;
         for (const item of section.items) {
             // Only the item's FIRST line: a wrapped bullet's continuation lines are part of the same note,
@@ -229,4 +237,49 @@ export function validateTargetSupersedes(supersedes, body, slug) {
             '`guard-decisions show <slug>` lists them.');
     if ((!ref.slug || ref.slug === slug) && !axisEntryIds(body).has(ref.id))
         throw new Error(`--supersedes "${raw}" names no Target on this axis. See \`guard-decisions show <slug>\` for its block ids.`);
+}
+/** Name the block a ruling was read from: `target:<date>`, `entry:<date>` (legacy), or null. */
+export function liveRulingIdOf(body, hasTarget) {
+    const re = hasTarget ? TARGET_HEADING_RE : LEGACY_HEADING_RE;
+    const dates = [...body.matchAll(re)].map((m) => m[1]);
+    // Last heading wins, matching currentTarget's rule — append order IS chronological order here.
+    const last = dates.at(-1);
+    return last ? `${hasTarget ? 'target' : 'entry'}:${last}` : null;
+}
+/**
+ * Index into `all` of the live ruling's section (`## Target · <date>`, else legacy `## <date> `), or -1.
+ * Last match, never first: two blocks can share a date, and the earlier one is superseded.
+ */
+export function liveSectionIndex(all, liveRulingId) {
+    if (!liveRulingId)
+        return -1;
+    const date = liveRulingId.split(':')[1];
+    for (const prefix of [`## Target · ${date}`, `## ${date} `])
+        for (let i = all.length - 1; i >= 0; i -= 1)
+            if (all[i].depth === 2 && all[i].heading.startsWith(prefix))
+                return i;
+    return -1;
+}
+/** The live ruling's section index, and its end: the next `##` heading, or the body's end. */
+function liveSection(body) {
+    const all = sections(body);
+    const index = liveSectionIndex(all, liveRulingIdOf(body, Boolean(currentTarget(body))));
+    // `#`/`###` lines in a Target's free-text fields parse as headings; only a `##` ends the block.
+    const next = index === -1 ? -1 : all.findIndex((s, i) => i > index && s.depth === 2);
+    const end = next === -1 ? body.length : all[next - 1].end;
+    return { all, index, next, end };
+}
+/** Insert a note at the end of the live ruling's section (readers serve no other), never at EOF.
+ * Throws, writing nothing, with no ruling heading or when a later same-day note would be renumbered. */
+export function spliceLiveNote(body, date, note, supersedes, slug) {
+    const { all, index, next, end } = liveSection(body);
+    if (index === -1)
+        throw new Error('axis has no ruling heading to note under; record one with: guard-decisions add <slug> --target …');
+    const later = axisNotes(body).find((n) => next !== -1 && n.sectionIndex >= next && n.date === date);
+    if (later)
+        throw new Error(`a note dated ${date} already sits under "${all[later.sectionIndex].heading}"; a note above it ` +
+            'would take its id, so nothing was written');
+    const line = renderNote(date, noteTextWithRelation(note, supersedes, body, slug));
+    const tail = body.slice(end);
+    return `${body.slice(0, end).replace(TRAILING_WS_RE, '')}\n${line}\n${tail ? `\n${tail}` : ''}`;
 }

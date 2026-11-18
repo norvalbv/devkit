@@ -17,7 +17,7 @@
  * Consumers install prebuilt .mjs — no build on their side.
  */
 import { readFileSync } from 'node:fs';
-import { crashExit, GATE_REASON_ENV } from '../gate-engine/deterministic/reason.mjs';
+import { crashExit, GATE_REASON_ENV, stdoutDrained } from '../gate-engine/deterministic/reason.mjs';
 import { assertGit } from './lib/guard/require-git.mjs';
 import { renderCommandHelp, renderTopLevelHelp } from './lib/help/render.mjs';
 import { wantsCommandHelp } from './lib/help/wants-help.mjs';
@@ -153,6 +153,7 @@ async function main() {
         ? (await import('./lib/husky/overlay/copied-overlay.mjs')).overlayCommandCwd(process.cwd(), cmd === 'clean')
         : process.cwd();
     const code = await mod.default(cmdArgs, cwd);
+    await stdoutDrained();
     process.exit(code ?? 0);
 }
 main().catch((e) => {

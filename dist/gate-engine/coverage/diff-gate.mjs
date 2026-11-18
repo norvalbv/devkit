@@ -7,9 +7,11 @@ import { resolveGuardConfig } from '../config.mjs';
 import { failLine } from '../deterministic/reason.mjs';
 import { displayPath, humanAge } from './failures.mjs';
 import { artifactLine, BYPASS_REMEDY, canonicalPath, changedRunHint, classifier, emitProvenance, listPaths, OPT_OUT_REMEDY, recordReviewNotice, repoTop, reviewNotMeasuredAbsent, reviewNotMeasuredEmpty, } from './gate-shared.mjs';
+import { workingTreeText } from '../ratchets/git-index.mjs';
 import { addedLineCoverage, addedLinesOf, lineRanges } from './lines.mjs';
 import { COVERAGE_DIR, COVERAGE_FILE } from './produce.mjs';
 import { baseTreeish, checkProvenance, git, keysByPath, readArtifact, } from './provenance.mjs';
+import { blobText, neutralDrift, neutralEligible, runtimeNeutral, } from './neutral-edit/runtime-neutral.mjs';
 const REPO_KEYS = ['statements', 'functions', 'branches', 'lines'];
 // Only the fields lineHits reads; a wrong shape here is corrupt data, never a crash or a pass.
 // istanbul always writes both maps; an entry without them is corrupt, not a file with no statements.
@@ -36,28 +38,43 @@ export function resolveScope(coverage) {
 /** Added, modified and renamed regular files `rev` names: `--cached HEAD` is the commit's index, a
  * bare merge-base sha is the working tree. */
 function changedFiles(top, rev) {
-    const tokens = git(top, ['diff', '--raw', '-z', '-M', '--diff-filter=AMR', ...rev]).split('\0');
+    const tokens = git(top, [
+        'diff',
+        '--raw',
+        '--no-abbrev',
+        '-z',
+        '-M',
+        '--diff-filter=AMR',
+        ...rev,
+    ]).split('\0');
     const out = [];
     for (let i = 0; i < tokens.length;) {
         const head = tokens[i++] ?? '';
         if (!head.startsWith(':'))
             continue;
-        const [, mode = '', , , status = ''] = head.slice(1).split(' ');
+        const [, mode = '', srcOid = '', dstOid = '', status = ''] = head.slice(1).split(' ');
         const from = status.startsWith('R') ? tokens[i++] : undefined;
         const path = tokens[i++];
         // A symlink's added "line" is its target text, and a submodule has no lines at all.
         if (path && mode !== '120000' && mode !== '160000')
-            out.push({ path, from });
+            out.push({ path, from, srcOid, dstOid });
     }
     return out;
 }
+/** The new side of a change: its blob, or the working-tree file when git reports no blob. */
+const newSideText = (top, path, dstOid) => /^0+$/.test(dstOid) ? workingTreeText(top, path) : blobText(top, dstOid);
 /** Repo-relative path → the lines it adds over `rev`, for production source with any added. Shared
- * with `devkit coverage-diff`, so the report and the gate judge the same lines. */
-export function addedProductionLines(top, isProduction, rev) {
+ * with `devkit coverage-diff`; `dropNeutral` skips a runtime-neutral change, which adds no code. */
+export function addedProductionLines(top, isProduction, rev, dropNeutral = false) {
     const out = new Map();
-    for (const { path, from } of changedFiles(top, rev)) {
+    for (const { path, from, srcOid, dstOid } of changedFiles(top, rev)) {
         if (!isProduction(path))
             continue;
+        if (dropNeutral && neutralEligible(path)) {
+            const after = newSideText(top, path, dstOid);
+            if (after !== null && runtimeNeutral(path, blobText(top, srcOid), after))
+                continue;
+        }
         const spec = from ? [from, path] : [path];
         const patch = git(top, [
             'diff',
@@ -122,10 +139,7 @@ export function runDiffCoverage(cwd, coverage, min, reviewMode) {
     let head;
     try {
         head = baseTreeish(top);
-        added = addedProductionLines(top, (p) => classify(p, false) === 'production', [
-            '--cached',
-            head,
-        ]);
+        added = addedProductionLines(top, (p) => classify(p, false) === 'production', ['--cached', head], true);
     }
     catch {
         failLine('🚫 Coverage gate FAILED — git could not read the staged diff, so the added lines are unknown.');
@@ -154,8 +168,15 @@ export function runDiffCoverage(cwd, coverage, min, reviewMode) {
         const empty = 'measured no files';
         return reviewMode ? reviewNotMeasuredEmpty(empty) : failUnreadable(file, empty, head);
     }
-    const provenance = checkProvenance(cwd, resolve(cwd, COVERAGE_DIR), artifact, classify);
+    // A scored file's line numbers move with any edit, so only an unscored file may be exempt.
+    const exempt = (p, measured, now) => !added.has(p) && neutralDrift(top, p, measured, blobText(top, now));
+    const provenance = checkProvenance(cwd, resolve(cwd, COVERAGE_DIR), artifact, classify, exempt);
     emitProvenance(provenance);
+    if (provenance.state !== 'unknown' && provenance.exempted.length) {
+        console.log(`ℹ️  Coverage artifact predates ${provenance.exempted.length} file(s) only in runtime-neutral ways (comments, formatting, types) — not re-measured:`);
+        for (const line of listPaths(provenance.exempted, cwd, top))
+            console.log(line);
+    }
     if (provenance.state === 'unknown') {
         if (reviewMode) {
             console.log(`⚠️  Coverage NOT MEASURED in this review — artifact provenance unknown (${provenance.reason}).`);

@@ -239,7 +239,12 @@ export async function linkCheck(slug = '', cmd = '', reason = '', cwd = process.
             return refuse(`\`${check}\` ${failure.why}; a Check must pass before it is linked.`);
     }
     const { cmdAdd } = await import('../decisions.mjs');
-    cmdAdd(slug, { note: `${CHECK_TAG} ${check} — ${reason.trim()}` }, cwd);
+    try {
+        cmdAdd(slug, { note: `${CHECK_TAG} ${check} — ${reason.trim()}` }, cwd);
+    }
+    catch (error) {
+        return refuse(error instanceof Error ? error.message : String(error));
+    }
     return 0;
 }
 /** Enforced vs prose-only for every scoped axis, plus links that never run. Always exits 0. */

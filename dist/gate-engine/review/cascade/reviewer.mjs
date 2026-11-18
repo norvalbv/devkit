@@ -63,9 +63,14 @@ export async function runCascade(sel, opts) {
         const exec = opts.exec ?? execJudgeAsync;
         // Reset per exec: only the spawn that produced the verdict may explain it.
         const spawn = { denied: null };
-        const observed = (o) => {
+        // Kept across spawns: an escalation PASS may rest on the first pass's searches. A verdict from
+        // an unmeasured spawn (codex) makes the whole set unknown, never zero.
+        let toolCalls = null;
+        let unmeasured = false;
+        const observed = async (o) => {
             spawn.denied = null;
-            return exec({
+            let heard = false;
+            const text = await exec({
                 ...o,
                 onMcpPrepared: (fingerprint, cause) => {
                     o.onMcpPrepared?.(fingerprint, cause);
@@ -74,7 +79,14 @@ export async function runCascade(sel, opts) {
                 onPermissionDenials: (denied) => {
                     spawn.denied = denied;
                 },
+                onToolCalls: (lines) => {
+                    heard = true;
+                    toolCalls = [...(toolCalls ?? []), ...lines];
+                },
             });
+            if (text !== null && !heard)
+                unmeasured = true;
+            return text;
         };
         let res = await cascadeVerdict(sel, { ...opts, exec: observed }, checklistRoot);
         // Recovery below only schedules/classifies; it deletes this attempt's artifact without
@@ -106,7 +118,8 @@ export async function runCascade(sel, opts) {
         attachItems(res, finalState, disposition, { full: opts.fullItems });
         // Read before the finally deletes the artifact — the flag lives nowhere else (sc-2317).
         const mcpCause = mcpSpawn.cause();
-        const evidence = { mcpCause, denied: spawn.denied };
+        const calls = unmeasured ? null : toolCalls;
+        const evidence = { mcpCause, denied: spawn.denied, calls, searchTool: opts.cfg.searchTool };
         const degraded = retrievalDegradation(sel.reviewer.name, finalState, res.status, evidence);
         if (degraded)
             res.degraded = degraded;

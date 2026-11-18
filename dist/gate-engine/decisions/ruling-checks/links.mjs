@@ -3,8 +3,8 @@
  * records hold no Check note never loads the markdown parser this module needs.
  */
 import { currentTarget, parseDecision } from '../decision-format.mjs';
-import { lastTaggedNote } from '../recall/note-relations.mjs';
-import { axisEntries, liveRulingIdOf, SCOPE_NOTE_RE } from '../recall/retrieval.mjs';
+import { lastTaggedNote, liveRulingIdOf } from '../recall/note-relations.mjs';
+import { axisEntries, SCOPE_NOTE_RE } from '../recall/retrieval.mjs';
 // The note `enforce link` writes: `- <date> — **Check:** <cmd> — <reason>`; `none` unlinks.
 const CHECK_NOTE_RE = /^\*\*Check:\*\*\s*(.+?)(?:\s+—\s+.+)?$/;
 /** The live Target's Check, effective Scope and Ruling, from one read of its section. */

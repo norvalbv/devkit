@@ -1,9 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mjs';
 import { fanoutSplitHints } from './folder-fanout.mjs';
-import { gitPrefix, mergeBaseRef, treeTextAtRef } from './git-index.mjs';
+import { gitPrefix, mergeBaseRef, treeTextAtRef, workingTreeText } from './git-index.mjs';
 import { catBlobs } from './tree-blobs.mjs';
 import { lineMatchers, SIZE_SKIP_DIRS } from './size-policy.mjs';
 class LineAuthorityError extends Error {
@@ -92,14 +90,6 @@ export function lineBaselineOrExit(contents, label, prefix = '') {
 function snapshotText(root, snapshot, relativePath) {
     return treeTextAtRef(root, snapshot, relativePath);
 }
-function workingText(root, relativePath) {
-    try {
-        return readFileSync(join(root, relativePath), 'utf8');
-    }
-    catch {
-        return null;
-    }
-}
 function rawBaselineAt(root, snapshot) {
     const contents = snapshotText(root, snapshot, LINES_BASELINE);
     return { ...decodeLineBaseline(contents, snapshot), present: contents !== null };
@@ -153,7 +143,7 @@ export function lineBaselineForGate(root, candidate, parents = lineBaselineParen
     }
     const baseline = readRatchetBaseline(root, LINES_BASELINE);
     const decoded = lineBaselineOrExit(baseline?.contents ?? null, baseline?.relativePath ?? LINES_BASELINE);
-    return normalizeCandidateLineBaseline(root, decoded, parents, (file) => workingText(root, file));
+    return normalizeCandidateLineBaseline(root, decoded, parents, (file) => workingTreeText(root, file));
 }
 export function lineBaselineParents(root) {
     try {

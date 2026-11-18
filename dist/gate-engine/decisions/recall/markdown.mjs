@@ -26,11 +26,15 @@ export function sections(body) {
     for (const node of tree.children) {
         if (node.type === HEADING) {
             const { start, end } = node.position ?? {};
+            const previous = out.at(-1);
+            if (previous)
+                previous.end = start?.offset ?? previous.end;
             out.push({
                 heading: start && end ? body.slice(start.offset ?? 0, end.offset ?? 0) : '',
                 depth: node.depth,
                 prose: '',
                 items: [],
+                end: body.length,
             });
             continue;
         }

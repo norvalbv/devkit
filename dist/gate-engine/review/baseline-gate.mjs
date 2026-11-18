@@ -12,7 +12,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 // Frozen review runtime: local imports must be listed in PACKAGED_REVIEW_RUNTIME_MODULE_STEMS.
 import { baseResolveEnv } from './baseline/base-resolve-hook.mjs';
-import { FALLOW_CONFIG_FILES, parseDiffHunks, rewriteFallowBaseline, } from './baseline-fallow-paths.mjs';
+import { firstFallowConfig, parseDiffHunks, rewriteFallowBaseline, } from './baseline-fallow-paths.mjs';
 const METADATA_FILE = 'metadata.json';
 const SOURCE_EXT_RE = /\.(?:[cm]?[jt]sx?)$/i;
 const NEWLINE_RE = /\r?\n/;
@@ -290,14 +290,11 @@ function normalizeFallowBaselineFile(path, mappings) {
     }
     writeFileSync(path, `${JSON.stringify(rewriteFallowBaseline(value, mappings), null, 2)}\n`);
 }
-function fallowConfig(finalCwd) {
-    return FALLOW_CONFIG_FILES.map((file) => join(finalCwd, file)).find((file) => existsSync(file));
-}
 export function runFallowBaseline(runtimeDir) {
     const metadata = readMetadata(runtimeDir);
     const { baseCwd, finalCwd, scope } = scopedWorktrees(metadata);
     const binary = process.env.DEVKIT_REVIEW_FALLOW_BIN || 'fallow';
-    const config = fallowConfig(finalCwd);
+    const config = firstFallowConfig(finalCwd);
     const changes = stagedChanges(finalCwd);
     const mappings = fallowPathMappings(finalCwd, changes);
     const scopeId = createHash('sha256')

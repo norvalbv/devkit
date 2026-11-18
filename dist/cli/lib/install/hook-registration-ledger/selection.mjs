@@ -19,7 +19,7 @@ export const COMMENT_PREFLIGHT_HOOK = 'comment-budget-preflight.mjs';
 export const FANOUT_BRIEF_HOOK = 'fanout-brief.mjs';
 /** The pre-write structure-grammar advisory; owned by the placement group (fanout guard or structure). */
 export const PLACEMENT_BRIEF_HOOK = 'placement-brief.mjs';
-/** Codex apply_patch → edited paths; imported by edit hooks of five components, never wired alone. */
+/** Codex apply_patch → edited paths; imported by eight components' edit hooks, never wired alone. */
 export const EDIT_TARGETS_LIB = 'edit-targets-lib.mjs';
 /** The after-edit line-ceiling advisory; owned by the size guard whose ceiling it reports. */
 export const SIZE_HEADROOM_HOOK = 'size-headroom-check.mjs';
@@ -62,7 +62,7 @@ baseDrift = false, antiSlop = false, comments = false, fanout = false, placement
         ...adhdOwned,
         ...baseDriftOwned,
     ]);
-    const editHooks = agentHooks || decisions || baseDrift || antiSlop || comments;
+    const editHooks = agentHooks || decisions || baseDrift || antiSlop || comments || fanout || placement || size;
     return all.filter((name) => (agentHooks && !independentlyOwned.has(name)) ||
         (decisions && decisionsOwned.has(name)) ||
         (fallow && name === FALLOW_STAGED_GATE) ||

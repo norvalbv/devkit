@@ -9,6 +9,7 @@
  * CLI: stdin payload → one absolute path per line, or with `--payloads` the same payload once per path
  * with `tool_input` replaced by `{ file_path }`, for a shell hook that handles one file per run.
  */
+import { spawnSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -36,6 +37,26 @@ export function patchTargets(input) {
   const base = baseDir(input.cwd);
   const named = [...patchText(input.tool_input).matchAll(HEADER)].map((m) => m[1].trim());
   return [...new Set(named.filter(Boolean).map((p) => path.resolve(base, p)))];
+}
+
+/** Absolute paths under `root` a Write (any provider's path key) or apply_patch names. */
+export function writtenFiles(input, root) {
+  if (input?.tool_name !== 'Write') {
+    // Patch paths are physical; re-spell them under `root`, which may name the project via a symlink.
+    const real = baseDir(root);
+    const inside = (p) => p.startsWith(real + path.sep);
+    return patchTargets(input).map((p) => (inside(p) ? path.join(root, path.relative(real, p)) : p));
+  }
+  const toolInput = input.tool_input ?? {};
+  const key = ['file_path', 'path', 'target_file', 'target_path'].find((k) => toolInput[k]?.trim?.());
+  return key ? [path.resolve(root, toolInput[key].trim())] : [];
+}
+
+/** Claude names the project root; Codex runs the hook from the session cwd, maybe a subdirectory. */
+export function projectRoot() {
+  if (process.env.CLAUDE_PROJECT_DIR) return process.env.CLAUDE_PROJECT_DIR;
+  const run = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 5000 });
+  return (run.status === 0 && run.stdout.trim()) || process.cwd();
 }
 
 function main() {

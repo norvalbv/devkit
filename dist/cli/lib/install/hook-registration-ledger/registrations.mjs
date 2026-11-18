@@ -17,6 +17,7 @@
  * "Ship the generator, never the data": this is the MECHANISM list (which devkit hook runs on
  * which event). It carries no consumer-specific paths beyond $CLAUDE_PROJECT_DIR.
  */
+import { DECISIONS_REGISTRATIONS } from './decisions-registrations.mjs';
 export const PKG = 'node_modules/@norvalbv/devkit';
 /** Anchored at the CONSUMER's node_modules, so it carries dist/ and is never .mts — see the
  * 2026-09-04 note in docs/decisions/typescript-source-prebuilt-mjs.md. Frozen; pinned by its test. */
@@ -43,29 +44,7 @@ export const SUPERSEDED_HOOK_COMMANDS = [
 export const HOOK_REGISTRATIONS = {
     // The decisions guard owns its authoring boundary. This is deliberately independent of the
     // optional general agentHooks component: selecting the guard is sufficient to install it.
-    decisions: [
-        {
-            registrationId: 'decisions:pre-edit',
-            event: 'PreToolUse',
-            matcher: 'Edit|Write|MultiEdit|Delete',
-            command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/decision-edit-guard.mjs"',
-            cursorEvent: 'preToolUse',
-            cursorMatcher: 'Write|Delete',
-        },
-        // The brief is the guard's only INFORMING surface. Every other decision hook enforces after the
-        // fact — edit-guard denies a hand-write, stop-check nudges at turn end — which is too late to
-        // stop an agent re-solving a settled problem from the code alone. Matches Scope globs, never text
-        // similarity, so it needs no threshold and no model. Advisory only: it can neither block a write
-        // nor auto-approve one.
-        {
-            registrationId: 'decisions:scope-brief',
-            event: 'PreToolUse',
-            matcher: 'Edit|Write|MultiEdit',
-            command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/decision-scope-brief.mjs"',
-            cursorEvent: 'preToolUse',
-            cursorMatcher: 'Write',
-        },
-    ],
+    decisions: DECISIONS_REGISTRATIONS,
     // Write-time advisory that a NEW file would fail guard-structure or guard-fanout at commit. Owned
     // by either folder gate (selection.mts placementSelected); additionalContext only, never a denial.
     placement: [
