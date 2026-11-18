@@ -92,6 +92,21 @@ export function exitGate(code: number, lines: readonly string[]): never {
   process.exit(code);
 }
 
+/** Bound on waiting for stdout: a reader that never drains the pipe must not hang the exit. */
+const DRAIN_MS = 10_000;
+
+/** Resolves once stdout has handed every queued write to the OS, or after `ms`. process.exit drops
+ * a pipe's unflushed tail (about 64 KB survives on macOS), so a piped --json answer would be cut. */
+export function stdoutDrained(ms = DRAIN_MS): Promise<void> {
+  return new Promise((done) => {
+    const timer = setTimeout(done, ms);
+    process.stdout.write('', () => {
+      clearTimeout(timer);
+      done();
+    });
+  });
+}
+
 /** A gate threw instead of reaching a verdict: keep the stack in the log, record its first line. */
 export function crashExit(error: Error): never {
   console.error(error);

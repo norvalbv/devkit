@@ -219,6 +219,8 @@ const CI_ATTRIBUTION_MS = 25_000;
 const CI_MARGIN_MS = 5_000;
 /** Inherited failures named in the reason; the full comparison is in the log above it. */
 const NAMED_INHERITED = 3;
+/** Bound on the merge-base call, which runs inside the same gate deadline as the lookup. */
+const GIT_MS = 5_000;
 
 /** The lookup's budget: CI_ATTRIBUTION_MS, or less when the gate's own deadline is near. */
 function ciBudget(root: string): number {
@@ -229,7 +231,8 @@ function ciBudget(root: string): number {
 /** Where HEAD left the default branch, the commit CI is asked about; '' when git cannot say. */
 export function ciBase(root: string): string {
   const ref = `origin/${resolveRef(root)}`;
-  const r = spawnSync('git', ['merge-base', 'HEAD', ref], { cwd: root, encoding: 'utf8' });
+  const opts = { cwd: root, encoding: 'utf8' as const, timeout: GIT_MS };
+  const r = spawnSync('git', ['merge-base', 'HEAD', ref], opts);
   return r.status === 0 ? r.stdout.trim() : '';
 }
 
@@ -275,11 +278,13 @@ export function ciLines({ answer, comparison: c }: CiAttribution): string[] {
     ? `, ${answer.commitsBehindHead} commit(s) before the base`
     : '';
   const hidden = c.inherited.length - NAMED_INHERITED;
+  // A name list missing or cut short leaves some failures compared by file, so the counts are partial.
+  const partial = c.namesKnown ? '' : ' (partial: some compared by file only)';
   return [
-    `CI at ${sha} (${answer.ref}, run ${answer.runId}${behind}): ${c.inherited.length} inherited, ${c.fresh.length} new`,
+    `CI at ${sha} (${answer.ref}, run ${answer.runId}${behind}): ${c.inherited.length} inherited, ${c.fresh.length} new${partial}`,
     ...c.inherited.slice(0, NAMED_INHERITED).map((e) => `inherited · ${label(e)}`),
     ...(hidden > 0 ? [`(+${hidden} more inherited in the log above)`] : []),
-    ...(c.fresh.length
+    ...(c.fresh.length || !c.namesKnown
       ? ['to run this change in CI instead of on this machine: devkit ci-probe']
       : []),
   ];
@@ -293,15 +298,19 @@ async function ciAttribution(
   attribute: Attribute,
 ): Promise<string[]> {
   try {
-    const base = ciBase(root);
-    const ms = ciBudget(root);
-    if (!base || ms <= 0) return [];
-    const summary = join(dirname(report), SUMMARY_NAME);
+    const base = ciBudget(root) > 0 ? ciBase(root) : '';
+    if (!base) return [];
+    const dir = dirname(report);
+    const summary = join(dir, SUMMARY_NAME);
     const run = assertVitestReport(JSON.parse(readFileSync(report, 'utf8')));
     writeFileSync(summary, JSON.stringify(summarise(run, root)));
+    // Re-read after preparing the summary: one deadline covers the whole step.
+    const ms = ciBudget(root);
+    if (ms <= 0) return [];
     const cli = join(root, 'cli', 'index.mts');
     const argv = [process.execPath, cli, 'baseline-status', '--at', base, '--against', summary];
-    const found = await attribute([...argv, '--json'], root, env, ms);
+    // gh downloads land in the report dir, which runRelatedTests removes even after a kill.
+    const found = await attribute([...argv, '--json'], root, { ...env, TMPDIR: dir }, ms);
     const c = found?.comparison;
     if (!found || !c || c.fresh.length + c.inherited.length === 0) return [];
     console.log(renderComparison(found.comparison, found.answer).join('\n'));
@@ -321,12 +330,12 @@ async function narrate(
 ): Promise<void> {
   try {
     const diagnosis = report ? readDiagnosis(report, result.status ?? 1) : null;
-    const lines = relatedTestsReason(result, diagnosis, root);
+    // Written before the optional CI step, which can only append lines.
+    writeGateReason(relatedTestsReason(result, diagnosis, root));
     // A killed run reached no verdict, so there is nothing to compare and no time to spend.
     if (result.status !== null && diagnosis?.failedFiles.length && !diagnosis.unhandled) {
-      lines.push(...(await ciAttribution(report, root, env, attribute)));
+      writeGateReason(await ciAttribution(report, root, env, attribute));
     }
-    writeGateReason(lines);
   } catch {
     // The exit code already carries the verdict.
   }

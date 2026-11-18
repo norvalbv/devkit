@@ -109,6 +109,20 @@ describe('compareFailures', () => {
     expect(c.fresh).toEqual([]);
   });
 
+  // A truncated PR list still proves its listed names; only the unlisted tail is unknown.
+  it('compares a truncated PR list by its listed names and flags the counts as partial', () => {
+    const run = {
+      ...pr({ 'a.test.mts': 'failed' }),
+      tests: named({ 'a.test.mts': ['t0', 'tNew'] }, true),
+    };
+    const c = compareFailures(run, base(['a.test.mts'], { 'a.test.mts': ['t0'] }));
+    expect(c).toMatchObject({
+      inherited: [{ file: 'a.test.mts', test: 't0' }],
+      fresh: [{ file: 'a.test.mts', test: 'tNew' }],
+      namesKnown: false,
+    });
+  });
+
   it('lists base failures that pass here as fixed', () => {
     const c = compareFailures(
       pr({ 'a.test.mts': 'passed' }),

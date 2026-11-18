@@ -1,3 +1,5 @@
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -268,5 +270,30 @@ describe('reasonReport — the block printed under the aggregated verdict', () =
     const out = reasonReport([{ label: 'guard-size', reason }]);
     expect(out.filter((l) => l.includes('.ts: 9 lines'))).toHaveLength(REASON_LINES);
     expect(out.at(-1)).toContain('40 more line(s) in the full log above');
+  });
+});
+
+describe('stdoutDrained', () => {
+  const REASON = join(import.meta.dirname, '..', 'reason.mts');
+  // A child that writes 5 MB to a pipe and exits; `drain` decides whether it waits first.
+  const writer = (drain: string) =>
+    `import { stdoutDrained } from ${JSON.stringify(REASON)};` +
+    `process.stdout.write('x'.repeat(5e6)); ${drain} process.exit(0);`;
+  const run = (script: string) =>
+    execFileSync(process.execPath, ['--input-type=module', '-e', script], { maxBuffer: 1e8 });
+
+  it('lets every queued stdout byte reach a pipe before process.exit', () => {
+    expect(run(writer('await stdoutDrained();')).length).toBe(5e6);
+  });
+
+  it('gives up after its bound when the reader never drains the pipe', async () => {
+    const child = spawn(process.execPath, [
+      '--input-type=module',
+      '-e',
+      writer('await stdoutDrained(200);'),
+    ]);
+    child.stdout.pause();
+    const [code] = await once(child, 'exit');
+    expect(code).toBe(0);
   });
 });

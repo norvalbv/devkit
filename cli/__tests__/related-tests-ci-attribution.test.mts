@@ -1,7 +1,14 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GATE_REASON_ENV, readGateReason } from '../../gate-engine/deterministic/reason.mts';
 import type { Comparison } from '../lib/baseline-status/compare.mts';
@@ -14,8 +21,13 @@ import {
 } from '../lib/husky/gate-policy/related-tests.mts';
 
 const dirs: string[] = [];
-beforeEach(() => vi.stubEnv(GATE_REASON_ENV, ''));
+beforeEach(() => {
+  vi.stubEnv(GATE_REASON_ENV, '');
+  // A caller's short GUARD_GATE_TIMEOUT_MS would leave no lookup budget; the deadline test sets its own.
+  vi.stubEnv('GUARD_GATE_TIMEOUT_MS', String(60 * 60_000));
+});
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
@@ -134,6 +146,16 @@ describe('ciLines', () => {
     );
   });
 
+  // Some failures matched by file only: the counts are partial, so "0 new" must not read as complete.
+  it('marks partial counts and keeps the ci-probe line when names were missing or truncated', () => {
+    const c = { ...comparison(1, 0), namesKnown: false };
+    expect(ciLines({ answer: answer(), comparison: c })).toEqual([
+      'CI at 96f4d96b (main, run 42): 1 inherited, 0 new (partial: some compared by file only)',
+      'inherited · cli/old0.test.mts > d t',
+      'to run this change in CI instead of on this machine: devkit ci-probe',
+    ]);
+  });
+
   it('names three inherited failures and counts the rest', () => {
     const lines = ciLines({ answer: answer(), comparison: comparison(8, 4) });
     expect(lines).toHaveLength(6);
@@ -164,8 +186,13 @@ describe('runRelatedTests CI attribution', () => {
     const file = reasonFile();
     const { repo, base } = branchedRepo();
     let summary: unknown;
-    const attribute = vi.fn(async (argv: string[]) => {
-      summary = JSON.parse(readFileSync(argv[argv.indexOf('--against') + 1], 'utf8'));
+    let reasonAtLookup: string[] = [];
+    const attribute = vi.fn(async (argv: string[], _cwd: string, env: NodeJS.ProcessEnv) => {
+      const path = argv[argv.indexOf('--against') + 1];
+      summary = JSON.parse(readFileSync(path, 'utf8'));
+      // gh's downloads must land where runRelatedTests cleans up, even after a kill.
+      expect(env.TMPDIR).toBe(dirname(path));
+      reasonAtLookup = readGateReason(file);
       return { answer: answer(), comparison: comparison(1, 1) };
     });
     const exec = reportingExec(1, [failing(join(repo, 'cli/a.test.mts'), 't')]);
@@ -176,6 +203,7 @@ describe('runRelatedTests CI attribution', () => {
     expect(argv.slice(2, 5)).toEqual(['baseline-status', '--at', base]);
     expect(argv.at(-1)).toBe('--json');
     expect(summary).toMatchObject({ files: { 'cli/a.test.mts': 'failed' } });
+    expect(reasonAtLookup).toEqual(['1 test file(s) failed:', 'cli/a.test.mts > d t']);
     expect(readGateReason(file)).toEqual([
       '1 test file(s) failed:',
       'cli/a.test.mts > d t',
@@ -282,6 +310,9 @@ describe('runRelatedTests CI attribution', () => {
   });
 });
 
+/** Any value works: the deadline test advances fake time by exactly this much. */
+const LOOKUP_MS = 25_000;
+
 describe('attributeToCi', () => {
   const node = (script: string) => [process.execPath, '-e', script];
   const env = process.env;
@@ -312,8 +343,15 @@ describe('attributeToCi', () => {
   it('kills a lookup that outlives its deadline and answers null', async () => {
     const dir = tempDir('related-ci-hang-');
     const pidFile = join(dir, 'pid');
-    const script = `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`;
-    expect(await attributeToCi(node(script), '.', env, 1500)).toBeNull();
+    // Written then renamed, so the file never exists half-written.
+    const script = `const fs = require('fs'); fs.writeFileSync('${pidFile}.tmp', String(process.pid)); fs.renameSync('${pidFile}.tmp', '${pidFile}'); setInterval(() => {}, 1000)`;
+    // Only the deadline is faked: it fires after the child wrote its pid, however slow its start-up.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const lookup = attributeToCi(node(script), '.', env, LOOKUP_MS);
+    while (!existsSync(pidFile)) await new Promise((r) => setImmediate(r));
+    vi.advanceTimersByTime(LOOKUP_MS);
+    vi.useRealTimers();
+    expect(await lookup).toBeNull();
     const pid = Number(readFileSync(pidFile, 'utf8'));
     await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 5000 });
   });
