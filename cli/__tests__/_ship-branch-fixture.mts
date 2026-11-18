@@ -28,6 +28,12 @@ export const packagedApiSecurityChecklist = fileURLToPath(
 );
 /** gh-stub arm for the current-body read an explicit --body carries the evidence block through. */
 export const GH_BODY_VIEW_ARM = `case " $* " in *" --json title,body,"*) exec node -e 'const fs = require("fs"), f = process.env.GH_BODY; process.stdout.write(JSON.stringify({ body: fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "", headRefOid: "", baseRefOid: "" }))' ;; esac`;
+/** `--wait-ci`'s head-run reads: an open PR into its default branch, with GH_HEAD_RUNS_JSON's run pages or none. */
+export const GH_HEAD_RUNS_ARM = `[ "$1" = api ] && case " $* " in
+  *" repos/"*/pulls/*) printf '%s' '{"state":"open","mergeable":true,"head":{"sha":"abc"},"base":{"ref":"main","repo":{"default_branch":"main"}}}'; exit 0 ;;
+  *" repos/"*/actions/runs*) if [ -n "\${GH_HEAD_RUNS_JSON:-}" ]; then printf '%s' "$GH_HEAD_RUNS_JSON"
+    else printf '%s' '[{"workflow_runs":[]}]'; fi; exit 0 ;;
+esac`;
 export const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 export const DETACHED_RE = /detached HEAD/;
 export const DIR_RE = /directory path not allowed/;
@@ -368,7 +374,7 @@ export function ghStub(prBody) {
   dirs.push(stubBin);
   writeFileSync(
     join(stubBin, 'gh'),
-    `#!/bin/sh\n${GH_BODY_VIEW_ARM}\ncase "$1" in\n  pr) [ "$2" = edit ] && cat >/dev/null; ${prBody} ;;\n  *) exit 0 ;;\nesac\n`,
+    `#!/bin/sh\n${GH_BODY_VIEW_ARM}\n${GH_HEAD_RUNS_ARM}\ncase "$1" in\n  pr) [ "$2" = edit ] && cat >/dev/null; ${prBody} ;;\n  *) exit 0 ;;\nesac\n`,
   );
   chmodSync(join(stubBin, 'gh'), 0o755);
   return stubBin;
@@ -410,6 +416,7 @@ export function bodyUpdateRepo({ hookBody = 'exit 0' } = {}) {
     [
       '#!/bin/sh',
       'printf \'%s\\n\' "$*" >> "$GH_LOG"',
+      GH_HEAD_RUNS_ARM,
       // --wait-ci-required reads the base's required contexts: base `main`, then GH_REQUIRED_CONTEXTS.
       'if [ "$1" = api ]; then printf \'%s\\n\' "${GH_REQUIRED_CONTEXTS:-}"; exit 0; fi',
       'case " $* " in *" baseRefName "*) echo main; exit 0 ;; esac',

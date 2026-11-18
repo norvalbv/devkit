@@ -151,5 +151,23 @@ describe('devkit ci-verdict', () => {
     expect(calls.filter((c) => c[1] === 'checks').every((c) => c.includes('--required'))).toBe(
       true,
     );
+    expect(calls.filter((c) => /\/pulls\/|\/actions\/runs\?/.test(c.at(-1) ?? ''))).toEqual([]);
+  });
+
+  it('exits 2 when a green rollup sits on a conflicting PR no workflow can run on', async () => {
+    const pass = { ...failing, bucket: 'pass' as const, name: 'CodeRabbit', workflow: '' };
+    const conflicting = JSON.stringify({
+      state: 'open',
+      mergeable: false,
+      head: { sha: 'abc' },
+      base: { ref: 'main', repo: { default_branch: 'main' } },
+    });
+    const exec: ChecksExec = (args) => {
+      if (args[0] === 'api')
+        return args.at(-1)?.includes('/pulls/') ? conflicting : '[{"workflow_runs":[]}]';
+      return args[1] === 'view' ? PR_JSON : JSON.stringify([pass]);
+    };
+    expect(await ciVerdict(['985'], '/r', { exec, wait: fastWait() })).toBe(2);
+    expect(out).toEqual(['ship: ci-outcome=unavailable pr=985 reason=merge-conflict']);
   });
 });

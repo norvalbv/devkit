@@ -19,6 +19,7 @@ import {
 
 export { CHECK_BUCKETS, CHECKS_JSON_FIELDS, parseChecksJson, type CheckBucket, type CheckRow };
 import { classifyChecksFailure, type ExecFailure } from './classify.mts';
+import { headRunsPoller } from './head-runs.mts';
 import { requiredSetPoller } from './required.mts';
 import { withFailedSteps } from './steps.mts';
 import { recordCiEvent } from './telemetry.mts';
@@ -42,24 +43,26 @@ export const MIN_TIMEOUT_S = 60;
 
 /**
  * The first four members are baseline-status/gh.mts's vocabulary, narrowed by Extract so a rename
- * there breaks this compile. The last three only this caller can produce.
+ * there breaks this compile. The last four only this caller can produce.
  */
 export type WaitCiUnavailable =
   | Extract<UnknownReason, 'gh-missing' | 'gh-unauthenticated' | 'not-a-github-repo' | 'gh-failed'>
   | 'gh-unreachable'
   | 'pr-not-found'
-  | 'gh-json-unparseable';
+  | 'gh-json-unparseable'
+  | 'merge-conflict';
 
 /** Reasons no amount of waiting fixes — returned on first sighting instead of retried. */
 const PERMANENT: ReadonlySet<WaitCiUnavailable> = new Set([
   'gh-missing',
   'gh-unauthenticated',
   'not-a-github-repo',
+  'merge-conflict',
 ]);
 
 /** One poll's answer. gh trouble is a VALUE here; the driver never catches. */
 export type PollResult =
-  | { kind: 'rows'; rows: CheckRow[] }
+  | { kind: 'rows'; rows: CheckRow[]; head?: string }
   | { kind: 'unavailable'; reason: WaitCiUnavailable; message: string };
 
 export type TerminalOutcome = 'passed' | 'failed' | 'cancelled' | 'no-checks';
@@ -225,6 +228,7 @@ export async function waitForChecks(options: WaitCiOptions): Promise<WaitCiResul
   let lastLine = '';
   let lastEmitAt = started;
   let streakOutcome: TerminalOutcome | null = null;
+  let streakHead: string | undefined;
   let streak = 0;
   let firstTerminalAt: number | null = null;
   let transient = 0;
@@ -288,14 +292,16 @@ export async function waitForChecks(options: WaitCiOptions): Promise<WaitCiResul
         streak = 0;
         streakOutcome = null;
       } else {
-        // A flip between two TERMINAL outcomes (pass -> fail without passing through pending)
-        // changes the set, so the grace restarts with it instead of inheriting the replaced clock.
-        if (last.outcome === streakOutcome && firstTerminalAt !== null) streak += 1;
+        // A flip between two TERMINAL outcomes, or a new PR head, restarts the grace: neither may inherit
+        // the replaced clock or the confirmations another head earned.
+        const same = last.outcome === streakOutcome && result.head === streakHead;
+        if (same && firstTerminalAt !== null) streak += 1;
         else {
           firstTerminalAt = now();
           streak = 1;
         }
         streakOutcome = last.outcome;
+        streakHead = result.head;
         // Both bars, not either: the poll count survives a flap, the wall-clock grace survives a
         // workflow_run job or a stale re-push rollup that registers after the first terminal poll.
         if (streak >= confirmations && now() - firstTerminalAt >= settleGraceMs)
@@ -443,7 +449,7 @@ async function main(argv: string[]): Promise<number> {
   const checks = ghChecksPoller({ pr, repo, cwd, required, exec });
   const narrowed = required ? requiredSetPoller(checks, { pr, repo, cwd, exec }) : null;
   const result = await waitForChecks({
-    poll: narrowed?.poll ?? checks,
+    poll: narrowed?.poll ?? headRunsPoller(checks, { pr, repo, cwd, exec }),
     timeoutMs: seconds * 1000,
     intervalMs,
     settleGraceMs,

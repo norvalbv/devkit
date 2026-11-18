@@ -565,6 +565,24 @@ describe('edge cases', () => {
     expect(harness.at()).toBeGreaterThanOrEqual(8_000);
   });
 
+  it('restarts the settle grace when the PR head changes under a green tally', async () => {
+    // A re-push to a new green head must earn its own grace, or a run that registers late on it
+    // is missed on the strength of the old head's confirmations.
+    const onHead = (head: string): PollResult => ({
+      kind: 'rows',
+      rows: [row('pass', 'bot')],
+      head,
+    });
+    const harness = drive([onHead('A'), onHead('A'), onHead('A'), onHead('B')], {
+      settleGraceMs: 5_000,
+      intervalMs: 1_000,
+      timeoutMs: 600_000,
+    });
+    expect((await harness.run()).outcome).toBe('passed');
+    // B is first seen at t=3000; its own grace cannot settle before t=8000.
+    expect(harness.at()).toBeGreaterThanOrEqual(8_000);
+  });
+
   it('keeps the verdict on ONE line whatever a check is named', async () => {
     // The line is the machine-readable contract and callers grep it line-wise, so a name carrying a
     // newline must not split one verdict into two.

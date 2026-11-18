@@ -190,6 +190,32 @@ describe('ship-branch.sh — --wait-ci', () => {
     expect(r.stderr).toContain('ship: ci-outcome=passed pr=42');
   });
 
+  it("reads the head's own workflow runs, so a green review bot alone is not a pass", () => {
+    const startupFailure = JSON.stringify([
+      {
+        workflow_runs: [
+          {
+            id: 1,
+            workflow_id: 7,
+            name: 'gate',
+            status: 'completed',
+            conclusion: 'startup_failure',
+            html_url: 'https://github.com/acme/app/actions/runs/1',
+            event: 'pull_request',
+          },
+        ],
+      },
+    ]);
+    const bot = '[{"bucket":"pass","name":"CodeRabbit","state":"SUCCESS","link":"","workflow":""}]';
+    const { r } = ship(['feat/ci', 't', '--wait-ci', 'note.txt'], argvLog(), bot, {
+      GH_HEAD_RUNS_JSON: startupFailure,
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain(
+      'ship: ci-outcome=failed pr=42 failing=gate:https://github.com/acme/app/actions/runs/1',
+    );
+  });
+
   // The default fills only an UNSET budget: an unconditional assignment would silently override the
   // operator's own --wait-ci-timeout.
   it.each([
@@ -646,6 +672,8 @@ describe('--wait-ci-required', () => {
     expect(readFileSync(ghLog, 'utf8')).toMatch(
       /^api --paginate repos\/acme\/app\/rules\/branches\/main /m,
     );
+    // Head-run reads would hold a narrowed wait on unrequired workflows, so they stay default-only.
+    expect(readFileSync(ghLog, 'utf8')).not.toMatch(/\/pulls\/|\/actions\/runs/);
     expect(r.stderr).toContain(
       'ship: ci-outcome=passed pr=7 scope=required required-contexts=1 checks=1',
     );
