@@ -1866,3 +1866,14 @@ describe('gateTimeoutMs', () => {
     expect(gateTimeoutMs(d)).toBe(1_800_000);
   });
 });
+
+describe('command gate environment', () => {
+  // Base attribution keys a gate's published rerun by this label.
+  it('names each command gate its own label', () => {
+    const d = repo(['size']);
+    const exec = mkExec({});
+    runDeterministic(d, { exec, extra: [{ label: 'my-gate', cmd: 'true' }] });
+    const call = exec.mock.calls.find(([bin]) => bin === 'true');
+    expect(call?.[2].env.DEVKIT_GATE_LABEL).toBe('my-gate');
+  });
+});

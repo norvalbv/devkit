@@ -302,9 +302,10 @@ export function runArgv(
   exec: typeof execFileSync,
   reasonFile: string,
   timeoutMs: number,
+  label = '',
 ): number | string {
   try {
-    const env = gateEnv(reasonFile);
+    const env = gateEnv(reasonFile, label);
     exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit', env, timeout: timeoutMs });
     return 0;
   } catch (e: unknown) {

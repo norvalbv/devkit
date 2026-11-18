@@ -45,6 +45,8 @@ export interface GateEvent {
   outcome?: string;
   outage_detail?: string;
   lens?: string;
+  /** gate_base_rerun only: the gate's failing tests, validated where base-attribution reads them. */
+  tests?: unknown;
   bypass?: string;
   blocked_gate?: string | null;
   exit_code?: number;

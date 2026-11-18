@@ -489,10 +489,6 @@ commit_with_gate_capture() {
   # Narration under the digest's rules above: after $rc, errexit-suppressed, silent when unsure.
   [ "$blocked_json" != '"deterministic"' ] || _ship_base_attribution_note "$wt" "$log" "$ship_log"
 
-  # A failed config extraGates command is re-run at the cut commit: one line when it fails there too.
-  # Narration under the digest's rules above: after $rc, errexit-suppressed, silent when unsure.
-  [ "$blocked_json" != '"deterministic"' ] || _ship_base_attribution_note "$wt" "$log" "$ship_log"
-
   # sc-2299. The path brief again, next to the verdict. The resume banner already printed it in FULL,
   # but a blocked ship is read by tailing (the digest note above says so), minutes and often megabytes
   # of gate output later — and the question a contradicting finding raises is which files the gates
