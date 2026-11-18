@@ -43,3 +43,4 @@ created: 2026-08-27
 **Scope:** cli/lib/ship/**,cli/commands/ship.mts,cli/commands/release.mts
 **Source:** shortcut · sc-4965
 **Evidence-change:** sc-4965: a stopped ship left its branch at the base tip with no worktree, so no run record survived to authorise reclaiming it; the global worktree prune and the cleanup kill window both strand branches this way.
+- 2026-11-17 — sc-2676 — runManagedPackagedScript reports a child's exit 0 even after it forwarded a signal: a 0 means the script reached its success exit (ship's post-PR CI wait ends on a signal). Any non-zero exit after a signal still reports 129/130/131/143, so every interrupted gate, preflight and review path keeps its status; this follows tini and foreground-child, which report the child's own exit and use 128+n only for a signal death.

@@ -3,6 +3,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { shipEndRow } from '../lib/ship/ship-intent-event.mts';
 import { assertInterruptedGateKeepsWorktree, testSpawnSync as spawnSync } from './_helpers.mts';
@@ -49,6 +50,48 @@ function ship(
 /** A gh whose `pr checks` never answers, so a --wait-ci ship sits in its wait until signalled. */
 const HANGING_CHECKS =
   'case "$2" in checks) exec sleep 60 ;; *) echo https://github.com/acme/app/pull/42 ;; esac';
+
+/** devkit ship's own spawn (cli/commands/ship.mts): ship-branch.sh under the managed wrapper. */
+const SHIP_DRIVER = `const { runManagedPackagedScript } = await import(process.env.SHIP_WRAPPER);
+process.exit(await runManagedPackagedScript('ship-branch.sh', process.argv.slice(1),
+  { command: 'devkit ship', cwd: process.cwd(), env: process.env }));`;
+const SHIP_WRAPPER = fileURLToPath(new URL('../lib/ship/run-packaged-script.mts', import.meta.url));
+
+/** Run a --wait-ci ship until it announces its wait, then signal it (-1: its group, 1: its pid). */
+async function interruptWait(
+  argv: string[],
+  dir: string,
+  env: NodeJS.ProcessEnv,
+  signal: NodeJS.Signals,
+  target: -1 | 1,
+  extra: readonly string[] = [],
+) {
+  writeFileSync(join(dir, 'note.txt'), 'hi\n');
+  const [command, ...rest] = argv;
+  const child = spawn(command, [...rest, 't', '--wait-ci', ...extra, 'note.txt'], {
+    cwd: dir,
+    detached: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...env,
+      SHIP_WRAPPER,
+      DEVKIT_GATE_EVENTS: join(dir, 'gate-events.jsonl'),
+      PATH: `${ghStub(HANGING_CHECKS)}:${env.PATH ?? process.env.PATH}`,
+    },
+  });
+  let stdout = '';
+  let stderr = '';
+  let sent = false;
+  child.stdout.on('data', (chunk) => (stdout += chunk));
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+    if (sent || !stderr.includes('waiting on its checks') || !child.pid) return;
+    sent = true;
+    process.kill(target * child.pid, signal);
+  });
+  const [code] = await once(child, 'close');
+  return { code, stdout, stderr };
+}
 
 describe('shipEndRow', () => {
   it.each([
@@ -150,30 +193,41 @@ describe('ship-branch.sh — ship_end', () => {
   it('a ship interrupted while it waits on CI still ended as a success', async () => {
     const { dir, env } = seedShipRepoLocalRemote();
     const sink = join(dir, 'gate-events.jsonl');
-    writeFileSync(join(dir, 'note.txt'), 'hi\n');
-    const child = spawn('/bin/bash', [scriptPath, 'feat/end-wait', 't', '--wait-ci', 'note.txt'], {
-      cwd: dir,
-      detached: true,
-      stdio: ['ignore', 'ignore', 'pipe'],
-      env: {
-        ...env,
-        DEVKIT_GATE_EVENTS: sink,
-        PATH: `${ghStub(HANGING_CHECKS)}:${env.PATH ?? process.env.PATH}`,
-      },
-    });
-    let stderr = '';
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk;
-      // Ctrl-C reaches the whole foreground group, which is what the ship's own banner invites.
-      if (stderr.includes('waiting on its checks') && child.pid) process.kill(-child.pid, 'SIGINT');
-    });
-    const [code] = await once(child, 'exit');
+    // Ctrl-C reaches the whole foreground group, which is what the ship's own banner invites.
+    const r = await interruptWait(
+      ['/bin/bash', scriptPath, 'feat/end-wait'],
+      dir,
+      env,
+      'SIGINT',
+      -1,
+    );
 
-    expect(code, stderr).toBe(130);
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stderr).toContain('ci-outcome=not-run pr=42 reason=interrupted');
     expect(rows(sink, 'ship_end')).toEqual([
       expect.objectContaining({ exit_code: 0, cause: null }),
     ]);
   });
+
+  it.each([
+    ['SIGINT', [], 0],
+    ['SIGTERM', [], 0],
+    ['SIGINT', ['--wait-ci-strict'], 130],
+    ['SIGTERM', ['--wait-ci-strict'], 143],
+  ] as const)(
+    'a %s sent only to devkit ship during its CI wait (%j) exits %i',
+    async (signal, extra, code) => {
+      const { dir, env } = seedShipRepoLocalRemote();
+      const sink = join(dir, 'gate-events.jsonl');
+      const driver = [process.execPath, '--input-type=module', '-e', SHIP_DRIVER, '--'];
+      const r = await interruptWait([...driver, 'feat/end-wrapper'], dir, env, signal, 1, extra);
+
+      expect(r.code, r.stderr).toBe(code);
+      expect(r.stdout).toContain('https://github.com/acme/app/pull/42');
+      expect(r.stderr).toContain('ci-outcome=not-run pr=42 reason=interrupted');
+      expect(rows(sink, 'ship_end')).toEqual([expect.objectContaining({ exit_code: code })]);
+    },
+  );
 
   it.each([
     ['red', 'fail', 5, 'ci_not_green'],

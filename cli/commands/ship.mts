@@ -195,7 +195,7 @@ Usage:
                       carries \`scope=required required-contexts=<n>\`. NOT replayed by --resume.
   --wait-ci-strict    With --wait-ci only: exit 5 unless the verdict is passed — failed, cancelled,
                       no-checks, timed-out, unavailable and not-run all exit 5, as does a crashed
-                      wait. Exit 5 means the PR is open (or SHIP_DRY_RUN committed) and CI is not
+                      wait; a signal that ends the wait exits its own 129-143. Exit 5 means the PR is open (or SHIP_DRY_RUN committed) and CI is not
                       known green: do NOT --resume. For \`devkit ship … --wait-ci --wait-ci-strict &&
                       <merge>\`. NOT replayed by --resume.
   --wait-ci-timeout <s>  Bound for --wait-ci, 60..7200, default 3600. The floor exists because below
@@ -269,8 +269,8 @@ Judge models:
 Exits 0 on PR opened, committed under SHIP_DRY_RUN, or a passing --dry-gates rehearsal; 1 on any
 preflight/git/gh/gate error. A --wait-ci verdict never changes that — a red or timed-out CI still
 exits 0, because the PR opened — unless --wait-ci-strict, which exits 5 on any verdict but passed
-(an exit 1 above still wins). The other exception is a SIGNAL during the wait: ship exits 130/143
-even though the PR is open, so the wait announces the PR URL before it starts. A commit
+(an exit 1 above still wins). A signal during the wait ends only the wait: ship still exits 0, or
+129-143 under --wait-ci-strict, whose verdict it leaves unknown. A commit
 that lands but fails to push KEEPS the branch; an identical retry verifies and resumes that commit.
 A commit that never lands auto-deletes the empty branch.
 
