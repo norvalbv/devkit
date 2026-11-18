@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "devkitVersion": "0.76.0",
-  "upstreamCommit": "b9dbc740905baa1123a3ee4f512fe0933d9e916b",
+  "upstreamCommit": "2a0fcf324de7804f5396e845a689243fdb1acfbe",
   "pluginApiVersion": "1.78.0",
   "ruleIds": [
     "anti-slop/no-chained-type-assertions",
@@ -23,7 +23,7 @@
     "anti-slop/no-unsafe-external-record-enumeration",
     "anti-slop/no-elapsed-time-assertions"
   ],
-  "pluginDigest": "41f30f533e6bfd657553aaaec62ea0a5ce6b40b5eb84cec8059bb09e8640018e",
+  "pluginDigest": "458172422140c18357c1bff407f51442a7d5a16c9bf1fb452cb05dbac8fe61c7",
   "configDigest": "09e5458d89969252a2c0e5d44e327aa9215043176d2db857ca47fbab1d1fac0c",
   "probeDigest": "bf2c2181804ac4004aed98aa41133e080068be9b2e9bf9d47a459ce75c6cdb87",
   "probeConfigDigest": "b9bfbd93519b843df6bd175b91f5742bb67be649cac5c82492621e5a7bbd7604"

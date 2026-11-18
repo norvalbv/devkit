@@ -115,102 +115,50 @@ function findClause(
   );
 }
 
-interface RecordProof {
-  identity: ESTree.Expression | null;
-  objectType: ESTree.Expression | null;
-  nonNull: ESTree.Expression | null;
-  array: ESTree.Expression | null;
+interface RecordFacts {
+  identity: boolean;
+  object: boolean;
+  nonNull: boolean;
+  notArray: boolean;
 }
 
-function recordParts(
+/** What a condition proves when it is `truthy`: each `&&` clause, or each `||` clause negated. */
+function recordFacts(
   sourceCode: SourceCode,
   condition: ESTree.Expression,
   value: ESTree.Expression,
-): RecordProof {
+  truthy: boolean,
+): RecordFacts {
+  const holds = (predicate: (clause: ESTree.Expression) => boolean) =>
+    findClause(condition, truthy ? '&&' : '||', predicate) !== null;
   return {
-    identity: findClause(condition, '&&', (clause) =>
-      objectComparison(sourceCode, clause, value, true),
-    ),
-    objectType: findClause(condition, '&&', (clause) =>
-      typeofObjectComparison(sourceCode, clause, value, true),
-    ),
-    nonNull: findClause(condition, '&&', (clause) =>
-      nullComparison(sourceCode, clause, value, false),
-    ),
-    array: findClause(condition, '&&', (clause) => arrayCheck(sourceCode, clause, value, false)),
+    identity: holds((clause) => objectComparison(sourceCode, clause, value, truthy)),
+    object: holds((clause) => typeofObjectComparison(sourceCode, clause, value, truthy)),
+    nonNull: holds((clause) => nullComparison(sourceCode, clause, value, !truthy)),
+    notArray: holds((clause) => arrayCheck(sourceCode, clause, value, !truthy)),
   };
 }
 
-interface RejectionProof {
-  identity: ESTree.Expression | null;
-  nonObjectType: ESTree.Expression | null;
-  nullValue: ESTree.Expression | null;
-  array: ESTree.Expression | null;
-}
-
-function rejectionParts(
-  sourceCode: SourceCode,
-  condition: ESTree.Expression,
-  value: ESTree.Expression,
-): RejectionProof {
-  return {
-    identity: findClause(condition, '||', (clause) =>
-      objectComparison(sourceCode, clause, value, false),
-    ),
-    nonObjectType: findClause(condition, '||', (clause) =>
-      typeofObjectComparison(sourceCode, clause, value, false),
-    ),
-    nullValue: findClause(condition, '||', (clause) =>
-      nullComparison(sourceCode, clause, value, true),
-    ),
-    array: findClause(condition, '||', (clause) => arrayCheck(sourceCode, clause, value, true)),
-  };
-}
-
-function proven(required: readonly (ESTree.Expression | null)[]): boolean {
-  return required.every((proof) => proof !== null);
-}
-
-/** Calls cannot change a const binding's typeof, null-ness or array-ness, so proofs never expire. */
+/** Every enclosing branch and preceding terminating guard holds on the path to `node`, and calls
+ * cannot change a const binding's typeof, null-ness or array-ness, so the facts combine. */
 function guarded(
   sourceCode: SourceCode,
   node: ESTree.CallExpression,
   value: ESTree.Expression,
   origin: Exclude<ExternalOrigin, 'record-parameter'>,
 ): boolean {
-  if (
-    branchConditions(node).some(({ condition, truthy }) => {
-      if (truthy) {
-        const proof = recordParts(sourceCode, condition, value);
-        return (
-          (origin === 'json' && proven([proof.identity, proof.array])) ||
-          proven([proof.objectType, proof.nonNull, proof.array])
-        );
-      }
-      const proof = rejectionParts(sourceCode, condition, value);
-      return (
-        (origin === 'json' && proven([proof.identity, proof.array])) ||
-        proven([proof.nonObjectType, proof.nullValue, proof.array])
-      );
-    })
-  ) {
-    return true;
-  }
-  const combined = precedingTerminatingGuards(node).reduce<RejectionProof>(
-    (known, { condition }) => {
-      const next = rejectionParts(sourceCode, condition, value);
-      return {
-        identity: next.identity ?? known.identity,
-        nonObjectType: next.nonObjectType ?? known.nonObjectType,
-        nullValue: next.nullValue ?? known.nullValue,
-        array: next.array ?? known.array,
-      };
-    },
-    { identity: null, nonObjectType: null, nullValue: null, array: null },
-  );
+  const facts = [
+    ...branchConditions(node).map(({ condition, truthy }) =>
+      recordFacts(sourceCode, condition, value, truthy),
+    ),
+    ...precedingTerminatingGuards(node).map(({ condition }) =>
+      recordFacts(sourceCode, condition, value, false),
+    ),
+  ];
+  const known = (fact: keyof RecordFacts) => facts.some((established) => established[fact]);
   return (
-    (origin === 'json' && proven([combined.identity, combined.array])) ||
-    proven([combined.nonObjectType, combined.nullValue, combined.array])
+    known('notArray') &&
+    ((origin === 'json' && known('identity')) || (known('object') && known('nonNull')))
   );
 }
 

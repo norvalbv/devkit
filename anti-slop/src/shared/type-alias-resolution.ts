@@ -1,6 +1,9 @@
 import type { ESTree } from "@oxlint/plugins";
 
-import { lexicalTypeParameterNames } from "./lexical-type-parameters.ts";
+import {
+	lexicalTypeParameterNames,
+	nearestTypeParameterBinder,
+} from "./lexical-type-parameters.ts";
 
 type VisitorKeys = Readonly<Record<string, readonly string[]>>;
 type TypeScope = ESTree.Node;
@@ -10,7 +13,8 @@ type TypeBinding = {
 	/**
 	 * "type" for a declaration or `import type`; "maybe" for a named or default value import, whose
 	 * target may or may not be a type; "none" for a namespace import, which can never name a type, and
-	 * for a `declare global` interface, which merges with the global type instead of shadowing it.
+	 * for a `declare global` interface, which merges with the global type instead of shadowing it,
+	 * and for a namespace, which only roots qualified names.
 	 */
 	readonly typeMeaning: TypeMeaning;
 	readonly name: string;
@@ -114,6 +118,11 @@ function declaredTypeBinding(
 			? null
 			: { alias: null, typeMeaning: "type", name: node.id.name };
 	}
+	if (node.type === "TSModuleDeclaration" && node.kind === "namespace") {
+		let root: ESTree.Node = node.id;
+		while (root.type === "TSQualifiedName") root = root.left;
+		return root.type === "Identifier" ? { alias: null, typeMeaning: "none", name: root.name } : null;
+	}
 	if (node.type === "ImportNamespaceSpecifier") {
 		return { alias: null, typeMeaning: "none", name: node.local.name };
 	}
@@ -187,12 +196,10 @@ function ancestorDistance(ancestor: ESTree.Node, node: ESTree.Node): number | nu
 	return null;
 }
 
-function nearestTypeBindings(
-	name: string,
+function nearestBindings(
+	candidates: readonly TypeBinding[],
 	use: ESTree.Node,
-	environment: TypeAliasEnvironment,
 ): readonly TypeBinding[] {
-	const candidates = environment.bindingsByName.get(name) ?? [];
 	let nearestDistance = Number.POSITIVE_INFINITY;
 	let nearest: TypeBinding[] = [];
 	for (const candidate of candidates) {
@@ -206,6 +213,19 @@ function nearestTypeBindings(
 		nearest = [candidate];
 	}
 	return nearest;
+}
+
+/** The nearest bindings that may name a type; one that never does lets the name resolve further out. */
+function nearestTypeBindings(
+	name: string,
+	use: ESTree.Node,
+	environment: TypeAliasEnvironment,
+): readonly TypeBinding[] {
+	const candidates = environment.bindingsByName.get(name) ?? [];
+	return nearestBindings(
+		candidates.filter((binding) => binding.typeMeaning !== "none"),
+		use,
+	);
 }
 
 /** Resolve the nearest visible alias with this name, respecting lexical shadowing. */
@@ -230,9 +250,7 @@ export function hasVisibleTypeBinding(
 ): boolean {
 	return (
 		lexicalTypeParameterNames(use, environment.visitorKeys).has(name) ||
-		nearestTypeBindings(name, use, environment).some(
-			(binding) => binding.typeMeaning !== "none",
-		)
+		nearestTypeBindings(name, use, environment).length > 0
 	);
 }
 
@@ -253,33 +271,62 @@ export function hasVisibleTypeDeclaration(
 	);
 }
 
+/** Whether a name here resolves to a top-level declaration, not a nearer type or type parameter. */
+export function isTopLevelTypeBinding(
+	name: string,
+	use: ESTree.Node,
+	environment: TypeAliasEnvironment,
+): boolean {
+	return (
+		!lexicalTypeParameterNames(use, environment.visitorKeys).has(name) &&
+		nearestTypeBindings(name, use, environment)[0]?.scope.type === "Program"
+	);
+}
+
+/** The type parameter or the alias bindings a name resolves to at a use, whichever is nearer. */
+function nearestTypeBinder(
+	name: string,
+	use: ESTree.Node,
+	environment: TypeAliasEnvironment,
+): ESTree.Node | readonly TypeBinding[] {
+	// Namespaces count here: they root qualified names such as `Models.Item`.
+	const bindings = nearestBindings(environment.bindingsByName.get(name) ?? [], use);
+	const parameter = nearestTypeParameterBinder(name, use, environment.visitorKeys);
+	const bindingScope = bindings[0]?.scope;
+	if (
+		parameter !== null &&
+		(bindingScope === undefined ||
+			(ancestorDistance(bindingScope, use) ?? Number.POSITIVE_INFINITY) >= parameter.distance)
+	) {
+		return parameter.binder;
+	}
+	return bindings;
+}
+
 function hasSameTypeBinding(
 	first: ESTree.IdentifierReference,
 	second: ESTree.IdentifierReference,
 	environment: TypeAliasEnvironment,
 ): boolean {
-	const { name } = first;
-	const { visitorKeys } = environment;
-	if (
-		second.name !== name ||
-		lexicalTypeParameterNames(first, visitorKeys).has(name) ||
-		lexicalTypeParameterNames(second, visitorKeys).has(name)
-	) {
-		return false;
+	if (second.name !== first.name) return false;
+	const firstBinder = nearestTypeBinder(first.name, first, environment);
+	const secondBinder = nearestTypeBinder(first.name, second, environment);
+	if (!Array.isArray(firstBinder) || !Array.isArray(secondBinder)) {
+		return firstBinder === secondBinder;
 	}
-	const firstBindings = nearestTypeBindings(name, first, environment);
-	const secondBindings = nearestTypeBindings(name, second, environment);
 	return (
-		firstBindings.length === secondBindings.length &&
-		firstBindings.every((binding, index) => binding === secondBindings[index])
+		firstBinder.length === secondBinder.length &&
+		firstBinder.every((binding, index) => binding === secondBinder[index])
 	);
 }
 
+/** Collect each type reference's root name; false when a `typeof` query names a value it cannot compare. */
 function collectTypeReferenceRoots(
 	node: ESTree.Node,
 	visitorKeys: VisitorKeys,
 	roots: ESTree.IdentifierReference[],
-): void {
+): boolean {
+	if (node.type === "TSTypeQuery") return false;
 	if (node.type === "TSTypeReference") {
 		let name = node.typeName;
 		while (name.type === "TSQualifiedName") name = name.left;
@@ -291,12 +338,13 @@ function collectTypeReferenceRoots(
 		const value = fields[key];
 		const children = Array.isArray(value) ? value : [value];
 		for (const child of children) {
-			if (isNode(child)) collectTypeReferenceRoots(child, visitorKeys, roots);
+			if (isNode(child) && !collectTypeReferenceRoots(child, visitorKeys, roots)) return false;
 		}
 	}
+	return true;
 }
 
-/** Whether two textually equal types name the same declarations; a shadowing type parameter or local type does not. */
+/** Whether two textually equal types name the same declarations, type parameters included; a `typeof` query never does. */
 export function hasSameTypeBindings(
 	first: ESTree.TSType,
 	second: ESTree.TSType,
@@ -304,9 +352,9 @@ export function hasSameTypeBindings(
 ): boolean {
 	const firstRoots: ESTree.IdentifierReference[] = [];
 	const secondRoots: ESTree.IdentifierReference[] = [];
-	collectTypeReferenceRoots(first, environment.visitorKeys, firstRoots);
-	collectTypeReferenceRoots(second, environment.visitorKeys, secondRoots);
 	return (
+		collectTypeReferenceRoots(first, environment.visitorKeys, firstRoots) &&
+		collectTypeReferenceRoots(second, environment.visitorKeys, secondRoots) &&
 		firstRoots.length === secondRoots.length &&
 		firstRoots.every((root, index) => {
 			const other = secondRoots[index];

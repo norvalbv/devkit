@@ -51,6 +51,10 @@ tester.run('anti-slop/no-unsafe-external-record-access', noUnsafeExternalRecordA
     'const r = JSON.parse(raw); const k = next(); for (const _ of xs) { if (Object.hasOwn(r, k)) r[k]; Reflect.deleteProperty(r, k); }',
     'const r = JSON.parse(raw); const k = next(); if (Object.hasOwn(r, k)) { for (const x of r[k]) use(x); }',
     'const r = JSON.parse(raw); const k = next(); if (Object.hasOwn(r, k)) { class C { static { r[k]; } static v = r[k]; } }',
+    'const parsed = JSON.parse(raw); const alias = parsed; alias["safe"]; parsed["other"];',
+    'const parsed = JSON.parse(raw); const other = JSON.parse(raw); const alias = other; Object.setPrototypeOf(alias, proto); parsed["safe"];',
+    'const r = JSON.parse(raw); const k = next(); if (Object.hasOwn(r, k)) { class C { value = Reflect.deleteProperty(r, k); } r[k]; }',
+    'const r = JSON.parse(raw); const k = next(); if (Object.hasOwn(r, k)) { r[k]; class C { static { delete r[k]; } } }',
   ],
   invalid: [
     { code: 'const files = JSON.parse(raw).files; files["constructor"];', errors: [error] },
@@ -201,6 +205,30 @@ tester.run('anti-slop/no-unsafe-external-record-access', noUnsafeExternalRecordA
     {
       code: 'function read(files: Record<string, string>) { return files["fixed"]; }',
       options: [{ includeRecordParameters: true }],
+      errors: [error],
+    },
+    {
+      code: 'const parsed = JSON.parse("{}"); const alias = parsed; Object.setPrototypeOf(alias, { injected: true }); parsed["injected"];',
+      errors: [error],
+    },
+    {
+      code: 'const parsed = JSON.parse(raw); const files = parsed.files; files.__proto__ = proto; parsed.files["injected"];',
+      errors: [error],
+    },
+    {
+      code: 'const parsed = JSON.parse(raw); const alias = parsed; Object.setPrototypeOf(parsed, proto); alias["injected"];',
+      errors: [error],
+    },
+    {
+      code: 'const r = JSON.parse(raw); const k = next(); if (Object.hasOwn(r, k)) { class C { static { delete r[k]; } } r[k]; }',
+      errors: [error],
+    },
+    {
+      code: 'const r = JSON.parse(raw); const k = next(); if (Object.hasOwn(r, k)) { class C { static drop = Reflect.deleteProperty(r, k); } r[k]; }',
+      errors: [error],
+    },
+    {
+      code: 'const r = JSON.parse(raw); const k = next(); if (Object.hasOwn(r, k)) { class C { static { delete r[k]; r[k]; } } }',
       errors: [error],
     },
   ],

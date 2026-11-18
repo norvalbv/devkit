@@ -43,6 +43,9 @@ tester.run(
       'const e = JSON.parse(raw).entries; if (typeof e === "object" && e !== null && !Array.isArray(e)) Object.keys(e);',
       'const value = JSON.parse(text); if (typeof value === "object" && value !== null && !Array.isArray(value)) { const keys = Object.keys(value); const entries = Object.entries(value); }',
       'const value = JSON.parse(raw, reviver); if (typeof value === "object" && value !== null && !Array.isArray(value)) { Object.keys(value); mutate(value); Object.entries(value); }',
+      'const value = JSON.parse(text); if (typeof value === "object" && value !== null) { if (!Array.isArray(value)) Object.keys(value); }',
+      'const value = JSON.parse(text); if (typeof value !== "object" || value === null) reject(); else if (!Array.isArray(value)) Object.keys(value);',
+      'function read(raw: string) { const value = JSON.parse(raw); if (Object(value) !== value) return []; return Array.isArray(value) ? [] : Object.keys(value); }',
     ],
     invalid: [
       { code: 'Object.entries(JSON.parse(raw));', errors: [error] },
@@ -94,6 +97,14 @@ tester.run(
       },
       {
         code: 'if (Object(JSON.parse(next())) === JSON.parse(next()) && !Array.isArray(JSON.parse(next()))) Object.entries(JSON.parse(next()));',
+        errors: [error],
+      },
+      {
+        code: 'const value = JSON.parse(text); if (typeof value === "object" && value !== null) reject(); else if (!Array.isArray(value)) Object.keys(value);',
+        errors: [error],
+      },
+      {
+        code: 'const value = JSON.parse(text); if (typeof value === "object" || value !== null) { if (!Array.isArray(value)) Object.keys(value); }',
         errors: [error],
       },
     ],

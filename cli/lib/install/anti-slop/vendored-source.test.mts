@@ -9,7 +9,7 @@ import {
 } from './constants.mts';
 
 const PINNED_UPSTREAM_IMPLEMENTATION_DIGEST =
-  'fb28449a39e1b3b79e0a7c1918f16879a6720b6221a55d72b9c160527325da60';
+  'b59eebd04fbced284525425a4aeb3a1d66bafb2cb379f98a2ea95c3a5f6c6190';
 
 function sourceDigest(): { digest: string; files: string[] } {
   const root = join(import.meta.dirname, '../../../../anti-slop/src');

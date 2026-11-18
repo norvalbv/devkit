@@ -254,19 +254,32 @@ export function sameExpression(
 export interface MutationEvidence {
   start: number;
   end: number;
-  scope: Scope;
+  scopes: Scope[];
 }
 
+function runsDuringClassEvaluation(scope: Scope): boolean {
+  const field = scope.block.parent;
+  return (
+    scope.type === 'class-static-block' ||
+    (scope.type === 'class-field-initializer' &&
+      (field?.type === 'PropertyDefinition' || field?.type === 'AccessorProperty') &&
+      field.static)
+  );
+}
+
+/** A static block or static field value runs while its class is evaluated, so it also mutates there. */
 export function appendMutationEvidence(
   sourceCode: SourceCode,
   mutations: MutationEvidence[],
   node: ESTree.Node,
 ): void {
-  mutations.push({
-    start: node.start,
-    end: node.end,
-    scope: sourceCode.getScope(node).variableScope,
-  });
+  const scopes = [sourceCode.getScope(node).variableScope];
+  let scope = scopes[0]!;
+  while (scope.upper !== null && runsDuringClassEvaluation(scope)) {
+    scope = scope.upper.variableScope;
+    scopes.push(scope);
+  }
+  mutations.push({ start: node.start, end: node.end, scopes });
 }
 
 export function hasPotentialMutationWithin(
@@ -276,7 +289,7 @@ export function hasPotentialMutationWithin(
   end: number,
 ): boolean {
   return mutations.some(
-    (mutation) => mutation.scope === scope && mutation.start >= start && mutation.end <= end,
+    (mutation) => mutation.scopes.includes(scope) && mutation.start >= start && mutation.end <= end,
   );
 }
 
