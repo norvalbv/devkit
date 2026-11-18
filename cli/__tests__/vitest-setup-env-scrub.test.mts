@@ -93,6 +93,9 @@ const SHIP_ENV = {
 
 const bothSpellings = (suffix: string) => [`GUARD_${suffix}`, `FRINK_${suffix}`];
 
+/** Scrubbed names the setup file then sets to a safe value of its own. */
+const REASSIGNED = new Set(['DEVKIT_GATE_EVENTS', 'DEVKIT_GATE_LOG']);
+
 /** Loads vitest.setup.mjs in a clean node process and reports the env it leaves behind. */
 function envAfterSetup(extra: Record<string, string>): Record<string, string | undefined> {
   const stdout = execFileSync(
@@ -158,9 +161,9 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
   it('leaves no scrubbed name in a process launched from a ship environment', () => {
     const env = envAfterSetup(SHIP_ENV);
     for (const name of SCRUBBED_ENV) {
-      // DEVKIT_GATE_EVENTS is scrubbed and then reassigned; the point is that it is no longer the
-      // inherited value, which is what would let a test ship write to the developer's real sink.
-      if (name === 'DEVKIT_GATE_EVENTS') continue;
+      // Scrubbed and then reassigned; the point is that the inherited value is gone, which is what
+      // would let a test write to the developer's real sink or gate log.
+      if (REASSIGNED.has(name)) continue;
       expect(env[name], name).toBeUndefined();
     }
   });
@@ -170,7 +173,7 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
     // independent side, so a ship variable absent from the list fails here as well.
     const env = envAfterSetup(SHIP_ENV);
     for (const name of Object.keys(SHIP_ENV)) {
-      if (name === 'DEVKIT_GATE_EVENTS') continue; // reassigned to a per-worker temp sink by design
+      if (REASSIGNED.has(name)) continue;
       expect(env[name], name).toBeUndefined();
     }
   });
@@ -266,6 +269,12 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
     expect(env.DEVKIT_GATE_EVENTS).not.toBe('/real/telemetry.jsonl');
     expect(env.DEVKIT_GATE_EVENTS).toMatch(/devkit-test-gate-events-\d+\.jsonl$/);
     expect(env.DEVKIT_NO_TELEMETRY).toBe('1');
+  });
+
+  it('turns the commit gate log off instead of honouring an inherited one', () => {
+    expect(envAfterSetup({ ...SHIP_ENV, DEVKIT_GATE_LOG: '/real/gate.log' }).DEVKIT_GATE_LOG).toBe(
+      '0',
+    );
   });
 
   it("drops inherited `git -c` config so a fixture repo's own core.hooksPath applies", () => {

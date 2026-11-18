@@ -355,6 +355,7 @@ describe('assembled hook is set -e-safe', () => {
     writeFileSync(hookPath, buildFullHook({ guards: [...GUARD_IDS] }));
     try {
       execFileSync('sh', ['-e', hookPath], {
+        cwd: home,
         env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin' },
         stdio: 'pipe',
       });
@@ -400,6 +401,7 @@ describe('exit 4 renders as an object-database fault, never as a verdict', () =>
     writeFileSync(hookPath, buildFullHook({ guards: [...GUARD_IDS] }));
     try {
       const out = execFileSync('sh', ['-e', hookPath], {
+        cwd: home,
         env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin' },
         encoding: 'utf8',
         stdio: 'pipe',

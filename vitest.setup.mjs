@@ -254,6 +254,10 @@ process.env.DEVKIT_GATE_EVENTS = path.join(
 // suite-wide; a ship test sets DEVKIT_SHIP_ID (unaffected), and run-context's own test toggles this.
 process.env.DEVKIT_NO_TELEMETRY = '1';
 
+// A test hook run from the real checkout would overwrite its .devkit/last-commit-gates-*.log.
+// Ship's gate log is a path, set past this file; commit-gate-log.test strips DEVKIT_* to test the log.
+process.env.DEVKIT_GATE_LOG = '0';
+
 // sc-2837: runReviewGate now resolves the judge MCP registry ITSELF (to name, before any judge
 // spawns, the reviewers that will run without codebase) — so a gate test would otherwise answer to
 // the developer's ~/.claude.json: green PASS on a machine with codebase configured, PASS (DEGRADED)
