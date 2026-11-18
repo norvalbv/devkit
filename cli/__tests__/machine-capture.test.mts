@@ -225,12 +225,16 @@ describe.runIf(browserReady)("machine capture (the app's own DevTools)", () => {
     return JSON.stringify(tree).split('"x-pw-user-overlay"').length - 1;
   }
 
-  it('leaves no caption or mark over the app when a step throws after marking', async () => {
+  it('leaves no caption or mark over the app when a step throws while others hold their marks', async () => {
     const root = repo();
     const { context, page, devtools } = await app();
     try {
-      const marked = stepOf('Mark', 'await page.goto(url);', `, { focus: page.locator('#t') }`);
-      const body = `${marked}\n${stepOf('Throw', `throw new Error('mid-step');`)}`;
+      // Holds are stretched to 6 s: both marks are up by about 3 s, the third step throws at
+      // about 4 s, and the run ends long before either held step would take its own mark down.
+      const held = (title: string) =>
+        `step('${title}', async () => {}, { focus: page.locator('#t') })`;
+      const thrown = `step('Throw', async () => { await new Promise((done) => setTimeout(done, 1000)); throw new Error('mid-step'); })`;
+      const body = `await page.goto(url);\nawait Promise.all([${held('A')}, ${held('B')}, ${thrown}]);`;
       const input = {
         root,
         flowPath: flowFile(root, 'thrown', body),
@@ -238,7 +242,7 @@ describe.runIf(browserReady)("machine capture (the app's own DevTools)", () => {
         profile: join(root, 'unused'),
         evidence: evidenceDir(root),
         devtools: true,
-        pace: PACE,
+        pace: 4,
       };
       expect(await runFlow(input)).toMatchObject({ passed: false, error: 'mid-step' });
       expect(await overlaysLeft(page)).toBe(0);

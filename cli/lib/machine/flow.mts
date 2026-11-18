@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
-import { chromium, type Locator, type Page } from 'playwright-core';
+import { type CDPSession, chromium, type Locator, type Page } from 'playwright-core';
 import { z } from 'zod';
 import { errorMessage } from '../ship/review/shared/common.mts';
 import { type Box, boxOutput, screenshot, startRecording, stopRecording } from './box.mts';
@@ -157,18 +157,22 @@ export const videoSize = (width: number, height: number): typeof VIEWPORT =>
 async function capture(page: Page, file: string): Promise<void> {
   const session = await page.context().newCDPSession(page);
   try {
-    for (let tries = 1; ; tries++) {
-      const shot = session.send('Page.captureScreenshot', { format: 'png' });
-      const taken = await withTimeout(shot, CAPTURE_TIMEOUT_MS, 'the screenshot').catch(
-        (cause: unknown) => {
-          if (tries === CAPTURE_TRIES || !CAPTURE_REFUSED.test(errorMessage(cause))) throw cause;
-        },
-      );
-      if (taken) return writeFileSync(file, Buffer.from(taken.data, 'base64'));
-      await sleep(200);
-    }
+    const png = await withTimeout(takePng(session), CAPTURE_TIMEOUT_MS, 'the screenshot');
+    writeFileSync(file, Buffer.from(png, 'base64'));
   } finally {
     await session.detach().catch(() => undefined);
+  }
+}
+
+/** One capture, asked again while Chromium refuses it; the caller bounds the whole of it. */
+async function takePng(session: CDPSession): Promise<string> {
+  for (let tries = 1; ; tries++) {
+    try {
+      return (await session.send('Page.captureScreenshot', { format: 'png' })).data;
+    } catch (cause) {
+      if (tries === CAPTURE_TRIES || !CAPTURE_REFUSED.test(errorMessage(cause))) throw cause;
+    }
+    await sleep(200);
   }
 }
 
@@ -211,33 +215,35 @@ type Overlay = Awaited<ReturnType<Page['screencast']['showOverlay']>>;
 /** A run's caption and focus mark. They are drawn in the page, over the app and outside its own
  * DOM tree, so `clear` must run before an attached app is left, or they outlive the run. */
 function narration(page: Page) {
+  const drawn = new Set<Overlay>();
   let caption: Overlay | undefined;
-  let mark: Overlay | undefined;
   let cleared = false;
   // A flow that outlives its timeout keeps running: what it draws after `clear` comes straight down.
   const show = async (html: string): Promise<Overlay | undefined> => {
     if (cleared) return undefined;
     const overlay = await page.screencast.showOverlay(html);
-    if (!cleared) return overlay;
-    await overlay.dispose().catch(() => undefined);
-    return undefined;
+    drawn.add(overlay);
+    if (cleared) await remove(overlay);
+    return cleared ? undefined : overlay;
   };
-  const unmark = async () => {
-    await mark?.dispose().catch(() => undefined);
-    mark = undefined;
+  const remove = async (overlay: Overlay | undefined) => {
+    if (!overlay || !drawn.delete(overlay)) return;
+    await overlay.dispose().catch(() => undefined);
   };
   return {
     /** The next caption goes up before the last comes down, so no frame is left without one. */
     caption: async (text: string, top = false) => {
+      const next = await show(captionHtml(text, top));
+      // Read only now: captions started together then each take down the one before them.
       const previous = caption;
-      caption = await show(captionHtml(text, top));
-      await previous?.dispose();
+      caption = next;
+      await remove(previous);
     },
-    /** Marks `focus`; true when it reaches into the bottom caption's zone. */
-    mark: async (focus: Locator, kind: StepOptions['mark'] = 'outline'): Promise<boolean> => {
+    /** Marks `focus`: the mark to `remove`, and whether it reaches into the bottom caption's zone. */
+    mark: async (focus: Locator, kind: StepOptions['mark'] = 'outline') => {
       await focus.scrollIntoViewIfNeeded();
       const box = await focus.boundingBox();
-      if (!box) return false;
+      if (!box) return { overlay: undefined, low: false };
       const dim = kind === 'dim';
       const pad = dim ? 0 : 6;
       const radius = dim ? await focus.evaluate((el) => getComputedStyle(el).borderRadius) : '8px';
@@ -245,17 +251,17 @@ function narration(page: Page) {
         ? 'box-shadow:0 0 0 9999px rgba(15,15,20,.5)'
         : 'border:3px solid #ff3b6b;box-shadow:0 0 0 4px rgba(255,59,107,.25)';
       const place = `left:${box.x - pad}px;top:${box.y - pad}px;width:${box.width + 2 * pad}px;height:${box.height + 2 * pad}px`;
-      mark = await show(
+      const overlay = await show(
         `<div style="position:fixed;${place};box-sizing:border-box;border-radius:${radius};${look};pointer-events:none"></div>`,
       );
       const { height } = await windowSize(page);
-      return box.y + box.height > height - CAPTION_ZONE;
+      return { overlay, low: box.y + box.height > height - CAPTION_ZONE };
     },
-    unmark,
+    remove,
+    /** Takes down everything still drawn, whichever step drew it. */
     clear: async () => {
       cleared = true;
-      await unmark();
-      await caption?.dispose().catch(() => undefined);
+      await Promise.all([...drawn].map(remove));
     },
   };
 }
@@ -344,8 +350,8 @@ export async function runFlow(input: RunInput): Promise<RunResult> {
     await sleep(LEAD_IN_MS * pace);
     await act();
     // A caption that would sit on the marked element moves to the top instead.
-    if (options?.focus && (await notes.mark(options.focus, options.mark)))
-      await notes.caption(label, true);
+    const marked = options?.focus ? await notes.mark(options.focus, options.mark) : undefined;
+    if (marked?.low) await notes.caption(label, true);
     await sleep(STEP_HOLD_MS * pace);
     await still(
       `step${number}-${title
@@ -353,7 +359,7 @@ export async function runFlow(input: RunInput): Promise<RunResult> {
         .replace(/[^a-z0-9]+/g, '-')
         .slice(0, 40)}`,
     );
-    await notes.unmark();
+    await notes.remove(marked?.overlay);
   };
   const proof = async (run: Flow) => {
     await run({ page, url, shot, exec: execIn(box), step });
