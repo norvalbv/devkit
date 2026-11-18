@@ -1,8 +1,8 @@
 # Vendored anti-slop provenance
 
 - Repository: https://github.com/norvalbv/anti-slop, the maintained fork of https://github.com/dmmulroy/anti-slop
-- Commit: `b9dbc740905baa1123a3ee4f512fe0933d9e916b` (tag `v0.2.2`)
-- Vendored: 2026-11-18 (previous pin `e8c4880471b23ab7f216fba7b27d173a6ef07d4c`, dmmulroy/anti-slop `v0.1.2`, 2026-10-18)
+- Commit: `2a0fcf324de7804f5396e845a689243fdb1acfbe` (tag `v0.2.3`)
+- Vendored: 2026-11-18 (previous pin `b9dbc740905baa1123a3ee4f512fe0933d9e916b`, the fork's `v0.2.2`; first fork pin replaced dmmulroy/anti-slop `v0.1.2` at `e8c4880471b23ab7f216fba7b27d173a6ef07d4c`)
 - License: MIT (see `LICENSE`)
 
 The 15 rule implementations under `src/rules/` and the 6 helpers they import under `src/shared/` are

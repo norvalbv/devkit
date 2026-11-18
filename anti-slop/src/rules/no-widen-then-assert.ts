@@ -3,6 +3,7 @@ import type { ESTree, Variable } from "@oxlint/plugins";
 
 import {
   createTypeAliasEnvironment,
+  hasSameTypeBindings,
   hasVisibleTypeBinding,
   hasVisibleTypeDeclaration,
   type TypeAliasEnvironment,
@@ -150,15 +151,18 @@ function normalizedTypeText(sourceText: string, type: ESTree.TSType): string {
   return sourceText.slice(type.start, type.end).replaceAll(/\s+/gu, "");
 }
 
+/** Equal text names the same type only when every name in it resolves to the same declaration. */
 function typesHaveSameSyntax(
   sourceText: string,
   left: ESTree.TSType | null,
   right: ESTree.TSType,
+  environment: TypeAliasEnvironment,
 ): boolean {
   return (
     left !== null &&
     normalizedTypeText(sourceText, unwrapTypeParentheses(left)) ===
-      normalizedTypeText(sourceText, unwrapTypeParentheses(right))
+      normalizedTypeText(sourceText, unwrapTypeParentheses(right)) &&
+    hasSameTypeBindings(left, right, environment)
   );
 }
 
@@ -368,7 +372,7 @@ function assertionIsNarrower(
 ): boolean {
   if (broadTypeKind(assertedType, environment, "spare") !== null) return false;
   if (broadKind === "top") return true;
-  if (typesHaveSameSyntax(sourceText, evidence.type, assertedType)) return true;
+  if (typesHaveSameSyntax(sourceText, evidence.type, assertedType, environment)) return true;
   if (broadKind === "object") return isDefinitelyObjectType(assertedType);
   return isDefinitelyNarrowerRecordType(assertedType, environment);
 }

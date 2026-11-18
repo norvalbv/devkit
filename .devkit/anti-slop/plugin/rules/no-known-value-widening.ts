@@ -15,7 +15,11 @@ import {
 	functionParameterTypeAnnotation,
 } from "../shared/function-parameters.ts";
 import { resolveVariable } from "../shared/scope.ts";
-import { hasSameTypeBindings, visibleTypeAlias } from "../shared/type-alias-resolution.ts";
+import {
+	hasSameTypeBindings,
+	hasVisibleTypeBinding,
+	visibleTypeAlias,
+} from "../shared/type-alias-resolution.ts";
 
 import type { ESTree, SourceCode, Variable } from "#oxlint-plugins";
 
@@ -304,6 +308,79 @@ function declaredTypeMatchesPredicate(
 	return typeSatisfiesPredicate(check, type, new Set()) && hasInformativeType(type, environment);
 }
 
+type LiteralKind = "array" | "object" | "readonly array";
+
+function isTopType(type: ESTree.TSType | undefined): boolean {
+	const unwrapped = type === undefined ? null : unwrapParenthesizedType(type);
+	return unwrapped?.type === "TSUnknownKeyword" || unwrapped?.type === "TSAnyKeyword";
+}
+
+/** The type arguments of a reference to the built-in `name`; null when the name is not it. */
+function builtInTypeArguments(
+	type: ESTree.TSType,
+	name: string,
+	environment: TypeEnvironment,
+): readonly ESTree.TSType[] | null {
+	return type.type === "TSTypeReference" &&
+		type.typeName.type === "Identifier" &&
+		type.typeName.name === name &&
+		!hasVisibleTypeBinding(name, type, environment.typeAliases)
+		? (type.typeArguments?.params ?? [])
+		: null;
+}
+
+/** `Record<string, unknown>` or `{ [key: string]: unknown }`: a type every object literal satisfies. */
+function isOpenDictionaryPredicate(type: ESTree.TSType, environment: TypeEnvironment): boolean {
+	const [key, value] = builtInTypeArguments(type, "Record", environment) ?? [];
+	if (key !== undefined) {
+		const keyType = unwrapParenthesizedType(key);
+		return (
+			isTopType(value) &&
+			(keyType.type === "TSStringKeyword" ||
+				builtInTypeArguments(keyType, "PropertyKey", environment) !== null)
+		);
+	}
+	return (
+		type.type === "TSTypeLiteral" &&
+		type.members.length > 0 &&
+		type.members.every(
+			(member) =>
+				member.type === "TSIndexSignature" &&
+				member.parameters[0]?.typeAnnotation.typeAnnotation.type === "TSStringKeyword" &&
+				isTopType(member.typeAnnotation.typeAnnotation),
+		)
+	);
+}
+
+/** The array literals a predicate accepts whatever their elements: `unknown[]` takes mutable ones only. */
+function acceptedArrayLiteral(type: ESTree.TSType, environment: TypeEnvironment): LiteralKind | null {
+	if (type.type === "TSArrayType") return isTopType(type.elementType) ? "array" : null;
+	if (type.type === "TSTypeOperator" && type.operator === "readonly") {
+		const operand = unwrapParenthesizedType(type.typeAnnotation);
+		return operand.type === "TSArrayType" && isTopType(operand.elementType) ? "readonly array" : null;
+	}
+	if (isTopType(builtInTypeArguments(type, "Array", environment)?.[0])) return "array";
+	return isTopType(builtInTypeArguments(type, "ReadonlyArray", environment)?.[0])
+		? "readonly array"
+		: null;
+}
+
+/** Whether every literal of this kind satisfies the predicate; a structural comparison is never tried. */
+function literalSatisfiesPredicate(
+	kind: LiteralKind,
+	predicate: ESTree.TSType | null,
+	environment: TypeEnvironment,
+): boolean {
+	if (predicate === null) return false;
+	const target = classifyWideningTarget(predicate, environment);
+	if (target === "undecided") return false;
+	if (target?.kind === "unknown" || target?.kind === "object") return true;
+	const type = unwrapParenthesizedType(predicate);
+	if (kind === "object") return isOpenDictionaryPredicate(type, environment);
+	const accepted = acceptedArrayLiteral(type, environment);
+	return accepted === "readonly array" || accepted === kind;
+}
+
 function isOptionalParameterAnnotation(annotation: ESTree.TSTypeAnnotation): boolean {
 	// Oxlint types `Identifier.optional` as `false`, but an optional parameter (`value?: T`) sets it.
 	return annotation.parent.type === "Identifier" && Boolean(annotation.parent.optional);
@@ -323,11 +400,17 @@ function isRedundantGuardArgument(
 	nonNull = false,
 	visitedVariables = new Set<Variable>(),
 ): boolean {
+	const constAssertion =
+		(expression.type === "TSAsExpression" || expression.type === "TSTypeAssertion") &&
+		isConstType(expression.typeAnnotation);
+	// `as const` makes an array literal a readonly tuple, which `unknown[]` does not accept.
+	if (constAssertion && unwrapExpression(expression.expression).type === "ArrayExpression") {
+		return literalSatisfiesPredicate("readonly array", predicate, environment);
+	}
 	if (
 		expression.type === "ParenthesizedExpression" ||
 		expression.type === "TSSatisfiesExpression" ||
-		((expression.type === "TSAsExpression" || expression.type === "TSTypeAssertion") &&
-			isConstType(expression.typeAnnotation))
+		constAssertion
 	) {
 		return isRedundantGuardArgument(
 			sourceCode,
@@ -364,6 +447,10 @@ function isRedundantGuardArgument(
 			returnType !== undefined &&
 			declaredTypeMatchesPredicate(sourceCode, returnType, predicate, environment, nonNull)
 		);
+	}
+	if (expression.type === "ArrayExpression" || expression.type === "ObjectExpression") {
+		const kind = expression.type === "ArrayExpression" ? "array" : "object";
+		return literalSatisfiesPredicate(kind, predicate, environment);
 	}
 	if (expression.type !== "Identifier") return isKnownEvidenceExpression(expression);
 	const variable = resolveVariable(sourceCode, expression);

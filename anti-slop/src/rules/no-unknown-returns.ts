@@ -18,13 +18,33 @@ type FunctionWithReturnType =
   | ESTree.TSFunctionType
   | ESTree.TSMethodSignature;
 
+const INFERRED_TYPE_PARAMETER_OWNERS = new Set<string>([
+  "ArrowFunctionExpression",
+  "FunctionDeclaration",
+  "FunctionExpression",
+  "TSCallSignatureDeclaration",
+  "TSConstructSignatureDeclaration",
+  "TSConstructorType",
+  "TSDeclareFunction",
+  "TSEmptyBodyFunctionExpression",
+  "TSFunctionType",
+  "TSMethodSignature",
+]);
+
+/** A function's type arguments are normally inferred; a type's default is the contract its consumer gets. */
+const hasInferredDefault = (parameter: ESTree.TSTypeParameter): boolean => {
+  const owner = parameter.parent.parent;
+  return owner !== null && INFERRED_TYPE_PARAMETER_OWNERS.has(owner.type);
+};
+
 function isInsideTypeConstraint(node: ESTree.Node): boolean {
   let child: ESTree.Node = node;
   let parent: ESTree.Node | null = child.parent;
   while (parent !== null && parent.type !== "Program") {
     if (
       (parent.type === "TSTypeParameter" &&
-        (parent.constraint === child || parent.default === child)) ||
+        (parent.constraint === child ||
+          (parent.default === child && hasInferredDefault(parent)))) ||
       (parent.type === "TSConditionalType" && parent.extendsType === child)
     ) {
       return true;

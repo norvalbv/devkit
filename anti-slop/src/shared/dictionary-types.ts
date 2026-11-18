@@ -5,6 +5,7 @@ import {
 	createTypeAliasEnvironment,
 	hasVisibleTypeBinding,
 	isExpansionBudgetSpent,
+	isTopLevelTypeBinding,
 	spendExpansion,
 	visibleTypeAlias,
 	type ExpansionBudget,
@@ -366,7 +367,10 @@ function unsafeDirectValue(
 		);
 	}
 	const interfaceDeclarations = walk.environment.interfaces.get(name);
-	if (interfaceDeclarations !== undefined) {
+	if (
+		interfaceDeclarations !== undefined &&
+		isTopLevelTypeBinding(name, unwrapped, walk.environment.typeAliases)
+	) {
 		return isEffectivelyEmptyInterface(interfaceDeclarations) ? "empty-object" : null;
 	}
 	const alias = visibleTypeAlias(name, unwrapped, walk.environment.typeAliases);
@@ -379,6 +383,14 @@ function unsafeDirectValue(
 	if (body === null) return null;
 	const result = unsafeDirectValue(walk, body.type, body.substitutions, body.resolvingAliases);
 	return remember(walk, walk.aliases.unsafeValues, shared, cutAliases, result);
+}
+
+/** A mapped type's key binder shadows any outer binding of its name inside the value type. */
+function withoutBinding(substitutions: TypeAliasEnvironment, name: string): TypeAliasEnvironment {
+	if (!substitutions.has(name)) return substitutions;
+	const next = new Map(substitutions);
+	next.delete(name);
+	return next;
 }
 
 function dictionaryValueTypes(
@@ -400,7 +412,13 @@ function dictionaryValueTypes(
 	if (unwrapped.type === "TSMappedType") {
 		return unwrapped.typeAnnotation === null
 			? []
-			: [{ type: unwrapped.typeAnnotation, substitutions, resolvingAliases }];
+			: [
+					{
+						type: unwrapped.typeAnnotation,
+						substitutions: withoutBinding(substitutions, unwrapped.key.name),
+						resolvingAliases,
+					},
+				];
 	}
 
 	if (unwrapped.type !== "TSTypeReference") return [];

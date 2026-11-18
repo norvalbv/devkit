@@ -14,10 +14,11 @@ import {
   precedingTerminatingGuards,
   resolveVariable,
   sameExpression,
+  stableConstInitializer,
   unwrapExpression,
 } from '../shared/external-records.ts';
 
-import type { ESTree, SourceCode } from '@oxlint/plugins';
+import type { ESTree, SourceCode, Variable } from '@oxlint/plugins';
 import type { ExternalOrigin, MutationEvidence } from '../shared/external-records.ts';
 
 function rootIdentifier(expression: ESTree.Expression): ESTree.IdentifierReference | null {
@@ -26,44 +27,68 @@ function rootIdentifier(expression: ESTree.Expression): ESTree.IdentifierReferen
   return current.type === 'Identifier' ? current : null;
 }
 
+/** The outermost expression reached from `node` through member objects and transparent wrappers. */
+function chainTop(node: ESTree.Node): ESTree.Node {
+  let current = node;
+  while (
+    current.parent !== null &&
+    ((current.parent.type === 'MemberExpression' && current.parent.object === current) ||
+      isTransparentExpression(current.parent))
+  ) {
+    current = current.parent;
+  }
+  return current;
+}
+
 /** Whether a reference to the record is a setPrototypeOf target or a `__proto__` write or Reflect.set. */
 function setsPrototype(sourceCode: SourceCode, identifier: ESTree.Node): boolean {
-  let current = identifier;
-  let parent = current.parent;
-  while (
-    parent !== null &&
-    ((parent.type === 'MemberExpression' && parent.object === current) ||
-      isTransparentExpression(parent))
-  ) {
-    if (
-      parent.type === 'MemberExpression' &&
-      memberKey(parent) === '__proto__' &&
-      parent.parent?.type === 'AssignmentExpression' &&
-      parent.parent.left === parent
-    ) {
-      return true;
-    }
-    current = parent;
-    parent = current.parent;
-  }
+  const top = chainTop(identifier);
+  const parent = top.parent;
   return (
-    parent?.type === 'CallExpression' &&
-    parent.arguments[0] === current &&
-    (isGlobalMemberCall(sourceCode, parent, 'Object', 'setPrototypeOf') ||
-      isGlobalMemberCall(sourceCode, parent, 'Reflect', 'setPrototypeOf') ||
-      (isGlobalMemberCall(sourceCode, parent, 'Reflect', 'set') &&
-        parent.arguments[1]?.type !== 'SpreadElement' &&
-        parent.arguments[1] !== undefined &&
-        literalPropertyKey(parent.arguments[1]) === '__proto__'))
+    (top.type === 'MemberExpression' &&
+      memberKey(top) === '__proto__' &&
+      parent?.type === 'AssignmentExpression' &&
+      parent.left === top) ||
+    (parent?.type === 'CallExpression' &&
+      parent.arguments[0] === top &&
+      (isGlobalMemberCall(sourceCode, parent, 'Object', 'setPrototypeOf') ||
+        isGlobalMemberCall(sourceCode, parent, 'Reflect', 'setPrototypeOf') ||
+        (isGlobalMemberCall(sourceCode, parent, 'Reflect', 'set') &&
+          parent.arguments[1]?.type !== 'SpreadElement' &&
+          parent.arguments[1] !== undefined &&
+          literalPropertyKey(parent.arguments[1]) === '__proto__')))
   );
 }
 
+/** The variable `object` is rooted at, followed back through const aliases such as `const a = parsed`. */
+function aliasOrigin(sourceCode: SourceCode, object: ESTree.Expression): Variable | null {
+  const seen = new Set<Variable>();
+  let root = rootIdentifier(object);
+  while (root !== null) {
+    const variable = resolveVariable(sourceCode, root);
+    if (variable === null || seen.has(variable)) break;
+    seen.add(variable);
+    const initializer = stableConstInitializer(variable);
+    root = initializer === null ? null : rootIdentifier(initializer);
+  }
+  return [...seen].at(-1) ?? null;
+}
+
+/** Whether `object`'s origin, or any variable declared from it or its members, has its prototype set. */
 function prototypeMayChange(sourceCode: SourceCode, object: ESTree.Expression): boolean {
-  const root = rootIdentifier(object);
-  const variable = root === null ? null : resolveVariable(sourceCode, root);
-  return (
-    variable !== null &&
-    variable.references.some((reference) => setsPrototype(sourceCode, reference.identifier))
+  const origin = aliasOrigin(sourceCode, object);
+  const family = origin === null ? [] : [origin];
+  for (const variable of family) {
+    for (const { identifier } of variable.references) {
+      const top = chainTop(identifier);
+      if (top.parent?.type === 'VariableDeclarator' && top.parent.init === top) {
+        const aliases = sourceCode.getDeclaredVariables(top.parent);
+        family.push(...aliases.filter((alias) => !family.includes(alias)));
+      }
+    }
+  }
+  return family.some((variable) =>
+    variable.references.some((reference) => setsPrototype(sourceCode, reference.identifier)),
   );
 }
 

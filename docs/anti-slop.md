@@ -3,7 +3,7 @@
 Devkit vendors 15 production rules, every rule upstream shipped in its first releases, from
 [norvalbv/anti-slop](https://github.com/norvalbv/anti-slop), the maintained fork of
 [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop), at commit
-**b9dbc740905baa1123a3ee4f512fe0933d9e916b** (tag `v0.2.2`). `anti-slop/UPSTREAM.md` lists the
+**2a0fcf324de7804f5396e845a689243fdb1acfbe** (tag `v0.2.3`). `anti-slop/UPSTREAM.md` lists the
 fork's later rules that Devkit does not vendor. Devkit also composes three
 Devkit-owned rules: two external-record rules and one elapsed-time test rule. All 18 rules default to error. The ruleset is an opt-in
 capability on top of Devkit's
