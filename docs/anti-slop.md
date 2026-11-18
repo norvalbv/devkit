@@ -1,7 +1,9 @@
 # Anti-slop capability
 
-Devkit vendors the complete 15-rule [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop)
-production ruleset at commit **e8c4880471b23ab7f216fba7b27d173a6ef07d4c** and composes three
+Devkit vendors the complete 15-rule anti-slop production ruleset from
+[norvalbv/anti-slop](https://github.com/norvalbv/anti-slop), the maintained fork of
+[dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop), at commit
+**b9dbc740905baa1123a3ee4f512fe0933d9e916b** (tag `v0.2.2`), and composes three
 Devkit-owned rules: two external-record rules and one elapsed-time test rule. All 18 rules default to error. The ruleset is an opt-in
 capability on top of Devkit's
 exact Oxlint 1.78.0 and @oxlint/plugins 1.78.0 pins:
@@ -285,7 +287,8 @@ baseline persistence for Git renames, and a post-merge check against the packed 
 
 ## Intentional differences and limits
 
-- The 15 upstream rule/helper implementations are unchanged from the pinned source. Devkit owns the
+- The 15 upstream rule/helper implementations are unchanged from the pinned source. A bug in them is
+  fixed in the fork, with its RuleTester suite, and reaches Devkit by re-pinning. Devkit owns the
   plugin composition seam, the three Devkit-owned rules, delivery, namespacing/config
   ownership, and the baseline wrapper.
 - Oxc's JS-plugin API is alpha. The exact Oxlint/plugin API pair and packed fixture are the
@@ -293,6 +296,13 @@ baseline persistence for Git renames, and a post-merge check against the packed 
   either pin requires refreshing that evidence.
 - Like upstream, these are syntax/scope rules, not TypeScript type-aware rules. They do not replace
   TypeScript check with no emit.
+- A local name can shadow the built-in `Record`, `Readonly`, `PropertyKey`, `Array` or `Promise`. A
+  type alias, interface, class, type parameter or `import type` always shadows it, and a namespace
+  import (`import * as Record`) never does. A named or default value import (`import { Record } from
+  "effect"`) may or may not be a type, so each rule reads it the way that cannot report: such a file
+  can miss a finding, but is never blocked by a guess about the import.
+- Alias expansion has a per-classification budget. A type the rules cannot finish expanding (for
+  example a plain alias chain over 1000 levels deep) is left undecided and is never reported.
 - Oxc does not run custom JS rules over unsupported custom file formats. The capability targets
   JavaScript, TypeScript, and their supported JSX variants.
 - Baseline paths must resolve inside the repository. External files are rejected rather than

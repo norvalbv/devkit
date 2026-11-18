@@ -6,6 +6,7 @@ import {
 	createTypeEnvironment,
 	isKnownEvidenceExpression,
 	type TypeEnvironment,
+	type Undecided,
 	type WideningTarget,
 } from "../shared/dictionary-types.ts";
 import {
@@ -13,8 +14,10 @@ import {
 	functionParameterBindingName,
 	functionParameterTypeAnnotation,
 } from "../shared/function-parameters.ts";
+import { resolveVariable } from "../shared/scope.ts";
+import { hasSameTypeBindings, visibleTypeAlias } from "../shared/type-alias-resolution.ts";
 
-import type { ESTree, Scope, SourceCode, Variable } from "@oxlint/plugins";
+import type { ESTree, SourceCode, Variable } from "@oxlint/plugins";
 
 type FunctionExpression = ESTree.ArrowFunctionExpression | ESTree.Function;
 
@@ -32,19 +35,6 @@ function unwrapExpression(expression: ESTree.Expression): ESTree.Expression {
 	return current;
 }
 
-function resolveVariable(
-	sourceCode: SourceCode,
-	identifier: ESTree.IdentifierReference,
-): Variable | null {
-	let scope: Scope | null = sourceCode.getScope(identifier);
-	while (scope !== null) {
-		const variable = scope.set.get(identifier.name);
-		if (variable !== undefined) return variable;
-		scope = scope.upper;
-	}
-	return null;
-}
-
 function variableDeclarator(variable: Variable): ESTree.VariableDeclarator | null {
 	if (variable.defs.length !== 1) return null;
 	const [definition] = variable.defs;
@@ -53,17 +43,51 @@ function variableDeclarator(variable: Variable): ESTree.VariableDeclarator | nul
 		: null;
 }
 
+const onlyInitializingWrites = new WeakMap<Variable, boolean>();
+
+function hasOnlyInitializingWrites(variable: Variable): boolean {
+	let result = onlyInitializingWrites.get(variable);
+	if (result === undefined) {
+		result = variable.references.every((reference) => reference.init || !reference.isWrite());
+		onlyInitializingWrites.set(variable, result);
+	}
+	return result;
+}
+
 function isStableConstVariable(variable: Variable, declarator: ESTree.VariableDeclarator): boolean {
 	return (
 		declarator.parent.type === "VariableDeclaration" &&
 		declarator.parent.kind === "const" &&
-		variable.references.every((reference) => reference.init || !reference.isWrite())
+		hasOnlyInitializingWrites(variable)
+	);
+}
+
+/**
+ * Whether a binding's initializer asserts a broad type, as `{} as Record<string, T>` does. An
+ * undecided assertion counts too: it stops evidence at the source, so it can never cause a report.
+ */
+function hasBroadAssertionInitializer(
+	initializer: ESTree.Expression,
+	environment: TypeEnvironment,
+): boolean {
+	let current = initializer;
+	while (
+		current.type === "ParenthesizedExpression" ||
+		current.type === "TSNonNullExpression" ||
+		current.type === "TSSatisfiesExpression"
+	) {
+		current = current.expression;
+	}
+	return (
+		(current.type === "TSAsExpression" || current.type === "TSTypeAssertion") &&
+		classifyWideningTarget(current.typeAnnotation, environment) !== null
 	);
 }
 
 function hasKnownEvidence(
 	sourceCode: SourceCode,
 	expression: ESTree.Expression,
+	environment: TypeEnvironment,
 	visitedVariables = new Set<Variable>(),
 ): boolean {
 	if (isKnownEvidenceExpression(expression)) return true;
@@ -79,8 +103,15 @@ function hasKnownEvidence(
 	) {
 		return false;
 	}
+	// A broad or undecided annotation or assertion on the source is judged at its own declaration.
+	if (
+		annotationTarget(variableTypeAnnotation(sourceCode, variable), environment) !== null ||
+		hasBroadAssertionInitializer(declarator.init, environment)
+	) {
+		return false;
+	}
 	visitedVariables.add(variable);
-	return hasKnownEvidence(sourceCode, declarator.init, visitedVariables);
+	return hasKnownEvidence(sourceCode, declarator.init, environment, visitedVariables);
 }
 
 function isFunctionExpression(node: ESTree.Node): node is FunctionExpression {
@@ -93,15 +124,8 @@ function isFunctionExpression(node: ESTree.Node): node is FunctionExpression {
 	);
 }
 
-function localFunctionForCall(
-	sourceCode: SourceCode,
-	callee: ESTree.Expression,
-): FunctionExpression | null {
-	const unwrapped = unwrapExpression(callee);
-	if (isFunctionExpression(unwrapped)) return unwrapped;
-	if (unwrapped.type !== "Identifier") return null;
-	const variable = resolveVariable(sourceCode, unwrapped);
-	if (variable === null || variable.defs.length !== 1) return null;
+function definedFunction(variable: Variable): FunctionExpression | null {
+	if (variable.defs.length !== 1) return null;
 	const [definition] = variable.defs;
 	if (definition === undefined) return null;
 	if (definition.type === "FunctionName" && isFunctionExpression(definition.node)) {
@@ -114,6 +138,25 @@ function localFunctionForCall(
 	if (initializer === null) return null;
 	const unwrappedInitializer = unwrapExpression(initializer);
 	return isFunctionExpression(unwrappedInitializer) ? unwrappedInitializer : null;
+}
+
+/** The local function a call runs, if `accepts` it; the reassignment scan runs only after that check. */
+function localFunctionForCall(
+	sourceCode: SourceCode,
+	callee: ESTree.Expression,
+	accepts: (owner: FunctionExpression) => boolean,
+): FunctionExpression | null {
+	const unwrapped = unwrapExpression(callee);
+	if (isFunctionExpression(unwrapped)) return accepts(unwrapped) ? unwrapped : null;
+	if (unwrapped.type !== "Identifier") return null;
+	const variable = resolveVariable(sourceCode, unwrapped);
+	if (variable === null) return null;
+	const owner = definedFunction(variable);
+	return owner !== null && accepts(owner) && hasOnlyInitializingWrites(variable) ? owner : null;
+}
+
+function hasReturnType(owner: FunctionExpression): boolean {
+	return owner.returnType !== undefined && owner.returnType !== null;
 }
 
 function variableTypeAnnotation(
@@ -144,45 +187,199 @@ function hasInformativeType(
 	type: ESTree.TSType,
 	environment: TypeEnvironment,
 ): boolean {
+	// An undecided type is not known to be informative.
 	return classifyUnsafeDictionaryValue(type, environment) === null;
 }
 
-function hasKnownCallArgumentEvidence(
+function unwrapParenthesizedType(type: ESTree.TSType): ESTree.TSType {
+	let current = type;
+	while (current.type === "TSParenthesizedType") current = current.typeAnnotation;
+	return current;
+}
+
+function typeText(sourceCode: SourceCode, type: ESTree.TSType): string {
+	// Drop whitespace between tokens but keep it inside string literal types, where it is the value.
+	return sourceCode
+		.getText(unwrapParenthesizedType(type))
+		.replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|\s+/g, (_, literal?: string) => literal ?? "");
+}
+
+const literalTypeKeywords: Partial<Record<string, ESTree.TSType["type"]>> = {
+	bigint: "TSBigIntKeyword",
+	boolean: "TSBooleanKeyword",
+	number: "TSNumberKeyword",
+	string: "TSStringKeyword",
+};
+
+function literalTypeKeyword(type: ESTree.TSType): ESTree.TSType["type"] | null {
+	if (type.type === "TSTemplateLiteralType") return "TSStringKeyword";
+	if (type.type !== "TSLiteralType") return null;
+	const literal = type.literal.type === "UnaryExpression" ? type.literal.argument : type.literal;
+	if (literal.type === "TemplateLiteral") return "TSStringKeyword";
+	return literal.type === "Literal" ? (literalTypeKeywords[typeof literal.value] ?? null) : null;
+}
+
+function isNullishType(type: ESTree.TSType): boolean {
+	return type.type === "TSNullKeyword" || type.type === "TSUndefinedKeyword";
+}
+
+type PredicateCheck = {
+	readonly environment: TypeEnvironment;
+	readonly nonNull: boolean;
+	readonly predicate: ESTree.TSType;
+	readonly predicateText: string;
+	readonly resolvedAliases: Map<ESTree.TSTypeAliasDeclaration, boolean>;
+	readonly sourceCode: SourceCode;
+};
+
+/** Deeper alias chains count as narrowable: a missed report, never a false one. */
+const maxPredicateAliasDepth = 64;
+
+/** Whether every value of a declared type already satisfies the guard's predicate type. */
+function typeSatisfiesPredicate(
+	check: PredicateCheck,
+	type: ESTree.TSType,
+	resolvingAliases: ReadonlySet<ESTree.TSTypeAliasDeclaration>,
+): boolean {
+	const current = unwrapParenthesizedType(type);
+	if (
+		typeText(check.sourceCode, current) === check.predicateText &&
+		hasSameTypeBindings(current, check.predicate, check.environment.typeAliases)
+	) {
+		return true;
+	}
+	if (current.type === "TSUnionType") {
+		return current.types.every(
+			(member) =>
+				(check.nonNull && isNullishType(member)) ||
+				typeSatisfiesPredicate(check, member, resolvingAliases),
+		);
+	}
+	const literalKeyword = literalTypeKeyword(current);
+	if (literalKeyword !== null) return literalKeyword === unwrapParenthesizedType(check.predicate).type;
+	if (
+		current.type !== "TSTypeReference" ||
+		current.typeName.type !== "Identifier" ||
+		current.typeArguments
+	) {
+		return false;
+	}
+	const alias = visibleTypeAlias(current.typeName.name, current, check.environment.typeAliases);
+	if (
+		alias === null ||
+		alias.typeParameters ||
+		resolvingAliases.has(alias) ||
+		resolvingAliases.size >= maxPredicateAliasDepth
+	) {
+		return false;
+	}
+	let satisfies = check.resolvedAliases.get(alias);
+	if (satisfies === undefined) {
+		satisfies = typeSatisfiesPredicate(
+			check,
+			alias.typeAnnotation,
+			new Set(resolvingAliases).add(alias),
+		);
+		check.resolvedAliases.set(alias, satisfies);
+	}
+	return satisfies;
+}
+
+function declaredTypeMatchesPredicate(
+	sourceCode: SourceCode,
+	type: ESTree.TSType,
+	predicate: ESTree.TSType | null,
+	environment: TypeEnvironment,
+	nonNull: boolean,
+): boolean {
+	if (predicate === null) return false;
+	const check: PredicateCheck = {
+		environment,
+		nonNull,
+		predicate,
+		predicateText: typeText(sourceCode, predicate),
+		resolvedAliases: new Map(),
+		sourceCode,
+	};
+	return typeSatisfiesPredicate(check, type, new Set()) && hasInformativeType(type, environment);
+}
+
+function isOptionalParameterAnnotation(annotation: ESTree.TSTypeAnnotation): boolean {
+	// Oxlint types `Identifier.optional` as `false`, but an optional parameter (`value?: T`) sets it.
+	return annotation.parent.type === "Identifier" && Boolean(annotation.parent.optional);
+}
+
+/** `as const` keeps the asserted expression's own type, so the expression stays the evidence. */
+function isConstType(type: ESTree.TSType): boolean {
+	return type.type === "TSTypeReference" && type.typeName.type === "Identifier" && type.typeName.name === "const";
+}
+
+/** Whether a guard call cannot narrow its argument: a known value, or a declared type the predicate already holds. */
+function isRedundantGuardArgument(
 	sourceCode: SourceCode,
 	expression: ESTree.Expression,
+	predicate: ESTree.TSType | null,
 	environment: TypeEnvironment,
+	nonNull = false,
 	visitedVariables = new Set<Variable>(),
 ): boolean {
-	if (expression.type === "ParenthesizedExpression" || expression.type === "TSNonNullExpression") {
-		return hasKnownCallArgumentEvidence(
+	if (
+		expression.type === "ParenthesizedExpression" ||
+		expression.type === "TSSatisfiesExpression" ||
+		((expression.type === "TSAsExpression" || expression.type === "TSTypeAssertion") &&
+			isConstType(expression.typeAnnotation))
+	) {
+		return isRedundantGuardArgument(
 			sourceCode,
 			expression.expression,
+			predicate,
 			environment,
+			nonNull,
+			visitedVariables,
+		);
+	}
+	if (expression.type === "TSNonNullExpression") {
+		return isRedundantGuardArgument(
+			sourceCode,
+			expression.expression,
+			predicate,
+			environment,
+			true,
 			visitedVariables,
 		);
 	}
 	if (expression.type === "TSAsExpression" || expression.type === "TSTypeAssertion") {
-		return hasInformativeType(expression.typeAnnotation, environment);
-	}
-	if (expression.type === "TSSatisfiesExpression") {
-		return hasKnownCallArgumentEvidence(
+		return declaredTypeMatchesPredicate(
 			sourceCode,
-			expression.expression,
+			expression.typeAnnotation,
+			predicate,
 			environment,
-			visitedVariables,
+			nonNull,
 		);
 	}
 	if (expression.type === "CallExpression") {
-		const owner = localFunctionForCall(sourceCode, expression.callee);
-		const returnType = owner?.returnType?.typeAnnotation;
-		return returnType !== undefined && hasInformativeType(returnType, environment);
+		const returnType = localFunctionForCall(sourceCode, expression.callee, hasReturnType)?.returnType
+			?.typeAnnotation;
+		return (
+			returnType !== undefined &&
+			declaredTypeMatchesPredicate(sourceCode, returnType, predicate, environment, nonNull)
+		);
 	}
 	if (expression.type !== "Identifier") return isKnownEvidenceExpression(expression);
 	const variable = resolveVariable(sourceCode, expression);
 	if (variable === null || visitedVariables.has(variable)) return false;
 	const annotation = variableTypeAnnotation(sourceCode, variable);
 	if (annotation !== null) {
-		return hasInformativeType(annotation.typeAnnotation, environment);
+		return (
+			(nonNull || !isOptionalParameterAnnotation(annotation)) &&
+			declaredTypeMatchesPredicate(
+				sourceCode,
+				annotation.typeAnnotation,
+				predicate,
+				environment,
+				nonNull,
+			)
+		);
 	}
 	const declarator = variableDeclarator(variable);
 	if (
@@ -193,12 +390,27 @@ function hasKnownCallArgumentEvidence(
 		return false;
 	}
 	visitedVariables.add(variable);
-	return hasKnownCallArgumentEvidence(
+	return isRedundantGuardArgument(
 		sourceCode,
 		declarator.init,
+		predicate,
 		environment,
+		nonNull,
 		visitedVariables,
 	);
+}
+
+/** The predicate type of a non-generic guard; a generic guard's predicate names its own type parameters. */
+function guardPredicateType(owner: FunctionExpression): ESTree.TSType | null {
+	const predicate = owner.returnType?.typeAnnotation;
+	if (predicate?.type !== "TSTypePredicate" || (owner.typeParameters?.params.length ?? 0) > 0) {
+		return null;
+	}
+	return predicate.typeAnnotation?.typeAnnotation ?? null;
+}
+
+function isTypePredicateFunction(owner: FunctionExpression): boolean {
+	return owner.returnType?.typeAnnotation.type === "TSTypePredicate";
 }
 
 function typePredicateSubjectIndex(
@@ -220,7 +432,7 @@ function typePredicateSubjectIndex(
 function annotationTarget(
 	annotation: ESTree.TSTypeAnnotation | null | undefined,
 	environment: TypeEnvironment,
-): WideningTarget | null {
+): WideningTarget | Undecided | null {
 	return annotation === null || annotation === undefined
 		? null
 		: classifyWideningTarget(annotation.typeAnnotation, environment);
@@ -288,17 +500,17 @@ export const noKnownValueWideningRule = defineRule({
 
 		const reportFlow = (
 			expression: ESTree.Expression,
-			destination: WideningTarget | null,
+			destination: WideningTarget | Undecided | null,
 			subject: string,
 		) => {
-			if (destination === null) return;
+			if (destination === null || destination === "undecided" || environment === null) return;
 			if (
 				isDictionaryAccumulatorTarget(destination) &&
 				isEmptyObjectExpression(expression)
 			) {
 				return;
 			}
-			if (!hasKnownEvidence(context.sourceCode, expression)) return;
+			if (!hasKnownEvidence(context.sourceCode, expression, environment)) return;
 			context.report({
 				node: expression,
 				messageId: "widening",
@@ -354,7 +566,7 @@ export const noKnownValueWideningRule = defineRule({
 			},
 			CallExpression(node) {
 				if (environment === null) return;
-				const owner = localFunctionForCall(context.sourceCode, node.callee);
+				const owner = localFunctionForCall(context.sourceCode, node.callee, isTypePredicateFunction);
 				if (owner === null) return;
 				const parameterIndex = typePredicateSubjectIndex(context.sourceCode, owner);
 				if (parameterIndex === null) return;
@@ -372,9 +584,10 @@ export const noKnownValueWideningRule = defineRule({
 					return;
 				}
 				if (
-					!hasKnownCallArgumentEvidence(
+					!isRedundantGuardArgument(
 						context.sourceCode,
 						argument,
+						guardPredicateType(owner),
 						environment,
 					)
 				) {

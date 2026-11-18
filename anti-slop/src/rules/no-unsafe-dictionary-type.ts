@@ -5,6 +5,7 @@ import {
 	classifyUnsafeDictionaryValue,
 	createTypeEnvironment,
 	type TypeEnvironment,
+	type UnsafeDictionary,
 } from "../shared/dictionary-types.ts";
 import { visibleTypeAlias } from "../shared/type-alias-resolution.ts";
 
@@ -67,13 +68,60 @@ function isInsideTypeAliasDeclaration(node: ESTree.Node): boolean {
 	return false;
 }
 
-function isPlainAliasConsumerUse(node: ESTree.TSType, environment: TypeEnvironment): boolean {
-	if (node.type !== "TSTypeReference" || node.typeArguments?.params.length) return false;
+/** Per-file memo of type results: each node, and each alias by declaration, classifies once. */
+type FileState = {
+	readonly environment: TypeEnvironment;
+	readonly types: Map<ESTree.TSType, UnsafeDictionary | null>;
+	readonly bareUses: Map<ESTree.TSTypeAliasDeclaration, UnsafeDictionary | null>;
+	readonly declarationReports: Map<ESTree.TSTypeAliasDeclaration, boolean>;
+};
+
+function bareAlias(
+	node: ESTree.Node,
+	environment: TypeEnvironment,
+): ESTree.TSTypeAliasDeclaration | null {
+	if (node.type !== "TSTypeReference" || node.typeArguments?.params.length) return null;
 	const name = typeReferenceName(node);
+	return name === null ? null : visibleTypeAlias(name, node, environment.typeAliases);
+}
+
+/** A bare alias use classifies exactly as its declaration with defaults applied. */
+function classifyUncachedType(node: ESTree.TSType, state: FileState): UnsafeDictionary | null {
+	const alias = bareAlias(node, state.environment);
+	if (alias === null) return classifyUnsafeDictionary(node, state.environment);
+	if (!state.bareUses.has(alias))
+		state.bareUses.set(alias, classifyUnsafeDictionary(node, state.environment));
+	return state.bareUses.get(alias) ?? null;
+}
+
+/** Each type node is classified for itself and again for every type node nested inside it. */
+function classifyType(node: ESTree.TSType, state: FileState): UnsafeDictionary | null {
+	const cached = state.types.get(node);
+	if (cached !== undefined) return cached;
+	const result = classifyUncachedType(node, state);
+	state.types.set(node, result);
+	return result;
+}
+
+/** Whether the alias body or one of its type-parameter defaults is itself reported. */
+function aliasDeclarationReports(alias: ESTree.TSTypeAliasDeclaration, state: FileState): boolean {
+	const cached = state.declarationReports.get(alias);
+	if (cached !== undefined) return cached;
+	const defaults = (alias.typeParameters?.params ?? []).map((parameter) => parameter.default);
+	const reports = [alias.typeAnnotation, ...defaults].some(
+		(type) => type != null && classifyType(type, state) !== null,
+	);
+	state.declarationReports.set(alias, reports);
+	return reports;
+}
+
+function isPlainAliasConsumerUse(node: ESTree.TSType, state: FileState): boolean {
+	const alias = bareAlias(node, state.environment);
+	// The declaration already reports; a default unsafe only as a dictionary value reports here.
 	return (
-		name !== null &&
-		visibleTypeAlias(name, node, environment.typeAliases) !== null &&
-		!isInsideTypeAliasDeclaration(node)
+		alias !== null &&
+		!isInsideTypeAliasDeclaration(node) &&
+		aliasDeclarationReports(alias, state)
 	);
 }
 
@@ -88,14 +136,13 @@ function isInsideTypeParameterConstraint(node: ESTree.TSType): boolean {
 	return false;
 }
 
-function shouldReportType(node: ESTree.TSType, environment: TypeEnvironment): boolean {
+function shouldReportType(node: ESTree.TSType, state: FileState): boolean {
 	if (isInsideTypeParameterConstraint(node)) return false;
-	if (isPlainAliasConsumerUse(node, environment)) return false;
-	if (classifyUnsafeDictionary(node, environment) === null) return false;
+	if (isPlainAliasConsumerUse(node, state)) return false;
+	if (classifyType(node, state) === null) return false;
 	let current: ESTree.Node | null = node.parent;
 	while (current !== null && current.type !== "Program") {
-		if (isTypeNode(current) && classifyUnsafeDictionary(current, environment) !== null)
-			return false;
+		if (isTypeNode(current) && classifyType(current, state) !== null) return false;
 		current = current.parent;
 	}
 	return true;
@@ -115,39 +162,41 @@ export const noUnsafeDictionaryTypeRule = defineRule({
 		},
 	},
 	createOnce(context) {
-		let environment: TypeEnvironment | null = null;
+		let state: FileState | null = null;
 		const report = (node: ESTree.Node, value: string) => {
 			context.report({ node, messageId: "unsafeDictionary", data: { value } });
 		};
 		const reportIfUnsafe = (node: ESTree.TSType) => {
-			if (environment === null || !shouldReportType(node, environment)) return;
-			const unsafe = classifyUnsafeDictionary(node, environment);
+			if (state === null || !shouldReportType(node, state)) return;
+			const unsafe = classifyType(node, state);
 			if (unsafe === null) return;
 			report(node, unsafe.unsafeValue);
 		};
 
 		return {
 			Program(node) {
-				environment = createTypeEnvironment(
-					node,
-					context.sourceCode.visitorKeys,
-				);
+				state = {
+					environment: createTypeEnvironment(node, context.sourceCode.visitorKeys),
+					types: new Map(),
+					bareUses: new Map(),
+					declarationReports: new Map(),
+				};
 			},
 			TSTypeReference: reportIfUnsafe,
 			TSTypeLiteral: reportIfUnsafe,
 			TSMappedType: reportIfUnsafe,
 			TSIndexSignature(node) {
 				if (
-					environment === null ||
+					state === null ||
 					node.typeAnnotation === null ||
 					node.parent.type === "TSTypeLiteral"
 				)
 					return;
 				const unsafe = classifyUnsafeDictionaryValue(
 					node.typeAnnotation.typeAnnotation,
-					environment,
+					state.environment,
 				);
-				if (unsafe !== null) report(node, unsafe.unsafeValue);
+				if (unsafe !== null && unsafe !== "undecided") report(node, unsafe.unsafeValue);
 			},
 		};
 	},
