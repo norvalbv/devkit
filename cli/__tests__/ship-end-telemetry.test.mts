@@ -1,8 +1,9 @@
 /** ship_end: the one terminal row a ship writes, whichever step decided its exit. */
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { shipEndRow } from '../lib/ship/ship-intent-event.mts';
@@ -53,9 +54,28 @@ const HANGING_CHECKS =
 
 /** devkit ship's own spawn (cli/commands/ship.mts): ship-branch.sh under the managed wrapper. */
 const SHIP_DRIVER = `const { runManagedPackagedScript } = await import(process.env.SHIP_WRAPPER);
-process.exit(await runManagedPackagedScript('ship-branch.sh', process.argv.slice(1),
+process.exit(await runManagedPackagedScript(process.env.DRIVER_SCRIPT ?? 'ship-branch.sh', process.argv.slice(1),
   { command: 'devkit ship', cwd: process.cwd(), env: process.env }));`;
 const SHIP_WRAPPER = fileURLToPath(new URL('../lib/ship/run-packaged-script.mts', import.meta.url));
+
+/** Run `body` as a managed packaged script, SIGTERM only the driver once it prints ready, and exit. */
+async function terminateManagedScript(body: string) {
+  const script = join(mkdtempSync(join(tmpdir(), 'managed-exit-')), 'child.sh');
+  writeFileSync(script, `${body}\necho ready >&2\nwhile :; do sleep 0.1; done\n`);
+  const DRIVER_SCRIPT = relative(fileURLToPath(new URL('../lib/ship/', import.meta.url)), script);
+  const child = spawn(process.execPath, ['--input-type=module', '-e', SHIP_DRIVER], {
+    detached: true,
+    stdio: ['ignore', 'ignore', 'pipe'],
+    env: { ...process.env, SHIP_WRAPPER, DRIVER_SCRIPT },
+  });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+    if (stderr.includes('ready') && child.pid) process.kill(child.pid, 'SIGTERM');
+  });
+  const [code] = await once(child, 'close');
+  return code;
+}
 
 /** Run a --wait-ci ship until it announces its wait, then signal it (-1: its group, 1: its pid). */
 async function interruptWait(
@@ -228,6 +248,13 @@ describe('ship-branch.sh — ship_end', () => {
       expect(rows(sink, 'ship_end')).toEqual([expect.objectContaining({ exit_code: code })]);
     },
   );
+
+  it.each([
+    ['the exit a child chose after the signal', 'trap "exit 5" TERM', 5],
+    ['the signal status for a child the signal killed', '', 143],
+  ])('the managed wrapper reports %s', async (_label, body, code) => {
+    expect(await terminateManagedScript(body)).toBe(code);
+  });
 
   it.each([
     ['red', 'fail', 5, 'ci_not_green'],

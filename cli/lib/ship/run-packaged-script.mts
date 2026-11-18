@@ -160,10 +160,9 @@ export function runManagedPackagedScript(
       finish(requestedSignal ? SIGNAL_STATUS[requestedSignal] : 1);
     });
     child.once('close', (status, signal) => {
-      // A 0 after a signal means the child reached its success exit (ship's CI wait ends on one).
-      if (status === 0) return finish(0);
-      if (requestedSignal) return finish(SIGNAL_STATUS[requestedSignal]);
+      // A child that chose its exit owns it; a latched signal speaks only for a child it killed.
       if (status !== null) return finish(status);
+      if (requestedSignal) return finish(SIGNAL_STATUS[requestedSignal]);
       const forwarded =
         signal && FORWARDED_SIGNALS.includes(signal as ForwardedSignal)
           ? (signal as ForwardedSignal)

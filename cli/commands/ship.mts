@@ -195,8 +195,9 @@ Usage:
                       carries \`scope=required required-contexts=<n>\`. NOT replayed by --resume.
   --wait-ci-strict    With --wait-ci only: exit 5 unless the verdict is passed — failed, cancelled,
                       no-checks, timed-out, unavailable and not-run all exit 5, as does a crashed
-                      wait; a signal that ends the wait exits its own 129-143. Exit 5 means the PR is open (or SHIP_DRY_RUN committed) and CI is not
-                      known green: do NOT --resume. For \`devkit ship … --wait-ci --wait-ci-strict &&
+                      wait; a signal that ends the wait exits its own 129-143. Exit 5 means the PR
+                      is open (or SHIP_DRY_RUN committed) and CI is not known green: do NOT
+                      --resume. For \`devkit ship … --wait-ci --wait-ci-strict &&
                       <merge>\`. NOT replayed by --resume.
   --wait-ci-timeout <s>  Bound for --wait-ci, 60..7200, default 3600. The floor exists because below
                       it a "this repo has no checks" verdict is unreachable and would surface as a
