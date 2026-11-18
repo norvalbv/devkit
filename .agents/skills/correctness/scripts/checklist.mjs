@@ -82,7 +82,7 @@ const lensPath = (lens, chunk) => {
 
 const log = console.log;
 
-// Non-empty lens checklists as `--lens` values (best-effort: an fs error yields none). Chunk suffixes
+// Non-empty, known-lens checklists as `--lens` values (an fs error yields none). Chunk suffixes
 // are dropped: chunks share item names, so a chunk menu could steer a judge into another's file.
 function lensGroupsPresent() {
   const dir = dirname(CHECKLIST_PATH);
@@ -92,7 +92,9 @@ function lensGroupsPresent() {
       if (!m || !statSync(join(dir, name), { throwIfNoEntry: false })?.size) return [];
       return [m[1].replace(/\+c\d+$/, '').replaceAll('+', ',')];
     });
-    return [...new Set(groups)].sort();
+    const known = ALL_ITEMS.map((it) => it.name);
+    const valid = groups.filter((g) => g.split(',').every((l) => known.includes(l)));
+    return [...new Set(valid)].sort();
   } catch {
     return [];
   }

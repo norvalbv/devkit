@@ -833,16 +833,18 @@ describe('correctness checklist — a missing artifact names the path read and t
     expect(readFileSync(c1, 'utf8')).toBe('{"items":[]}');
   });
 
-  it('skips empty placeholders and the un-lensed file', () => {
+  it('skips empty placeholders, the un-lensed file and unknown lens names', () => {
     const repo = stagedRepo();
     lensFile(repo, 'concurrency-races', '');
     lensFile(repo, 'writer-reader-contracts');
+    writeFileSync(join(repo, '.claude', '.correctness-review.json'), '');
+    lensFile(repo, 'bogus');
 
     const r = correctness(repo, ['status']);
 
     expect(r.status).toBe(1);
-    expect(r.stdout).toContain('--lens writer-reader-contracts');
-    expect(r.stdout).not.toContain('concurrency-races');
+    expect(r.stdout).toContain('No checklist at .claude/.correctness-review.json');
+    expect(r.stdout.match(/--lens [a-z,-]+/g)).toEqual(['--lens writer-reader-contracts']);
   });
 
   it('a chunked call whose own chunk is absent points at its own generate, not a sibling chunk', () => {
@@ -859,12 +861,29 @@ describe('correctness checklist — a missing artifact names the path read and t
   it('a lensed call whose own group is absent points at its own generate, not a sibling', () => {
     const repo = stagedRepo();
     lensFile(repo, 'writer-reader-contracts');
+    lensFile(repo, 'state-transitions', '');
 
     const r = correctness(repo, ['finalize', '--lens', 'state-transitions']);
 
     expect(r.status).toBe(1);
     expect(r.stdout).toContain('Run: generate --lens state-transitions');
+    expect(r.stdout).not.toContain('Found lens checklist');
     expect(r.stdout).not.toContain('writer-reader-contracts');
+  });
+
+  it('a two-lens group given in any order matches its own sorted chunk files', () => {
+    const repo = stagedRepo();
+    lensFile(repo, 'concurrency-races+writer-reader-contracts+c0');
+
+    const r = correctness(repo, ['status', '--lens', 'writer-reader-contracts,concurrency-races']);
+
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain(
+      'No checklist at .claude/.correctness-review-concurrency-races+writer-reader-contracts.json',
+    );
+    expect(r.stdout).toContain(
+      'Found lens checklist(s): --lens concurrency-races,writer-reader-contracts —',
+    );
   });
 
   it('with no .claude directory, exits 1 with the path and the generate remedy', () => {
