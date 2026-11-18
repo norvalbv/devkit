@@ -43,6 +43,8 @@ export function compareFailures(pr: TestReportSummary, base: BaselineAnswer): Co
     .sort();
   for (const file of prFailing) {
     const prNames = namesOf(pr.tests, file);
+    // Listed names compare exactly; a truncated PR list leaves its unlisted failures unknown.
+    if (truncatedIn(pr.tests, file)) result.namesKnown = false;
     if (!baseFailing.has(file)) {
       result.fresh.push(...entriesFor(file, prNames));
       continue;
@@ -54,8 +56,6 @@ export function compareFailures(pr: TestReportSummary, base: BaselineAnswer): Co
       result.inherited.push({ file });
       continue;
     }
-    // Listed names compare exactly; a truncated PR list leaves its unlisted failures unknown.
-    if (truncatedIn(pr.tests, file)) result.namesKnown = false;
     for (const test of prNames) {
       (baseNames.includes(test) ? result.inherited : result.fresh).push({ file, test });
     }

@@ -123,6 +123,13 @@ describe('compareFailures', () => {
     });
   });
 
+  // A file green at the base is all NEW, but a truncated list still hides how many.
+  it('flags the counts as partial for a truncated PR list in a file green at the base', () => {
+    const run = { ...pr({ 'a.test.mts': 'failed' }), tests: named({ 'a.test.mts': ['t0'] }, true) };
+    const c = compareFailures(run, base([]));
+    expect(c).toMatchObject({ fresh: [{ file: 'a.test.mts', test: 't0' }], namesKnown: false });
+  });
+
   it('lists base failures that pass here as fixed', () => {
     const c = compareFailures(
       pr({ 'a.test.mts': 'passed' }),

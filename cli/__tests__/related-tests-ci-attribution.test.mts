@@ -344,7 +344,8 @@ describe('attributeToCi', () => {
     const dir = tempDir('related-ci-hang-');
     const pidFile = join(dir, 'pid');
     // Written then renamed, so the file never exists half-written.
-    const script = `const fs = require('fs'); fs.writeFileSync('${pidFile}.tmp', String(process.pid)); fs.renameSync('${pidFile}.tmp', '${pidFile}'); setInterval(() => {}, 1000)`;
+    const [tmp, final] = [JSON.stringify(`${pidFile}.tmp`), JSON.stringify(pidFile)];
+    const script = `const fs = require('fs'); fs.writeFileSync(${tmp}, String(process.pid)); fs.renameSync(${tmp}, ${final}); setInterval(() => {}, 1000)`;
     // Only the deadline is faked: it fires after the child wrote its pid, however slow its start-up.
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const lookup = attributeToCi(node(script), '.', env, LOOKUP_MS);
