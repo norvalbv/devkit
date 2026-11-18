@@ -33,6 +33,12 @@ import {
   summarise,
 } from '../../baseline-status/produce.mts';
 import { type BaselineAnswer, resolveRef } from '../../baseline-status/query.mts';
+import {
+  previousSelection,
+  recordSelection,
+  relatedDrivers,
+  selectionLines,
+} from './related-tests-selection.mts';
 
 // Runs with every selection: it fails when a module is left unreachable to `vitest related` itself.
 const REACH_TEST = 'cli/__tests__/test-graph-reach.test.mts';
@@ -173,6 +179,7 @@ interface RunOpts {
   exec?: Exec;
   list?: typeof listRelated;
   attribute?: Attribute;
+  drivers?: typeof relatedDrivers;
 }
 
 /** The test files `vitest related` would select, resolved in-process so no queued vitest CLI starts. */
@@ -447,6 +454,9 @@ export async function runRelatedTests(root: string, opts: RunOpts): Promise<Vite
   console.log(
     `related-tests: ${tests.length} test file(s) for ${paths.length} staged path(s)${forced.length ? `, ${forced.length} forced` : ''}`,
   );
+  // Disclosure only: a failed graph walk or sink read prints nothing and changes no verdict.
+  const drivers = await (opts.drivers ?? relatedDrivers)(root, paths, tests.length).catch(() => []);
+  for (const line of selectionLines(tests, root, drivers, previousSelection())) console.log(line);
   const vitest = join(root, 'node_modules', '.bin', 'vitest');
   const dir = reportDir();
   const report = dir && join(dir, RESULTS_NAME);
@@ -463,6 +473,7 @@ export async function runRelatedTests(root: string, opts: RunOpts): Promise<Vite
     const run = await (opts.exec ?? runGrouped)(vitest, args, root, env);
     // A signalled gate blocks, even when vitest still exits 0 after the forwarded signal.
     const code = run.interrupted && run.code === 0 ? 1 : run.code;
+    if (report && !run.interrupted) recordSelection(report, root, tests.length);
     // A null status reads as "killed before exiting" in the reason.
     if (code !== 0) {
       const status = run.interrupted ? null : code;
