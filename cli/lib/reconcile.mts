@@ -42,14 +42,13 @@ type Blob = string | typeof ABSENT;
 
 /** One shipped path in a branch entry: what devkit sent to the PR and how it changed the base. */
 export interface ReconcilePath {
-  /** repo-relative POSIX path. */
-  path: string;
+  path: string; // repo-relative POSIX path
   /** the blob sha devkit shipped for this path (the pre-op base blob for a delete). */
   blobSha: string;
-  /** git file mode (e.g. '100644'); recorded but unused by reconcile. */
-  mode?: string;
-  /** 'modify' | 'add' | 'delete'. */
-  op: string;
+  mode?: string; // git file mode (e.g. '100644'); recorded but unused by reconcile
+  op: string; // 'modify' | 'add' | 'delete'
+  /** ship --pr: the base commit whose content the shipped blob holds unstripped; unused by reconcile. */
+  heldBase?: string;
 }
 
 /** One recorded ship: the PR + base it targeted and the paths it touched. */
