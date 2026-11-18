@@ -219,7 +219,7 @@ describe('ship-branch.sh — resume when the base moved', () => {
       cwd: dir,
       input: 'pr body\n',
       encoding: 'utf8',
-      env: { ...publishEnv, PATH: oldGitPath(publishEnv.PATH) },
+      env: { ...publishEnv, PATH: mergeTreeShimPath(129, publishEnv.PATH) },
     });
 
     expect(r.status, r.stderr).toBe(1);
@@ -658,14 +658,15 @@ function mergeRepo({ files = ['n.txt'], objectFormat = 'sha1' } = {}) {
   return dir;
 }
 
-/** A PATH whose git rejects merge-tree's options the way git before 2.38 does (exit 129). */
-function oldGitPath(path = process.env.PATH) {
+/** A PATH whose git answers any merge-tree call with `exit <code>` and no output; 129 is how a git
+ *  older than 2.40 rejects --attr-source. */
+function mergeTreeShimPath(code = 129, path = process.env.PATH) {
   const bin = mkdtempSync(join(tmpdir(), 'ship-old-git-'));
   dirs.push(bin);
   const real = execFileSync('/usr/bin/env', ['which', 'git'], { encoding: 'utf8' }).trim();
   writeFileSync(
     join(bin, 'git'),
-    `#!/bin/sh\nfor a in "$@"; do [ "$a" = merge-tree ] && exit 129; done\nexec '${real}' "$@"\n`,
+    `#!/bin/sh\nfor a in "$@"; do [ "$a" = merge-tree ] && exit ${code}; done\nexec '${real}' "$@"\n`,
   );
   chmodSync(join(bin, 'git'), 0o755);
   return `${bin}:${path}`;
@@ -732,7 +733,12 @@ describe('ship-branch.sh — the preserved-commit merge check and its remedy', (
   // merge-tree exits 1 for an unresolvable rev too; reading that as a conflict would fail closed.
   it.each([
     ['an unresolvable rev', { B: 'deadbeef', C: 'side' }],
-    ['a git older than 2.38', { B: 'main', C: 'side', PATH: oldGitPath() }],
+    ['a git older than 2.40', { B: 'main', C: 'side', PATH: mergeTreeShimPath(129) }],
+    // A zero exit with no tree is no merge at all; reading it as clean would publish unverified.
+    [
+      'a merge-tree that exits 0 with no tree',
+      { B: 'main', C: 'side', PATH: mergeTreeShimPath(0) },
+    ],
   ])('reports cannot-tell, not a conflict, for %s', (_label, vars) => {
     const r = runLib(mergeRepo(), CHECK, vars);
     expect(r.stdout.trim(), r.stderr).toBe('rc=2');

@@ -136,6 +136,7 @@ describe('no advisory renderer states a blocking verdict it cannot compute', () 
     expect(out).toContain('pkg/f3.mts — changed on the base'); // capped: listed, but no sha to name
     expect(out).not.toContain('pkg/f9.mts'); // past the cap, folded into the "…and N more" tail
     expect(out).toContain('decided at staging');
+    expect(out).toContain('or by the merge check when --resume publishes a preserved commit');
     expect(out).toContain('hand-edited');
     expect(out).not.toMatch(VERDICT_CLAIM);
   });

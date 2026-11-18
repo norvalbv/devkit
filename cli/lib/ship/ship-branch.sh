@@ -1172,7 +1172,7 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
       RECOVERY_REASON="it no longer merges cleanly into $BASE_REF (${BASE:0:7}), which changed the same lines since ${RECOVERY_PARENT:0:7}"
       [ -z "$RECOVERY_CONFLICT_HINT" ] || RECOVERY_HINTS+=("$RECOVERY_CONFLICT_HINT")
     elif [ "$merge_rc" -eq 2 ]; then
-      RECOVERY_REASON="ship could not verify it still merges cleanly into $BASE_REF (${BASE:0:7}), which moved since ${RECOVERY_PARENT:0:7} (git merge-tree --write-tree needs git >= 2.38)"
+      RECOVERY_REASON="ship could not verify it still merges cleanly into $BASE_REF (${BASE:0:7}), which moved since ${RECOVERY_PARENT:0:7} (the check needs git >= 2.40)"
     fi
     [ "$merge_rc" -eq 0 ] || RECOVERY_REMEDY=1
   fi

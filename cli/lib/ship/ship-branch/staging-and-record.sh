@@ -64,14 +64,15 @@ ship_base_conflict_preflight() {
   [ -n "$LOCAL_BRANCH_EXISTS" ] || ship_text_arm_trial
 }
 
-# Test-merges a preserved commit as GitHub will, ignoring tree/global/system merge drivers (GitHub
-# does, so merge=union passes here and conflicts there; info/attributes stays live). 0 clean, 1 conflict, 2 cannot tell.
+# Test-merges a preserved commit as GitHub will, without tree/global/system merge drivers (GitHub ignores
+# them; info/attributes stays live). Returns 0 clean, 1 conflict, 2 cannot tell.
 ship_preserved_merge_check() {  # <root> <base> <commit>; a conflict sets RECOVERY_CONFLICT_HINT
   local out rc=0 rec first=1 empty n=0 list=
   RECOVERY_CONFLICT_HINT=
   empty=$(git -C "$1" hash-object -t tree /dev/null) || return 2
   out=$(mktemp "${TMPDIR:-/tmp}/ship-preserved-merge.XXXXXX") || return 2
-  GIT_ATTR_SOURCE=$empty GIT_ATTR_NOSYSTEM=1 git -c core.attributesFile=/dev/null -C "$1" merge-tree --write-tree --name-only --no-messages -z "$2" "$3" \
+  # --attr-source is git 2.40+; an older git rejects it (exit 129), which reads as cannot-tell.
+  GIT_ATTR_NOSYSTEM=1 git --attr-source="$empty" -c core.attributesFile=/dev/null -C "$1" merge-tree --write-tree --name-only --no-messages -z "$2" "$3" \
     > "$out" 2>/dev/null || rc=$?
   while IFS= read -r -d '' rec; do
     if [ "$first" -eq 1 ]; then
@@ -83,8 +84,8 @@ ship_preserved_merge_check() {  # <root> <base> <commit>; a conflict sets RECOVE
     fi
   done < "$out"
   rm -f "$out"
-  # rc 1 with no tree OID is a fatal error ("not something we can merge"), not a conflict.
-  [ "$rc" -eq 1 ] && [ "$first" -eq 1 ] && rc=2
+  # No tree OID means git did not merge at all ("not something we can merge"): never clean.
+  [ "$first" -eq 0 ] || rc=2
   [ "$rc" -le 1 ] || return 2
   [ "$n" -le 5 ] || list="$list (+$((n - 5)) more)"
   [ "$n" -eq 0 ] || RECOVERY_CONFLICT_HINT="conflicting paths ($n):$list"
