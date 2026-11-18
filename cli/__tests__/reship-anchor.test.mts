@@ -21,6 +21,7 @@ import {
   stripBase,
   treeEntry,
 } from '../lib/ship/reship/anchor.mts';
+import type { ReconcilePath } from '../lib/reconcile.mts';
 import { recordShip } from '../lib/ship/reconcile-manifest-write.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 import { manifestOf } from './_ship-branch-fixture.mts';
@@ -34,6 +35,7 @@ const WT_RE = /worktree kept at (.+?)\. Remove/;
 const LINES = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`);
 const text = (edits: Record<number, string> = {}) =>
   `${LINES.map((l, i) => edits[i] ?? l).join('\n')}\n`;
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 const dirs: string[] = [];
 afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
@@ -301,6 +303,33 @@ describe('reconcile manifest --anchors — a newer record is never regressed', (
     expect(write(`${before.op}:${before.mode}:${before.blobSha}`)).toBe(0);
     expect(record().blobSha).not.toBe(before.blobSha);
   });
+
+  it('stores the base a record ends in, drops it on a plain record and on a deletion', () => {
+    const r = prRepo();
+    const record = () => manifestOf(r.dir).branches['feat/pr'].paths.find((p) => p.path === 'a.ts');
+    const before = record();
+    const sha = r.caller(['rev-parse', 'HEAD']);
+    const guards = join(r.dir, 'anchors');
+    const write = (rec: string, baseSha = sha) => {
+      const cur = record();
+      writeFileSync(guards, `${cur.op}:${cur.mode}:${cur.blobSha}\0${rec}\0a.ts\0`);
+      const opts = { root: r.dir, branch: 'feat/pr', baseSha, merge: true, anchors: guards };
+      return recordShip(opts, ['a.ts']);
+    };
+    expect(write(`= ${sha}`)).toBe(0);
+    expect(record()).toMatchObject({ mode: before.mode, blobSha: before.blobSha, heldBase: sha });
+    expect(write(`100755 ${before.blobSha} ${sha}`)).toBe(0);
+    expect(record()).toMatchObject({ mode: '100755', blobSha: before.blobSha, heldBase: sha });
+    expect(write('=')).toBe(0);
+    expect(record().heldBase).toBeUndefined();
+
+    expect(write(`= ${sha}`)).toBe(0);
+    rmSync(join(r.dir, 'a.ts'));
+    const empty = r.caller(['commit-tree', '-m', 'empty', EMPTY_TREE]);
+    expect(write('=', empty)).toBe(0); // absent at the base and here: the gone arm
+    expect(record()).toMatchObject({ op: 'delete' });
+    expect(record().heldBase).toBeUndefined();
+  });
 });
 
 describe('reship --pr — what reached the PR branch survives a re-push (sc-4607)', () => {
@@ -461,6 +490,28 @@ describe('reship --pr — base content only the caller holds stays out of the PR
     r.caller(['merge', '-q', '--no-edit', 'origin/main']);
     return r;
   }
+  const record = (r: ReturnType<typeof prRepo>) =>
+    manifestOf(r.dir).branches['feat/pr'].paths.find((p) => p.path === 'a.ts');
+  /** Rewrite this checkout's a.ts record (or drop it when <edit> returns null). */
+  function editRecord(
+    r: ReturnType<typeof prRepo>,
+    edit: (rec: ReconcilePath) => ReconcilePath | null,
+  ) {
+    const file = join(r.dir, '.devkit/reconcile-manifest.json');
+    const m = manifestOf(r.dir);
+    const entry = m.branches['feat/pr'];
+    entry.paths = entry.paths.flatMap((p) => (p.path === 'a.ts' ? (edit(p) ?? []) : [p]));
+    writeFileSync(file, JSON.stringify(m));
+  }
+  /** merged(), then line 1 shipped over main's under GUARD_SHIP_REPLACE_OK; the peer is up to date. */
+  function overridden() {
+    const r = merged();
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine over main' }));
+    const ok = r.reship({ GUARD_SHIP_REPLACE_OK: '1' });
+    expect(ok.status, ok.stderr).toBe(0);
+    r.peerGit(['pull', '-q', '--ff-only', 'origin', 'feat/pr']);
+    return { ...r, main: r.caller(['rev-parse', 'origin/main']) };
+  }
 
   it('ships only the lane edit after a local base merge, and again once the tip is ahead', () => {
     const r = merged();
@@ -565,20 +616,134 @@ describe('reship --pr — base content only the caller holds stays out of the PR
     expect(ok.status, ok.stderr).toBe(0);
     expect(ok.stderr).toContain('GUARD_SHIP_REPLACE_OK');
     expect(r.remote('a.ts')).toBe(text({ 0: 'mine over main' }).trim());
+    const main = r.caller(['rev-parse', 'origin/main']);
+    expect(record(r).heldBase).toBe(main); // the tip now holds main's line 1 for this path
+    r.reship(); // a no-delta re-run keeps it
+    expect(record(r).heldBase).toBe(main);
 
-    // The tip now holds the override, so an edit elsewhere ships without it.
+    // The tip holds the override, so an edit elsewhere, and re-editing the line itself, ship without it.
     writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine over main', 9: 'second edit' }));
     const again = r.reship();
     expect(again.status, again.stderr).toBe(0);
     expect(r.remote('a.ts')).toBe(text({ 0: 'mine over main', 9: 'second edit' }).trim());
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine again', 9: 'second edit' }));
+    const reedit = r.reship();
+    expect(reedit.status, reedit.stderr).toBe(0);
+    expect(r.remote('a.ts')).toBe(text({ 0: 'mine again', 9: 'second edit' }).trim());
 
-    // A tip hunk the copy lacks is never re-added or dropped silently: the push still refuses.
+    // A tip hunk the copy lacks is merged in, never re-added or dropped silently.
     r.peerGit(['pull', '-q', '--ff-only', 'origin', 'feat/pr']);
-    const suggested = text({ 0: 'mine over main', 5: 'review suggestion', 9: 'second edit' });
+    const suggested = text({ 0: 'mine again', 5: 'review suggestion', 9: 'second edit' });
     r.foreign('a.ts', suggested, 'Apply review suggestion');
-    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine over main', 9: 'second edit', 11: 'x' }));
-    expect(r.reship().status).toBe(1);
-    expect(r.remote('a.ts')).toBe(suggested.trim());
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine again', 9: 'second edit', 11: 'x' }));
+    const merge = r.reship();
+    expect(merge.status, merge.stderr).toBe(0);
+    expect(merge.stderr).toContain("merged origin/feat/pr's changes");
+    expect(r.remote('a.ts')).toBe(
+      text({ 0: 'mine again', 5: 'review suggestion', 9: 'second edit', 11: 'x' }).trim(),
+    );
+    const caller = r.caller(['hash-object', 'a.ts']);
+    expect(record(r)).toMatchObject({ blobSha: caller, heldBase: main });
+  });
+
+  it('after an override, keeps leaving out a later base change the PR lacks', () => {
+    const r = overridden();
+    const two = (d: string) =>
+      writeFileSync(join(d, 'a.ts'), text({ 0: 'from main', 3: 'main 2' }));
+    r.onMain('main: line four', two);
+    r.caller(['checkout', '--', 'a.ts']);
+    r.caller(['merge', '-q', '--no-edit', 'origin/main']);
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine again', 3: 'main 2' }));
+    const res = r.reship();
+    expect(res.status, res.stderr).toBe(0);
+    expect(res.stderr).toContain('main: line four');
+    expect(res.stderr).not.toContain('main: new intro');
+    expect(r.remote('a.ts')).toBe(text({ 0: 'mine again' }).trim());
+    expect(record(r).heldBase).toBe(r.main); // what the shipped blob holds, not the newer main
+
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine again', 3: 'main 2', 9: 'later' }));
+    const later = r.reship();
+    expect(later.status, later.stderr).toBe(0);
+    expect(r.remote('a.ts')).toBe(text({ 0: 'mine again', 9: 'later' }).trim());
+  });
+
+  it('after an override, refuses a re-edit of a line the PR branch rewrote', () => {
+    const r = overridden();
+    r.foreign('a.ts', text({ 0: 'reviewer intro' }), 'Reword the intro');
+    r.reship(); // an unchanged copy keeps the PR's version and leaves the record, held base included
+    expect(record(r).heldBase).toBe(r.main);
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine again' }));
+    const res = r.reship();
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain('changed these path(s)');
+    expect(res.stderr).toContain('Reword the intro');
+    expect(res.stderr).not.toContain('cannot be left out');
+    expect(r.remote('a.ts')).toBe(text({ 0: 'reviewer intro' }).trim());
+  });
+
+  it('after an override, does not refuse a side branch both the PR and main merged', () => {
+    const r = overridden(); // main's tip H is the held base; a side branch S then forks from the root
+    const peer = r.peerGit(['rev-parse', '--show-toplevel']);
+    r.peerGit(['checkout', '-q', '-b', 'side', r.peerGit(['rev-list', '--max-parents=0', 'HEAD'])]);
+    writeFileSync(join(peer, 'a.ts'), text({ 6: 'side' }));
+    r.peerGit(['commit', '-q', '-am', 'side: line seven']);
+    for (const branch of ['feat/pr', 'main']) {
+      r.peerGit(['fetch', '-q', 'origin', branch]);
+      r.peerGit(['checkout', '-q', '-B', branch, 'FETCH_HEAD']);
+      r.peerGit(['merge', '-q', '--no-edit', 'side']);
+      r.peerGit(['push', '-q', 'origin', branch]);
+    }
+    r.caller(['fetch', '-q', 'origin', 'main:refs/remotes/origin/main']);
+    r.caller(['checkout', '--', 'a.ts']);
+    r.caller(['merge', '-q', '--no-edit', 'origin/main']);
+    // H and S are both best bases of main against the tip and H; git's tie-break must not pick S.
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine again', 6: 'side' }));
+    const res = r.reship();
+    expect(res.status, res.stderr).toBe(0);
+    expect(r.remote('a.ts')).toBe(text({ 0: 'mine again', 6: 'side' }).trim());
+  });
+
+  it('forgets the held base once the PR branch has the base', () => {
+    const r = overridden();
+    r.peerGit(['fetch', '-q', 'origin', 'main']);
+    r.peerGit(['merge', '-q', '--no-edit', '-X', 'ours', 'FETCH_HEAD']); // gh pr update-branch
+    r.peerGit(['push', '-q', 'origin', 'feat/pr']);
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine again' }));
+    const res = r.reship();
+    expect(res.status, res.stderr).toBe(0);
+    expect(r.remote('a.ts')).toBe(text({ 0: 'mine again' }).trim());
+    expect(record(r).heldBase).toBeUndefined();
+  });
+
+  it('records the held base when the tip already holds the copy without a record of it', () => {
+    const r = overridden();
+    editRecord(r, () => null); // the override was shipped from another checkout
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine over main', 9: 'second edit' }));
+    const elsewhere = r.reship();
+    expect(elsewhere.status, elsewhere.stderr).toBe(0);
+    expect(record(r).heldBase).toBe(r.main);
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine again', 9: 'second edit' }));
+    const reedit = r.reship();
+    expect(reedit.status, reedit.stderr).toBe(0);
+    expect(r.remote('a.ts')).toBe(text({ 0: 'mine again', 9: 'second edit' }).trim());
+  });
+
+  it.each([
+    [
+      'holds no base (written before held bases)',
+      ({ heldBase: _, ...rest }: ReconcilePath) => rest,
+    ],
+    [
+      'names a commit this clone lacks',
+      (rec: ReconcilePath) => ({ ...rec, heldBase: '0'.repeat(40) }),
+    ],
+  ])('still refuses re-editing the overridden line when the record %s', (_, edit) => {
+    const r = overridden();
+    editRecord(r, edit);
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine again' }));
+    const res = r.reship();
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain('cannot be left out');
   });
 
   it('copies as before once the PR branch already holds the base change', () => {
@@ -722,7 +887,7 @@ describe('stripBase — a base change the tip already carries is never removed',
       return { here, got: stripBase(dir, here, treeEntry(dir, tip, 'a.ts'), opts, 'a.ts') };
     };
     const held = strip(0o644);
-    expect(held.got).toEqual({ here: held.here, commits: [], refuse: false });
+    expect(held.got).toEqual({ here: held.here, commits: [], refuse: false, held: head });
     expect(strip(0o755).got.refuse).toBe(true);
   });
 });

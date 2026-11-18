@@ -235,7 +235,8 @@ interface RecordShipOptions {
 interface AnchorGuard {
   /** "<op>:<mode>:<blob>" of the record the anchor read, or "-" for none. */
   expect: string;
-  /** "" leaves the record untouched, "=" records the path as classified, "<mode> <blob>" the caller's. */
+  /** "" leaves the record untouched, "=" records the path as classified, "<mode> <blob>" the caller's;
+   *  either may end in " <commit>", the base the shipped blob holds unstripped. */
   record: string;
 }
 
@@ -322,8 +323,9 @@ function applyAnchorGuards(
   return classified
     .filter((e): e is ReconcilePath => e !== null && guards.get(e.path)?.record !== '')
     .map((e) => {
-      const [mode, blobSha] = guards.get(e.path)?.record.split(' ') ?? [];
-      return blobSha ? { ...e, mode, blobSha } : e;
+      const [a, b, c] = guards.get(e.path)?.record.split(' ') ?? [];
+      const [own, heldBase] = a === '=' ? [undefined, b] : [b && { mode: a, blobSha: b }, c];
+      return { ...e, ...own, ...(heldBase && { heldBase }) };
     });
 }
 
@@ -357,7 +359,8 @@ function mergeEntry(
   for (const p of gone) {
     const prev = byPath.get(p);
     if (!prev || prev.op === 'delete' || !isFresh(byPath, guards, p)) continue;
-    byPath.set(p, { ...prev, op: 'delete' });
+    const { heldBase: _, ...rest } = prev;
+    byPath.set(p, { ...rest, op: 'delete' });
     changed++;
   }
   if (changed === 0) throw new Error('no recordable paths');
