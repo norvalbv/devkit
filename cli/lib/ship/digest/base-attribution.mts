@@ -310,7 +310,11 @@ async function rerunAtBase(
     // A change that adds or repoints the gate has no base run to compare against.
     if (atBase.get(label) !== cmd) continue;
     if (gate.tests) {
-      lines.push(...(await labelTestsAtBase(gate, baseWt, outPrefix, deadline, sha)));
+      // A throw here (an unreadable base path) silences this gate only, never the others.
+      const labelled = await labelTestsAtBase(gate, baseWt, outPrefix, deadline, sha).catch(
+        () => [],
+      );
+      lines.push(...labelled);
       continue;
     }
     const outFile = `${outPrefix}.base-${label}.log`;

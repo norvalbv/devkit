@@ -390,6 +390,19 @@ describe('base rerun publishing', () => {
     ],
     ['failing tests that ran over 60 s here', [slow('/repo/a.test.mts', 61_000)]],
     ['a test file outside the root', [failing('/elsewhere/a.test.mts', 't')]],
+    [
+      'a failed entry too malformed to name',
+      [
+        {
+          name: '/repo/a.test.mts',
+          status: 'failed',
+          assertionResults: [
+            { status: 'failed', title: 't', ancestorTitles: ['d'] },
+            { status: 'failed', title: 7 },
+          ],
+        },
+      ],
+    ],
   ])('publishes nothing for %s', (_, results) => {
     expect(baseRerunTests(report(results), '/repo')).toEqual([]);
   });

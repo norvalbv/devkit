@@ -350,6 +350,7 @@ const failedTestSchema = z.object({
 });
 /** Each assertion of one file: a failed one parsed, anything else (passed, malformed) null. */
 const failedListSchema = z.array(failedTestSchema.nullable().catch(null)).catch([]);
+const statusListSchema = z.array(z.object({ status: z.string() }).nullable().catch(null)).catch([]);
 /** Bounds on a base rerun: base attribution's whole budget is 120 s, its worktree included. */
 const RERUN_TESTS = 20;
 const RERUN_MS = 60_000;
@@ -364,6 +365,9 @@ export function baseRerunTests(report: string, root: string): { file: string; na
   for (const result of run.testResults ?? []) {
     const file = relative(root, String(result?.name ?? ''));
     const failed = failedListSchema.parse(result?.assertionResults).flatMap((t) => (t ? [t] : []));
+    const claimed = statusListSchema.parse(result?.assertionResults);
+    // A failed entry too malformed to name is as unnameable as a file that did not load.
+    if (claimed.filter((a) => a?.status === 'failed').length !== failed.length) return [];
     if (result?.status === 'failed' && failed.length === 0) return [];
     if (failed.length && (isAbsolute(file) || escapesRoot(file))) return [];
     for (const t of failed) {
@@ -380,12 +384,14 @@ export function baseRerunTests(report: string, root: string): { file: string; na
 function publishBaseRerun(report: string, root: string): void {
   const gate = process.env[GATE_LABEL_ENV];
   if (!gate || !process.env.DEVKIT_SHIP_ID) return;
+  let tests: { file: string; name: string }[] = [];
   try {
-    // Published even when empty, so an earlier run's tests are never read for this one.
-    emitGateEvent({ type: 'gate_base_rerun', gate, tests: baseRerunTests(report, root) });
+    tests = baseRerunTests(report, root);
   } catch {
-    // An unreadable report publishes nothing; the CI step after this still runs.
+    // An unreadable report publishes the empty list below; the CI step after this still runs.
   }
+  // Published even when empty, so an earlier run's tests are never read for this one.
+  emitGateEvent({ type: 'gate_base_rerun', gate, tests });
 }
 
 /** Record the failure reason. Narration only: nothing here may throw into the verdict. */
