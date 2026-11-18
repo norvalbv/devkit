@@ -11,7 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { COVERAGE_DIR, RUNS_DIR } from '../../gate-engine/coverage/produce.mts';
 import { testSpawnSync } from './_helpers.mts';
 
@@ -68,8 +68,30 @@ const runScript = (root: string) => {
 // 2^22 + 1: above Linux's PID_MAX_LIMIT and macOS's pid ceiling, so no process can ever hold it.
 const DEAD_PID = '4194305';
 
-const ignored = (path: string): boolean =>
-  testSpawnSync('git', ['check-ignore', '--no-index', '-q', path], { cwd: ROOT }).status === 0;
+// Judged in an empty repo: ship symlinks coverage/ into its worktree, and git refuses paths beyond one.
+let ignoreRepo = '';
+beforeAll(() => {
+  ignoreRepo = mkdtempSync(join(tmpdir(), 'coverage-ignore-'));
+  expect(testSpawnSync('git', ['init', '-q'], { cwd: ignoreRepo }).status).toBe(0);
+});
+afterAll(() => rmSync(ignoreRepo, { recursive: true, force: true }));
+const ignored = (path: string): boolean => {
+  const { status } = testSpawnSync(
+    'git',
+    [
+      '-c',
+      `core.excludesFile=${join(ROOT, '.gitignore')}`,
+      'check-ignore',
+      '--no-index',
+      '-q',
+      path,
+    ],
+    { cwd: ignoreRepo },
+  );
+  // 1 is "not ignored"; any other non-zero is git failing, which must not pass as "not ignored".
+  expect([0, 1]).toContain(status);
+  return status === 0;
+};
 
 describe('test:run:coverage:changed', () => {
   it('passes --changed once, taking the base from COVERAGE_BASE', () => {
