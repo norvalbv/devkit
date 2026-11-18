@@ -66,6 +66,29 @@ const outcomeSchema = z.strictObject({
     .optional(),
 });
 
+/** `value` as JSON in an HTML comment line; `<` and `>` are escaped so no text can close it. */
+export const commentLine = <T,>(open: string, value: T): string =>
+  `${open}${JSON.stringify(value).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e')}${DATA_CLOSE}`;
+
+/** The `schema` value a `commentLine` holds within `text`; null when absent or malformed. */
+export function readCommentJson<T>(
+  text: string | null,
+  open: string,
+  schema: z.ZodType<T>,
+): T | null {
+  const line = text
+    ?.split('\n')
+    .map((row) => row.trimEnd())
+    .find((row) => row.startsWith(open) && row.endsWith(DATA_CLOSE));
+  try {
+    return line
+      ? (schema.safeParse(JSON.parse(line.slice(open.length, -DATA_CLOSE.length))).data ?? null)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A zero-width space after the namespace keeps quoted marker text from ever parsing as a marker. */
 const defuse = (text: string): string => text.replace(MARKER, '<!-- devkit:evidence​:');
 
@@ -76,6 +99,9 @@ const clip = (text: string, limit: number): string =>
   text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 
 const flat = (text: string): string => stripVTControlCharacters(text).replace(/\s+/g, ' ').trim();
+
+/** One line of untrusted text, bounded; still raw markdown, so a renderer escapes it for its context. */
+export const oneLine = (text: string): string => clip(flat(text), MAX_DETAIL_CHARS);
 
 export const plain = (text: string): string =>
   clip(flat(text).replaceAll('<', '&lt;'), MAX_DETAIL_CHARS);
@@ -98,7 +124,7 @@ function sharedDescribe(items: RegressionFailureSummary[]): string[] {
 }
 
 /** `n` and its noun; `plus` marks a floor, from a list the report summary cut at its cap. */
-const counted = (n: number, noun: string, plus = ''): string =>
+export const counted = (n: number, noun: string, plus = ''): string =>
   `${n}${plus} ${noun}${n === 1 && !plus ? '' : 's'}`;
 
 /** A collapsed section; `summary` is raw HTML, so it carries no markdown. */
@@ -194,14 +220,13 @@ export function renderEvidenceBlock(
     ]),
   ].join('\n');
   const record = verdict?.verdict ? { ...outcome, mergeVerdict: verdict.verdict } : outcome;
-  const data = JSON.stringify(record).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e');
   return [
     EVIDENCE_BEGIN,
     '## Automated evidence',
     // A line opening with a comment is a raw HTML block, so the slot trails the verdict's markdown.
     `${verdict ? `${plain(verdict.line)} ` : ''}${VERDICT_SLOT}`,
     defuse(content),
-    `${DATA_OPEN}${data}${DATA_CLOSE}`,
+    commentLine(DATA_OPEN, record),
     EVIDENCE_END,
   ].join('\n');
 }
@@ -262,17 +287,6 @@ export function readEvidenceBlock(
   body: string,
   currentHead: string,
 ): (z.infer<typeof outcomeSchema> & { stale: boolean }) | null {
-  const line = BLOCK.exec(body)?.[0]
-    .split('\n')
-    .map((text) => text.trimEnd())
-    .find((text) => text.startsWith(DATA_OPEN) && text.endsWith(DATA_CLOSE));
-  if (!line) return null;
-  let data: unknown;
-  try {
-    data = JSON.parse(line.slice(DATA_OPEN.length, -DATA_CLOSE.length));
-  } catch {
-    return null;
-  }
-  const parsed = outcomeSchema.safeParse(data);
-  return parsed.success ? { ...parsed.data, stale: parsed.data.headSha !== currentHead } : null;
+  const data = readCommentJson(BLOCK.exec(body)?.[0] ?? null, DATA_OPEN, outcomeSchema);
+  return data ? { ...data, stale: data.headSha !== currentHead } : null;
 }

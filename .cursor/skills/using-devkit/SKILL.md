@@ -139,8 +139,9 @@ devkit command.
   names the red and green failures, and ship prints `evidence: kept the red/green logs at <path>`.
   After fixing a flaky cause, `devkit pr-evidence <pr>` re-captures it from a checkout at the PR head.
 - **The block also carries a "Reviewer notes" section** (`devkit:evidence:notes`): every PASS
-  reviewer advisory, one bullet per finding with the commit it was raised at, even when no
-  `evidence` entry is configured. A `--pr` re-ship adds its own and keeps the earlier ones; a
+  reviewer advisory, even when no `evidence` entry is configured. Notes are grouped by the commit
+  they were raised at, then by the file and line they cite: the newest commit's are open, earlier
+  commits' are collapsed, and a note raised again moves to the newer commit. A `--pr` re-ship adds its own and keeps the earlier ones; a
   `--base` rewrite replaces them. `"review": { "prNotes": false }` in `guard.config.json` turns the
   section off. Don't re-list advisories in your own text — write only what you did about each one.
 - **Change a description after ship with `devkit pr-body <n> --body-file <f>`, never `gh pr edit

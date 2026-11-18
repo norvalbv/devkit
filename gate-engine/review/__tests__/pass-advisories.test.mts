@@ -91,6 +91,14 @@ describe('parseAdvisories', () => {
     expect(parseAdvisories(raw)).toEqual(['a.ts:1 — first', 'b.ts:2 — second']);
   });
 
+  it('strips emphasis from prose but keeps every `*` inside a code span', () => {
+    const raw =
+      'ADVISORY: **a.ts:3** — `/* c8 ignore next */` and ``**/*.ts ` x`` are *code*, `a * b\n';
+    expect(parseAdvisories(raw)).toEqual([
+      'a.ts:3 — `/* c8 ignore next */` and ``**/*.ts ` x`` are code, `a b',
+    ]);
+  });
+
   it('keeps every line whole; the print cap belongs to reportAdvisories', () => {
     const raw = Array.from({ length: 8 }, (_, i) => `ADVISORY: a.ts:${i} ${'x'.repeat(300)}`).join(
       '\n',

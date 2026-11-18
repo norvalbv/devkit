@@ -97,7 +97,25 @@ export function parseReviewVerdict(raw: string): ReviewVerdict {
 const ADVISORY_LINE_RE = /^(?:(?![\r\n])[\s*#>-])*ADVISORY:\**[^\S\r\n]*(.+)$/gim;
 export const ADVISORY_CAP = 5;
 
-const flatten = (text: string): string => text.replace(/\*+/g, '').replace(/\s+/g, ' ').trim();
+// CommonMark's code span: a backtick run, closed by the next run of exactly the same length.
+const CODE_SPAN_RE = /(?<![`\\])(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g;
+
+/** `text` with `edit` applied to its prose only; inline code spans pass through byte for byte. */
+export function outsideCode(text: string, edit: (prose: string) => string): string {
+  let out = '';
+  let at = 0;
+  for (const m of text.matchAll(CODE_SPAN_RE)) {
+    out += edit(text.slice(at, m.index)) + m[0];
+    at = m.index + m[0].length;
+  }
+  return out + edit(text.slice(at));
+}
+
+// Markdown emphasis goes; a `*` inside code (a c8 ignore hint, a glob) is part of the finding.
+const flatten = (text: string): string =>
+  outsideCode(text, (prose) => prose.replace(/\*+/g, ''))
+    .replace(/\s+/g, ' ')
+    .trim();
 
 /** The writer half of parseAdvisories: only a final-reply marker line ever reaches the author. */
 export const PASS_ADVISORY_RULE =
