@@ -20,6 +20,9 @@ import {
 export const VIEWPORT = { width: 1280, height: 720 };
 const FLOW_TIMEOUT_MS = 5 * 60_000;
 const CAPTURE_TIMEOUT_MS = 30_000;
+/** Chromium refuses a capture until the page has drawn a frame, which a just-loaded page has not. */
+const CAPTURE_REFUSED = /Unable to capture screenshot/;
+const CAPTURE_TRIES = 10;
 /** Pacing: a caption is read before its action, and each result is held long enough to be seen. */
 const LEAD_IN_MS = 700;
 const STEP_HOLD_MS = 1500;
@@ -143,7 +146,10 @@ interface Recorder {
  * window with no layout yet has no shape to keep. */
 export const videoSize = (width: number, height: number): typeof VIEWPORT =>
   width > 0 && height > 0
-    ? { width: VIEWPORT.width, height: Math.round((VIEWPORT.width * height) / width / 2) * 2 }
+    ? {
+        width: VIEWPORT.width,
+        height: Math.max(2, Math.round((VIEWPORT.width * height) / width / 2) * 2),
+      }
     : VIEWPORT;
 
 /** A still straight from DevTools: `page.screenshot` redraws the page at another scale for a frame,
@@ -151,9 +157,16 @@ export const videoSize = (width: number, height: number): typeof VIEWPORT =>
 async function capture(page: Page, file: string): Promise<void> {
   const session = await page.context().newCDPSession(page);
   try {
-    const shot = session.send('Page.captureScreenshot', { format: 'png' });
-    const { data } = await withTimeout(shot, CAPTURE_TIMEOUT_MS, 'the screenshot');
-    writeFileSync(file, Buffer.from(data, 'base64'));
+    for (let tries = 1; ; tries++) {
+      const shot = session.send('Page.captureScreenshot', { format: 'png' });
+      const taken = await withTimeout(shot, CAPTURE_TIMEOUT_MS, 'the screenshot').catch(
+        (cause: unknown) => {
+          if (tries === CAPTURE_TRIES || !CAPTURE_REFUSED.test(errorMessage(cause))) throw cause;
+        },
+      );
+      if (taken) return writeFileSync(file, Buffer.from(taken.data, 'base64'));
+      await sleep(200);
+    }
   } finally {
     await session.detach().catch(() => undefined);
   }
@@ -200,6 +213,15 @@ type Overlay = Awaited<ReturnType<Page['screencast']['showOverlay']>>;
 function narration(page: Page) {
   let caption: Overlay | undefined;
   let mark: Overlay | undefined;
+  let cleared = false;
+  // A flow that outlives its timeout keeps running: what it draws after `clear` comes straight down.
+  const show = async (html: string): Promise<Overlay | undefined> => {
+    if (cleared) return undefined;
+    const overlay = await page.screencast.showOverlay(html);
+    if (!cleared) return overlay;
+    await overlay.dispose().catch(() => undefined);
+    return undefined;
+  };
   const unmark = async () => {
     await mark?.dispose().catch(() => undefined);
     mark = undefined;
@@ -208,7 +230,7 @@ function narration(page: Page) {
     /** The next caption goes up before the last comes down, so no frame is left without one. */
     caption: async (text: string, top = false) => {
       const previous = caption;
-      caption = await page.screencast.showOverlay(captionHtml(text, top));
+      caption = await show(captionHtml(text, top));
       await previous?.dispose();
     },
     /** Marks `focus`; true when it reaches into the bottom caption's zone. */
@@ -223,7 +245,7 @@ function narration(page: Page) {
         ? 'box-shadow:0 0 0 9999px rgba(15,15,20,.5)'
         : 'border:3px solid #ff3b6b;box-shadow:0 0 0 4px rgba(255,59,107,.25)';
       const place = `left:${box.x - pad}px;top:${box.y - pad}px;width:${box.width + 2 * pad}px;height:${box.height + 2 * pad}px`;
-      mark = await page.screencast.showOverlay(
+      mark = await show(
         `<div style="position:fixed;${place};box-sizing:border-box;border-radius:${radius};${look};pointer-events:none"></div>`,
       );
       const { height } = await windowSize(page);
@@ -231,6 +253,7 @@ function narration(page: Page) {
     },
     unmark,
     clear: async () => {
+      cleared = true;
       await unmark();
       await caption?.dispose().catch(() => undefined);
     },
@@ -314,8 +337,9 @@ export async function runFlow(input: RunInput): Promise<RunResult> {
   const notes = narration(page);
   let steps = 0;
   const step: FlowContext['step'] = async (title, act, options) => {
-    steps += 1;
-    const label = `${steps} · ${title}`;
+    // Fixed here: steps a flow starts together must not share the counter's later value.
+    const number = (steps += 1);
+    const label = `${number} · ${title}`;
     await notes.caption(label);
     await sleep(LEAD_IN_MS * pace);
     await act();
@@ -324,7 +348,7 @@ export async function runFlow(input: RunInput): Promise<RunResult> {
       await notes.caption(label, true);
     await sleep(STEP_HOLD_MS * pace);
     await still(
-      `step${steps}-${title
+      `step${number}-${title
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .slice(0, 40)}`,

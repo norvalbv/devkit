@@ -154,6 +154,18 @@ describe.runIf(browserReady)('machine capture (headless browser)', () => {
     expect(threw.result.error).toBe('own error');
   }, 90_000);
 
+  it('numbers steps a flow starts together apart, in caption and still alike', async () => {
+    const root = repo();
+    const body = `await page.goto(url);\nawait Promise.all([step('A', async () => {}), step('B', async () => {})]);`;
+    const { evidence, result } = await capture(root, flowFile(root, 'pair', body));
+    expect(result.error).toBeUndefined();
+    expect(readManifest(evidence).map(({ file }) => file)).toEqual([
+      'pair.webm',
+      'pair.step1-a.png',
+      'pair.step2-b.png',
+    ]);
+  }, 60_000);
+
   it("refuses a shot named like a step's own still", async () => {
     const root = repo();
     const { result } = await capture(
@@ -288,6 +300,10 @@ describe('the video frame', () => {
 
   it('falls back to the default frame for a window with no layout yet', () => {
     expect(videoSize(0, 0)).toEqual(VIEWPORT);
+  });
+
+  it('never rounds a very wide, very short window down to no height', () => {
+    expect(videoSize(3000, 1)).toEqual({ width: 1280, height: 2 });
   });
 });
 
