@@ -42,7 +42,8 @@ const TURN_FAILED = JSON.stringify({
 // `sleep 10` processes still alive in this run's process group, i.e. ones a killed fake stranded.
 function strandedSleeps(): string[] {
   const own = execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' });
-  return execFileSync('ps', ['-A', '-o', 'pgid=,command='], { encoding: 'utf8' })
+  // A busy machine's process table outgrows execFileSync's 1 MB default buffer (ENOBUFS).
+  return execFileSync('ps', ['-A', '-o', 'pgid=,command='], { encoding: 'utf8', maxBuffer: 64e6 })
     .split('\n')
     .filter((row) => row.trim().split(/\s+/)[0] === own.trim() && row.trim().endsWith('sleep 10'));
 }
@@ -159,6 +160,15 @@ describe('commands_ref on judge_exec', () => {
     expect(text).toMatch(/^lens: concurrency-races\n\[exit 0\] .*git diff/);
     expect(text).toContain('vitest run');
     expect(text).not.toContain('hunter2');
+  });
+
+  // codex exec --json omits MCP calls nested in code-mode exec, so its tool calls are not evidence.
+  it('a codex spawn never reports tool calls: its searches stay unmeasured, not zero', async () => {
+    process.env.GUARD_CODEX_BIN = fakeBin('codex-calls', [PASSING, VERDICT]);
+    let fired = false;
+    const out = await execJudgeAsync({ ...codexOpts, onToolCalls: () => (fired = true) });
+    expect(out).toBe('VERDICT: PASS');
+    expect(fired).toBe(false);
   });
 
   it('a failed turn and a killed judge keep the commands they ran', async () => {

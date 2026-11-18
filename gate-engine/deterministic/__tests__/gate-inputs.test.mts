@@ -135,3 +135,87 @@ describe('gate-input registry', () => {
     expect(gateInputFor('.fallowrc.jsonc.bak')).toBeUndefined();
   });
 });
+
+describe('fallow baselines named by the fallow config', () => {
+  const baselines = (root: string) =>
+    [...gateInputs(root)].filter((input) => input.path.startsWith('fallow-baselines/'));
+  const withFallow = (file: string, contents: string, guardConfig?: string) => {
+    const root = repo(guardConfig);
+    writeFileSync(join(root, file), contents);
+    return root;
+  };
+  const AUDIT = `{
+    // comments and a trailing comma are valid JSONC
+    "audit": {
+      "deadCodeBaseline": "fallow-baselines/dead-code.json",
+      "healthBaseline": "./fallow-baselines/health.json",
+      "dupesBaseline": "fallow-baselines/dupes.json",
+    },
+  }`;
+
+  it('yields each as a branch file between the fixed entries and the guard.config.json paths', () => {
+    const root = withFallow('.fallowrc.jsonc', AUDIT);
+    expect(baselines(root)).toEqual(
+      ['dead-code', 'health', 'dupes'].map((name) => ({
+        path: `fallow-baselines/${name}.json`,
+        kind: 'file',
+        share: 'branch',
+      })),
+    );
+    const all = paths(root);
+    expect(all.indexOf('fallow-baselines/dupes.json')).toBe(
+      all.indexOf(CORRECTNESS_OVERRIDES_FILE) + 3,
+    );
+  });
+
+  it.each([
+    ['a malformed config', '.fallowrc.jsonc', '{ "audit": { "healthBaseline": '],
+    ['a TOML config', 'fallow.toml', '[audit]\nhealthBaseline = "fallow-baselines/health.json"\n'],
+    ['non-string values', '.fallowrc.json', '{"audit":{"healthBaseline":7,"dupesBaseline":null}}'],
+    ['no audit object', '.fallowrc.json', '{"audit":"fallow-baselines/health.json"}'],
+  ])('yields none for %s, without throwing', (_, file, contents) => {
+    expect(baselines(withFallow(file, contents))).toEqual([]);
+  });
+
+  it('yields none for an unreadable config, without throwing', () => {
+    const root = repo();
+    mkdirSync(join(root, '.fallowrc.json'));
+    expect(baselines(root)).toEqual([]);
+  });
+
+  it('drops out-of-repo paths and paths a fixed directory entry already carries', () => {
+    const outside = join(tmpdir(), 'abs-health.json');
+    const root = withFallow(
+      '.fallowrc.json',
+      JSON.stringify({
+        audit: {
+          deadCodeBaseline: '../dead.json',
+          healthBaseline: outside,
+          dupesBaseline: '.fallow/dupes.json',
+        },
+      }),
+    );
+    const all = paths(root);
+    expect(all.filter((path) => path.endsWith('.json') && path.includes('dead'))).toEqual([]);
+    expect(all).not.toContain(outside);
+    expect(all).not.toContain('.fallow/dupes.json');
+  });
+
+  it('reads only the config fallow itself would load: .fallowrc.json before .fallowrc.jsonc', () => {
+    const root = withFallow('.fallowrc.jsonc', AUDIT);
+    writeFileSync(
+      join(root, '.fallowrc.json'),
+      '{"audit":{"healthBaseline":"fallow-baselines/h.json"}}',
+    );
+    expect(baselines(root).map((input) => input.path)).toEqual(['fallow-baselines/h.json']);
+  });
+
+  it('still yields them when guard.config.json then fails to parse', () => {
+    const root = withFallow('.fallowrc.jsonc', AUDIT, '{ not json');
+    const seen: string[] = [];
+    expect(() => {
+      for (const input of gateInputs(root)) seen.push(input.path);
+    }).toThrow(/not valid JSON/);
+    expect(seen).toContain('fallow-baselines/health.json');
+  });
+});

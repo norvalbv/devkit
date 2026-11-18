@@ -4,7 +4,7 @@
 // ONE code path rather than duplicated per ratchet.
 
 import { execFileSync, spawnSync, type StdioOptions } from 'node:child_process';
-import { lstatSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { readGitPaths } from './git-paths.mts';
 import { commitIndexEnv, commitIndexKind, commitIndexTree } from './commit-index.mts';
@@ -368,6 +368,15 @@ export function gitPrefix(root: string): string {
 /** Freeze the pending index into one immutable tree object without changing the index or worktree. */
 export function indexTreeRef(root: string): string | null {
   return commitIndexTree(root).tree;
+}
+
+/** A root-relative working-tree file as UTF-8, or null when it cannot be read. */
+export function workingTreeText(root: string, relativePath: string): string | null {
+  try {
+    return readFileSync(join(root, relativePath), 'utf8');
+  } catch {
+    return null;
+  }
 }
 
 /** Read a CWD-relative UTF-8 blob from a Git tree. Missing paths or refs return null. */

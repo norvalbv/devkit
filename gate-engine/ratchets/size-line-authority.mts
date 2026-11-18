@@ -1,10 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type { resolveGuardConfig } from '../config.mts';
 import { LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mts';
 import { fanoutSplitHints } from './folder-fanout.mts';
-import { gitPrefix, mergeBaseRef, treeTextAtRef } from './git-index.mts';
+import { gitPrefix, mergeBaseRef, treeTextAtRef, workingTreeText } from './git-index.mts';
 import { catBlobs } from './tree-blobs.mts';
 import { lineMatchers, SIZE_SKIP_DIRS } from './size-policy.mts';
 
@@ -159,14 +157,6 @@ function snapshotText(root: string, snapshot: Snapshot, relativePath: string): s
   return treeTextAtRef(root, snapshot, relativePath);
 }
 
-function workingText(root: string, relativePath: string): string | null {
-  try {
-    return readFileSync(join(root, relativePath), 'utf8');
-  } catch {
-    return null;
-  }
-}
-
 function rawBaselineAt(root: string, snapshot: Snapshot): SnapshotLineBaseline {
   const contents = snapshotText(root, snapshot, LINES_BASELINE);
   return { ...decodeLineBaseline(contents, snapshot), present: contents !== null };
@@ -235,7 +225,9 @@ export function lineBaselineForGate(
     baseline?.contents ?? null,
     baseline?.relativePath ?? LINES_BASELINE,
   );
-  return normalizeCandidateLineBaseline(root, decoded, parents, (file) => workingText(root, file));
+  return normalizeCandidateLineBaseline(root, decoded, parents, (file) =>
+    workingTreeText(root, file),
+  );
 }
 
 export function lineBaselineParents(root: string): string[] {

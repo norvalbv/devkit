@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { resolveGuardConfig } from '../config.mts';
 import { readRatchetBaseline } from './baseline-paths.mts';
 import { fanoutSplitHints } from './folder-fanout.mts';
-import { stagedSet, treeTextAtRef } from './git-index.mts';
+import { stagedSet, treeTextAtRef, workingTreeText } from './git-index.mts';
 import {
   decodeLineBaseline,
   type DecodedLineBaseline,
@@ -39,14 +39,6 @@ function readLinesBaselineAtRef(root: string, ref: string): DecodedLineBaseline 
   return normalizeLineBaseline(readLinesBaseline(text, ref), (file) =>
     treeTextAtRef(root, ref, file),
   );
-}
-
-function workingText(root: string, file: string): string | null {
-  try {
-    return readFileSync(join(root, file), 'utf8');
-  } catch {
-    return null;
-  }
 }
 
 function sourcePaths(
@@ -90,7 +82,7 @@ export function preflightLines(root: string, ref: string, requested: string[] = 
     console.error(`guard-size preflight unavailable at ${ref}: ${String(error)}`);
     return 2;
   }
-  local = normalizeCandidateLineBaseline(root, local, [ref], (file) => workingText(root, file));
+  local = normalizeCandidateLineBaseline(root, local, [ref], (file) => workingTreeText(root, file));
   const match = lineMatchers(cfg);
   const cap = (file: string) => (match.isTest(file) ? cfg.maxTestLines : cfg.maxLines);
   const selected = requested.length > 0 ? requested : [...(stagedSet(root) ?? [])];

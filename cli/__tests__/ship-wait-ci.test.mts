@@ -60,6 +60,20 @@ function waiterShim(log: string, path = process.env.PATH): string {
   return `${bin}:${path}`;
 }
 
+/** A `node` whose waiter is interrupted like a terminal Ctrl-C: the shell and the waiter both get INT. */
+function interruptedWaiterShim(path = process.env.PATH): string {
+  const bin = mkdtempSync(join(tmpdir(), 'wait-ci-node-int-'));
+  const realNode = spawnSync('/bin/sh', ['-c', 'command -v node'], {
+    encoding: 'utf8',
+  }).stdout.trim();
+  writeFileSync(
+    join(bin, 'node'),
+    `#!/bin/sh\ncase "$1" in */wait-ci/wait.mts|*/wait-ci/wait.mjs) kill -INT $PPID; exit 130 ;; esac\nexec '${realNode}' "$@"\n`,
+    { mode: 0o755 },
+  );
+  return `${bin}:${path}`;
+}
+
 function ship(argv: string[], log: string, rows = GREEN, extraEnv: Record<string, string> = {}) {
   const { dir, env } = seedShipRepoLocalRemote();
   writeFileSync(join(dir, 'note.txt'), 'hello\n');
@@ -225,8 +239,7 @@ describe('ship-branch.sh — --wait-ci', () => {
   });
 
   it('announces that the PR is open before it starts waiting', () => {
-    // A signal during the wait exits 130 through the managed wrapper whatever bash does, so the
-    // abort has to be self-describing before it can happen.
+    // A signal during the wait ends it without a verdict, so the PR has to be named before it can.
     const log = argvLog();
     const { r } = ship(['feat/announce', 't', '--wait-ci', 'note.txt'], log);
     const announced = r.stderr.indexOf('the ship is complete');
@@ -300,6 +313,26 @@ describe('reship.sh — --wait-ci after a real re-push', () => {
 
     expect(r.status, r.stderr).toBe(0);
     expect(lines(waits)).toEqual([expect.stringContaining('--timeout 3600')]);
+  });
+
+  it('exits 0 when a signal ends the wait on the PR it re-pushed', () => {
+    const { dir, env } = bodyUpdateRepo();
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const r = spawnSync(
+      '/bin/bash',
+      [reshipScript, 'feat/pr', 'add v2', '--pr', '--wait-ci', '--', 'a.ts'],
+      {
+        cwd: dir,
+        input: 'body\n',
+        encoding: 'utf8',
+        env: { ...process.env, ...env, ...CHECKS, PATH: interruptedWaiterShim(env.PATH) },
+      },
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain('pull/7');
+    expect(r.stderr).toContain('ci-outcome=not-run pr=7 reason=interrupted');
   });
 
   it('skips the wait and says so when the --ready flip failed', () => {
@@ -640,8 +673,13 @@ function strictReship(argv: string[], env: Record<string, string>) {
 
 /** Runs the wait against a `node` that exits `code`, then prints the recorded status. */
 function waitWithNodeExiting(code: number, strict: number, call = 'ship_run_wait_ci 42 a/b 900 u') {
+  return waitWithNode(`exit ${code}`, strict, call);
+}
+
+/** ship_run_wait_ci with a stand-in `node` whose body is `node`; the caller's shell is its $PPID. */
+function waitWithNode(node: string, strict: number, call = 'ship_run_wait_ci 42 a/b 900 u') {
   const binDir = mkdtempSync(join(tmpdir(), 'wait-ci-strict-node-'));
-  writeFileSync(join(binDir, 'node'), `#!/bin/sh\nexit ${code}\n`, { mode: 0o755 });
+  writeFileSync(join(binDir, 'node'), `#!/bin/sh\n${node}\n`, { mode: 0o755 });
   return spawnSync(
     '/bin/bash',
     [
@@ -784,6 +822,38 @@ describe('--wait-ci-strict', () => {
     const r = waitWithNodeExiting(code, strict);
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout.trim()).toBe(expected);
+  });
+
+  it.each([
+    ['keeps a HUP status under strict', 1, 'status=129'],
+    ['still exits 0 without strict', 0, 'status=0'],
+  ])('a signal that ends the wait %s', (_label, strict, expected) => {
+    const r = waitWithNode('kill -HUP $PPID; exit 129', strict);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout.trim()).toBe(expected);
+    expect(r.stderr).toContain('ci-outcome=not-run pr=42 reason=interrupted');
+  });
+
+  it('skips the wait when the signal came first, and keeps the first signal', () => {
+    const call =
+      'ship_settled_signal_traps; kill -INT $$; kill -TERM $$; ship_run_wait_ci 42 a/b 900 u';
+    const r = waitWithNode('echo NODE_RAN >&2', 1, call);
+    expect(r.stdout.trim()).toBe('status=130');
+    expect(r.stderr).not.toContain('NODE_RAN');
+    expect(r.stderr).toContain('ci-outcome=not-run pr=42 reason=interrupted');
+  });
+
+  it('ends the wait when only its shell is signalled', () => {
+    // A foreground wait would defer the trap until this node exits 0, keeping its verdict instead.
+    const r = waitWithNode('kill -INT $PPID; exec sleep 30', 1);
+    expect(r.stdout.trim()).toBe('status=130');
+    expect(r.stderr).toContain('ci-outcome=not-run pr=42 reason=interrupted');
+  });
+
+  it('leaves the verdict alone when the signal lands after the wait', () => {
+    const r = waitWithNode('exit 0', 1, 'ship_run_wait_ci 42 a/b 900 u; kill -TERM $$');
+    expect(r.stdout.trim()).toBe('status=0');
+    expect(r.stderr).not.toContain('reason=interrupted');
   });
 
   it('records 5 for a wait that could not run', () => {
