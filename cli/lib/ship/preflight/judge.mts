@@ -29,6 +29,8 @@ type Reachability =
   | 'unauthenticated'
   | 'rate-limited'
   | 'unavailable'
+  // Plan limit spent with usable credits: the read cannot say whether exec will be served.
+  | 'unverified'
   | 'unknown';
 
 export interface ModelStatus {
@@ -42,7 +44,7 @@ export interface ModelStatus {
   usedPercent?: number;
   /** The window that percentage is measured over, so "80% used" carries its own urgency. */
   windowMins?: number;
-  /** Plan limit spent but credits serve the calls, so `ok` must not read as plain headroom. */
+  /** Plan limit spent with usable credits — the raw reading behind an `unverified` state. */
   onCredits?: true;
   /** The account's plan, when the provider named one. */
   planType?: string;
@@ -143,7 +145,7 @@ export async function reachabilityOf(
         status.served = codexLimits?.visibleModels;
       } else if (codexLimits?.reached) status.state = 'rate-limited';
       else if (codexLimits) {
-        status.state = 'ok';
+        status.state = codexLimits.onCredits ? 'unverified' : 'ok';
         if (codexLimits.onCredits) status.onCredits = true;
       }
       // else: the RPC said nothing this version understands — 'unknown', reported as such.
@@ -204,18 +206,18 @@ export function renderPreflight(
     const suffix = detail.length > 0 ? ` (${detail.join(', ')})` : '';
     const verdict =
       s.state === 'ok'
-        ? s.onCredits
-          ? 'reachable — plan limit reached, running on credits'
-          : 'reachable'
-        : s.state === 'absent'
-          ? `\`${s.bin}\` not installed or not on PATH`
-          : s.state === 'unauthenticated'
-            ? `\`${s.bin}\` not authenticated`
-            : s.state === 'rate-limited'
-              ? 'EXHAUSTED — USAGE LIMIT REACHED'
-              : s.state === 'unavailable'
-                ? `NOT AVAILABLE ON THIS ACCOUNT (plan ${s.planType})`
-                : 'not verified';
+        ? 'reachable'
+        : s.state === 'unverified'
+          ? 'plan limit reached — credit service unverified'
+          : s.state === 'absent'
+            ? `\`${s.bin}\` not installed or not on PATH`
+            : s.state === 'unauthenticated'
+              ? `\`${s.bin}\` not authenticated`
+              : s.state === 'rate-limited'
+                ? 'EXHAUSTED — USAGE LIMIT REACHED'
+                : s.state === 'unavailable'
+                  ? `NOT AVAILABLE ON THIS ACCOUNT (plan ${s.planType})`
+                  : 'not verified';
     lines.push(`  ${s.role}: ${s.model} via ${s.bin} — ${verdict}${suffix}`);
   }
 
@@ -243,9 +245,11 @@ export function renderPreflight(
   for (const model of new Set(refused.map((s) => s.model))) {
     const rows = refused.filter((s) => s.model === model);
     const knobs = rows.map((s) => `${s.role} via ${ROLE_ENV[s.role]}`).join('; ');
+    const served = rows[0].served ?? [];
+    const target =
+      served.length > 0 ? ` — to a model the account serves: ${served.join(', ')}` : '';
     lines.push(
-      `   This plan does not serve ${model}, so re-running will not help. Move ${knobs} — to a ` +
-        `model the account serves: ${rows[0].served?.join(', ')}.`,
+      `   This plan does not serve ${model}, so re-running will not help. Move ${knobs}${target}.`,
     );
   }
   lines.push(`   ${remedyLine(statuses)}`);
@@ -268,7 +272,7 @@ export function remedyLine(statuses: ModelStatus[]): string {
 }
 
 const darkStatuses = (statuses: ModelStatus[]): ModelStatus[] =>
-  statuses.filter((s) => s.state !== 'ok' && s.state !== 'unknown');
+  statuses.filter((s) => s.state !== 'ok' && s.state !== 'unverified' && s.state !== 'unknown');
 
 /** The one dark judge CLI, or undefined when both are dark. */
 function singleDarkBin(blocked: ModelStatus[]): { bin: string; present: boolean } | undefined {
