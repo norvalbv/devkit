@@ -104,6 +104,11 @@ function candidateAssets(dir, arm, baseline, historicalInstructions) {
     rmSync(temp, { recursive: true, force: true });
   }
 }
+/** Each protocol source file's bytes at its sourceRevision, a commit this repository no longer holds. */
+export function sourceSnapshot(dir) {
+  const text = readFileSync(path.join(dir, 'source-snapshot.json'), 'utf8');
+  return z.record(z.string(), z.string()).parse(JSON.parse(text));
+}
 /** Hashes validate consistency, never provenance truth or a claimed clean label. */
 export function loadComparison(root = ROOT) {
   const dir = path.join(root, PREPARATION),
@@ -118,12 +123,9 @@ export function loadComparison(root = ROOT) {
     throw new Error('effective correctness model differs from registration');
   const historicalSources = {};
   const historicalInstructions = {};
+  const snapshot = sourceSnapshot(dir);
   for (const [file, hash] of Object.entries(protocol.sourceFilesSha256)) {
-    const old = execFileSync('git', ['show', `${protocol.sourceRevision}:${file}`], {
-      cwd: root,
-      timeout: 30_000,
-      maxBuffer: 10 * 1024 * 1024,
-    });
+    const old = Buffer.from(snapshot[file] ?? '');
     match(old, hash, `preparation source ${file}`);
     const asset = INSTRUCTION_ASSETS.get(file);
     if (asset) historicalInstructions[asset] = old.toString('utf8');
