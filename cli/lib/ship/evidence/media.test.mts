@@ -36,12 +36,42 @@ const URL_A = 'https://github.com/user-attachments/assets/aaaa-1111';
 const URL_B = 'https://github.com/user-attachments/assets/bbbb-2222';
 
 describe('planMedia: what is apt to upload', () => {
-  it("takes each passing flow's video and final screenshot, not its other screenshots", () => {
-    const entries = [entry('click.webm'), entry('click.start.png'), entry('click.final.png')];
+  it("takes each passing flow's video and every still its run took", () => {
+    const entries = [
+      entry('click.start.png'),
+      entry('click.webm'),
+      entry('click.step1-go.png', { flow: 'click' }),
+    ];
     expect(planMedia(entries, eligible, null).picks.map((e) => e.file)).toEqual([
       'click.webm',
-      'click.final.png',
+      'click.start.png',
+      'click.step1-go.png',
     ]);
+  });
+
+  /** A flow of seven steps: its video and seven stills. */
+  const sevenSteps = (flow: string) => [
+    entry(`${flow}.webm`),
+    ...Array.from({ length: 7 }, (_, i) => entry(`${flow}.step${i + 1}-x.png`, { flow })),
+  ];
+
+  it('uploads two seven-step flows whole, shown flow by flow', () => {
+    const plan = planMedia([...sevenSteps('a'), ...sevenSteps('b')], eligible, null);
+    expect(plan.picks.map((e) => e.file)).toEqual(
+      [...sevenSteps('a'), ...sevenSteps('b')].map((e) => e.file),
+    );
+    expect(plan.notes).toEqual([]);
+  });
+
+  it("never drops a flow's video for another flow's stills, and trims the stills evenly", () => {
+    const flows = ['a', 'b', 'c'];
+    const plan = planMedia(flows.flatMap(sevenSteps), eligible, null);
+    const picked = (flow: string, kind: string) =>
+      plan.picks.filter((e) => e.flow === flow && e.kind === kind).length;
+    expect(flows.map((flow) => picked(flow, 'video'))).toEqual([1, 1, 1]);
+    expect(flows.map((flow) => picked(flow, 'screenshot'))).toEqual([5, 4, 4]);
+    expect(plan.notes).toHaveLength(8);
+    expect(plan.notes[0]).toBe('`b.step5-x.png`: not uploaded, over 16 files');
   });
 
   it('falls back to at most four screenshots when no flow has a video', () => {
@@ -81,13 +111,13 @@ describe('planMedia: what is apt to upload', () => {
     ]);
   });
 
-  it('leaves out files over the size limit and past six files, naming each', () => {
+  it('leaves out files over the size limit and past sixteen files, naming each', () => {
     const big = entry('big.webm', { flow: 'big', bytes: 9.5 * MB });
-    const many = Array.from({ length: 7 }, (_, i) => entry(`f${i}.webm`, { flow: `f${i}` }));
+    const many = Array.from({ length: 17 }, (_, i) => entry(`f${i}.webm`, { flow: `f${i}` }));
     const plan = planMedia([big, ...many], eligible, null);
-    expect(plan.picks).toHaveLength(6);
+    expect(plan.picks).toHaveLength(16);
     expect(plan.notes[0]).toBe('`big.webm`: not uploaded, 9.5 MB is over the 9.0 MB limit');
-    expect(plan.notes[1]).toBe('`f6.webm`: not uploaded, over 6 files');
+    expect(plan.notes[1]).toBe('`f16.webm`: not uploaded, over 16 files');
   });
 
   it('says a UI change recorded nothing only when there is no capture at all', () => {

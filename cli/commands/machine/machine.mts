@@ -97,8 +97,11 @@ DEVKIT_MACHINE_*. guard.config.json may be committed, so it holds no env: set an
 argv (["env", "DB={data}/app.db", "next", "dev", "-p", "{port}"]) and keep secrets in your own
 environment, which the app inherits. \`up\` waits until the app answers HTTP on its port.
 
-A flow is \`export default async ({ page, url, shot, exec }) => { … }\`: assert with
-node:assert/strict and locator waits, call \`shot('name')\` for a screenshot. With "devtools",
+A flow is \`export default async ({ page, url, step, shot, exec }) => { … }\`, written as
+\`await step('what happens', async () => { … }, { focus: locator })\`: each step is captioned, held
+on its result and saved as a still, with \`focus\` marked (\`mark: 'dim'\` darkens the rest
+instead of outlining it). A flow with no step fails. Assert with node:assert/strict and locator
+waits; \`shot('name')\` takes an extra still. With "devtools",
 \`page\` is your app's window and \`url\` its own address. In full mode \`page\` is
 whatever answers DevTools on the desktop (its Chromium, or an app started with
 --remote-debugging-port=9222 after \`exec -- pkill chromium\`), \`exec([...])\` returns a desktop
@@ -301,6 +304,7 @@ async function up(root: string, rest: string[]): Promise<number> {
 function report(result: RunResult, evidence: string): number {
   for (const entry of result.entries)
     console.log(`${entry.kind}: ${join(evidence, entry.file)} (${entry.bytes} bytes)`);
+  if (result.warning) say(result.warning);
   if (result.entries.some((entry) => entry.kind === 'video' && entry.bytes > VIDEO_CAP))
     say('the video is over the 9 MB a PR attaches; shorten the flow so it can be uploaded');
   if (result.passed)

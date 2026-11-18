@@ -55,7 +55,7 @@ function flowFile(name: string, body: string): string {
   const head = "import assert from 'node:assert/strict';";
   writeFileSync(
     file,
-    `${head}\nexport default async ({ page, url, shot, exec }) => {\n${body}\n};\n`,
+    `${head}\nexport default async ({ page, url, shot, exec, step }) => {\n${body}\n};\n`,
   );
   return file;
 }
@@ -68,6 +68,7 @@ const run = (flowPath: string) =>
     profile: '',
     evidence: evidenceDir(root),
     box,
+    pace: 0.05,
   });
 
 beforeAll(async () => {
@@ -100,10 +101,12 @@ describe.runIf(dockerReady)('machine box (full mode, real Docker)', () => {
     const flow = flowFile(
       'click',
       [
+        "await step('Click with xdotool', async () => {",
         'await page.goto(url);',
         "exec(['xdotool', 'mousemove', '200', '250', 'click', '1']);",
         "await page.locator('#t', { hasText: 'clicked' }).waitFor({ timeout: 10_000 });",
         "assert.match(exec(['uname', '-s']), /Linux/);",
+        "}, { focus: page.locator('#t') });",
       ].join('\n'),
     );
     const result = await run(flow);
@@ -111,7 +114,7 @@ describe.runIf(dockerReady)('machine box (full mode, real Docker)', () => {
     expect(result).toMatchObject({ flow: 'click', passed: true });
     expect(readManifest(evidenceDir(root)).map(({ file, kind }) => ({ file, kind }))).toEqual([
       { file: 'click.mp4', kind: 'video' },
-      { file: 'click.final.png', kind: 'screenshot' },
+      { file: 'click.step1-click-with-xdotool.png', kind: 'screenshot' },
     ]);
   }, 120_000);
 
@@ -167,7 +170,7 @@ describe.runIf(dockerReady)('machine box (full mode, real Docker)', () => {
   }, 60_000);
 
   it("refuses a second run of a flow being recorded, leaving the first one's video and the flow's earlier capture whole", async () => {
-    const flow = flowFile('dup', 'await page.goto(url);');
+    const flow = flowFile('dup', "await step('Open', async () => { await page.goto(url); });");
     expect((await run(flow)).passed).toBe(true);
     const earlier = readManifest(evidenceDir(root)).filter((e) => e.flow === 'dup');
     await startRecording(box.name, 'dup');
