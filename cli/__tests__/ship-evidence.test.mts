@@ -549,27 +549,32 @@ describe('devkit ship evidence block', () => {
     dirs.push(dirname(sink));
     const ship = (argv: string[], note: string) =>
       bash(repo.dir, { ...repo.env, DEVKIT_GATE_EVENTS: sink, NOTE: note }, argv, 'mine\n');
-    const note = (head: string, text: string) =>
-      `- **correctness-reviewer** at \`${head.slice(0, 12)}\`: ${text}`;
+    const shown = (text: string) => `— ${text} · <sub>correctness</sub>\n`;
+    const at = (head: string) => `<code>${head.slice(0, 12)}</code>`;
     const reship = (text: string) => [reshipScript, 'feat/notes', 'fix', '--pr', '--', text];
 
     write(repo.dir, { 'src/value.mjs': FIXED });
     const shipped = ship([scriptPath, 'feat/notes', 'fix', 'src/value.mjs'], 'value.mjs:1 — first');
     expect(shipped.status, shipped.stderr).toBe(0);
-    const first = note(tipOf(repo.bare, 'feat/notes'), 'value.mjs:1 — first');
+    const firstTip = tipOf(repo.bare, 'feat/notes');
     expect(readFileSync(repo.state, 'utf8')).toMatch(
       /^mine\n\n<!-- devkit:evidence:begin -->\n<!-- devkit:evidence:notes:begin -->/,
     );
-    expect(readFileSync(repo.state, 'utf8')).toContain('<summary>💬 <b>Reviewer notes</b>');
-    expect(readFileSync(repo.state, 'utf8')).toContain(`${first}\n`);
+    expect(readFileSync(repo.state, 'utf8')).toContain(
+      `<summary>💬 <b>Reviewer notes</b> · 1 note at ${at(firstTip)}</summary>`,
+    );
+    expect(readFileSync(repo.state, 'utf8')).toContain(shown('first'));
 
     // An append re-ship judged only its delta: its note joins the first, which stays.
     write(repo.dir, { 'src/value.mjs': `${FIXED}// two\n` });
     const second = ship(reship('src/value.mjs'), 'value.mjs:2 — second');
     expect(second.status, second.stderr).toBe(0);
     const body = readFileSync(repo.state, 'utf8');
-    expect(body).toContain(first);
-    expect(body).toContain(note(tipOf(repo.bare, 'feat/notes'), 'value.mjs:2 — second'));
+    expect(body).toContain(shown('first'));
+    expect(body).toContain(shown('second'));
+    expect(body).toContain(
+      `· 1 note at ${at(tipOf(repo.bare, 'feat/notes'))} · 1 at earlier commits</summary>`,
+    );
     expect(body.match(/<!-- devkit:evidence:notes:begin -->/g)).toHaveLength(1);
 
     // A re-ship whose reviewers raised nothing touches the body not at all.
@@ -620,7 +625,9 @@ describe('devkit ship evidence block', () => {
     });
     expect(r.status, r.stderr).toBe(0);
     const body = readFileSync(gh.state, 'utf8');
-    expect(body).toContain(`- **r** at \`${head.slice(0, 12)}\`: new.ts:1 — kept`);
+    expect(body).toContain(
+      `- [L1](https://github.com/acme/app/blob/${head}/new.ts#L1) — kept · <sub>r</sub>`,
+    );
     expect(body).not.toContain('stale');
     expect(body.startsWith('prose\n\n')).toBe(true);
   }, 60_000);
