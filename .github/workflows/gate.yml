@@ -128,6 +128,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Same Node as the gate job. The compile cache below stores type-stripped source only from Node 24.
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -151,9 +156,17 @@ jobs:
         # The runner is dedicated, unlike a dev box: 3 workers on its 4 vCPUs instead of '50%' = 2.
         env:
           VITEST_MAX_WORKERS: 3
+          # Ship tests start dozens of node processes each; the cache spares every start after the
+          # first from recompiling the same source.
+          NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
           SHARD: ${{ matrix.shard }}
           DEVKIT_INSTALL_LAYOUTS: 1
         run: bun run test:run --shard="$SHARD/4" --reporter=blob --reporter=default
+
+      # An empty or missing directory means the suite ran on a Node that cannot cache this source.
+      - name: Compile cache size
+        if: always()
+        run: du -sh "$RUNNER_TEMP/node-compile-cache" || echo "no compile cache was written"
 
       # download-artifact takes the newest artifact per name across run attempts, so a shard that
       # wrote no blob must still upload something, or a re-run would merge an older attempt's blob.
