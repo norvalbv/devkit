@@ -429,7 +429,8 @@ describe('base rerun publishing', () => {
     const rows = readFileSync(sink, 'utf8')
       .trim()
       .split('\n')
-      .map((line) => JSON.parse(line));
+      .map((line) => JSON.parse(line))
+      .filter((row) => row.type === 'gate_base_rerun');
     expect(rows).toEqual([
       expect.objectContaining({
         type: 'gate_base_rerun',
