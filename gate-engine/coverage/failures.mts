@@ -79,6 +79,12 @@ export interface RunDiagnosis {
   collection?: CollectionError[];
 }
 
+/**
+ * What publishCoverage did. `kept` = a sibling's report survived us; `cleared` = ours was removed.
+ * Distinct on purpose — see the doc on publishCoverage (produce.mts).
+ */
+export type PublishOutcome = 'published' | 'cleared' | 'kept';
+
 interface VitestAssertion {
   status?: string;
   fullName?: string;
@@ -295,6 +301,24 @@ export function formatDiagnosis(
     );
   }
   return lines;
+}
+
+/** A failed run devkit has no report of: the exit code and the artifact's fate, never a guessed cause. */
+export function formatUndiagnosedExit(run: {
+  code: number;
+  interrupted: boolean;
+  diagnosis: RunDiagnosis | null;
+  outcome: PublishOutcome;
+}): string[] {
+  if (run.code === 0 || run.interrupted || run.diagnosis) return [];
+  const fate =
+    run.outcome === 'cleared'
+      ? 'the previous coverage artifact was removed'
+      : 'no coverage artifact was published from this run';
+  return [
+    `🚫 vitest exited ${run.code}, and devkit has no report of this run to name why — ${fate}.`,
+    '   The cause is in the output above, or in the report you directed vitest to.',
+  ];
 }
 
 /** Whether the named files are yours. Silent when git cannot answer: unknown is never "none". */

@@ -1371,6 +1371,48 @@ process.exit(99);`,
     writeFileSync(join(root, COVERAGE_FILE), '{"from-an-earlier-green-run.ts":{}}');
   };
 
+  // No devkit report to read (diagnosis off, or the consumer's own reporter): the closing lines
+  // still say how vitest exited and what became of the artifact, and claim no cause.
+  it('ends an undiagnosed failure on its exit code and the removed artifact', () => {
+    const root = makeRoot();
+    scriptedVitest(root, ['crash']);
+    seedArtifact(root);
+
+    const result = run(root, [], { DEVKIT_COVERAGE_NO_DIAGNOSIS: '1' });
+
+    expect(result.status).toBe(99);
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+    expect(result.stderr).toMatch(/the rescue cannot be reported/);
+    const [closing] = result.stderr.trimEnd().split('\n').slice(-2);
+    expect(closing).toMatch(/vitest exited 99, .* the previous coverage artifact was removed\.$/);
+  });
+
+  it('ends an undiagnosed failure under a consumer reporter on what was not published', () => {
+    const root = makeRoot();
+    scriptedVitest(root, ['crash']);
+
+    const result = run(root, ['--', '--reporter=dot']);
+
+    expect(result.status).toBe(99);
+    const [closing] = result.stderr.trimEnd().split('\n').slice(-2);
+    expect(closing).toMatch(
+      /vitest exited 99, .* no coverage artifact was published from this run/,
+    );
+  });
+
+  it('names the removal pass 1 made when an undiagnosed second pass ends the run', () => {
+    const root = makeRoot();
+    scriptedVitest(root, ['timeout', 'crash']);
+    seedArtifact(root);
+
+    const result = run(root);
+
+    expect(result.status).toBe(99);
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+    const [closing] = result.stderr.trimEnd().split('\n').slice(-2);
+    expect(closing).toMatch(/vitest exited 99, .* the previous coverage artifact was removed\.$/);
+  });
+
   it('publishes from a second pass given a raised budget, and reports the rescue as flaky', () => {
     const root = makeRoot();
     const calls = scriptedVitest(root, ['timeout', 'green']);
