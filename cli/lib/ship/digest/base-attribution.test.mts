@@ -152,7 +152,11 @@ function fixture(options: FixtureOptions = {}) {
 
 /** The pid of the `--guard` process `parent` spawned, read from the process table. */
 function guardianOf(parent: number): number {
-  const rows = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' });
+  // A busy machine's process table outgrows execFileSync's 1 MB default buffer (ENOBUFS).
+  const rows = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,command='], {
+    encoding: 'utf8',
+    maxBuffer: 64e6,
+  });
   const row = rows
     .split('\n')
     .map((line) => line.trim().split(WHITESPACE_RE))
