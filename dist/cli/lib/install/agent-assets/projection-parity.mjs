@@ -1,21 +1,22 @@
 /**
  * Projection parity — does an agent surface still hold exactly what the sync writer would put there?
  *
- * `skills/` and `agents/` are sources of truth; `.claude/…`, `.cursor/…` and `.agents/…` are
- * projections of them. #405 and #395 each edited a source without re-running the writer, and the
+ * `skills/`, `agents/` and `agents-hooks/` are sources of truth; the provider dirs are projections
+ * of them. #405 and #395 each edited a source without re-running the writer, and the
  * projections served deleted scripts and a stale MCP tool profile for days. The recorded mitigation
  * (manifest sha256 + doctor) cannot catch it: doctor's asset check is advisory-only in self-host.
  *
  * This is the READER half of that contract, deliberately kept out of the test file so it is
  * typechecked (`tsconfig.json` excludes `**\/*.test.mts`) and can be exercised against fixtures.
- * Enumeration and selection reuse the writers' own `walk` / `listAgents` / `skillNamesForSelection`
- * rather than re-deriving them — reader and writer drifted apart once already (components.mts:346).
+ * Enumeration and selection reuse the writers' own `walk`, `listAgents`, `skillNamesForSelection`
+ * and `selectedHookAssets` rather than re-deriving them: reader and writer drifted apart once.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { listAgents } from '../../../commands/sync/sync-agents.mjs';
 import { walk } from '../../../commands/sync/sync-skills.mjs';
 import { skillNamesForSelection } from '../../components.mjs';
+import { selectedHookAssets } from '../hook-registration-ledger/selection.mjs';
 import { agentAssetDir, projectAgentAsset, projectedAssetRel } from './agent-assets.mjs';
 /** The working tree, read the way the sync writers see it. */
 export function fsReader(root) {
@@ -39,6 +40,10 @@ export function projectedLogicals({ root, kind, srcDir, selection = {}, reader, 
             ? reader.list(srcDir).filter((rel) => !rel.includes('/') && rel.endsWith('.md'))
             : listAgents(join(root, srcDir));
     const all = (reader ?? fsReader(root)).list(srcDir);
+    if (kind === 'hooks') {
+        const selected = new Set(selectedHookAssets(selection).scripts);
+        return all.filter((rel) => selected.has(rel));
+    }
     const names = new Set(skillNamesForSelection([...new Set(all.map((rel) => rel.split('/')[0]))], selection));
     return all.filter((rel) => names.has(rel.split('/')[0]));
 }

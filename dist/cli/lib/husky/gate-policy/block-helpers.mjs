@@ -17,6 +17,10 @@ __dk_block_deterministic() {
     dk_review_failed=1
     dk_review_failed_gates="$dk_review_failed_gates $1"
 }
+__dk_gate_could_not_run() {
+    [ -x "\${__dk_package_bin_dir:-}/guard-review" ] &&
+        __dk_no_git_env "$__dk_package_bin_dir/guard-review" record-gate "$1" --could-not-run "$2" \${3:+"$3"} >/dev/null 2>&1 || true
+}
 __dk_block_ai() {
     [ "\${DEVKIT_RUN_MODE:-}" = review ] || exit 1
     dk_review_failed=1

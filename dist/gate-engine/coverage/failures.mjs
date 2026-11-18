@@ -223,6 +223,18 @@ export function formatDiagnosis(diagnosis, cwd, staged) {
     }
     return lines;
 }
+/** A failed run devkit has no report of: the exit code and the artifact's fate, never a guessed cause. */
+export function formatUndiagnosedExit(run) {
+    if (run.code === 0 || run.interrupted || run.diagnosis)
+        return [];
+    const fate = run.outcome === 'cleared'
+        ? 'the previous coverage artifact was removed'
+        : 'no coverage artifact was published from this run';
+    return [
+        `🚫 vitest exited ${run.code}, and devkit has no report of this run to name why — ${fate}.`,
+        '   The cause is in the output above, or in the report you directed vitest to.',
+    ];
+}
 /** Whether the named files are yours. Silent when git cannot answer: unknown is never "none". */
 function stagedSentence(files, staged, cwd) {
     const mine = stagedIntersection(files, staged);

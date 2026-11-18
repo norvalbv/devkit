@@ -1,3 +1,6 @@
+// Frozen review runtime: local imports must be listed in PACKAGED_REVIEW_RUNTIME_MODULE_STEMS.
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 /** In fallow's discovery precedence; the baseline gate reads the first that exists. Here, not in
  * the gate-input registry that lists them, because the frozen review runtime cannot load config. */
 export const FALLOW_CONFIG_FILES = [
@@ -6,6 +9,10 @@ export const FALLOW_CONFIG_FILES = [
     'fallow.toml',
     '.fallow.toml',
 ];
+/** The config fallow loads from `dir`: the first `FALLOW_CONFIG_FILES` entry present there. */
+export function firstFallowConfig(dir) {
+    return FALLOW_CONFIG_FILES.map((file) => join(dir, file)).find((file) => existsSync(file));
+}
 const DROP_FALLOW_VALUE = Symbol('drop-fallow-value');
 const HUNK_HEADER_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm;
 const LINE_RANGE_RE = /^(\d+)-(\d+)$/;

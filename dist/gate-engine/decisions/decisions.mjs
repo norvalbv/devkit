@@ -53,11 +53,11 @@ import { pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
 import { amendDecision } from './amend.mjs';
 import { writeFileAtomic } from './atomic-write.mjs';
-import { currentTarget, hasTargetFields, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, sanitizeCell, today, upsertRow, whyHook, } from './decision-format.mjs';
+import { currentTarget, hasTargetFields, parseDecision, parseIndex, renderDecision, renderIndex, renderTarget, sanitizeCell, today, upsertRow, whyHook, } from './decision-format.mjs';
 import { warnNearestAxes } from './dedupe.mjs';
 import { runDrift } from './drift.mjs';
 import { assertFullNotJson, printFull, printRanked, renderSpine } from './recall/full-print.mjs';
-import { noteTextWithRelation, validateTargetSupersedes } from './recall/note-relations.mjs';
+import { spliceLiveNote, validateTargetSupersedes } from './recall/note-relations.mjs';
 import { rankAxes as rankAxesIn, reindexAll } from './recall/retrieval.mjs';
 export { currentTarget, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, upsertRow, } from './decision-format.mjs';
 // The recall path lives in retrieval.mts; re-exported so consumers and tests keep one entry point.
@@ -156,7 +156,7 @@ function addTarget(slug, o, p) {
     writeFileAtomic(p.indexPath, renderIndex(rows));
     console.log(`Recorded Target "${slug}" (${date}).`);
 }
-// Cheap convergence note under the current Target. INDEX untouched (a note is not a ruling).
+// Cheap convergence note at the end of the live ruling's section. INDEX untouched (not a ruling).
 function addNote(slug, o, p) {
     if (!o.note) {
         console.error('Usage: guard-decisions add <slug> --note "…"   (or --target … for an epic Target)');
@@ -170,8 +170,7 @@ function addNote(slug, o, p) {
     }
     const date = today();
     const parsed = parseDecision(readFileSync(file, 'utf8'));
-    const note = noteTextWithRelation(o.note, o.supersedes, parsed.body, slug);
-    const body = `${parsed.body.replace(TRAILING_WS_RE, '')}\n${renderNote(date, note)}\n`;
+    const body = spliceLiveNote(parsed.body, date, o.note, o.supersedes, slug);
     writeFileAtomic(file, renderDecision({ slug, created: parsed.fm.created || date }, body));
     console.log(`Noted on "${slug}" (${date}).`);
 }
@@ -301,7 +300,7 @@ export async function main(argv) {
             break;
         }
         case 'rescope': {
-            // Append-only Scope correction: reuses addNote's append path (never touches the Target's own
+            // Append-only Scope correction: a note addNote places in the live ruling's section.
             const [slug, ...rest] = args;
             const scope = flag(rest, '--scope');
             const reason = flag(rest, '--reason');

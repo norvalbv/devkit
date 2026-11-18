@@ -69,6 +69,7 @@ export function emitProvenance(p) {
         state: p.state,
         production_count: p.state === 'drift' ? p.production.length : 0,
         test_count: p.state === 'drift' ? p.tests.length : 0,
+        exempt_count: p.state === 'unknown' ? 0 : p.exempted.length,
         detail: p.state === 'unknown' ? p.reason : p.manifest.runId,
     });
 }

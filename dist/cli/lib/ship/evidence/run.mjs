@@ -24,7 +24,7 @@ import { inconclusive, notRun, outcomeFromRegression } from './outcome.mjs';
 import { publishBody, readPull } from './pr-body.mjs';
 import { publishMedia, withPrEvidenceLock } from './publish-media.mjs';
 import { buildRedCommit, classifyChange, prBase, treeOf } from './red-ref.mjs';
-import { noteLines, upsertNotes } from './reviewer-notes.mjs';
+import { reviewerNotes, upsertNotes } from './reviewer-notes.mjs';
 import { withUiItem } from './ui-item.mjs';
 /** Ship waits out a `devkit machine attach` on the same PR, whose upload is bounded at 300 s. */
 const LOCK_WAIT_MS = 330_000;
@@ -213,12 +213,12 @@ export async function publish(args) {
 /** This ship's reviewer advisories into the PR body; a ship whose reviewers raised none makes no gh call. */
 function publishNotes(repo, pr, head, replace) {
     const events = readShipEvents(telemetrySink() ?? '', process.env.DEVKIT_SHIP_ID ?? '');
-    const lines = noteLines(events, head);
-    if (!lines.length)
+    const notes = reviewerNotes(events, head);
+    if (!notes.length)
         return;
-    const write = () => publishBody(repo, pr, head, (body) => upsertNotes(body, lines, replace));
+    const write = () => publishBody(repo, pr, head, (body) => upsertNotes(body, notes, replace, repo));
     const result = withPrEvidenceLock(process.cwd(), { repo, pr }, write, LOCK_WAIT_MS);
-    console.error(`reviewer notes: ${lines.length} advisory row(s) [PR body ${result}]`);
+    console.error(`reviewer notes: ${notes.length} advisory row(s) [PR body ${result}]`);
 }
 /** This ship attempt's screenshot reminder, read from its own gate events; null when it was quiet. */
 function uiEvidenceDetail(env) {

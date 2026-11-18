@@ -3,7 +3,7 @@
 // auto-lower a baseline during a commit and need the same two primitives, so they live here as
 // ONE code path rather than duplicated per ratchet.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { lstatSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { readGitPaths } from './git-paths.mjs';
 import { commitIndexEnv, commitIndexKind, commitIndexTree } from './commit-index.mjs';
@@ -334,6 +334,15 @@ export function gitPrefix(root) {
 /** Freeze the pending index into one immutable tree object without changing the index or worktree. */
 export function indexTreeRef(root) {
     return commitIndexTree(root).tree;
+}
+/** A root-relative working-tree file as UTF-8, or null when it cannot be read. */
+export function workingTreeText(root, relativePath) {
+    try {
+        return readFileSync(join(root, relativePath), 'utf8');
+    }
+    catch {
+        return null;
+    }
 }
 /** Read a CWD-relative UTF-8 blob from a Git tree. Missing paths or refs return null. */
 export function treeTextAtRef(root, ref, relativePath) {

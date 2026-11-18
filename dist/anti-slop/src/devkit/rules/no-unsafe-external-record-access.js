@@ -1,46 +1,103 @@
 import { defineRule } from '@oxlint/plugins';
-import { appendMutationEvidence, branchConditions, externalOrigin, hasPotentialMutationWithin, isGlobalMemberCall, isUnaryNot, precedingTerminatingGuards, sameExpression, unwrapExpression, } from '../shared/external-records.js';
-function literalPropertyKey(expression) {
-    const candidate = unwrapExpression(expression);
-    if (candidate.type === 'TemplateLiteral' && candidate.expressions.length === 0) {
-        return candidate.quasis[0]?.value.cooked ?? null;
-    }
-    if (candidate.type === 'UnaryExpression' &&
-        (candidate.operator === '+' || candidate.operator === '-')) {
-        const argument = unwrapExpression(candidate.argument);
-        if (argument.type === 'Literal' && argument.value === Number(argument.value)) {
-            const value = Number(argument.value);
-            return String(candidate.operator === '-' ? -value : value);
-        }
-        if (candidate.operator === '-' &&
-            argument.type === 'Literal' &&
-            'bigint' in argument) {
-            return String(-argument.value);
-        }
-    }
-    if (candidate.type !== 'Literal')
-        return null;
-    if ('regex' in candidate)
-        return null;
-    return String(candidate.value);
+import { appendMutationEvidence, branchConditions, externalOrigin, hasPotentialMutationWithin, isFunctionBoundary, isGlobalMemberCall, isTransparentExpression, isUnaryNot, JSON_VALUE_PROTOTYPE_KEYS, literalPropertyKey, memberKey, precedingTerminatingGuards, resolveVariable, sameExpression, stableConstInitializer, unwrapExpression, } from '../shared/external-records.js';
+function rootIdentifier(expression) {
+    let current = unwrapExpression(expression);
+    while (current.type === 'MemberExpression')
+        current = unwrapExpression(current.object);
+    return current.type === 'Identifier' ? current : null;
 }
-const JSON_VALUE_PROTOTYPE_KEYS = new Set([
-    ...[
-        Object.prototype,
-        Array.prototype,
-        String.prototype,
-        Number.prototype,
-        Boolean.prototype,
-    ].flatMap((prototype) => Object.getOwnPropertyNames(prototype)),
-    // `prototype` is not inherited from these values, but allowing it beside `constructor` makes the
-    // classic constructor/prototype pollution path too easy to split across fixed accesses.
-    'prototype',
-]);
-function needsOwnPropertyProof(key, origin) {
-    if (origin !== 'json')
+/** The outermost expression reached from `node` through member objects and transparent wrappers. */
+function chainTop(node) {
+    let current = node;
+    while (current.parent !== null &&
+        ((current.parent.type === 'MemberExpression' && current.parent.object === current) ||
+            isTransparentExpression(current.parent))) {
+        current = current.parent;
+    }
+    return current;
+}
+/** Whether a reference to the record is a setPrototypeOf target or a `__proto__` write or Reflect.set. */
+function setsPrototype(sourceCode, identifier) {
+    const top = chainTop(identifier);
+    const parent = top.parent;
+    return ((top.type === 'MemberExpression' &&
+        memberKey(top) === '__proto__' &&
+        parent?.type === 'AssignmentExpression' &&
+        parent.left === top) ||
+        (parent?.type === 'CallExpression' &&
+            parent.arguments[0] === top &&
+            (isGlobalMemberCall(sourceCode, parent, 'Object', 'setPrototypeOf') ||
+                isGlobalMemberCall(sourceCode, parent, 'Reflect', 'setPrototypeOf') ||
+                (isGlobalMemberCall(sourceCode, parent, 'Reflect', 'set') &&
+                    parent.arguments[1]?.type !== 'SpreadElement' &&
+                    parent.arguments[1] !== undefined &&
+                    literalPropertyKey(parent.arguments[1]) === '__proto__'))));
+}
+/** The variable `object` is rooted at, followed back through const aliases such as `const a = parsed`. */
+function aliasOrigin(sourceCode, object) {
+    const seen = new Set();
+    let root = rootIdentifier(object);
+    while (root !== null) {
+        const variable = resolveVariable(sourceCode, root);
+        if (variable === null || seen.has(variable))
+            break;
+        seen.add(variable);
+        const initializer = stableConstInitializer(variable);
+        root = initializer === null ? null : rootIdentifier(initializer);
+    }
+    return [...seen].at(-1) ?? null;
+}
+/** Whether `object`'s origin, or any variable declared from it or its members, has its prototype set. */
+function prototypeMayChange(sourceCode, object) {
+    const origin = aliasOrigin(sourceCode, object);
+    const family = origin === null ? [] : [origin];
+    for (const variable of family) {
+        for (const { identifier } of variable.references) {
+            const top = chainTop(identifier);
+            if (top.parent?.type === 'VariableDeclarator' && top.parent.init === top) {
+                const aliases = sourceCode.getDeclaredVariables(top.parent);
+                family.push(...aliases.filter((alias) => !family.includes(alias)));
+            }
+        }
+    }
+    return family.some((variable) => variable.references.some((reference) => setsPrototype(sourceCode, reference.identifier)));
+}
+const FUNCTION_PROTOTYPE_KEYS = new Set(Object.getOwnPropertyNames(Function.prototype));
+function needsOwnPropertyProof(sourceCode, object, key, origin) {
+    if (origin !== 'json' && origin !== 'json-inherited')
         return true;
     const literal = literalPropertyKey(key);
-    return literal === null || JSON_VALUE_PROTOTYPE_KEYS.has(literal);
+    return (literal === null ||
+        JSON_VALUE_PROTOTYPE_KEYS.has(literal) ||
+        (origin === 'json-inherited' && FUNCTION_PROTOTYPE_KEYS.has(literal)) ||
+        prototypeMayChange(sourceCode, object));
+}
+/** `child` runs again, or later, after code that follows it: a loop body or an instance field value. */
+function rerunsChild(loop, child) {
+    switch (loop.type) {
+        case 'PropertyDefinition':
+        case 'AccessorProperty':
+            return child === loop.value && !loop.static;
+        case 'ForStatement':
+            return child !== loop.init;
+        case 'ForInStatement':
+        case 'ForOfStatement':
+            return child !== loop.right;
+        case 'WhileStatement':
+        case 'DoWhileStatement':
+            return true;
+        default:
+            return false;
+    }
+}
+function rerunScope(node) {
+    let current = node;
+    while (current.parent !== null && !isFunctionBoundary(current)) {
+        if (rerunsChild(current.parent, current))
+            return current.parent;
+        current = current.parent;
+    }
+    return null;
 }
 function samePropertyKey(sourceCode, left, right) {
     if (sameExpression(sourceCode, left, right))
@@ -85,7 +142,11 @@ function proofRemainsValid(sourceCode, mutations, proof, conditionEnd, continuat
         !hasPotentialMutationWithin(mutations, scope, continuationStart, accessStart));
 }
 function guarded(sourceCode, mutations, node, object, key) {
+    // A proof made outside a loop or field initializer can be stale when the access runs again or later.
+    const rerunStart = rerunScope(node)?.start ?? -1;
     if (branchConditions(node).some(({ condition, truthy, branch }) => {
+        if (condition.start < rerunStart)
+            return false;
         const proof = truthy
             ? truthyHasOwnProof(sourceCode, condition, object, key)
             : falsyHasOwnProof(sourceCode, condition, object, key);
@@ -95,6 +156,8 @@ function guarded(sourceCode, mutations, node, object, key) {
         return true;
     }
     return precedingTerminatingGuards(node).some(({ condition, boundary }) => {
+        if (condition.start < rerunStart)
+            return false;
         const proof = falsyHasOwnProof(sourceCode, condition, object, key);
         return (proof !== null &&
             proofRemainsValid(sourceCode, mutations, proof, condition.end, boundary, node.start, node));
@@ -137,7 +200,7 @@ export const noUnsafeExternalRecordAccessRule = defineRule({
                     const includeRecordParameters = Object(context.options?.[0]).includeRecordParameters === true;
                     const origin = externalOrigin(context.sourceCode, node.object, includeRecordParameters);
                     if (origin !== null &&
-                        needsOwnPropertyProof(node.property, origin) &&
+                        needsOwnPropertyProof(context.sourceCode, node.object, node.property, origin) &&
                         !guarded(context.sourceCode, mutations, node, node.object, node.property)) {
                         context.report({
                             node,

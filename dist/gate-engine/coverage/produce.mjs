@@ -30,7 +30,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, } fro
 import { basename, join } from 'node:path';
 import { emitGateEvent } from '../judge/gate-events.mjs';
 import { readClearMarker, removeClearMarker, writeClearMarker } from './clear-marker/store.mjs';
-import { formatDiagnosis, formatRerunNotice, formatRerunRescue, markerCause, passEnv, raisedTimeoutMs, readDiagnosis, RESULTS_NAME, RETRY_CONDITION, UNHANDLED_REPORTER, } from './failures.mjs';
+import { formatDiagnosis, formatRerunNotice, formatRerunRescue, formatUndiagnosedExit, markerCause, passEnv, raisedTimeoutMs, readDiagnosis, RESULTS_NAME, RETRY_CONDITION, UNHANDLED_REPORTER, } from './failures.mjs';
 import { ownsReporter, ownsRetry, ownsTimeoutBudget, resolveVitest, runVitestDetailed, } from './vitest-cli.mjs';
 import { detectVitestVersion, RETRY_MIN_VITEST, supportsRetryCondition, } from './vitest-version.mjs';
 import { headSha, markTouchedDuringRun, publishManifest, snapshotSource, stagedFiles, stageManifest, } from './provenance.mjs';
@@ -376,6 +376,9 @@ export async function produceCoverage(cwd = process.cwd(), argv = []) {
         }
     }
     const { code, outcome } = final;
+    const fate = first.outcome === 'cleared' ? 'cleared' : outcome; // pass 1 may have removed it
+    for (const line of formatUndiagnosedExit({ ...final, outcome: fate }))
+        console.error(line);
     // Green tests but no report means the suite never emitted one — most often because `json` is
     // missing from coverage.reporter. The gate still fails CLOSED on the absent artifact, so this is
     // not a correctness hole; it is a diagnosis. Reporting success here sends the developer to a

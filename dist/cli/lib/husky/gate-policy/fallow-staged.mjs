@@ -16,11 +16,13 @@ export const FALLOW_STAGED = `if command -v fallow >/dev/null 2>&1; then
     if [ -z "$DK_FALLOW_DIFF" ] || ! ${STAGED_DIFF_ENV} \\
         ${STAGED_DIFF_CMD} >"$DK_FALLOW_DIFF"; then
         echo "devkit fallow gate: could not capture the staged diff — audit skipped."
+        __dk_gate_could_not_run fallow "could not capture the staged diff — audit skipped"
     elif [ ! -s "$DK_FALLOW_DIFF" ]; then
         :
     elif [ "$(($(wc -c <"$DK_FALLOW_DIFF")))" -gt ${DIFF_STDIN_CAP_BYTES} ]; then
         # Above its --diff-stdin cap fallow drops the line filter and reports the whole project.
         echo "devkit fallow gate: staged diff exceeds fallow's 10 MiB --diff-stdin cap — audit skipped."
+        __dk_gate_could_not_run fallow "staged diff exceeds fallow's 10 MiB --diff-stdin cap — audit skipped"
     else
         # fallow rejects a map holding a negative hit and looks only under its cwd, so it is handed
         # a clamped copy of the repo's artifact. Ship's own FALLOW_COVERAGE is left in place.
@@ -56,6 +58,7 @@ ${shipRehearsalHint('        ')}
     elif [ "$DK_FALLOW_RC" -ne 0 ]; then
         # Exit 2+ is a fallow error (no detectable base branch, bad config), never a finding.
         echo "devkit fallow gate: fallow exited $DK_FALLOW_RC without a verdict (its message is above) — audit skipped, commit not blocked."
+        __dk_gate_could_not_run fallow "fallow exited $DK_FALLOW_RC without a verdict — audit skipped" "\${DK_FALLOW_JSON:-}"
     fi
 fi`;
 // Hoisted (perf: no per-call regex compile).

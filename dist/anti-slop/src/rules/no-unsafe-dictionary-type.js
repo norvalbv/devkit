@@ -55,13 +55,46 @@ function isInsideTypeAliasDeclaration(node) {
     }
     return false;
 }
-function isPlainAliasConsumerUse(node, environment) {
+function bareAlias(node, environment) {
     if (node.type !== "TSTypeReference" || node.typeArguments?.params.length)
-        return false;
+        return null;
     const name = typeReferenceName(node);
-    return (name !== null &&
-        visibleTypeAlias(name, node, environment.typeAliases) !== null &&
-        !isInsideTypeAliasDeclaration(node));
+    return name === null ? null : visibleTypeAlias(name, node, environment.typeAliases);
+}
+/** A bare alias use classifies exactly as its declaration with defaults applied. */
+function classifyUncachedType(node, state) {
+    const alias = bareAlias(node, state.environment);
+    if (alias === null)
+        return classifyUnsafeDictionary(node, state.environment);
+    if (!state.bareUses.has(alias))
+        state.bareUses.set(alias, classifyUnsafeDictionary(node, state.environment));
+    return state.bareUses.get(alias) ?? null;
+}
+/** Each type node is classified for itself and again for every type node nested inside it. */
+function classifyType(node, state) {
+    const cached = state.types.get(node);
+    if (cached !== undefined)
+        return cached;
+    const result = classifyUncachedType(node, state);
+    state.types.set(node, result);
+    return result;
+}
+/** Whether the alias body or one of its type-parameter defaults is itself reported. */
+function aliasDeclarationReports(alias, state) {
+    const cached = state.declarationReports.get(alias);
+    if (cached !== undefined)
+        return cached;
+    const defaults = (alias.typeParameters?.params ?? []).map((parameter) => parameter.default);
+    const reports = [alias.typeAnnotation, ...defaults].some((type) => type != null && classifyType(type, state) !== null);
+    state.declarationReports.set(alias, reports);
+    return reports;
+}
+function isPlainAliasConsumerUse(node, state) {
+    const alias = bareAlias(node, state.environment);
+    // The declaration already reports; a default unsafe only as a dictionary value reports here.
+    return (alias !== null &&
+        !isInsideTypeAliasDeclaration(node) &&
+        aliasDeclarationReports(alias, state));
 }
 function isInsideTypeParameterConstraint(node) {
     let child = node;
@@ -74,16 +107,16 @@ function isInsideTypeParameterConstraint(node) {
     }
     return false;
 }
-function shouldReportType(node, environment) {
+function shouldReportType(node, state) {
     if (isInsideTypeParameterConstraint(node))
         return false;
-    if (isPlainAliasConsumerUse(node, environment))
+    if (isPlainAliasConsumerUse(node, state))
         return false;
-    if (classifyUnsafeDictionary(node, environment) === null)
+    if (classifyType(node, state) === null)
         return false;
     let current = node.parent;
     while (current !== null && current.type !== "Program") {
-        if (isTypeNode(current) && classifyUnsafeDictionary(current, environment) !== null)
+        if (isTypeNode(current) && classifyType(current, state) !== null)
             return false;
         current = current.parent;
     }
@@ -101,32 +134,37 @@ export const noUnsafeDictionaryTypeRule = defineRule({
         },
     },
     createOnce(context) {
-        let environment = null;
+        let state = null;
         const report = (node, value) => {
             context.report({ node, messageId: "unsafeDictionary", data: { value } });
         };
         const reportIfUnsafe = (node) => {
-            if (environment === null || !shouldReportType(node, environment))
+            if (state === null || !shouldReportType(node, state))
                 return;
-            const unsafe = classifyUnsafeDictionary(node, environment);
+            const unsafe = classifyType(node, state);
             if (unsafe === null)
                 return;
             report(node, unsafe.unsafeValue);
         };
         return {
             Program(node) {
-                environment = createTypeEnvironment(node, context.sourceCode.visitorKeys);
+                state = {
+                    environment: createTypeEnvironment(node, context.sourceCode.visitorKeys),
+                    types: new Map(),
+                    bareUses: new Map(),
+                    declarationReports: new Map(),
+                };
             },
             TSTypeReference: reportIfUnsafe,
             TSTypeLiteral: reportIfUnsafe,
             TSMappedType: reportIfUnsafe,
             TSIndexSignature(node) {
-                if (environment === null ||
+                if (state === null ||
                     node.typeAnnotation === null ||
                     node.parent.type === "TSTypeLiteral")
                     return;
-                const unsafe = classifyUnsafeDictionaryValue(node.typeAnnotation.typeAnnotation, environment);
-                if (unsafe !== null)
+                const unsafe = classifyUnsafeDictionaryValue(node.typeAnnotation.typeAnnotation, state.environment);
+                if (unsafe !== null && unsafe !== "undecided")
                     report(node, unsafe.unsafeValue);
             },
         };

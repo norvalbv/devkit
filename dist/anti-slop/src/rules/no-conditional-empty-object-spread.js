@@ -1,16 +1,22 @@
 import { defineRule } from "@oxlint/plugins";
-function unwrapParentheses(node) {
+/** Peel parentheses and TypeScript-only wrappers, which do not change the runtime value. */
+function unwrapExpression(node) {
     let current = node;
-    while (current.type === "ParenthesizedExpression") {
+    while (current.type === "ParenthesizedExpression" ||
+        current.type === "TSAsExpression" ||
+        current.type === "TSSatisfiesExpression" ||
+        current.type === "TSTypeAssertion" ||
+        current.type === "TSNonNullExpression") {
         current = current.expression;
     }
     return current;
 }
 function isEmptyObjectExpression(node) {
-    return node.type === "ObjectExpression" && node.properties.length === 0;
+    const current = unwrapExpression(node);
+    return current.type === "ObjectExpression" && current.properties.length === 0;
 }
 function isConditionalEmptyObjectSpread(node) {
-    const conditional = unwrapParentheses(node);
+    const conditional = unwrapExpression(node);
     return (conditional.type === "ConditionalExpression" &&
         (isEmptyObjectExpression(conditional.consequent) ||
             isEmptyObjectExpression(conditional.alternate)));

@@ -226,9 +226,9 @@ const spawnErrorSchema = z.object({
  * `killed:<SIG>` / `spawn-failed:<CODE>` when it never reached one. stdio is inherited; the gate's
  * failure reason returns via `reasonFile`.
  */
-export function runArgv(cwd, argv, exec, reasonFile, timeoutMs) {
+export function runArgv(cwd, argv, exec, reasonFile, timeoutMs, label = '') {
     try {
-        const env = gateEnv(reasonFile);
+        const env = gateEnv(reasonFile, label);
         exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit', env, timeout: timeoutMs });
         return 0;
     }

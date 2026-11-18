@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, existsSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync, } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
+import { JS_TS_SOURCE_RE } from '../config-source-matchers.mjs';
 import { commitIndexEnv } from '../ratchets/commit-index.mjs';
 import { headTreeish } from '../ratchets/git-index.mjs';
 import { headHash } from '../review/evidence/staged-git.mjs';
@@ -85,23 +86,28 @@ export function snapshotSource(cwd, args = []) {
                 continue;
             toHash.push(p);
         }
-        // --stdin-paths is newline-delimited; a path containing one is hashed on its own.
-        const plain = toHash.filter((p) => !p.includes('\n'));
-        const blobs = plain.length
-            ? git(top, ['hash-object', '--stdin-paths'], `${plain.join('\n')}\n`)
-                .trim()
-                .split('\n')
-            : [];
-        if (blobs.length !== plain.length)
-            return null;
-        for (const [i, p] of plain.entries()) {
-            const blob = blobs[i];
-            if (blob === undefined)
+        // Source blobs are written (-w) so the gate can later compare the measured bytes themselves.
+        for (const write of [true, false]) {
+            const group = toHash.filter((p) => JS_TS_SOURCE_RE.test(p) === write);
+            const flags = write ? ['hash-object', '-w'] : ['hash-object'];
+            // --stdin-paths is newline-delimited; a path containing one is hashed on its own.
+            const plain = group.filter((p) => !p.includes('\n'));
+            const blobs = plain.length
+                ? git(top, [...flags, '--stdin-paths'], `${plain.join('\n')}\n`)
+                    .trim()
+                    .split('\n')
+                : [];
+            if (blobs.length !== plain.length)
                 return null;
-            dirty[p] = blob;
-        }
-        for (const p of toHash.filter((q) => q.includes('\n'))) {
-            dirty[p] = git(top, ['hash-object', '--', p]).trim();
+            for (const [i, p] of plain.entries()) {
+                const blob = blobs[i];
+                if (blob === undefined)
+                    return null;
+                dirty[p] = blob;
+            }
+            for (const p of group.filter((q) => q.includes('\n'))) {
+                dirty[p] = git(top, [...flags, '--', p]).trim();
+            }
         }
         return { roots: checkoutRoots(cwd, top), head, dirty, args };
     }
@@ -289,7 +295,7 @@ function measuredPaths(artifact, roots) {
 }
 /** Compare each briefed blob with the one the manifest says was measured. `artifact` is the exact
  * bytes the verdict came from; `classify` routes a path to production / test / other (never drift). */
-export function checkProvenance(cwd, coverageDir, artifact, classify) {
+export function checkProvenance(cwd, coverageDir, artifact, classify, exempt) {
     if (!readManifest(coverageDir)) {
         return { state: 'unknown', reason: 'no manifest — not produced by `devkit coverage-run`' };
     }
@@ -307,21 +313,27 @@ export function checkProvenance(cwd, coverageDir, artifact, classify) {
         const inArtifact = measuredPaths(artifact.bytes, manifest.roots);
         const production = [];
         const tests = [];
+        const exempted = [];
         for (const p of briefed) {
             const measured = Object.hasOwn(manifest.dirty, p)
                 ? manifest.dirty[p]
                 : (atHead.get(p) ?? DELETED);
-            if (measured === (committed.get(p) ?? DELETED))
+            const current = committed.get(p) ?? DELETED;
+            if (measured === current)
                 continue;
             const kind = classify(p, inArtifact.has(p));
-            if (kind === 'production')
-                production.push(p);
+            if (kind === 'production') {
+                if (exempt && measured && current !== DELETED && exempt(p, measured, current))
+                    exempted.push(p);
+                else
+                    production.push(p);
+            }
             else if (kind === 'test')
                 tests.push(p);
         }
         return production.length || tests.length
-            ? { state: 'drift', manifest, production, tests }
-            : { state: 'fresh', manifest };
+            ? { state: 'drift', manifest, production, tests, exempted }
+            : { state: 'fresh', manifest, exempted };
     }
     catch {
         return { state: 'unknown', reason: 'git could not compare the briefed files' };

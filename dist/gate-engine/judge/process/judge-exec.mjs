@@ -87,8 +87,9 @@ outageDetail, stdout) {
     // On the ledger the outage detail is queryable: which outage, and until when.
     if (outageDetail !== undefined)
         extra.outage_detail = outageDetail;
-    const save = judgeBinFor(opts.args) === 'claude' ? saveClaudeCommands : saveCodexCommands;
-    const commandsRef = save(opts.label, stdout, opts.lens);
+    const commandsRef = judgeBinFor(opts.args) === 'claude'
+        ? saveClaudeCommands(opts.label, stdout, opts.lens, opts.onToolCalls)
+        : saveCodexCommands(opts.label, stdout, opts.lens);
     if (commandsRef)
         extra.commands_ref = commandsRef;
     Object.assign(extra, recordPermissionDenials(opts, stdout, codexGateDenials(opts.label, stdout)));

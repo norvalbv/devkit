@@ -5,6 +5,10 @@ import { appendFileSync } from 'node:fs';
 function namesOf(map, file) {
     return map && Object.hasOwn(map, file) ? (map[file]?.failed ?? []) : [];
 }
+/** True when the producer cut `file`'s failed-name list short. */
+function truncatedIn(map, file) {
+    return Boolean(map && Object.hasOwn(map, file) && map[file]?.truncated);
+}
 /** One entry per named test, or a file-level entry when no names were recorded. */
 function entriesFor(file, names) {
     return names.length ? names.map((test) => ({ file, test })) : [{ file }];
@@ -18,14 +22,16 @@ export function compareFailures(pr, base) {
         .sort();
     for (const file of prFailing) {
         const prNames = namesOf(pr.tests, file);
+        // Listed names compare exactly; a truncated PR list leaves its unlisted failures unknown.
+        if (truncatedIn(pr.tests, file))
+            result.namesKnown = false;
         if (!baseFailing.has(file)) {
             result.fresh.push(...entriesFor(file, prNames));
             continue;
         }
         const baseNames = namesOf(base.tests, file);
         // A truncated base list cannot prove a name absent, so it compares by file like a missing one.
-        const baseTruncated = Object.hasOwn(base.tests ?? {}, file) && base.tests?.[file]?.truncated;
-        if (!prNames.length || !baseNames.length || baseTruncated) {
+        if (!prNames.length || !baseNames.length || truncatedIn(base.tests, file)) {
             result.namesKnown = false;
             result.inherited.push({ file });
             continue;
@@ -37,7 +43,7 @@ export function compareFailures(pr, base) {
     result.fixed = base.failingFiles.filter((file) => Object.hasOwn(pr.files, file) && pr.files[file] === 'passed');
     return result;
 }
-const label = (entry) => entry.test ? `${entry.file} > ${entry.test}` : entry.file;
+export const label = (entry) => entry.test ? `${entry.file} > ${entry.test}` : entry.file;
 /** One titled list, or nothing when it is empty. */
 function section(title, mark, items) {
     return items.length ? [`${title} (${items.length}):`, ...items.map((i) => `  ${mark} ${i}`)] : [];
@@ -46,7 +52,7 @@ function section(title, mark, items) {
 export function renderComparison(c, base) {
     const sha = base.sha?.slice(0, 8) ?? 'unknown';
     const behind = base.commitsBehindHead
-        ? `, ${base.commitsBehindHead} commit(s) before the PR base`
+        ? `, ${base.commitsBehindHead} commit(s) before the base`
         : '';
     const lines = [`compared with ${base.ref} @ ${sha} (run ${base.runId}${behind})`];
     if (!c.fresh.length) {
@@ -56,7 +62,7 @@ export function renderComparison(c, base) {
     }
     lines.push(...section(`NEW — not failing at ${sha}`, '✗', c.fresh.map(label)), ...section(`inherited — also failing at ${sha}`, '·', c.inherited.map(label)), ...section(`fixed here — failing at ${sha}, passing here`, '✓', c.fixed));
     if (!c.namesKnown)
-        lines.push('some files compared by file only: a run recorded no test names');
+        lines.push('some files compared by file only: a test-name list was missing or truncated');
     return lines;
 }
 /** Append the rendered comparison to the GitHub step summary, when the runner provides one. */

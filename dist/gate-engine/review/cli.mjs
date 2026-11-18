@@ -12,7 +12,8 @@
  *   guard-review transcript <ref>                print a persisted agent transcript by its ref
  *   guard-review record-agent <label>            record one Task-dispatched agent run (stdin)
  *   guard-review record-feedback prior-art --run <id> ...  claim a correction to a recorded run
- *   guard-review record-gate <gate>              record a hook-shell gate's block for the ship digest
+ *   guard-review record-gate <gate> [--could-not-run <detail> [<json>]]  record a hook-shell gate's
+ *                                                block, or a run that verified nothing, for the ship digest
  *   guard-review reference-checkouts [--json]    resolve research.referenceCheckouts to directories
  *
  * Everything resolves from resolveGuardConfig(process.cwd()) — the CONSUMER repo, never the
@@ -20,7 +21,9 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { z } from 'zod';
 import { envFlag, resolveGuardConfig } from '../config.mjs';
+import { emitAdvisoryResult } from '../judge/advisory/emit.mjs';
 import { emitGateEvent } from '../judge/gate-events.mjs';
 import { markGateRun } from '../judge/run-context.mjs';
 import { recordAgentRun } from '../judge/run-judge.mjs';
@@ -228,14 +231,31 @@ function printReferenceCheckouts(json) {
 }
 /** The hook-shell gates that block with no node process of their own to report the verdict. */
 const SHELL_GATES = new Set(['fallow', 'eslint-overlay']);
+const ToolErrorReport = z.object({ message: z.string().min(1) });
+/** The `message` of a tool's JSON error report (fallow's `{"error":true,"message":…}`), if any. */
+function errorMessage(json) {
+    try {
+        return ToolErrorReport.safeParse(JSON.parse(json ?? '')).data?.message;
+    }
+    catch {
+        return undefined;
+    }
+}
 /**
  * `guard-review record-gate <gate>` — the generated hook's narration after a shell gate blocked.
  * No `family`: the digest then matches the row against the gate's own blocked_gate token.
+ * `--could-not-run` records a run that verified nothing as an advisory row, which never blocks.
  */
-function recordGate(gate) {
+function recordGate(gate, args) {
     if (!SHELL_GATES.has(gate))
         return 2;
     markGateRun();
+    if (args[0] === '--could-not-run') {
+        const detail = args[1] || 'could not run';
+        const message = errorMessage(args[2]);
+        emitAdvisoryResult(gate, 'could_not_run', message ? `${detail}: ${message}` : detail);
+        return 0;
+    }
     emitGateEvent({
         type: 'gate_result',
         gate,
@@ -304,7 +324,7 @@ async function run(argv) {
         return runRecordFeedback(rest.slice(1));
     }
     if (cmd === 'record-gate' && rest[0])
-        return recordGate(rest[0]);
+        return recordGate(rest[0], rest.slice(1));
     if (cmd === 'reference-checkouts')
         return printReferenceCheckouts(rest.includes('--json'));
     console.error('Usage: guard-review --gate | completeness --gate <msg-file> | scan | lens <reviewer>[:<lens>] | clear-cache | ' +
@@ -315,7 +335,7 @@ async function run(argv) {
         '[--cost-usd <n>] [--session-id <dispatched-agent-session>] [--billing subscription] | ' +
         'record-feedback prior-art --run <invocation_id> --claimed-verdict <V> [--claimed-framing <F>] ' +
         '[--supersedes <feedback_id>] --source root|user --reason "<why>" | ' +
-        'record-gate fallow|eslint-overlay | reference-checkouts [--json]');
+        'record-gate fallow|eslint-overlay [--could-not-run <detail> [<json>]] | reference-checkouts [--json]');
     return 2;
 }
 run(process.argv.slice(2)).then((code) => process.exit(code), (e) => {

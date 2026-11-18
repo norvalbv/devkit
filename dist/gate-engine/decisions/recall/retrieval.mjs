@@ -3,7 +3,7 @@ import path from 'node:path';
 import { currentTarget, parseDecision, parseIndex } from '../decision-format.mjs';
 import { axisHash, cosine, EMBED_MODEL, embed, embedDisabled, loadVecIndex, saveVecIndex, } from './embeddings.mjs';
 import { sections } from './markdown.mjs';
-import { axisNotes, lastTaggedNote } from './note-relations.mjs';
+import { axisNotes, lastTaggedNote, liveRulingIdOf, liveSectionIndex } from './note-relations.mjs';
 import { corpusIdf, orderQualifiers, tokenize } from './qualifiers.mjs';
 export { cosine, EMBED_MODEL, EMBED_URL, embed } from './embeddings.mjs';
 // Re-exported so retrieval stays the single entry point for the recall path.
@@ -14,8 +14,6 @@ const ANY_DATE_RE = /\b(\d{4}-\d{2}-\d{2})\b/g;
 /** Legacy (pre-Target) schema: `**Ruling:**` / `**Why / target:**` under a bare `## <date> — …`. */
 const RULING_FIELD_RE = /^\*\*Ruling:\*\*\s*(.+)$/gm;
 const WHY_FIELD_RE = /^\*\*(?:Why \/ target|Context):\*\*\s*(.+)$/m;
-const TARGET_HEADING_RE = /^## Target · (\d{4}-\d{2}-\d{2})/gm;
-const LEGACY_HEADING_RE = /^## (\d{4}-\d{2}-\d{2}) /gm;
 // ─── Candidate set ───────────────────────────────────────────────────────────────
 /**
  * The retrieval candidate set is the decisions DIRECTORY, not INDEX.md.
@@ -99,23 +97,9 @@ export function axisEntries(body, liveRulingId) {
     const target = currentTarget(body);
     const rulingDate = liveRulingId?.split(':')[1] ?? '';
     const all = sections(body);
-    // The ruling's own section, found by its heading rather than by position. Both schema generations
-    // are named here because both are current somewhere: `## Target · <date>` and the legacy
-    // `## <date> — …` that still accounts for 49 of the real corpus's blocks.
-    // findLast, never find: EVERY other resolution in this engine takes the last match —
-    // currentTarget() takes the last Target block, axisRow takes legacyRulings.at(-1), and the
-    // string-arithmetic this replaced used lastIndexOf. Two blocks share a date whenever an axis is
-    // amended twice in one calendar day (today() is day-granularity, and the real corpus has such
-    // files), and first-match would bind to the SUPERSEDED one — attaching its notes to the current
-    // ruling and orphaning the real ones. That is the same notes-detached-from-their-ruling class the
-    // six earlier review rounds closed.
-    const lastMatching = (prefix) => {
-        for (let i = all.length - 1; i >= 0; i -= 1)
-            if (all[i].depth === 2 && all[i].heading.startsWith(prefix))
-                return all[i];
-        return undefined;
-    };
-    const own = lastMatching(`## Target · ${rulingDate}`) ?? lastMatching(`## ${rulingDate} `);
+    // The ruling's own section, found by its heading rather than by position.
+    const ownIndex = liveSectionIndex(all, liveRulingId);
+    const own = ownIndex === -1 ? undefined : all[ownIndex];
     const entries = [
         {
             id: liveRulingId ?? 'ruling:unknown',
@@ -135,7 +119,6 @@ export function axisEntries(body, liveRulingId) {
     // day — so no pointer could name one of them. The shared minter adds the `~N` occurrence suffix
     // (the same scheme supersession.mts uses for same-day Targets) and is numbered axis-wide, so the
     // id a reader sees here is the id an `**Amends:**` can reference.
-    const ownIndex = own ? all.indexOf(own) : -1;
     for (const note of axisNotes(body)) {
         if (note.sectionIndex !== ownIndex)
             continue;
@@ -163,14 +146,6 @@ export function effectiveScope(body) {
     const target = currentTarget(body);
     const entries = axisEntries(body, liveRulingIdOf(body, Boolean(target)));
     return lastTaggedNote(entries, SCOPE_NOTE_RE) ?? target?.scope ?? '';
-}
-/** Name the block a ruling was read from: `target:<date>`, `entry:<date>` (legacy), or null. */
-export function liveRulingIdOf(body, hasTarget) {
-    const re = hasTarget ? TARGET_HEADING_RE : LEGACY_HEADING_RE;
-    const dates = [...body.matchAll(re)].map((m) => m[1]);
-    // Last heading wins, matching currentTarget's rule — append order IS chronological order here.
-    const last = dates.at(-1);
-    return last ? `${hasTarget ? 'target' : 'entry'}:${last}` : null;
 }
 function slugPath(p, slug) {
     return path.join(p.decisionsDir, `${slug}.md`);

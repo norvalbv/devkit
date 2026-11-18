@@ -13,6 +13,7 @@ const MIN_DEGRADED = 5;
 const HINTS = {
     'mcp-missing': 'codebase MCP did not reach the judge — the environment, not this diff',
     denied: "the judge's search-code call was refused by the headless permission gate",
+    unobserved: 'the judge recorded retrieval ok but ran no search — a judge issue, not this diff',
     skipped: 'the judge chose not to search — a brief/judge issue, not this diff',
     unrecorded: '',
     unclassified: '',
