@@ -35,6 +35,8 @@ ship_queue_slot_register
 # Only review-target.sh reads run-packaged-script.mts's signal-lock root; left exported, a nested
 # `devkit review` would take that lock and the wrapper would stop forwarding signals to this ship.
 unset DEVKIT_MANAGED_SIGNAL_ROOT
+# The --resume hand-off marker guards one exec hop; left set, every nested resume in a gate reads it.
+SI_DISPATCHED=${DEVKIT_SHIP_RESUME_DISPATCHED:-}; unset DEVKIT_SHIP_RESUME_DISPATCHED
 
 # Before ANY git that can reach the network. Under the managed spawn this script runs in a background
 # process group, where a tool that opens /dev/tty is SIGTTIN-suspended rather than prompted — a silent
@@ -182,7 +184,7 @@ if [ "$RESUME" -eq 1 ]; then
     # The blocked attempt was a `--pr` re-push; hand over so the agent needn't remember which form
     # it used. POSITIVE match + one-shot marker only — an unrecognised mode must hard-error below,
     # never bounce between the two scripts.
-    [ -z "${DEVKIT_SHIP_RESUME_DISPATCHED:-}" ] || { echo "recorded invocation dispatched in a loop (mode '$SI_MODE') — the manifest is inconsistent; run the full command" >&2; exit 1; }
+    [ -z "$SI_DISPATCHED" ] || { echo "recorded invocation dispatched in a loop (mode '$SI_MODE') — the manifest is inconsistent; run the full command" >&2; exit 1; }
     DEVKIT_SHIP_RESUME_DISPATCHED=1 exec bash "$SCRIPT_DIR/reship.sh" --resume "$BR" ${RESUME_ARGS[@]+"${RESUME_ARGS[@]}"}
   fi
   [ "$SI_MODE" = "ship" ] || { echo "recorded invocation has unrecognised mode '$SI_MODE' — run the full devkit ship command" >&2; exit 1; }

@@ -23,6 +23,8 @@ set -euo pipefail
 # comment in ship-branch.sh: an inherited-but-unread lock root leaks into every gate and can silence
 # signal forwarding to this shell entirely.
 unset DEVKIT_MANAGED_SIGNAL_ROOT
+# The --resume hand-off marker guards one exec hop; left set, every nested resume in a gate reads it.
+SI_DISPATCHED=${DEVKIT_SHIP_RESUME_DISPATCHED:-}; unset DEVKIT_SHIP_RESUME_DISPATCHED
 
 # Before ANY git that can reach the network. Under the managed spawn this script runs in a background
 # process group, where a tool that opens /dev/tty is SIGTTIN-suspended rather than prompted — a silent
@@ -158,7 +160,7 @@ if [ "$RESUME" -eq 1 ]; then
   if [ "$SI_MODE" = "ship" ]; then
     # The blocked attempt was a NEW ship; hand over. Positive match + one-shot marker — an
     # unrecognised mode hard-errors below, never bounces between the two scripts.
-    [ -z "${DEVKIT_SHIP_RESUME_DISPATCHED:-}" ] || { echo "recorded invocation dispatched in a loop (mode '$SI_MODE') — the manifest is inconsistent; run the full command" >&2; exit 1; }
+    [ -z "$SI_DISPATCHED" ] || { echo "recorded invocation dispatched in a loop (mode '$SI_MODE') — the manifest is inconsistent; run the full command" >&2; exit 1; }
     DEVKIT_SHIP_RESUME_DISPATCHED=1 exec bash "$RESUME_SCRIPT_DIR/ship-branch.sh" --resume "$BR" ${RESUME_ARGS[@]+"${RESUME_ARGS[@]}"}
   fi
   [ "$SI_MODE" = "reship" ] || { echo "recorded invocation has unrecognised mode '$SI_MODE' — run the full devkit ship --pr command" >&2; exit 1; }
