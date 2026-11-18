@@ -13,7 +13,7 @@ import { pathToFileURL } from 'node:url';
 // Frozen review runtime: local imports must be listed in PACKAGED_REVIEW_RUNTIME_MODULE_STEMS.
 import { baseResolveEnv } from './baseline/base-resolve-hook.mts';
 import {
-  FALLOW_CONFIG_FILES,
+  firstFallowConfig,
   type FallowPathMapping,
   parseDiffHunks,
   rewriteFallowBaseline,
@@ -387,15 +387,11 @@ function normalizeFallowBaselineFile(
   writeFileSync(path, `${JSON.stringify(rewriteFallowBaseline(value, mappings), null, 2)}\n`);
 }
 
-function fallowConfig(finalCwd: string): string | undefined {
-  return FALLOW_CONFIG_FILES.map((file) => join(finalCwd, file)).find((file) => existsSync(file));
-}
-
 export function runFallowBaseline(runtimeDir: string): number {
   const metadata = readMetadata(runtimeDir);
   const { baseCwd, finalCwd, scope } = scopedWorktrees(metadata);
   const binary = process.env.DEVKIT_REVIEW_FALLOW_BIN || 'fallow';
-  const config = fallowConfig(finalCwd);
+  const config = firstFallowConfig(finalCwd);
   const changes = stagedChanges(finalCwd);
   const mappings = fallowPathMappings(finalCwd, changes);
   const scopeId = createHash('sha256')

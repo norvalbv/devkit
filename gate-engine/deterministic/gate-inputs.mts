@@ -1,7 +1,7 @@
 /** The one registry of paths a gate reads that a clean checkout can lack; ship, review and overlay
  * projection derive from it. Rationale: docs/decisions/gate-inputs-single-registry.md. */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { type ParseError, parse } from 'jsonc-parser';
 import { z } from 'zod';
@@ -14,7 +14,7 @@ import {
   STRUCTURE_BASELINE_DIR,
   STRUCTURE_EXEMPT,
 } from '../ratchets/baseline-paths.mts';
-import { FALLOW_CONFIG_FILES } from '../review/baseline-fallow-paths.mts';
+import { FALLOW_CONFIG_FILES, firstFallowConfig } from '../review/baseline-fallow-paths.mts';
 
 type ConfigPathField = 'indexPath' | 'allowlistPath' | 'decisionsDir';
 
@@ -135,9 +135,7 @@ const FallowAuditConfig = z.object({
 /** The baselines the fallow config's `audit.*Baseline` keys name, resolved as fallow does: from the
  * project root. A TOML, unreadable or malformed config yields none; fallow reports its own error. */
 function fallowBaselineInputs(root: string): GateInput[] {
-  const config = FALLOW_CONFIG_FILES.map((file) => join(root, file)).find((file) =>
-    existsSync(file),
-  );
+  const config = firstFallowConfig(root);
   if (!config || config.endsWith('.toml')) return [];
   const errors: ParseError[] = [];
   let text: string;
