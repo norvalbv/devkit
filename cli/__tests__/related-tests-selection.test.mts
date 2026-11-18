@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GATE_REASON_ENV } from '../../gate-engine/deterministic/reason.mts';
 import { runRelatedTests } from '../lib/husky/gate-policy/related-tests.mts';
 import {
+  forcedTests,
   previousSelection,
   recordSelection,
   relatedDrivers,
@@ -227,5 +228,45 @@ describe('runRelatedTests selection lines', () => {
       files: 2,
       slowest: [{ file: 'a.test.mts', ms: 7 }],
     });
+  });
+});
+
+const SCRUB = 'cli/__tests__/vitest-setup-env-scrub.test.mts';
+const PARITY = 'cli/__tests__/agent-asset-projection-parity.test.mts';
+
+describe('forcedTests', () => {
+  it('forces the env-scrub test for a top-level ship script or the setup file it binds', () => {
+    expect(forcedTests(['cli/a.mts', 'cli/lib/ship/reship.sh'])).toEqual([SCRUB]);
+    expect(forcedTests(['vitest.setup.mjs'])).toEqual([SCRUB]);
+  });
+
+  // The scrub test also reads both configs to pin that they share the setup file.
+  it('forces the env-scrub test for either vitest config it reads', () => {
+    expect(forcedTests(['vitest.config.mjs'])).toEqual([SCRUB]);
+    expect(forcedTests(['vitest.e2e.config.mjs'])).toEqual([SCRUB]);
+    expect(forcedTests(['templates/app/vitest.config.mjs'])).toEqual([]);
+  });
+
+  // The scrub test scans cli/lib/ship at the top level only, so a deeper script is not its input.
+  it('forces nothing for a nested or mirrored script, or a module', () => {
+    expect(
+      forcedTests(['cli/lib/ship/review/x.sh', 'dist/cli/lib/ship/reship.sh', 'cli/a.mts']),
+    ).toEqual([]);
+  });
+
+  // The parity test reads hook sources, projections and the selection from disk.
+  it('forces the agent-asset parity test for a hook source, projection or the selection', () => {
+    expect(forcedTests(['agents-hooks/prior-art-gate.mjs'])).toEqual([PARITY]);
+    expect(forcedTests(['.codex/hooks/knip-check.sh'])).toEqual([PARITY]);
+    expect(forcedTests(['.devkit/config.json'])).toEqual([PARITY]);
+    expect(forcedTests(['dist/agents-hooks/x.mjs', '.claude/hooks.json'])).toEqual([]);
+    expect(forcedTests(['vitest.setup.mjs', '.claude/hooks/x.mjs'])).toEqual([SCRUB, PARITY]);
+  });
+
+  it('names forced tests that exist, so a rename cannot silently select nothing', () => {
+    const root = join(import.meta.dirname, '..', '..');
+    const tests = forcedTests(['cli/lib/ship/reship.sh', 'agents-hooks/prior-art-gate.mjs']);
+    expect(tests).toEqual([SCRUB, PARITY]);
+    for (const test of tests) expect(existsSync(join(root, test)), test).toBe(true);
   });
 });

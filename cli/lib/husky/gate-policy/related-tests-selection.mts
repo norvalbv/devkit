@@ -113,3 +113,24 @@ export function recordSelection(report: string, root: string, files: number): vo
     // An unreadable report records nothing; the next attempt just prints no comparison.
   }
 }
+
+// The env-scrub test reads these from disk, so no import edge selects it. The ship-script pattern
+// mirrors that test's own top-level scan of cli/lib/ship.
+const SCRUB_TEST = 'cli/__tests__/vitest-setup-env-scrub.test.mts';
+const SCRUB_INPUT_RE =
+  /^cli\/lib\/ship\/[^/]+\.sh$|^vitest\.setup\.mjs$|^vitest(\.e2e)?\.config\.mjs$/;
+// The agent-asset parity test reads hook sources, their projections and the selection from disk.
+const PARITY_TEST = 'cli/__tests__/agent-asset-projection-parity.test.mts';
+const PARITY_INPUT_RE =
+  /^agents-hooks\/|^\.(claude|codex|cursor)\/hooks\/|^\.devkit\/config\.json$/;
+
+const FORCED: readonly (readonly [RegExp, string])[] = [
+  [SCRUB_INPUT_RE, SCRUB_TEST],
+  [PARITY_INPUT_RE, PARITY_TEST],
+];
+
+/** The disk-reading tests a staged path selects, which `vitest related` would never run. */
+export function forcedTests(staged: Iterable<string>): string[] {
+  const paths = [...staged];
+  return FORCED.filter(([re]) => paths.some((p) => re.test(p))).map(([, test]) => test);
+}

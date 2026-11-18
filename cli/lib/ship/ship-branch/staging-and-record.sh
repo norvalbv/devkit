@@ -92,6 +92,35 @@ ship_preserved_merge_check() {  # <root> <base> <commit>; a conflict sets RECOVE
   return "$rc"
 }
 
+# Sets RECOVERY_REASON when a moved base conflicts with the preserved commit, or cannot be checked
+# against it, and RECOVERY_REMEDY when the conflict remedy should close the refusal.
+ship_preserved_merge_verdict() {
+  local merge_rc=0
+  RECOVERY_REMEDY=
+  [ -z "$RECOVERY_REASON" ] && [ "$RECOVERY_PARENT" != "$BASE" ] || return 0
+  ship_preserved_merge_check "$ROOT" "$BASE" "$RECOVERY_COMMIT" || merge_rc=$?
+  # Fails closed: publishing unverified would reopen the CONFLICTING-PR exit 0; the re-stage works on any git.
+  if [ "$merge_rc" -eq 1 ]; then
+    RECOVERY_REASON="it no longer merges cleanly into $BASE_REF (${BASE:0:7}), which changed the same lines since ${RECOVERY_PARENT:0:7}"
+    [ -z "$RECOVERY_CONFLICT_HINT" ] || RECOVERY_HINTS+=("$RECOVERY_CONFLICT_HINT")
+  elif [ "$merge_rc" -eq 2 ]; then
+    RECOVERY_REASON="ship could not verify it still merges cleanly into $BASE_REF (${BASE:0:7}), which moved since ${RECOVERY_PARENT:0:7} (the check needs git >= 2.40)"
+  fi
+  [ "$merge_rc" -eq 0 ] || RECOVERY_REMEDY=1
+}
+
+# Names up to five paths where the recovery tree differs: "some scoped file changed" is unactionable on
+# a wide ship, and the commonest cause is the gate chain's own formatter re-staging inside the worktree.
+ship_recovery_drift_hint() {  # <branch-tree> <recovery-tree>
+  local drifted n=0 list=
+  while IFS= read -r drifted; do
+    n=$((n + 1))
+    [ "$n" -gt 5 ] || list="${list:+$list }$drifted"
+  done < <(git diff --name-only "$1" "$2")
+  [ "$n" -le 5 ] || list="$list (+$((n - 5)) more)"
+  RECOVERY_HINTS+=("differing paths ($n): $list")
+}
+
 # The closing advice for a preserved commit that no longer merges: one command that re-stages it on the
 # moved base, or a rewrite when origin already shows it in an open PR.
 ship_preserved_conflict_remedy() {

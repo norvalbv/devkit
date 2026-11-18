@@ -791,9 +791,10 @@ describe('ship_judge_preflight — the remedy reaches the shell, the report stay
       result: { data: [{ id: 'gpt-5.6-terra', model: 'gpt-5.6-terra' }], nextCursor: null },
     });
     const codex = join(root, 'codex');
+    // Holds stdin like the real server: a stub that exits first makes the probe's request write EPIPE.
     writeFileSync(
       codex,
-      `#!/bin/sh\n[ "$1" = login ] && { echo 'Logged in'; exit 0; }\necho '${limits}'\necho '${models}'\n`,
+      `#!/bin/sh\n[ "$1" = login ] && { echo 'Logged in'; exit 0; }\necho '${limits}'\necho '${models}'\nexec cat >/dev/null\n`,
     );
     chmodSync(codex, 0o755);
     const script = '. "$1"; ship_judge_preflight "$2"; printf "[%s]" "$SHIP_JUDGE_REMEDY" >&2';
