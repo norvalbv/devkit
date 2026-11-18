@@ -156,15 +156,23 @@ describe('upsertNotes', () => {
     expect(body.match(NOTES)).toHaveLength(1);
   });
 
-  it('links a range, but not a path outside the repository or a commit it cannot name', () => {
+  it('links a range and a column, but not a path outside the repository or a commit it cannot name', () => {
     const body = upsert('', [
       note('src/x.mts:406-408 — a range'),
       note('~/repo/y.ts:3 — a home path'),
       note('z.ts:5 — a short sha', 'abc123'),
+      note('../other/a.ts:3 — a parent path'),
+      note('c.ts:12:34 — a column'),
+      note('`d.ts:9 — wrapped whole`'),
     ]);
     expect(body).toContain(`- [L406-408](${blob(SHA_A, 'src/x.mts', '#L406-L408')}) — a range`);
     expect(body).toContain('- L3 — a home path');
     expect(body).toContain('- L5 — a short sha');
+    expect(body).toContain('- L3 — a parent path');
+    expect(body).toContain(`- [L12](${blob(SHA_A, 'c.ts', '#L12')}) — a column`);
+    expect(body).toContain(
+      'Not tied to a line\n- `d.ts:9 — wrapped whole` · <sub>correctness</sub>',
+    );
   });
 
   it('leaves the body untouched when there is nothing to add, even on a rewrite', () => {

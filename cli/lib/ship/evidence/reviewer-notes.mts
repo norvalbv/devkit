@@ -25,9 +25,11 @@ const REVIEW_GATE = 'review:';
 const DATA_OPEN = `<!-- devkit:evidence:${NOTES}:data `;
 const SHORT = 12;
 const FULL_SHA = /^[0-9a-f]{40}$/;
-// The advisory contract's `<file:line> — <finding>` opening, through markdown dressing.
+// A home, absolute or parent-relative path names no file in the repository's blob tree.
+const OUTSIDE_REPO = /^[~/]|(?:^|\/)\.\.\//;
+// The advisory contract's `<file:line> — <finding>` opening, through emphasis or one code span.
 const LEADING_LOCATION = new RegExp(
-  String.raw`^[\s\x60*]*(~?)${LOCATION_RE.source}(?:-(\d+))?[\x60*]*\s*(?:[—–:-]+\s*)?`,
+  String.raw`^[\s*]*(\x60?)(~?)${LOCATION_RE.source}(?::\d+)?(?:-(\d+))?\1[*]*\s*(?:[—–:-]+\s*)?`,
   'i',
 );
 
@@ -68,7 +70,7 @@ function place(note: Note): Placed {
   const m = LEADING_LOCATION.exec(note.text);
   const finding = m ? note.text.slice(m[0].length) : '';
   return m && finding
-    ? { note, file: `${m[1]}${m[2]}`, from: Number(m[3]), to: m[4], finding }
+    ? { note, file: `${m[2]}${m[3]}`, from: Number(m[4]), to: m[5], finding }
     : { note, file: null, from: 0, to: undefined, finding: note.text };
 }
 
@@ -82,7 +84,7 @@ const said = (p: Placed): string =>
 /** `L12` or `L12-14`, linked to the reviewed commit when the path is the repository's own. */
 function where(repo: string, p: Placed): string {
   const label = `L${p.from}${p.to ? `-${p.to}` : ''}`;
-  if (!p.file || /^[~/]/.test(p.file) || !FULL_SHA.test(p.note.sha)) return label;
+  if (!p.file || OUTSIDE_REPO.test(p.file) || !FULL_SHA.test(p.note.sha)) return label;
   const anchor = `#L${p.from}${p.to ? `-L${p.to}` : ''}`;
   return `[${label}](https://github.com/${repo}/blob/${p.note.sha}/${encodeURI(p.file)}${anchor})`;
 }
