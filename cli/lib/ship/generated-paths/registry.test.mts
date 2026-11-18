@@ -166,8 +166,7 @@ describe('classifyGenerated', () => {
     expect(out.generated).toEqual([
       { path: '.devkit/skills-manifest.json', command: 'devkit sync-skills' },
       { path: 'dist/x/y.mjs', command: 'bun run build' },
-      // `devkit sync-hooks` would add hook scripts the recorded selection turned off.
-      { path: '.devkit/agent-hooks-manifest.json', command: 'devkit init' },
+      { path: '.devkit/agent-hooks-manifest.json', command: 'devkit sync-hooks' },
     ]);
     expect(out.other).toEqual(['src/a.mts', 'README.md']);
   });
