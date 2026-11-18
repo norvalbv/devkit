@@ -97,7 +97,12 @@ describe.runIf(browserReady)('machine capture (headless browser)', () => {
   it('records a passing flow as a video plus its named shots and one still per step, all passed', async () => {
     const root = repo();
     const { evidence, result } = await capture(root, flowFile(root, 'click', CLICK));
-    expect(result).toMatchObject({ flow: 'click', error: undefined, passed: true });
+    expect(result).toMatchObject({
+      flow: 'click',
+      error: undefined,
+      warning: undefined,
+      passed: true,
+    });
     const files = readManifest(evidence).map(({ file, kind, passed }) => ({ file, kind, passed }));
     expect(files).toEqual([
       { file: 'click.webm', kind: 'video', passed: true },
@@ -166,7 +171,7 @@ describe.runIf(browserReady)('machine capture (headless browser)', () => {
     ]);
   }, 60_000);
 
-  it('still stops the recording and returns when the page stops answering mid-run', async () => {
+  it('still stops the recording and returns, with a warning, when the page stops answering mid-run', async () => {
     const root = repo();
     const stuck = [
       OPEN,
@@ -176,6 +181,9 @@ describe.runIf(browserReady)('machine capture (headless browser)', () => {
     ].join('\n');
     const { evidence, result } = await capture(root, flowFile(root, 'stuck', stuck));
     expect(result).toMatchObject({ passed: false, error: 'stuck page' });
+    expect(result.warning).toMatch(
+      /captions and marks of this run may still be drawn over the app/,
+    );
     expect(readManifest(evidence).map(({ file }) => file)).toContain('stuck.webm');
   }, 60_000);
 

@@ -21,6 +21,8 @@ export const VIEWPORT = { width: 1280, height: 720 };
 const FLOW_TIMEOUT_MS = 5 * 60_000;
 const CAPTURE_TIMEOUT_MS = 30_000;
 const CLEANUP_TIMEOUT_MS = 5_000;
+const STILL_DRAWN =
+  'the page stopped answering, so the captions and marks of this run may still be drawn over the app: reload or restart it';
 /** Chromium refuses a capture until the page has drawn a frame, which a just-loaded page has not. */
 const CAPTURE_REFUSED = /Unable to capture screenshot/;
 const CAPTURE_TRIES = 10;
@@ -310,6 +312,8 @@ export interface RunResult {
   passed: boolean;
   entries: EvidenceEntry[];
   error?: string;
+  /** Something the run could not undo on the page; the capture and its verdict stand. */
+  warning?: string;
 }
 
 /** Record `flowPath` on the slot's page; a throw or a timeout fails it (passed:false, kept locally). */
@@ -369,6 +373,7 @@ export async function runFlow(input: RunInput): Promise<RunResult> {
     await sleep(FINAL_HOLD_MS * pace);
   };
   let error: string | undefined;
+  let warning: string | undefined;
   // Only a recording this run started is stopped: stopping another run's would cut its video.
   let recording = false;
   try {
@@ -381,7 +386,9 @@ export async function runFlow(input: RunInput): Promise<RunResult> {
     error = errorMessage(cause);
   } finally {
     // A page that stopped answering must not keep the recorder and the browser from being released.
-    await withTimeout(notes.clear(), CLEANUP_TIMEOUT_MS, 'overlay cleanup').catch(() => undefined);
+    await withTimeout(notes.clear(), CLEANUP_TIMEOUT_MS, 'overlay cleanup').catch(() => {
+      warning = STILL_DRAWN;
+    });
     if (recording && !(await recorder.stop()))
       error ??= 'the recording was lost, so nothing proves this run';
     await close();
@@ -389,5 +396,5 @@ export async function runFlow(input: RunInput): Promise<RunResult> {
   const passed = error === undefined;
   // A run refused before it recorded anything leaves the flow's earlier capture alone.
   const entries = recording ? recordFlow(evidence, flow, files, { ...facts, passed }) : [];
-  return { flow, passed, entries, error };
+  return { flow, passed, entries, error, warning };
 }

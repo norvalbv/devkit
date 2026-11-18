@@ -304,6 +304,7 @@ async function up(root: string, rest: string[]): Promise<number> {
 function report(result: RunResult, evidence: string): number {
   for (const entry of result.entries)
     console.log(`${entry.kind}: ${join(evidence, entry.file)} (${entry.bytes} bytes)`);
+  if (result.warning) say(result.warning);
   if (result.entries.some((entry) => entry.kind === 'video' && entry.bytes > VIDEO_CAP))
     say('the video is over the 9 MB a PR attaches; shorten the flow so it can be uploaded');
   if (result.passed)
