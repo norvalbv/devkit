@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { readShipQueue } from '../lib/ship/queue/status.mts';
 import {
   testExecFileSync as execFileSync,
   processAlive,
@@ -783,7 +784,8 @@ describe('ship run record + orphan preflight', () => {
   });
 
   it('reaps the whole gate tree when only the CLI process is signalled (sc-2159)', async () => {
-    // The only test that drives cli/commands/ship.mts rather than the script directly.
+    // Drives cli/commands/ship.mts under a private queue root: the machine queue's root comes from
+    // the passwd home, never env, so a busy real queue would otherwise starve this fixture.
     const { dir, env, git } = seedShipRepoLocalRemote();
     seedScopedFile(dir);
     const gatePidFile = join(dir, '.gate-pid');
@@ -798,28 +800,24 @@ describe('ship run record + orphan preflight', () => {
     );
     chmodSync(hook, 0o755);
 
-    const cli = spawn(
-      process.execPath,
-      [
-        join(dirname(scriptPath), '../../index.mts'),
-        'ship',
-        'feat/signalled',
-        'ship it',
-        'note.txt',
-      ],
-      {
-        cwd: dir,
-        stdio: 'ignore',
-        env: { ...publishEnvFor(env), SHIP_DRY_RUN: '1' },
-      },
-    );
-    await waitForPath(ready, 60_000);
+    const root = mkdtempSync(join(tmpdir(), 'ship-queue-'));
+    dirs.push(root);
+    const mod = (rel) => JSON.stringify(new URL(rel, import.meta.url).href);
+    const entry = `Promise.all([import(${mod('../commands/ship.mts')}), import(${mod('../lib/ship/queue/enter.mts')}), import(${mod('../lib/ship/queue/status.mts')})]).then(([s, e, q]) => s.default(['feat/signalled', 'ship it', 'note.txt'], process.cwd(), { ...s.DEFAULT_DEPENDENCIES, enterQueue: (o) => e.enterShipQueue({ ...o, root: ${JSON.stringify(root)} }), queueAhead: () => e.queueAhead(process.pid, () => q.readShipQueue(${JSON.stringify(root)})) })).then((c) => process.exit(c));`;
+    const cli = spawn(process.execPath, ['-e', entry], {
+      cwd: dir,
+      stdio: ['ignore', 'ignore', 'pipe'],
+      env: { ...publishEnvFor(env), SHIP_DRY_RUN: '1' },
+    });
+    await waitForPath(ready, 60_000, cli);
     const gatePid = Number(readFileSync(gatePidFile, 'utf8').trim());
     expect(gatePid).toBeGreaterThan(0);
     expect(processAlive(gatePid)).toBe(true);
+    const holders = readShipQueue(root).running.map((h) => [h.pid, h.branch]);
 
     cli.kill('SIGTERM');
     const [code] = await once(cli, 'exit');
+    expect(holders).toEqual([[cli.pid, 'feat/signalled']]);
 
     expect(code).toBe(143);
     expect(processAlive(gatePid)).toBe(false);
