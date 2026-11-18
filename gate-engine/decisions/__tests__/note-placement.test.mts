@@ -201,7 +201,7 @@ describe('amend on a draft note that sits above a committed trailing section', (
     expect(tailOf(text)).toBe(`${TAIL}\n`);
   });
 
-  it('refuses, naming the trailing heading, when that section differs from HEAD', () => {
+  it('refuses, naming the edited line, when committed history below the draft differs from HEAD', () => {
     writeRecord(TARGET, TAIL);
     commit();
     ok('add', 'axis', '--note', 'A draft.');
@@ -210,7 +210,7 @@ describe('amend on a draft note that sits above a committed trailing section', (
       readFileSync(file, 'utf8').replace('Prose under a', 'Edited prose under a'),
     );
     const result = refused(
-      '"## Implementation note · 2026-05-02',
+      'differs from HEAD at "Prose under a hand-written heading."',
       'amend',
       'axis',
       '--note',
@@ -219,12 +219,34 @@ describe('amend on a draft note that sits above a committed trailing section', (
     expect(result.stderr).not.toContain('restore it');
   });
 
-  it('names the trailing heading, not amend --target, for a draft an older CLI wrote at EOF', () => {
+  it('amends a draft an older CLI wrote at EOF, below the trailing section', () => {
     writeRecord(TARGET, TAIL);
     commit();
     writeFileSync(file, `${readFileSync(file, 'utf8')}- ${TODAY} — Appended at EOF.\n`);
-    const result = refused('"## Implementation note', 'amend', 'axis', '--note', 'Changed.');
-    expect(result.stderr).not.toContain('--target');
+    ok('amend', 'axis', '--note', 'Corrected at EOF.');
+    const text = readFileSync(file, 'utf8');
+    expect(text).toContain(`- ${TODAY} — Corrected at EOF.`);
+    expect(text).not.toContain('Appended at EOF.');
+    expect(text).toContain(TAIL);
+  });
+
+  it('refuses to amend a draft that repeats a committed note below it', () => {
+    writeRecord(TARGET, `## [archived — misfiled]\n\n- ${TODAY} — Confirmed.`);
+    commit();
+    const committed = readFileSync(file, 'utf8');
+    writeFileSync(
+      file,
+      committed.replace('\n\n## [archived', `\n- ${TODAY} — Confirmed.\n\n## [archived`),
+    );
+    refused('appears twice and only one is committed', 'amend', 'axis', '--note', 'New.');
+  });
+
+  it('resolves --supersedes against a committed note in the trailing section', () => {
+    writeRecord(TARGET, TAIL);
+    commit();
+    ok('add', 'axis', '--note', 'A draft.');
+    ok('amend', 'axis', '--note', 'Replaces it.', '--supersedes', 'note:2026-05-03');
+    expect(served().at(-1)).toBe('**Amends:** note:2026-05-03 — Replaces it.');
   });
 
   it('re-targets after the trailing section, and amend --target keeps the notes under it', () => {
@@ -242,6 +264,7 @@ describe('amend on a draft note that sits above a committed trailing section', (
       '--vision-fit',
       'v',
     ];
+    ok('add', 'axis', '--note', 'Drafted under the old Target.');
     ok('add', 'axis', '--target', '--evidence-change', 'a benchmark moved', ...fields);
     ok('add', 'axis', '--note', 'Under the new Target.');
     ok(
@@ -258,5 +281,8 @@ describe('amend on a draft note that sits above a committed trailing section', (
     expect(text).toContain('the amended ruling');
     expect(served().at(-1)).toBe('Under the new Target.');
     expect(text).toContain(TAIL);
+    expect(text.indexOf('Drafted under the old Target.')).toBeLessThan(
+      text.indexOf('## Implementation note'),
+    );
   });
 });

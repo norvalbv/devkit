@@ -336,11 +336,6 @@ function liveSection(body: string) {
   return { all, index, next, end };
 }
 
-/** Where the live ruling's section ends; everything after it belongs to a later `##` heading. */
-export function liveSectionEnd(body: string): number {
-  return liveSection(body).end;
-}
-
 /** Insert a note at the end of the live ruling's section (readers serve no other), never at EOF.
  * Throws, writing nothing, with no ruling heading or when a later same-day note would be renumbered. */
 export function spliceLiveNote(

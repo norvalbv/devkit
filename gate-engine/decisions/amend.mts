@@ -21,11 +21,7 @@ import {
   warnIfFolded,
   whyHook,
 } from './decision-format.mts';
-import {
-  liveSectionEnd,
-  noteTextWithRelation,
-  validateTargetSupersedes,
-} from './recall/note-relations.mts';
+import { noteTextWithRelation, validateTargetSupersedes } from './recall/note-relations.mts';
 import { validateCategory } from './recall/categories.mts';
 import { effectiveScope } from './recall/retrieval.mts';
 
@@ -36,6 +32,7 @@ export interface DecisionPaths {
 }
 
 const TRAILING_WS_RE = /\s*$/;
+const LEADING_WS_RE = /^\s+/;
 const TIMELINE_ENTRY_RE = /^(?:## Target · \d{4}-\d{2}-\d{2}\b.*|- \d{4}-\d{2}-\d{2}\s+—\s+.*)$/gm;
 const ENTRY_DATE_RE = /^(?:## Target · |- )(\d{4}-\d{2}-\d{2})\b/;
 const TARGET_DATE_RE = /^## Target · (\d{4}-\d{2}-\d{2})\b/;
@@ -44,24 +41,72 @@ const LINE_END_RE = /\r?\n/;
 const LINE_LABEL_RE = /^[ \t]*(?:\*\*[^:\r\n]+:\*\*|- (?:Positive|Negative):)/;
 
 interface Timeline {
-  prefix: string;
-  entries: Array<{ kind: 'target' | 'note'; text: string; start: number }>;
+  entries: Array<{ kind: 'target' | 'note'; text: string; start: number; end: number }>;
 }
 
+// A note is one line (the CLI folds it); a Target runs to its first note or the next `##` heading.
 function timeline(body: string): Timeline {
   const matches = [...body.matchAll(TIMELINE_ENTRY_RE)];
   return {
-    prefix: body.slice(0, matches[0]?.index ?? body.length).replace(TRAILING_WS_RE, ''),
     entries: matches.map((match, index) => {
       const start = match.index ?? 0;
-      const end = matches[index + 1]?.index ?? body.length;
-      return {
-        kind: match[0].startsWith('## Target') ? 'target' : 'note',
-        text: body.slice(start, end).trim(),
-        start,
-      };
+      const kind = match[0].startsWith('## Target') ? 'target' : 'note';
+      const heading = body.indexOf('\n## ', start + 1);
+      const end =
+        kind === 'note'
+          ? start + match[0].length
+          : Math.min(
+              matches[index + 1]?.index ?? body.length,
+              heading === -1 ? body.length : heading + 1,
+            );
+      return { kind, text: body.slice(start, end).trim(), start, end };
     }),
   };
+}
+
+const contentLines = (text: string) =>
+  text
+    .split(LINE_END_RE)
+    .map((line) => line.trimEnd())
+    .filter(Boolean);
+
+/** Indices of entries absent from HEAD. Throws unless removing them leaves HEAD's content intact. */
+function draftIndices(body: string, working: Timeline, committedBody: string | null): number[] {
+  if (committedBody === null) return working.entries.map((_, index) => index);
+  const head = timeline(committedBody).entries;
+  const drafts: number[] = [];
+  let matched = 0;
+  for (const [index, entry] of working.entries.entries()) {
+    const want = head[matched];
+    if (want?.kind === entry.kind && want.text === entry.text) matched += 1;
+    else drafts.push(index);
+  }
+  const twin = drafts.find((d) =>
+    working.entries.some(
+      (e, i) => i < d && !drafts.includes(i) && e.text === working.entries[d].text,
+    ),
+  );
+  if (twin !== undefined) {
+    throw new Error(
+      `"${working.entries[twin].text.split('\n')[0]}" appears twice and only one is committed; ` +
+        'amend cannot tell the draft apart, so nothing was written',
+    );
+  }
+  let kept = body;
+  for (const index of [...drafts].reverse()) {
+    const { start, end } = working.entries[index];
+    kept = kept.slice(0, start) + kept.slice(end);
+  }
+  const [have, want] = [contentLines(kept), contentLines(committedBody)];
+  const at = want.findIndex((line, index) => line !== have[index]);
+  const differs =
+    matched < head.length ? head[matched].text.split('\n')[0] : (want[at] ?? have[want.length]);
+  if (differs !== undefined) {
+    throw new Error(
+      `earlier decision history differs from HEAD at "${differs}"; undo that edit (drafts are kept), then amend`,
+    );
+  }
+  return drafts;
 }
 
 function committedDecision(file: string, cwd: string): string | null {
@@ -99,8 +144,8 @@ function committedDecision(file: string, cwd: string): string | null {
   return shown.stdout;
 }
 
-// Select the newest note (--note) or newest Target (--target) and prove it is absent from HEAD;
-// HEAD's entries are a contiguous prefix, so every entry after an uncommitted one is a draft too.
+// Select the newest note (--note) or newest Target (--target) and prove it is absent from HEAD.
+// Drafts may sit mid-file (a note lands at the end of the live ruling's section, not at EOF).
 function validateAmendment(
   slug: string,
   current: string,
@@ -108,18 +153,15 @@ function validateAmendment(
   requested: 'target' | 'note',
 ) {
   const workingParsed = parseDecision(current);
-  // Bytes after the live ruling's section belong to later headings: never a draft, kept verbatim.
-  const liveEnd = liveSectionEnd(workingParsed.body);
-  const tail = workingParsed.body.slice(liveEnd);
-  const working = timeline(workingParsed.body.slice(0, liveEnd));
+  const working = timeline(workingParsed.body);
   const baseline = committed ? parseDecision(committed) : null;
-  if (baseline && !baseline.body.endsWith(tail)) {
-    throw new Error(
-      `"${tail.split('\n')[0]}" below the live ruling differs from HEAD; amend edits only drafts in the live ruling's section`,
-    );
+  if (baseline && JSON.stringify(workingParsed.fm) !== JSON.stringify(baseline.fm)) {
+    throw new Error('frontmatter differs from HEAD; restore committed history before amending');
   }
-  let selectedIndex = working.entries.length - 1;
+  const drafts = draftIndices(workingParsed.body, working, baseline?.body ?? null);
+  let selectedIndex = drafts.at(-1) ?? working.entries.length - 1;
   if (requested === 'target') {
+    selectedIndex = working.entries.length - 1;
     while (selectedIndex >= 0 && working.entries[selectedIndex].kind !== 'target') {
       selectedIndex -= 1;
     }
@@ -139,15 +181,7 @@ function validateAmendment(
         `guard-decisions amend ${slug} --target …, or append with: guard-decisions add ${slug} --note "…"`,
     );
   }
-
-  const head = timeline(baseline?.body.slice(0, baseline.body.length - tail.length) ?? '');
-  if (baseline && JSON.stringify(workingParsed.fm) !== JSON.stringify(baseline.fm)) {
-    throw new Error('frontmatter differs from HEAD; restore committed history before amending');
-  }
-  if (baseline && working.prefix !== head.prefix) {
-    throw new Error('history before the first entry differs from HEAD; restore it before amending');
-  }
-  if (selectedIndex < head.entries.length) {
+  if (!drafts.includes(selectedIndex)) {
     throw new Error(
       requested === 'target'
         ? `newest Target (${date}) is already committed; re-target with: ` +
@@ -155,21 +189,7 @@ function validateAmendment(
         : `newest note (${date}) is already committed; append with: guard-decisions add ${slug} --note "…"`,
     );
   }
-  for (let index = 0; index < head.entries.length; index += 1) {
-    if (
-      working.entries[index].kind !== head.entries[index].kind ||
-      working.entries[index].text !== head.entries[index].text
-    ) {
-      throw new Error('earlier decision history differs from HEAD; restore it before amending');
-    }
-  }
-  return {
-    workingParsed,
-    selected,
-    date,
-    trailing: working.entries.slice(selectedIndex + 1),
-    tail,
-  };
+  return { workingParsed, selected, date, trailing: working.entries.slice(selectedIndex + 1) };
 }
 
 /** Optional Target fields an amendment must re-pass, keyed by the field name parseTargetFields reads. */
@@ -341,7 +361,7 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
   const current = readFileSync(file, 'utf8');
   const committed = committedDecision(file, paths.cwd);
   const kind = options.isTarget || options.targetReplace ? 'target' : 'note';
-  const { workingParsed, selected, date, trailing, tail } = validateAmendment(
+  const { workingParsed, selected, date, trailing } = validateAmendment(
     slug,
     current,
     committed,
@@ -391,8 +411,14 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
   const source = workingParsed.body;
   const before = source.slice(0, selected.start).replace(TRAILING_WS_RE, '');
   if (!(options.isTarget && hasTargetFields(options))) {
-    const note = noteTextWithRelation(options.note ?? '', options.supersedes, before, slug);
-    const body = `${before}\n${renderNote(date, note)}\n${tail ? `\n${tail}` : ''}`;
+    const rest = source.slice(selected.end).replace(LEADING_WS_RE, '');
+    const note = noteTextWithRelation(
+      options.note ?? '',
+      options.supersedes,
+      `${before}\n${rest}`,
+      slug,
+    );
+    const body = `${before}\n${renderNote(date, note)}\n${rest ? `\n${rest}` : ''}`;
     writeFileAtomic(
       file,
       renderDecision({ slug, created: workingParsed.fm.created || date }, body),
