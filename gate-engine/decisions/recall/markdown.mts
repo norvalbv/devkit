@@ -23,6 +23,8 @@ export interface MdSection {
   prose: string;
   /** Top-level list-item texts under the heading, in document order. */
   items: string[];
+  /** Body offset where the next heading node (of any depth) starts, or the body's length. */
+  end: number;
 }
 
 const HEADING = 'heading';
@@ -40,11 +42,14 @@ export function sections(body: string): MdSection[] {
   for (const node of tree.children) {
     if (node.type === HEADING) {
       const { start, end } = node.position ?? {};
+      const previous = out.at(-1);
+      if (previous) previous.end = start?.offset ?? previous.end;
       out.push({
         heading: start && end ? body.slice(start.offset ?? 0, end.offset ?? 0) : '',
         depth: (node as { depth: number }).depth,
         prose: '',
         items: [],
+        end: body.length,
       });
       continue;
     }

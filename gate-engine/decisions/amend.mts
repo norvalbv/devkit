@@ -21,7 +21,11 @@ import {
   warnIfFolded,
   whyHook,
 } from './decision-format.mts';
-import { noteTextWithRelation, validateTargetSupersedes } from './recall/note-relations.mts';
+import {
+  liveSectionEnd,
+  noteTextWithRelation,
+  validateTargetSupersedes,
+} from './recall/note-relations.mts';
 import { validateCategory } from './recall/categories.mts';
 import { effectiveScope } from './recall/retrieval.mts';
 
@@ -104,7 +108,16 @@ function validateAmendment(
   requested: 'target' | 'note',
 ) {
   const workingParsed = parseDecision(current);
-  const working = timeline(workingParsed.body);
+  // Bytes after the live ruling's section belong to later headings: never a draft, kept verbatim.
+  const liveEnd = liveSectionEnd(workingParsed.body);
+  const tail = workingParsed.body.slice(liveEnd);
+  const working = timeline(workingParsed.body.slice(0, liveEnd));
+  const baseline = committed ? parseDecision(committed) : null;
+  if (baseline && !baseline.body.endsWith(tail)) {
+    throw new Error(
+      `"${tail.split('\n')[0]}" below the live ruling differs from HEAD; amend edits only drafts in the live ruling's section`,
+    );
+  }
   let selectedIndex = working.entries.length - 1;
   if (requested === 'target') {
     while (selectedIndex >= 0 && working.entries[selectedIndex].kind !== 'target') {
@@ -127,8 +140,7 @@ function validateAmendment(
     );
   }
 
-  const baseline = committed ? parseDecision(committed) : null;
-  const head = timeline(baseline?.body ?? '');
+  const head = timeline(baseline?.body.slice(0, baseline.body.length - tail.length) ?? '');
   if (baseline && JSON.stringify(workingParsed.fm) !== JSON.stringify(baseline.fm)) {
     throw new Error('frontmatter differs from HEAD; restore committed history before amending');
   }
@@ -156,6 +168,7 @@ function validateAmendment(
     selected,
     date,
     trailing: working.entries.slice(selectedIndex + 1),
+    tail,
   };
 }
 
@@ -328,7 +341,7 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
   const current = readFileSync(file, 'utf8');
   const committed = committedDecision(file, paths.cwd);
   const kind = options.isTarget || options.targetReplace ? 'target' : 'note';
-  const { workingParsed, selected, date, trailing } = validateAmendment(
+  const { workingParsed, selected, date, trailing, tail } = validateAmendment(
     slug,
     current,
     committed,
@@ -379,7 +392,7 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
   const before = source.slice(0, selected.start).replace(TRAILING_WS_RE, '');
   if (!(options.isTarget && hasTargetFields(options))) {
     const note = noteTextWithRelation(options.note ?? '', options.supersedes, before, slug);
-    const body = `${before}\n${renderNote(date, note)}\n`;
+    const body = `${before}\n${renderNote(date, note)}\n${tail ? `\n${tail}` : ''}`;
     writeFileAtomic(
       file,
       renderDecision({ slug, created: workingParsed.fm.created || date }, body),
