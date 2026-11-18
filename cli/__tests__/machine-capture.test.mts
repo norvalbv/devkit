@@ -4,9 +4,9 @@ import { createServer, type Server } from 'node:http';
 import { type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chromium } from 'playwright-core';
+import { chromium, type Page } from 'playwright-core';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { appPage, runFlow } from '../lib/machine/flow.mts';
+import { appPage, runFlow, videoSize, VIEWPORT } from '../lib/machine/flow.mts';
 import {
   evidenceDir,
   provenance,
@@ -67,7 +67,7 @@ function flowFile(root: string, name: string, body: string): string {
   const file = join(root, `${name}.mjs`);
   writeFileSync(
     file,
-    `import assert from 'node:assert/strict';\nexport default async ({ page, url, shot }) => {\n${body}\n};\n`,
+    `import assert from 'node:assert/strict';\nexport default async ({ page, url, shot, step }) => {\n${body}\n};\n`,
   );
   return file;
 }
@@ -76,21 +76,33 @@ async function capture(root: string, flowPath: string) {
   const profile = mkdtempSync(join(tmpdir(), 'machine-profile-'));
   temps.push(profile);
   const evidence = evidenceDir(root);
-  return { evidence, result: await runFlow({ root, flowPath, url, profile, evidence }) };
+  return {
+    evidence,
+    result: await runFlow({ root, flowPath, url, profile, evidence, pace: PACE }),
+  };
 }
 
-const CLICK = `await page.goto(url);\nawait shot('start');\nawait page.click('#b');\nawait page.locator('#t', { hasText: 'clicked' }).waitFor();`;
+/** Holds a twentieth as long as a real run's, so a step costs a test well under a second. */
+const PACE = 0.05;
+const stepOf = (title: string, body: string, options = '') =>
+  `await step(${JSON.stringify(title)}, async () => {\n${body}\n}${options});`;
+const CLICK = stepOf(
+  'Click Go',
+  `await page.goto(url);\nawait shot('start');\nawait page.click('#b');\nawait page.locator('#t', { hasText: 'clicked' }).waitFor();`,
+  `, { focus: page.locator('#t') }`,
+);
+const OPEN = stepOf('Open the page', 'await page.goto(url);');
 
 describe.runIf(browserReady)('machine capture (headless browser)', () => {
-  it('records a passing flow as a video plus named and final screenshots, all passed', async () => {
+  it('records a passing flow as a video plus its named shots and one still per step, all passed', async () => {
     const root = repo();
     const { evidence, result } = await capture(root, flowFile(root, 'click', CLICK));
-    expect(result).toMatchObject({ flow: 'click', passed: true });
+    expect(result).toMatchObject({ flow: 'click', error: undefined, passed: true });
     const files = readManifest(evidence).map(({ file, kind, passed }) => ({ file, kind, passed }));
     expect(files).toEqual([
       { file: 'click.webm', kind: 'video', passed: true },
       { file: 'click.start.png', kind: 'screenshot', passed: true },
-      { file: 'click.final.png', kind: 'screenshot', passed: true },
+      { file: 'click.step1-click-go.png', kind: 'screenshot', passed: true },
     ]);
     for (const { file, bytes, tree } of readManifest(evidence)) {
       expect(existsSync(join(evidence, file))).toBe(true);
@@ -123,28 +135,44 @@ describe.runIf(browserReady)('machine capture (headless browser)', () => {
 
   it('lists a screenshot taken twice under one name once', async () => {
     const root = repo();
-    const twice = `await page.goto(url);\nawait shot('x');\nawait shot('x');\nawait shot('final');`;
+    const twice = stepOf('Twice', `await page.goto(url);\nawait shot('x');\nawait shot('x');`);
     const { evidence } = await capture(root, flowFile(root, 'twice', twice));
     expect(readManifest(evidence).map(({ file }) => file)).toEqual([
       'twice.webm',
       'twice.x.png',
-      'twice.final.png',
+      'twice.step1-twice.png',
     ]);
+  }, 60_000);
+
+  it('fails a flow that called no step, naming the remedy, and keeps its own error when it threw', async () => {
+    const root = repo();
+    const bare = await capture(root, flowFile(root, 'bare', 'await page.goto(url);'));
+    expect(bare.result).toMatchObject({ passed: false });
+    expect(bare.result.error).toMatch(/called no step\(\): wrap each thing .* in `await step\(/);
+    expect(readManifest(bare.evidence)).toMatchObject([{ file: 'bare.webm', passed: false }]);
+    const threw = await capture(root, flowFile(root, 'threw', `throw new Error('own error');`));
+    expect(threw.result.error).toBe('own error');
+  }, 90_000);
+
+  it("refuses a shot named like a step's own still", async () => {
+    const root = repo();
+    const { result } = await capture(
+      root,
+      flowFile(root, 'clash', `await shot('step1-click-go');`),
+    );
+    expect(result.error).toContain('shot name "step1-click-go" is a step\'s own still');
   }, 60_000);
 
   it("keeps each flow's shots in files of their own, and refuses a shot name it would rewrite", async () => {
     const root = repo();
-    const { evidence } = await capture(
-      root,
-      flowFile(root, 'checkout-cart', 'await page.goto(url);'),
-    );
-    const cart = `await page.goto(url);\nawait shot('cart-final');`;
+    const { evidence } = await capture(root, flowFile(root, 'checkout-cart', OPEN));
+    const cart = stepOf('Cart', `await page.goto(url);\nawait shot('cart-final');`);
     await capture(root, flowFile(root, 'checkout', cart));
     const shots = readManifest(evidence).filter(({ kind }) => kind === 'screenshot');
     expect(shots.map(({ file }) => file).sort()).toEqual([
-      'checkout-cart.final.png',
+      'checkout-cart.step1-open-the-page.png',
       'checkout.cart-final.png',
-      'checkout.final.png',
+      'checkout.step1-cart.png',
     ]);
     const renamed = await capture(root, flowFile(root, 'spaced', "await shot('cart final');"));
     expect(renamed.result.error).toContain('shot name "cart final" may hold only');
@@ -154,11 +182,11 @@ describe.runIf(browserReady)('machine capture (headless browser)', () => {
     const root = repo();
     const flow = flowFile(root, 'click', CLICK);
     const { evidence } = await capture(root, flow);
-    writeFileSync(flow, `export default async ({ page, url }) => { await page.goto(url); };\n`);
+    writeFileSync(flow, `export default async ({ page, url, step }) => {\n${OPEN}\n};\n`);
     await capture(root, flow);
     expect(readManifest(evidence).map(({ file }) => file)).toEqual([
       'click.webm',
-      'click.final.png',
+      'click.step1-open-the-page.png',
     ]);
     expect(existsSync(join(evidence, 'click.start.png'))).toBe(false);
   }, 90_000);
@@ -177,6 +205,36 @@ describe.runIf(browserReady)("machine capture (the app's own DevTools)", () => {
     return { context, page, devtools: `http://127.0.0.1:${port}` };
   }
 
+  /** The captions and marks still drawn over `page`, counted through DevTools because Playwright
+   * keeps them in a closed shadow root. */
+  async function overlaysLeft(page: Page): Promise<number> {
+    const session = await page.context().newCDPSession(page);
+    const tree = await session.send('DOM.getDocument', { depth: -1, pierce: true });
+    return JSON.stringify(tree).split('"x-pw-user-overlay"').length - 1;
+  }
+
+  it('leaves no caption or mark over the app when a step throws after marking', async () => {
+    const root = repo();
+    const { context, page, devtools } = await app();
+    try {
+      const marked = stepOf('Mark', 'await page.goto(url);', `, { focus: page.locator('#t') }`);
+      const body = `${marked}\n${stepOf('Throw', `throw new Error('mid-step');`)}`;
+      const input = {
+        root,
+        flowPath: flowFile(root, 'thrown', body),
+        url: devtools,
+        profile: join(root, 'unused'),
+        evidence: evidenceDir(root),
+        devtools: true,
+        pace: PACE,
+      };
+      expect(await runFlow(input)).toMatchObject({ passed: false, error: 'mid-step' });
+      expect(await overlaysLeft(page)).toBe(0);
+    } finally {
+      await context.close();
+    }
+  }, 60_000);
+
   it("drives and records the app's own window, then leaves the app running", async () => {
     const root = repo();
     const { context, page, devtools } = await app();
@@ -191,14 +249,16 @@ describe.runIf(browserReady)("machine capture (the app's own DevTools)", () => {
         profile: join(root, 'unused'),
         evidence,
         devtools: true,
+        pace: PACE,
       };
       expect(await runFlow(input)).toMatchObject({ flow: 'attach', passed: true });
       expect(readManifest(evidence).map(({ file }) => file)).toEqual([
         'attach.webm',
         'attach.start.png',
-        'attach.final.png',
+        'attach.step1-click-go.png',
       ]);
       expect(await page.locator('#t').textContent()).toBe('clicked');
+      expect(await overlaysLeft(page)).toBe(0);
     } finally {
       await context.close();
     }
@@ -218,6 +278,17 @@ describe.runIf(browserReady)("machine capture (the app's own DevTools)", () => {
       /nothing answers DevTools at .*--remote-debugging-port=\{port\}/s,
     );
   }, 60_000);
+});
+
+describe('the video frame', () => {
+  it("keeps the window's own shape at the video width, with an even height", () => {
+    expect(videoSize(1555, 996)).toEqual({ width: 1280, height: 820 });
+    expect(videoSize(1280, 720)).toEqual(VIEWPORT);
+  });
+
+  it('falls back to the default frame for a window with no layout yet', () => {
+    expect(videoSize(0, 0)).toEqual(VIEWPORT);
+  });
 });
 
 describe('the app page among DevTools targets', () => {

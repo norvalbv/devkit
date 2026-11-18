@@ -1,6 +1,6 @@
 /** The QA-capture section of the evidence block: what `devkit machine run` recorded, the apt part of
  * it uploaded to GitHub through `gh --attach`, and why anything else was left out. */
-import { type EvidenceEntry, shotFile } from '../../machine/manifest.mts';
+import { type EvidenceEntry } from '../../machine/manifest.mts';
 import { details, sectionBegin, sectionEnd, sectionOf, withSection } from './block.mts';
 
 export const QA_BEGIN = sectionBegin('qa');
@@ -12,7 +12,8 @@ const MB = 1024 * 1024;
 /** GitHub's free-plan video limit is 10 MB and its image limit 10 MB; the margin covers rounding. */
 export const VIDEO_CAP = 9 * MB;
 const IMAGE_CAP = 10 * MB;
-const MAX_FILES = 6;
+/** Two flows of seven steps each: both videos and every still. */
+const MAX_FILES = 16;
 const MAX_SHOTS = 4;
 
 export interface MediaPlan {
@@ -44,15 +45,21 @@ function sizeNote(entry: EvidenceEntry): string | null {
     : null;
 }
 
-/** One flow's apt captures: its video and final screenshot, or, with no video, up to 4 screenshots. */
-function flowPicks(flow: EvidenceEntry[]): EvidenceEntry[] {
-  const video = flow.find((entry) => entry.kind === 'video');
-  if (!video) return flow.filter((entry) => entry.kind === 'screenshot').slice(0, MAX_SHOTS);
-  return [video, ...flow.filter((entry) => entry.file === shotFile(video.flow, 'final'))];
-}
+/** One flow's apt stills: every one its video's run took, or, with no video, the first 4. */
+const flowStills = (flow: EvidenceEntry[]): EvidenceEntry[] => {
+  const stills = flow.filter((entry) => entry.kind === 'screenshot');
+  return flow.some((entry) => entry.kind === 'video') ? stills : stills.slice(0, MAX_SHOTS);
+};
 
-/** The apt set: each eligible flow's video and final screenshot, else up to 4 of its screenshots.
- * A failed or ineligible flow is never uploaded; a UI change with nothing to show says so. */
+/** Round-robin, so the file limit trims every flow's stills evenly instead of dropping a flow's. */
+const interleave = <T,>(lists: T[][]): T[] =>
+  lists
+    .flatMap((list, at) => list.map((item, turn) => ({ item, turn, at })))
+    .sort((a, b) => a.turn - b.turn || a.at - b.at)
+    .map(({ item }) => item);
+
+/** The apt set: each eligible flow's video and stills, videos first so the file limit never costs a
+ * flow its video. A failed or ineligible flow is never uploaded; a UI change with none says so. */
 export function planMedia(
   entries: EvidenceEntry[],
   why: Ineligible,
@@ -62,7 +69,9 @@ export function planMedia(
   const notes = [...out].map(([flow, reason]) => `\`${flow}\`: not uploaded, ${reason}`);
   const usable = entries.filter((entry) => !out.has(entry.flow));
   const flows = [...new Set(usable.map((entry) => entry.flow))];
-  const wanted = flows.flatMap((flow) => flowPicks(usable.filter((entry) => entry.flow === flow)));
+  const perFlow = flows.map((flow) => usable.filter((entry) => entry.flow === flow));
+  const videos = perFlow.flatMap((flow) => flow.filter((entry) => entry.kind === 'video'));
+  const wanted = [...videos, ...interleave(perFlow.map(flowStills))];
   const fits = wanted.filter((entry) => sizeNote(entry) === null);
   for (const entry of wanted.filter((e) => sizeNote(e) !== null))
     notes.push(`\`${entry.file}\`: not uploaded, ${sizeNote(entry)}`);
@@ -72,7 +81,11 @@ export function planMedia(
     notes.push(
       `UI changed (${uiReason}); no QA capture recorded: run \`devkit machine up\`, \`devkit machine run <flow>\`, then \`devkit machine attach <this PR>\``,
     );
-  return { picks: fits.slice(0, MAX_FILES), notes };
+  // Shown flow by flow: a stable sort keeps each flow's video ahead of its stills.
+  const picks = fits
+    .slice(0, MAX_FILES)
+    .sort((a, b) => flows.indexOf(a.flow) - flows.indexOf(b.flow));
+  return { picks, notes };
 }
 
 function provenanceLine(entry: EvidenceEntry): string {
