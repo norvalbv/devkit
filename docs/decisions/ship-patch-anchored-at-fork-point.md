@@ -117,3 +117,4 @@ created: 2026-09-01
 **Category:** ship-pipeline
 **Source:** shortcut · sc-8022
 **Evidence-change:** The 2026-10-23 Ruling's own no-op clause ('an earlier override ship') was shown false for an overlapping override (a re-edit or a review suggestion after it refused), and the dated note had already moved F to merge-base(tip, M) off the Ruling's text; this is not the Revisit-when firing.
+- 2026-11-18 — The held base moves the strip start only when it is itself one of M's best merge bases against the tip and the held base; otherwise the start is F. Another best base (a rewritten or side-line base history) is neither what the record's blob holds nor guaranteed to be at or after F, so starting there could re-strip hunks the tip holds or skip ones the PR lacks; F keeps the 2026-10-23 behaviour for that path.

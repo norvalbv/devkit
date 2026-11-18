@@ -238,9 +238,9 @@ function baseRange(
 /** [F, M] for one path, from M's base against the tip and the base its anchoring record holds. */
 function pathRange(root: string, tip: string, [f, m]: string[], held?: string): string[] {
   if (!held || !m) return [f, m];
-  // An unknown <held> yields no base, so F stands; a tie goes to <held>, the base the override overlapped.
+  // Only <held> itself may replace F: the record's blob holds no other base, and a tie goes to it.
   const bases = lines(git(root, ['merge-base', '--all', m, tip, held]));
-  return [bases.includes(held) ? held : (bases[0] ?? f), m];
+  return [bases.includes(held) ? held : f, m];
 }
 
 /** Leave out <baseRef> changes the caller's HEAD holds and the PR tip does not (a local base merge). */
