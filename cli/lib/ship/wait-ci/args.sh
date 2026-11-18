@@ -8,6 +8,8 @@ SHIP_WAIT_CI_MIN_S=60
 SHIP_WAIT_CI_MAX_S=7200
 # The caller's exit after the wait: 0, or under WAIT_CI_STRICT=1 a 5 (not passed) or a signal status.
 WAIT_CI_STATUS=0
+# The first signal's status once ship_settled_signal_traps is armed; 0 while none arrived.
+WAIT_CI_SIGNAL=0
 # Sized to cover a ~55-minute CI run, devkit's own gate workflow included.
 SHIP_WAIT_CI_DEFAULT_S=3600
 
@@ -46,25 +48,49 @@ ship_wait_ci_not_run() {
   [ "${WAIT_CI_STRICT:-0}" -eq 0 ] || { WAIT_CI_STATUS=5; SHIP_END_CAUSE=ci_not_green; }
 }
 
-# ship_run_wait_ci <pr-number> <repo> <timeout> <pr-url> [<required>]
-# Runs LAST, after every artifact is durable. Announces the PR first: a signal here exits 130 through
-# the managed wrapper whatever bash does, so the abort has to be self-describing before it can happen.
-# Always returns 0 and records WAIT_CI_STATUS instead: the callers run under `set -e` with work left.
+# ship_settled_signal_traps — once the PR is open a signal ends only the wait, not ship's exit (strict
+# keeps it). Record-only: a `trap ''` would be inherited by the node wait and make it uninterruptible.
+ship_settled_signal_traps() {
+  trap '[ "$WAIT_CI_SIGNAL" -ne 0 ] || WAIT_CI_SIGNAL=129' HUP
+  trap '[ "$WAIT_CI_SIGNAL" -ne 0 ] || WAIT_CI_SIGNAL=130' INT
+  trap '[ "$WAIT_CI_SIGNAL" -ne 0 ] || WAIT_CI_SIGNAL=131' QUIT
+  trap '[ "$WAIT_CI_SIGNAL" -ne 0 ] || WAIT_CI_SIGNAL=143' TERM
+}
+
+# ship_run_wait_ci <pr-number> <repo> <timeout> <pr-url> [<required>] — runs LAST, after every artifact
+# is durable; returns 0 and records WAIT_CI_STATUS, since the callers run under `set -e` with work left.
 ship_run_wait_ci() {
-  local pr=$1 repo=$2 timeout=$3 url=$4 required=${5:-0} script req='' strict='' rc=0
+  local pr=$1 repo=$2 timeout=$3 url=$4 required=${5:-0} script req='' strict='' rc=0 waiter
+  ship_settled_signal_traps
   ship_queue_slot_release
   if [ -z "$pr" ]; then
     ship_wait_ci_not_run "" pr-number-unresolved
     return 0
   fi
-  echo "ship: the PR is open at $url and the ship is complete; waiting on its checks (Ctrl-C is safe)" >&2
   script="$SCRIPT_DIR/wait-ci/wait.mts"; [ -f "$script" ] || script="$SCRIPT_DIR/wait-ci/wait.mjs"
   [ "$required" -eq 0 ] || req=--required
   [ "${WAIT_CI_STRICT:-0}" -eq 0 ] || strict=--strict
-  node "$script" --pr "$pr" --repo "$repo" --timeout "$timeout" ${req:+"$req"} ${strict:+"$strict"} || rc=$?
+  if [ "$WAIT_CI_SIGNAL" -eq 0 ]; then
+    echo "ship: the PR is open at $url and the ship is complete; waiting on its checks (Ctrl-C is safe)" >&2
+    # In the background: a trapped signal ends `wait` at once, even one landing before node started.
+    node "$script" --pr "$pr" --repo "$repo" --timeout "$timeout" ${req:+"$req"} ${strict:+"$strict"} &
+    waiter=$!
+    [ "$WAIT_CI_SIGNAL" -ne 0 ] || wait "$waiter" || rc=$?
+    if [ "$WAIT_CI_SIGNAL" -ne 0 ] && kill -TERM "$waiter" 2>/dev/null; then
+      wait "$waiter" 2>/dev/null || :
+      rc=$WAIT_CI_SIGNAL
+    fi
+    # A wait that died by a signal was interrupted; one that reached its verdict keeps it.
+    case "$rc" in 129|130|131|143) [ "$WAIT_CI_SIGNAL" -ne 0 ] || WAIT_CI_SIGNAL=$rc ;; *) WAIT_CI_SIGNAL=0 ;; esac
+  fi
+  if [ "$WAIT_CI_SIGNAL" -ne 0 ]; then
+    echo "ship: ci-outcome=not-run pr=$pr reason=interrupted" >&2
+    [ -z "$strict" ] || WAIT_CI_STATUS=$WAIT_CI_SIGNAL
+    return 0
+  fi
   [ -n "$strict" ] || return 0
-  # Only 0 and the documented 130/143 signals survive; a crash or kill must not read as another code.
-  case "$rc" in 0|130|143) ;; *) rc=5 ;; esac
+  # Anything but a pass is not known green; a crash or kill must not read as another code.
+  [ "$rc" -eq 0 ] || rc=5
   WAIT_CI_STATUS=$rc
   [ "$rc" -ne 5 ] || SHIP_END_CAUSE=ci_not_green
   [ "$rc" -ne 5 ] || echo "ship: --wait-ci-strict exits 5 — the PR is open at $url; its CI is not known green. Do NOT --resume." >&2

@@ -1538,11 +1538,16 @@ describe.each(['package', 'standalone'])('staged fallow gate (%s hook)', (builde
   });
 
   it('does not block when fallow errors (exit 2: no detectable base branch, bad config)', () => {
-    const r = run({ FALLOW_RC: '2' });
+    const error = '{"error":true,"message":"failed to read baseline"}';
+    const r = run({ FALLOW_RC: '2', FALLOW_JSON: error });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('fallow exited 2 without a verdict');
     expect(r.stdout).toContain('fallow human report');
-    expect(r.calls).toContain('guard-review');
+    // Named in the ship digest as a run that verified nothing, never as the gate that blocked.
+    expect(r.calls).toContain(
+      `guard-review record-gate fallow --could-not-run fallow exited 2 without a verdict — audit skipped ${error}`,
+    );
+    expect(r.calls).not.toMatch(/^guard-review record-gate fallow$/m);
   });
 
   const fallowRuns = (calls: string) => calls.match(/^fallow audit/gm)?.length ?? 0;
@@ -1605,14 +1610,17 @@ describe.each(['package', 'standalone'])('staged fallow gate (%s hook)', (builde
   it("skips the audit above fallow's 10 MiB stdin cap, where it would report the whole project", () => {
     const r = run({ FALLOW_RC: '1' }, { staged: 'huge' });
     expect(r.status).toBe(0);
-    expect(r.calls).not.toContain('fallow');
+    expect(r.calls).not.toContain('fallow audit');
     expect(r.stdout).toContain('audit skipped');
+    expect(r.calls).toContain(
+      "record-gate fallow --could-not-run staged diff exceeds fallow's 10 MiB",
+    );
   });
 
   // fallow's own cap message: "--diff-stdin is at least 10485761 bytes (cap 10485760)".
   it('audits a diff of exactly 10485760 bytes and skips one byte more', () => {
     expect(run({ FALLOW_RC: '1' }, { staged: 10485760 }).calls).toContain('fallow audit');
-    expect(run({ FALLOW_RC: '1' }, { staged: 10485761 }).calls).not.toContain('fallow');
+    expect(run({ FALLOW_RC: '1' }, { staged: 10485761 }).calls).not.toContain('fallow audit');
   });
 
   it('skips the audit in review mode and when fallow is not installed', () => {
@@ -1641,7 +1649,10 @@ describe.each(['package', 'standalone'])('staged fallow gate (%s hook)', (builde
     const r = run({ FALLOW_RC: '1', GIT_INDEX_FILE: tmpdir() }); // an index path that is a directory
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('could not capture the staged diff');
-    expect(r.calls).not.toContain('fallow');
+    expect(r.calls).not.toContain('fallow audit');
+    expect(r.calls).toContain(
+      'record-gate fallow --could-not-run could not capture the staged diff',
+    );
   });
 
   it.skipIf(!hasDash)('runs under dash', () => {

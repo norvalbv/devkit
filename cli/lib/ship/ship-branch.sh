@@ -32,12 +32,8 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$SCRIPT_DIR/queue/slot.sh"
 ship_queue_slot_register
 
-# run-packaged-script.mts hands its private signal-lock root to the managed child. Only
-# review-target.sh implements that handshake; ship inherits the variable and forwards the caller
-# environment intact, so leaving it set would export an unread private path into every gate, hook and
-# nested command — and a nested `devkit review` would take the lock and hold it, after which the
-# outer wrapper stops forwarding signals to THIS ship entirely. Ship's own bash traps
-# (gate-signal-handoff.sh) already produce the same exit statuses, so dropping it costs nothing.
+# Only review-target.sh reads run-packaged-script.mts's signal-lock root; left exported, a nested
+# `devkit review` would take that lock and the wrapper would stop forwarding signals to this ship.
 unset DEVKIT_MANAGED_SIGNAL_ROOT
 
 # Before ANY git that can reach the network. Under the managed spawn this script runs in a background
@@ -1661,6 +1657,7 @@ git worktree remove --force "$WT" 2>/dev/null || true
 
 # --wait-ci runs LAST: the push, PR, manifest, intent release and worktree/branch cleanup above are
 # all durable, so a wait that is killed, times out or reports red cannot cost this ship.
+ship_settled_signal_traps # the PR is open: a signal from here on cannot turn ship_end's 0 into a 130
 [ "$WAIT_CI_STRICT" -eq 1 ] || ship_end_record 0 # strict: the verdict is the exit, so the trap records it
 [ "$WAIT_CI" -eq 0 ] || ship_run_wait_ci "$PR_NUM" "$REPO" "$WAIT_CI_TIMEOUT" "$PR_URL" "${WAIT_CI_REQUIRED:-0}"
 exit "$WAIT_CI_STATUS"

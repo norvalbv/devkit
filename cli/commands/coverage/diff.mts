@@ -30,6 +30,11 @@ import {
 } from '../../../gate-engine/coverage/provenance.mts';
 import { changedRunHint } from '../../../gate-engine/coverage/gate-shared.mts';
 import { computePercentages } from '../../../gate-engine/coverage/run.mts';
+import { workingTreeText } from '../../../gate-engine/ratchets/git-index.mts';
+import {
+  neutralDrift,
+  runtimeNeutral,
+} from '../../../gate-engine/coverage/neutral-edit/runtime-neutral.mts';
 import { type GitRun, gitRunner, line, ok } from '../../lib/ship/base-drift/git-run.mts';
 import { resolveBase } from '../../lib/ship/base-drift/resolve-base.mts';
 
@@ -157,6 +162,7 @@ function stalePaths(
   top: string,
   manifest: CoverageManifest,
   paths: string[],
+  exempt: (path: string, measuredOid: string) => boolean,
 ): string[] {
   if (paths.length === 0) return [];
   const stat = (p: string) => lstatSync(join(top, p), { throwIfNoEntry: false });
@@ -178,9 +184,11 @@ function stalePaths(
       manifest.head,
       paths.filter((p) => !Object.hasOwn(manifest.dirty, p)),
     );
-    return paths.filter(
-      (p) => (manifest.dirty[p] ?? atHead.get(p) ?? DELETED) !== (current.get(p) ?? DELETED),
-    );
+    return paths.filter((p) => {
+      const measured = manifest.dirty[p] ?? atHead.get(p) ?? DELETED;
+      if (measured === (current.get(p) ?? DELETED)) return false;
+      return links.includes(p) || !exempt(p, measured);
+    });
   } catch {
     return paths;
   }
@@ -297,7 +305,7 @@ export default function coverageDiff(args: string[], cwd: string): number {
 
   let added: Map<string, Set<number>>;
   try {
-    added = addedProductionLines(top, reported, [mb.sha]);
+    added = addedProductionLines(top, reported, [mb.sha], true);
   } catch {
     console.error('devkit coverage-diff: git could not read the diff.');
     return 2;
@@ -305,7 +313,10 @@ export default function coverageDiff(args: string[], cwd: string): number {
   const untracked = nulList(
     run(['ls-files', '-z', '--others', '--exclude-standard']).stdout,
   ).filter(reported);
-  for (const path of untracked) added.set(path, allLines(top, path));
+  for (const path of untracked) {
+    const text = workingTreeText(top, path);
+    if (text === null || !runtimeNeutral(path, null, text)) added.set(path, allLines(top, path));
+  }
 
   const isShell = (p: string) => isShellScript(top, p);
   const shellAdded = addedProductionLines(top, isShell, [mb.sha]);
@@ -328,9 +339,24 @@ export default function coverageDiff(args: string[], cwd: string): number {
   const changedSince = nulList(
     run(['diff', '--name-only', '-z', '--no-renames', '--no-relative', mb.sha]).stdout,
   );
+  const neutral = new Map<string, boolean>();
+  const neutralSince = (p: string, measured: string) => {
+    if (!neutral.has(p)) neutral.set(p, neutralDrift(top, p, measured, workingTreeText(top, p)));
+    return neutral.get(p) === true;
+  };
+  const measuredOf = new Map<string, string>();
+  // Any scored row reads line numbers, so only an unscored file may be exempt from this report.
   const stale = bound
-    ? stalePaths(run, top, bound, [...changedSince.filter(reported), ...untracked])
+    ? stalePaths(run, top, bound, [...changedSince.filter(reported), ...untracked], (p, m) => {
+        measuredOf.set(p, m);
+        return !added.has(p) && neutralSince(p, m);
+      })
     : [];
+  // The gate scores only gated files, so its verdict exempts a neutral file it does not score.
+  const gateStale = stale.filter((p) => {
+    const m = measuredOf.get(p);
+    return (gated(p) && added.has(p)) || m === undefined || !neutralSince(p, m);
+  });
 
   console.log(`Coverage of lines added since ${mb.label} (merge-base ${mb.sha.slice(0, 12)}):`);
   let covered = 0;
@@ -376,7 +402,16 @@ export default function coverageDiff(args: string[], cwd: string): number {
   }
 
   const empty = Object.keys(cov).length === 0;
-  const verdict = gateVerdict(cwd, gated, added, rows, notMeasured, empty, bound !== null, stale);
+  const verdict = gateVerdict(
+    cwd,
+    gated,
+    added,
+    rows,
+    notMeasured,
+    empty,
+    bound !== null,
+    gateStale,
+  );
   if (verdict?.pass) console.log(`✓ Coverage gate (scope "diff") would pass — ${verdict.reason}.`);
   else if (verdict) {
     console.error(`🚫 Coverage gate (scope "diff") would FAIL if this ships — ${verdict.reason}.`);
