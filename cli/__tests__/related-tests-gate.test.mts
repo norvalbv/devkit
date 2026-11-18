@@ -581,6 +581,7 @@ describe('runRelatedTests failure reason', () => {
 
   it('records the failing test for the aggregated block and the digest, then removes its report', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.stubEnv('DEVKIT_GATE_LABEL', 'related-tests');
     const file = reasonFile();
     const exec = reportingExec(1, {
       testResults: [
@@ -602,6 +603,7 @@ describe('runRelatedTests failure reason', () => {
     );
     const [, args, , env] = exec.mock.calls[0];
     expect(env[GATE_REASON_ENV]).toBeUndefined();
+    expect(env.DEVKIT_GATE_LABEL).toBeUndefined();
     const out = reportPath(args)!;
     expect(existsSync(dirname(out))).toBe(false);
   });

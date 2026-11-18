@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -37,6 +37,32 @@ if (process.env.DEVKIT_GATE_EVENTS) appendFileSync(process.env.DEVKIT_GATE_EVENT
 const long = readdirSync('.').filter((f) => f.endsWith('.txt') && readFileSync(f, 'utf8').split('\\n').length > 4);
 for (const f of long) console.log('too long: ' + f + ' ship=' + (process.env.DEVKIT_SHIP_ID ?? 'none'));
 process.exit(long.length > 0 ? 1 : 0);
+`;
+// Stands in for vitest at the base: reports each named test the -t pattern selects from
+// tests-at-base.json ({ file: { name: status } }), and records its argv where STUB_ARGV points.
+const STUB_VITEST = `#!/usr/bin/env node
+const fs = require('fs');
+const path = require('path');
+const args = process.argv.slice(2);
+if (process.env.STUB_ARGV) fs.writeFileSync(process.env.STUB_ARGV, JSON.stringify(args));
+if (process.env.STUB_SLEEP) setInterval(() => {}, 1000);
+else {
+  const re = new RegExp(args[args.indexOf('-t') + 1]);
+  const out = args.find((a) => a.startsWith('--outputFile.json=')).slice('--outputFile.json='.length);
+  const known = JSON.parse(fs.readFileSync('tests-at-base.json', 'utf8'));
+  const results = args.filter((a) => a.endsWith('.test.mts')).map((abs) => {
+    const named = Object.entries(known[path.relative(process.cwd(), abs)] ?? {}).filter(([n]) => re.test(n));
+    const assertionResults = named.map(([n, status]) => {
+      const parts = n.split(' > ');
+      return { ancestorTitles: parts.slice(0, -1), title: parts.at(-1), status };
+    });
+    const failed = assertionResults.some((a) => a.status === 'failed');
+    return { name: abs, status: failed ? 'failed' : 'passed', assertionResults };
+  });
+  const failed = results.some((r) => r.status === 'failed');
+  fs.writeFileSync(out, JSON.stringify({ success: !failed, testResults: results }));
+  process.exit(failed ? 1 : 0);
+}
 `;
 const created: string[] = [];
 
@@ -74,10 +100,13 @@ interface FixtureOptions {
   files?: Record<string, string>;
   /** Sink rows for this ship, oldest first; the default is one failed `max-lines` verdict. */
   rows?: Row[];
+  /** Install STUB_VITEST as the gate worktree's untracked node_modules/.bin/vitest. */
+  vitest?: boolean;
 }
 
 interface Row {
   type: string;
+  tests?: unknown;
   gate?: string;
   family?: string;
   status?: string;
@@ -125,7 +154,10 @@ function fixture(options: FixtureOptions = {}) {
   git(root, 'config', 'user.email', 'devkit@example.com');
   git(root, 'config', 'user.name', 'Devkit Test');
   const files = { 'check.mjs': CHECK, 'base.txt': options.baseText ?? LONG, ...options.files };
-  for (const [name, text] of Object.entries(files)) writeFileSync(join(root, name), text);
+  for (const [name, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, name)), { recursive: true });
+    writeFileSync(join(root, name), text);
+  }
   if (options.trackedGates) writeConfig(root, options.trackedGates);
   git(root, 'add', '.');
   git(root, 'commit', '-qm', 'base');
@@ -134,6 +166,11 @@ function fixture(options: FixtureOptions = {}) {
   linkOrOverrideConfig(root, wt, gates, options.trackedGates !== undefined);
   writeFileSync(join(wt, 'mine.txt'), LONG);
   git(wt, 'add', 'mine.txt');
+  if (options.vitest) {
+    mkdirSync(join(wt, 'node_modules', '.bin'), { recursive: true });
+    writeFileSync(join(wt, 'node_modules', '.bin', 'vitest'), STUB_VITEST);
+    chmodSync(join(wt, 'node_modules', '.bin', 'vitest'), 0o755);
+  }
   snapshot(wt);
   const rows = options.rows ?? [failRow('max-lines')];
   writeFileSync(sink, rows.map((r) => `${JSON.stringify({ ...r, ship_id: SHIP_ID })}\n`).join(''));
@@ -509,4 +546,115 @@ setInterval(() => existsSync(process.env.BASE_ATTRIBUTION_GO_FILE) && process.ex
       settled.kill('SIGKILL');
     }
   }, 60_000);
+});
+
+describe('attributeToBase reruns a gate’s published failing tests', () => {
+  const GATES = { 'related-tests': 'node check.mjs {staged}' };
+  /** What related-tests publishes; undefined models a gate that published nothing. */
+  type Published = { file: string; name: string }[] | undefined;
+  const rerunRow = (tests: Published): Row => ({
+    type: 'gate_base_rerun',
+    gate: 'related-tests',
+    tests,
+  });
+  const atBase = (known: Record<string, Record<string, string>>) => ({
+    'tests-at-base.json': JSON.stringify(known),
+    'cli/a.test.mts': '',
+  });
+  function rerunFixture(tests: Published, known: Record<string, Record<string, string>> = {}) {
+    const f = fixture({
+      gates: GATES,
+      vitest: true,
+      files: atBase(known),
+      rows: [failRow('related-tests'), rerunRow(tests)],
+    });
+    const argvFile = join(f.tmp, 'stub-argv.json');
+    vi.stubEnv('STUB_ARGV', argvFile);
+    return { ...f, argvFile };
+  }
+
+  it('labels each failing test inherited or new, and a test file the base lacks new without a run', async () => {
+    const f = rerunFixture(
+      [
+        { file: 'cli/a.test.mts', name: 'd > old' },
+        { file: 'cli/a.test.mts', name: 'd > fresh' },
+        { file: 'cli/new.test.mts', name: 'd > added' },
+      ],
+      { 'cli/a.test.mts': { 'd > old': 'failed', 'd > fresh': 'passed' } },
+    );
+    const lines = await attributeToBase(f.wt, f.outPrefix);
+
+    expect(lines).toEqual([
+      `ship: related-tests re-ran only its 3 failing test(s) at ${f.sha.slice(0, 7)}, the commit this gate worktree was cut from, on this machine: 1 inherited, 2 new. Base run output: ${f.outPrefix}.base-related-tests.log`,
+      '  inherited · cli/a.test.mts > d > old',
+      '  new · cli/a.test.mts > d > fresh',
+      '  new · cli/new.test.mts > d > added (file not at the base)',
+    ]);
+    const argv: string[] = JSON.parse(readFileSync(f.argvFile, 'utf8'));
+    expect(argv.slice(0, 4)).toEqual(['run', '--passWithNoTests', '-t', '^(d > old|d > fresh)$']);
+    expect(argv.filter((a) => a.endsWith('.test.mts'))).toEqual([
+      expect.stringMatching(/\/cli\/a\.test\.mts$/),
+    ]);
+    expect(f.types().at(-1)).toMatchObject({ type: 'base_attribution', gate: 'related-tests' });
+  });
+
+  it('runs nothing when every failing test file is new to the change', async () => {
+    const f = rerunFixture([{ file: 'cli/new.test.mts', name: 'd > added' }]);
+    expect(await attributeToBase(f.wt, f.outPrefix)).toEqual([
+      `ship: related-tests needed no rerun for its 1 failing test(s) at ${f.sha.slice(0, 7)}, the commit this gate worktree was cut from, on this machine: 0 inherited, 1 new.`,
+      '  new · cli/new.test.mts > d > added (file not at the base)',
+    ]);
+    expect(existsSync(f.argvFile)).toBe(false);
+  });
+
+  // check.mjs exits 1 at the base, so a rerun with the literal `{staged}` would claim "also exits 1".
+  it.each([
+    ['publishes no tests', undefined],
+    ['publishes a path outside the root', [{ file: '../x.test.mts', name: 'd > t' }]],
+    ['publishes an absolute path', [{ file: '/abs/x.test.mts', name: 'd > t' }]],
+  ])('skips a {staged} gate that %s', async (_, tests) => {
+    const f = rerunFixture(tests);
+    expect(await attributeToBase(f.wt, f.outPrefix)).toEqual([]);
+    expect(f.types().map((r) => r.type)).not.toContain('base_attribution');
+  });
+
+  it('reads only the newest published row, so an earlier run never stands in for this one', async () => {
+    const f = fixture({
+      gates: GATES,
+      vitest: true,
+      files: atBase({}),
+      rows: [
+        failRow('related-tests'),
+        rerunRow([{ file: 'cli/a.test.mts', name: 'd > old' }]),
+        rerunRow([]),
+      ],
+    });
+    expect(await attributeToBase(f.wt, f.outPrefix)).toEqual([]);
+  });
+
+  it('says nothing when the base run writes no readable report', async () => {
+    const f = fixture({
+      gates: GATES,
+      vitest: true,
+      rows: [failRow('related-tests'), rerunRow([{ file: 'base.txt', name: 'd > t' }])],
+    });
+    expect(await attributeToBase(f.wt, f.outPrefix)).toEqual([]);
+  });
+
+  it('says nothing when the base run outlives the cap', async () => {
+    const f = rerunFixture([{ file: 'cli/a.test.mts', name: 'd > old' }]);
+    vi.stubEnv('STUB_SLEEP', '1');
+    expect(await attributeToBase(f.wt, f.outPrefix, 5_000)).toEqual([]);
+    expect(f.types().at(-1)).toMatchObject({ type: 'base_attribution', outcome: 'timeout' });
+  });
+});
+
+describe('the ship script', () => {
+  it('narrates base attribution once per blocked attempt', () => {
+    const script = readFileSync(
+      join(import.meta.dirname, '..', 'commit-with-gate-capture.sh'),
+      'utf8',
+    );
+    expect(script.split('_ship_base_attribution_note "$wt"').length - 1).toBe(1);
+  });
 });

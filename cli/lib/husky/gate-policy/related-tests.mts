@@ -6,8 +6,9 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, extname, join } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { z } from 'zod';
 import { runVitestDetailed, type VitestRun } from '../../../../gate-engine/coverage/vitest-cli.mts';
 import {
   displayPath,
@@ -17,10 +18,20 @@ import {
   UNHANDLED_REPORTER,
 } from '../../../../gate-engine/coverage/failures.mts';
 import { gateTimeoutMs } from '../../../../gate-engine/deterministic/command-gates.mts';
-import { GATE_REASON_ENV, writeGateReason } from '../../../../gate-engine/deterministic/reason.mts';
+import {
+  GATE_LABEL_ENV,
+  GATE_REASON_ENV,
+  writeGateReason,
+} from '../../../../gate-engine/deterministic/reason.mts';
+import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mts';
 import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mts';
 import { type Comparison, label, renderComparison } from '../../baseline-status/compare.mts';
-import { assertVitestReport, SUMMARY_NAME, summarise } from '../../baseline-status/produce.mts';
+import {
+  assertVitestReport,
+  escapesRoot,
+  SUMMARY_NAME,
+  summarise,
+} from '../../baseline-status/produce.mts';
 import { type BaselineAnswer, resolveRef } from '../../baseline-status/query.mts';
 
 // Runs with every selection: it fails when a module is left unreachable to `vitest related` itself.
@@ -330,6 +341,53 @@ async function ciAttribution(
   }
 }
 
+/** One failed vitest assertion; its ` > ` joined name is what `vitest -t` matches. */
+const failedTestSchema = z.object({
+  ancestorTitles: z.array(z.string()),
+  title: z.string(),
+  status: z.literal('failed'),
+  duration: z.number().catch(0),
+});
+/** Each assertion of one file: a failed one parsed, anything else (passed, malformed) null. */
+const failedListSchema = z.array(failedTestSchema.nullable().catch(null)).catch([]);
+/** Bounds on a base rerun: base attribution's whole budget is 120 s, its worktree included. */
+const RERUN_TESTS = 20;
+const RERUN_MS = 60_000;
+const RERUN_BYTES = 2048;
+
+/** The failing tests base attribution may rerun at the cut commit; none when they cannot fit, or
+ * when a failing file did not load, since no test name could show that failure as new. */
+export function baseRerunTests(report: string, root: string): { file: string; name: string }[] {
+  const run = JSON.parse(readFileSync(report, 'utf8'));
+  const tests: { file: string; name: string }[] = [];
+  let ms = 0;
+  for (const result of run.testResults ?? []) {
+    const file = relative(root, String(result?.name ?? ''));
+    const failed = failedListSchema.parse(result?.assertionResults).flatMap((t) => (t ? [t] : []));
+    if (result?.status === 'failed' && failed.length === 0) return [];
+    if (failed.length && (isAbsolute(file) || escapesRoot(file))) return [];
+    for (const t of failed) {
+      tests.push({ file, name: [...t.ancestorTitles, t.title].join(' > ') });
+      ms += t.duration;
+    }
+  }
+  const bytes = Buffer.byteLength(JSON.stringify(tests));
+  const fits = tests.length <= RERUN_TESTS && ms <= RERUN_MS && bytes <= RERUN_BYTES;
+  return fits ? tests : [];
+}
+
+/** Publish the failing tests for base attribution, which only a blocked ship runs. */
+function publishBaseRerun(report: string, root: string): void {
+  const gate = process.env[GATE_LABEL_ENV];
+  if (!gate || !process.env.DEVKIT_SHIP_ID) return;
+  try {
+    // Published even when empty, so an earlier run's tests are never read for this one.
+    emitGateEvent({ type: 'gate_base_rerun', gate, tests: baseRerunTests(report, root) });
+  } catch {
+    // An unreadable report publishes nothing; the CI step after this still runs.
+  }
+}
+
 /** Record the failure reason. Narration only: nothing here may throw into the verdict. */
 async function narrate(
   result: SpawnResult,
@@ -344,6 +402,7 @@ async function narrate(
     writeGateReason(relatedTestsReason(result, diagnosis, root));
     // A killed run reached no verdict, so there is nothing to compare and no time to spend.
     if (result.status !== null && diagnosis?.failedFiles.length && !diagnosis.unhandled) {
+      publishBaseRerun(report, root);
       writeGateReason(await ciAttribution(report, root, env, attribute));
     }
   } catch {
@@ -390,9 +449,10 @@ export async function runRelatedTests(root: string, opts: RunOpts): Promise<Vite
     : [];
   // A passing ship or reviewer test's console output would echo the ship's own progress lines.
   const args = ['run', '--reporter=dot', '--silent=passed-only', ...reporters, ...tests];
-  // A test that drives gate code must not write into this gate's own reason file.
+  // A test that drives gate code must not write into this gate's reason file or publish as this gate.
   const env = { ...process.env };
   delete env[GATE_REASON_ENV];
+  delete env[GATE_LABEL_ENV];
   try {
     const run = await (opts.exec ?? runGrouped)(vitest, args, root, env);
     // A signalled gate blocks, even when vitest still exits 0 after the forwarded signal.

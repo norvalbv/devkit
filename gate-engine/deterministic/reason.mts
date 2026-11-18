@@ -49,9 +49,11 @@ export function withReasonFiles<T>(fn: (fileFor: (index: number) => string) => T
   }
 }
 
-/** The environment a gate runs under: the caller's, with THIS gate's reason file named. */
-export function gateEnv(reasonFile: string): NodeJS.ProcessEnv {
-  return { ...process.env, [GATE_REASON_ENV]: reasonFile };
+export const GATE_LABEL_ENV = 'DEVKIT_GATE_LABEL';
+
+/** The environment a gate runs under: the caller's, with THIS gate's reason file and label named. */
+export function gateEnv(reasonFile: string, label = ''): NodeJS.ProcessEnv {
+  return { ...process.env, [GATE_REASON_ENV]: reasonFile, [GATE_LABEL_ENV]: label };
 }
 
 /** One line for review-target.sh's verdict line. Written only into this review's own temp root, so a

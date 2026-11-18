@@ -5,7 +5,7 @@
   "files": {
     "cli/commands/init.mts": 1040,
     "cli/lib/generate/generate-structure-baseline.mts": 867,
-    "cli/lib/ship/commit-with-gate-capture.sh": 542,
+    "cli/lib/ship/commit-with-gate-capture.sh": 526,
     "cli/lib/ship/patch-anchor.sh": 523,
     "cli/lib/ship/prepare-gate-worktree.sh": 704,
     "cli/lib/ship/reship.sh": 1194,

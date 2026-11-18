@@ -10,16 +10,22 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { configExtraGates } from '../../../../gate-engine/deterministic/command-gates.mts';
+import { z } from 'zod';
+import {
+  configExtraGates,
+  STAGED_PLACEHOLDER,
+} from '../../../../gate-engine/deterministic/command-gates.mts';
 import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mts';
 import { telemetrySink } from '../../../../gate-engine/judge/run-context.mts';
-import { readShipEvents } from './gate-digest.mts';
+import { assertVitestReport, escapesRoot, summarise } from '../../baseline-status/produce.mts';
+import { type GateEvent, readShipEvents } from './gate-digest.mts';
 
 /** One budget for the worktree, its links and every rerun. Removing the worktree has its own bound. */
 const CAP_MS = 120_000;
@@ -43,6 +49,8 @@ type Outcome = 'also-fails' | 'not-reproduced' | 'timeout';
 interface CommandGate {
   label: string;
   cmd: string;
+  /** A gate's own failing tests to rerun instead of `cmd`; see rerunTestsOf. */
+  tests?: RerunTest[];
 }
 
 let interrupted = false;
@@ -115,6 +123,24 @@ function guardBase(commonDir: string, baseWt: string): void {
   });
 }
 
+/** The tests a gate published for its base rerun (`gate_base_rerun`), at most 20 root-relative ones. */
+const rerunTestsSchema = z
+  .array(z.object({ file: z.string().min(1), name: z.string().min(1) }))
+  .min(1)
+  .max(20);
+type RerunTest = z.infer<typeof rerunTestsSchema>[number];
+
+/** The newest `gate_base_rerun` tests `label` published this attempt, when they are well formed. */
+function rerunTestsOf(attempt: GateEvent[], label: string): RerunTest[] | undefined {
+  const rows = attempt.filter((e) => e.type === 'gate_base_rerun' && e.gate === label);
+  const row = rows.at(-1);
+  const parsed = rerunTestsSchema.safeParse(row?.tests);
+  if (!parsed.success) return undefined;
+  return parsed.data.every((t) => !isAbsolute(t.file) && !escapesRoot(t.file))
+    ? parsed.data
+    : undefined;
+}
+
 /** The config command gates this attempt recorded as failed with a verdict (exit 1). */
 function failedConfigGates(wt: string, sink: string, shipId: string): CommandGate[] {
   const events = readShipEvents(sink, shipId);
@@ -122,11 +148,13 @@ function failedConfigGates(wt: string, sink: string, shipId: string): CommandGat
   const verdicts = attempt.filter((e) => e.type === 'gate_result' && e.family === 'deterministic');
   const failed = new Set(verdicts.filter((e) => e.status === 'fail').map((e) => e.gate));
   // `guard-structure` is resolved to devkit's own module by the gate runner, never spawned by name.
-  return configExtraGates(wt).flatMap(({ label, cmd }) =>
-    cmd && failed.has(label) && cmd.split(WHITESPACE_RE)[0] !== 'guard-structure'
-      ? [{ label, cmd }]
-      : [],
-  );
+  return configExtraGates(wt).flatMap(({ label, cmd }) => {
+    if (!cmd || !failed.has(label) || cmd.split(WHITESPACE_RE)[0] === 'guard-structure') return [];
+    const tests = rerunTestsOf(attempt, label);
+    if (tests) return [{ label, cmd, tests }];
+    // The staged set does not exist at the base, so a `{staged}` command has nothing to rerun.
+    return cmd.includes(STAGED_PLACEHOLDER) ? [] : [{ label, cmd }];
+  });
 }
 
 /** The untracked entries the ship recorded before its gates ran, or undefined when it recorded none. */
@@ -165,8 +193,8 @@ function rerunEnv(baseWt: string): NodeJS.ProcessEnv {
 }
 
 /** Run one command in its own process group, output to `outFile`, never past `deadline`. */
-function rerun(cmd: string, baseWt: string, outFile: string, deadline: number) {
-  const [file = '', ...args] = cmd.split(WHITESPACE_RE).filter(Boolean);
+function rerun(argv: string[], baseWt: string, outFile: string, deadline: number) {
+  const [file = '', ...args] = argv;
   return new Promise<Outcome>((done) => {
     const fd = openSync(outFile, 'w');
     const child = spawn(file, args, {
@@ -202,28 +230,102 @@ function rerun(cmd: string, baseWt: string, outFile: string, deadline: number) {
   });
 }
 
-/** Rerun each gate the base config declares identically; the output file of each that exits 1. */
+const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Each failed `[file, names]` of a base run's json report; null when it is unreadable. */
+function failedAtBase(report: string, root: string): Map<string, string[]> | null {
+  try {
+    const summary = summarise(assertVitestReport(JSON.parse(readFileSync(report, 'utf8'))), root);
+    const failed = Object.keys(summary.files).filter((f) => summary.files[f] === 'failed');
+    return new Map(failed.map((f) => [f, summary.tests?.[f]?.failed ?? []]));
+  } catch {
+    return null;
+  }
+}
+
+/** Rerun only `tests` at the base, labelled one per line; a file absent there is new without a run. */
+async function labelTestsAtBase(
+  { label, tests = [] }: CommandGate,
+  baseWt: string,
+  outPrefix: string,
+  deadline: number,
+  sha: string,
+): Promise<string[]> {
+  const root = realpathSync(baseWt);
+  const present = tests.filter((t) => lstatSync(join(root, t.file), { throwIfNoEntry: false }));
+  let failed = new Map<string, string[]>();
+  let output = '';
+  if (present.length) {
+    const [log, report] = [`${outPrefix}.base-${label}.log`, `${outPrefix}.base-${label}.json`];
+    const pattern = `^(${[...new Set(present.map((t) => escapeRe(t.name)))].join('|')})$`;
+    const files = [...new Set(present.map((t) => join(root, t.file)))];
+    const vitest = join(root, 'node_modules', '.bin', 'vitest');
+    const argv = [vitest, 'run', '--passWithNoTests', '-t', pattern, '--reporter=json'];
+    const started = Date.now();
+    const outcome = await rerun(
+      [...argv, `--outputFile.json=${report}`, ...files],
+      root,
+      log,
+      deadline,
+    );
+    emitGateEvent({
+      type: 'base_attribution',
+      gate: label,
+      outcome,
+      duration_ms: Date.now() - started,
+    });
+    const read = outcome === 'timeout' ? null : failedAtBase(report, root);
+    if (!read) return [];
+    [failed, output] = [read, ` Base run output: ${log}`];
+  }
+  // A file that failed at the base with no test names did not load there: every test in it fails.
+  const inherited = (t: RerunTest) => {
+    const names = failed.get(t.file);
+    return names !== undefined && (names.length === 0 || names.includes(t.name));
+  };
+  const labelled = tests.map((t) => {
+    const absent = present.includes(t) ? '' : ' (file not at the base)';
+    return `  ${inherited(t) ? 'inherited' : 'new'} · ${t.file} > ${t.name}${absent}`;
+  });
+  const old = tests.filter(inherited).length;
+  return [
+    `ship: ${label} ${present.length ? 're-ran only' : 'needed no rerun for'} its ${tests.length} failing test(s) at ${sha.slice(0, 7)}, the commit this gate worktree was cut from, on this machine: ${old} inherited, ${tests.length - old} new.${output}`,
+    ...labelled,
+  ];
+}
+
+/** Rerun each gate the base config declares identically; the narration lines for each. */
 async function rerunAtBase(
   gates: CommandGate[],
   baseWt: string,
   outPrefix: string,
   deadline: number,
+  sha: string,
 ) {
-  const alsoFailing = new Map<string, string>();
+  const lines: string[] = [];
   const atBase = new Map(configExtraGates(baseWt).map((g) => [g.label, g.cmd]));
-  for (const { label, cmd } of gates) {
+  for (const gate of gates) {
+    const { label, cmd } = gate;
     if (interrupted || Date.now() >= deadline) break;
     // A change that adds or repoints the gate has no base run to compare against.
     if (atBase.get(label) !== cmd) continue;
+    if (gate.tests) {
+      lines.push(...(await labelTestsAtBase(gate, baseWt, outPrefix, deadline, sha)));
+      continue;
+    }
     const outFile = `${outPrefix}.base-${label}.log`;
     const started = Date.now();
-    const outcome = await rerun(cmd, baseWt, outFile, deadline);
+    const argv = cmd.split(WHITESPACE_RE).filter(Boolean);
+    const outcome = await rerun(argv, baseWt, outFile, deadline);
     const duration_ms = Date.now() - started;
     emitGateEvent({ type: 'base_attribution', gate: label, outcome, duration_ms });
-    if (outcome === 'also-fails') alsoFailing.set(label, outFile);
-    else rmSync(outFile, { force: true });
+    if (outcome !== 'also-fails') rmSync(outFile, { force: true });
+    else
+      lines.push(
+        `ship: ${label} also exits 1 at ${sha.slice(0, 7)}, the commit this gate worktree was cut from (run with this checkout's linked node_modules). Base run output: ${outFile}`,
+      );
   }
-  return alsoFailing;
+  return lines;
 }
 
 /**
@@ -252,12 +354,9 @@ export async function attributeToBase(wt: string, outPrefix: string, capMs = CAP
     const add = ['worktree', 'add', '-q', '--detach', baseWt, sha];
     git(wt, deadline, '-c', 'core.hooksPath=/dev/null', ...add);
     linkPreGate(wt, baseWt, untracked);
-    const alsoFailing = await rerunAtBase(gates, baseWt, outPrefix, deadline);
+    const lines = await rerunAtBase(gates, baseWt, outPrefix, deadline, sha);
     if (interrupted) throw new Error('interrupted before every rerun finished');
-    return [...alsoFailing].map(
-      ([label, outFile]) =>
-        `ship: ${label} also exits 1 at ${sha.slice(0, 7)}, the commit this gate worktree was cut from (run with this checkout's linked node_modules). Base run output: ${outFile}`,
-    );
+    return lines;
   } finally {
     for (const signal of FORWARDED_SIGNALS) process.off(signal, onSignal);
     try {

@@ -15,6 +15,7 @@ import type { Comparison } from '../lib/baseline-status/compare.mts';
 import type { BaselineAnswer } from '../lib/baseline-status/query.mts';
 import {
   attributeToCi,
+  baseRerunTests,
   ciBase,
   ciLines,
   runRelatedTests,
@@ -356,4 +357,104 @@ describe('attributeToCi', () => {
     const pid = Number(readFileSync(pidFile, 'utf8'));
     await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 5000 });
   });
+});
+
+describe('base rerun publishing', () => {
+  const report = (results: unknown[]) => {
+    const file = join(tempDir('related-rerun-'), 'results.json');
+    writeFileSync(file, JSON.stringify({ success: false, testResults: results }));
+    return file;
+  };
+  const slow = (file: string, ms: number) => ({
+    name: file,
+    status: 'failed',
+    assertionResults: [{ status: 'failed', title: 't', ancestorTitles: ['d'], duration: ms }],
+  });
+
+  it('lists each failed test by file and vitest name', () => {
+    const tests = baseRerunTests(report([failing('/repo/cli/a.test.mts', 't')]), '/repo');
+    expect(tests).toEqual([{ file: 'cli/a.test.mts', name: 'd > t' }]);
+  });
+
+  // No test name can show a file that never loaded as new, so a partial list would read as all inherited.
+  it('publishes nothing when a failing file did not load', () => {
+    const loadFailure = { name: '/repo/cli/b.test.mts', status: 'failed', message: 'boom' };
+    const results = [failing('/repo/cli/a.test.mts', 't'), loadFailure];
+    expect(baseRerunTests(report(results), '/repo')).toEqual([]);
+  });
+
+  it.each([
+    [
+      'more than 20 failing tests',
+      Array.from({ length: 21 }, (_, i) => failing(`/repo/f${i}.test.mts`, 't')),
+    ],
+    ['failing tests that ran over 60 s here', [slow('/repo/a.test.mts', 61_000)]],
+    ['a test file outside the root', [failing('/elsewhere/a.test.mts', 't')]],
+  ])('publishes nothing for %s', (_, results) => {
+    expect(baseRerunTests(report(results), '/repo')).toEqual([]);
+  });
+
+  it('publishes its failing tests for base attribution, and only inside a ship', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    reasonFile();
+    const { repo } = branchedRepo();
+    const sink = join(tempDir('related-rerun-sink-'), 'events.jsonl');
+    vi.stubEnv('DEVKIT_GATE_EVENTS', sink);
+    vi.stubEnv('DEVKIT_GATE_LABEL', 'related-tests');
+    const run = () =>
+      runRelatedTests(repo, {
+        staged: ['a.mts'],
+        list: async () => [],
+        exec: reportingExec(1, [failing(join(repo, 'cli/a.test.mts'), 't')]),
+        attribute: async () => null,
+      });
+    await run();
+    expect(existsSync(sink)).toBe(false);
+
+    vi.stubEnv('DEVKIT_SHIP_ID', 'ship-1');
+    await run();
+    const rows = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(rows).toEqual([
+      expect.objectContaining({
+        type: 'gate_base_rerun',
+        gate: 'related-tests',
+        tests: [{ file: 'cli/a.test.mts', name: 'd > t' }],
+        ship_id: 'ship-1',
+      }),
+    ]);
+  });
+});
+
+// Base attribution reruns with `-t ^(<published name>)$`, so the ` > ` join is load-bearing.
+describe('the vitest name contract the base rerun relies on', () => {
+  it('vitest -t selects a test by the ` > ` joined name the gate publishes, not a space-joined one', () => {
+    const root = tempDir('related-rerun-name-');
+    writeFileSync(
+      join(root, 'n.test.mjs'),
+      "import { describe, it } from 'vitest';\ndescribe('d', () => { it('t', () => {}); it('other', () => {}); });\n",
+    );
+    const vitest = join(import.meta.dirname, '..', '..', 'node_modules', '.bin', 'vitest');
+    const statuses = (pattern: string) => {
+      const out = join(root, `${pattern.length}.json`);
+      const args = [
+        'run',
+        '--root',
+        root,
+        '-t',
+        pattern,
+        '--reporter=json',
+        `--outputFile.json=${out}`,
+      ];
+      execFileSync(vitest, [...args, 'n.test.mjs'], { cwd: root, stdio: 'ignore' });
+      const run = JSON.parse(readFileSync(out, 'utf8'));
+      return run.testResults[0].assertionResults.map(
+        (a: { title: string; status: string }) => `${a.title}:${a.status}`,
+      );
+    };
+    expect(statuses('^(d > t)$')).toEqual(['t:passed', 'other:skipped']);
+    expect(statuses('^(d t)$')).toEqual(['t:skipped', 'other:skipped']);
+  }, 120_000);
 });
