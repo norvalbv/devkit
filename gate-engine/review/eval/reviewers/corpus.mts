@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { BenchAbort, parseCasesText } from '../../../decisions/eval/bench.mts';
+import { PASS_ADVISORY_RULE } from '../../contracts/response.mts';
 import { checklistScript, REVIEWERS } from '../../reviewers.mts';
 import { groupByPair } from './corpus/twins.mts';
 
@@ -204,6 +205,8 @@ export function benchGateHash(reviewer) {
       ].map((file) => readFileSync(path.join(repoRoot, 'gate-engine/review', file), 'utf8')),
       readFileSync(path.join(repoRoot, 'gate-engine/review/reviewers.mts'), 'utf8'),
       readFileSync(path.join(repoRoot, 'gate-engine/review/runtime.mts'), 'utf8'),
+      // Judge-visible bytes defined in a module that also holds the parsers, so hash the text alone.
+      PASS_ADVISORY_RULE,
       // sc-1442: these supply judge-visible bytes (Targets framing, the advisory message wrapper,
       // the stdin diff plumbing) — editing any changes what every judge reads, so a baseline
       // earned under old bytes is not comparable. targets-block was a hash gap since sc-1441.

@@ -121,8 +121,10 @@ const flatten = (text: string): string =>
 export const PASS_ADVISORY_RULE =
   'FAIL only for a finding that must block THIS commit. Every concrete in-charter defect that ' +
   'does not block, on a PASS too, goes in your FINAL reply directly above the VERDICT line as ' +
-  'ADVISORY: <file:line> — <finding> (a plain line number). A defect named only in a bullet, in ' +
-  'earlier narration or in the verdict reason never reaches the author.';
+  'ADVISORY: <file:line> — <finding> (a plain line number). A person reads <finding> in the PR: ' +
+  'write ONE sentence of at most 30 words naming what goes wrong and the input that triggers it, ' +
+  'and leave out why it does not block and whether you ran it. A defect named only in a bullet, ' +
+  'in earlier narration or in the verdict reason never reaches the author.';
 
 /** The judge's `ADVISORY:` lines citing a code location — non-blocking, to resolve before merge. */
 export function parseAdvisories(raw: string): string[] {
