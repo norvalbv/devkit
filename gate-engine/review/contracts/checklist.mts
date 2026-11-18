@@ -155,18 +155,35 @@ export const RETRIEVAL_UNRECORDED =
 export interface RetrievalEvidence {
   mcpCause?: string;
   denied?: string[] | null;
+  /** Every claude spawn's tool-call lines; null when no spawn was measured (codex, a test double). */
+  calls?: string[] | null;
+  searchTool?: string;
 }
 
 /** A refused `search-code` fallback, as `deniedLine` renders it; codex measures no denials (null). */
 const SEARCH_CODE_DENIAL_RE = /^Bash: (\S*\/)?search-code(?![\w.-])/;
+
+/** The tool a `[ok] [(subagent) ]<tool>: <input>` line returned from (claudeCommandLines). */
+const RETURNED_CALL_RE = /^\[ok\] (?:\(subagent\) )?([^:\s]+): /;
+
+/** A claimed `ok` no measured search backs; unmeasured spawns keep it, a missing MCP reports apart. */
+function unverifiedOk({
+  calls,
+  searchTool,
+}: RetrievalEvidence): { cause: string; kind: DegradedKind } | undefined {
+  if (!calls || calls.some((line) => RETURNED_CALL_RE.exec(line)?.[1] === searchTool))
+    return undefined;
+  const cause = `retrieval recorded ok, but no ${searchTool} call returned in this review`;
+  return { cause, kind: 'unobserved' };
+}
 
 function unavailableKind({ mcpCause, denied }: RetrievalEvidence): DegradedKind {
   if (mcpCause) return 'mcp-missing';
   return denied?.some((line) => SEARCH_CODE_DENIAL_RE.test(line)) ? 'denied' : 'unclassified';
 }
 
-/** Why a commit-guard PASS did not fully verify (sc-2317). Only an explicit `{status:'ok'}` clears
- * it — an absent or malformed record is no evidence retrieval ran; a named skip never degrades. */
+/** Why a commit-guard PASS did not fully verify. Only an explicit `{status:'ok'}` the
+ * measured calls do not contradict clears it; an absent or malformed record never does. */
 export function retrievalDegradation(
   reviewerName: string,
   state: ChecklistState | null,
@@ -177,7 +194,7 @@ export function retrievalDegradation(
     return undefined;
   const recorded = retrievalSchema.safeParse(state?.retrieval);
   if (!recorded.success) return { cause: RETRIEVAL_UNRECORDED, kind: 'unrecorded' };
-  if (recorded.data.status === 'ok') return undefined;
+  if (recorded.data.status === 'ok') return unverifiedOk(evidence);
   const kind = recorded.data.status === 'skipped' ? 'skipped' : unavailableKind(evidence);
   return { cause: boundedCause(recorded.data.cause), kind };
 }
@@ -189,13 +206,18 @@ export function verdictToken(
   return `${res.status.toUpperCase()}${degradedSuffix(res)}`;
 }
 
+const RETRIEVAL_VERB: Partial<Record<DegradedKind, string>> = {
+  skipped: 'skipped by the judge',
+  unobserved: 'unverified',
+};
+
 /**
  * Surface a degraded PASS on every channel an operator or agent audits: a ⚠️ stderr line (the ship
  * log's documented marker) and a `gate_degraded` event (the ship digest's "unverified" row).
  */
 export function reportRetrievalDegraded(name: string, rawCause: string, kind: DegradedKind): void {
   const cause = boundedCause(rawCause); // the sink re-bounds, whatever path the cause took here
-  const what = kind === 'skipped' ? 'skipped by the judge' : 'unavailable';
+  const what = RETRIEVAL_VERB[kind] ?? 'unavailable';
   const detail = `semantic retrieval ${what}: ${cause} — only the deterministic matcher and clone gates checked duplication`;
   console.error(`⚠️  guard-review: ${name} — DEGRADED: ${detail}`);
   emitGateEvent({ type: 'gate_degraded', judge: name, cause, detail, kind });

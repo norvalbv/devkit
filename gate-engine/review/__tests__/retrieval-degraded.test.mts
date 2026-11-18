@@ -32,6 +32,7 @@ const ENV_KEYS = [
   'SHIP_COMMIT_TIMEOUT',
   'DEVKIT_GATE_DEADLINE_MS',
   'GUARD_CORRECTNESS_SPLIT',
+  'GUARD_SEARCH_TOOL',
 ];
 const saved: Record<string, string | undefined> = {};
 let stderr: string[];
@@ -280,5 +281,103 @@ describe('commit-guard PASS without semantic retrieval (sc-2317)', () => {
     expect(exec.mock.calls.map(([o]) => o.label)).toContain('review:commit-guard');
     expect(stderr.join('\n')).not.toMatch(/commit-guard — cached PASS/);
     expect(bareCommitGuardPass(stderr)).toEqual([]);
+  });
+});
+
+describe('a recorded ok the measured tool calls do not back (sc-6118)', () => {
+  const SEARCH = '[ok] mcp__codebase__searchCode: {"query":"parse a semver range"}';
+
+  /** A claude-like PASS judge: reports `calls` as its measured tool calls, then records ok. */
+  const passWithCalls = (repo: string, calls: (label: string) => string[]) =>
+    mkExec(async ({ label, onToolCalls }) => {
+      onToolCalls?.(calls(label));
+      writeArtifact(repo, label, { retrieval: { status: 'ok' } });
+      return 'VERDICT: PASS';
+    });
+
+  it('ok with no search call is PASS (DEGRADED), unobserved, exit 0, and never checkpointed', async () => {
+    const repo = consumerRepo({ backend: true });
+    const events = captureEvents(repo);
+    const exec = passWithCalls(repo, () => [
+      '[ok] Bash: node checklist.mjs finalize --retrieval ok',
+    ]);
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(events().find((e) => e.type === 'gate_degraded')).toMatchObject({
+      judge: 'commit-guard',
+      kind: 'unobserved',
+      cause: 'retrieval recorded ok, but no mcp__codebase__searchCode call returned in this review',
+    });
+    expect(stderr).toContainEqual(
+      expect.stringMatching(/^guard-review: commit-guard — PASS \(DEGRADED\) in \d+s/),
+    );
+    expect(bareCommitGuardPass(stderr)).toEqual([]);
+    expect(commitGuardCacheEntries(repo)).toEqual([]);
+  });
+
+  it('ok backed by a returned search stays a clean, cached PASS', async () => {
+    const repo = consumerRepo({ backend: true });
+    expect(await runReviewGate(repo, { exec: passWithCalls(repo, () => [SEARCH]) })).toBe(0);
+    expect(stderr.join('\n')).not.toContain('DEGRADED');
+    expect(commitGuardCacheEntries(repo)).toHaveLength(1);
+  });
+
+  it("an escalation PASS that rests on the first pass's search stays clean", async () => {
+    const repo = consumerRepo({ backend: true });
+    const exec = mkExec(async ({ label, onToolCalls }) => {
+      const first = label === 'review:commit-guard';
+      onToolCalls?.(first ? [SEARCH] : []);
+      writeArtifact(repo, label, { failed: first ? 1 : 0, retrieval: { status: 'ok' } });
+      return first
+        ? 'src/a.ts:1 duplicates src/b.ts:1\nVERDICT: FAIL — duplicate'
+        : 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec.mock.calls.map(([o]) => o.label)).toContain('review:commit-guard:escalate');
+    expect(stderr.join('\n')).not.toContain('DEGRADED');
+    expect(commitGuardCacheEntries(repo)).toHaveLength(1);
+  });
+
+  // A codex spawn reports no tool calls, so its searches are unknown, not absent.
+  it('an unmeasured first pass (codex) leaves a measured escalation ok trusted', async () => {
+    const repo = consumerRepo({ backend: true });
+    const exec = mkExec(async ({ label, onToolCalls }) => {
+      const first = label === 'review:commit-guard';
+      if (!first) onToolCalls?.([]);
+      writeArtifact(repo, label, { failed: first ? 1 : 0, retrieval: { status: 'ok' } });
+      return first
+        ? 'src/a.ts:1 duplicates src/b.ts:1\nVERDICT: FAIL — duplicate'
+        : 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec.mock.calls.map(([o]) => o.label)).toContain('review:commit-guard:escalate');
+    expect(stderr.join('\n')).not.toContain('DEGRADED');
+  });
+
+  it('a strict-mode outage retried in the same cascade does not switch the check off', async () => {
+    process.env.GUARD_AI_STRICT = '1';
+    const repo = consumerRepo({ backend: true });
+    const events = captureEvents(repo);
+    let cgCalls = 0;
+    const exec = mkExec(async ({ label, onToolCalls }) => {
+      if (label === 'review:commit-guard' && cgCalls++ === 0) return null;
+      onToolCalls?.(['[ok] Bash: node checklist.mjs finalize --retrieval ok']);
+      writeArtifact(repo, label, { retrieval: { status: 'ok' } });
+      return 'VERDICT: PASS';
+    });
+    await runReviewGate(repo, { exec });
+    expect(cgCalls).toBe(2);
+    const row = events().find((e) => e.type === 'gate_degraded' && e.judge === 'commit-guard');
+    expect(row).toMatchObject({ kind: 'unobserved' });
+  });
+
+  it("the consumer's configured searchTool is the one that must return", async () => {
+    process.env.GUARD_SEARCH_TOOL = 'mcp__acme__semanticSearch';
+    const repo = consumerRepo({ backend: true });
+    const events = captureEvents(repo);
+    expect(await runReviewGate(repo, { exec: passWithCalls(repo, () => [SEARCH]) })).toBe(0);
+    expect(events().find((e) => e.type === 'gate_degraded')).toMatchObject({
+      kind: 'unobserved',
+      cause: 'retrieval recorded ok, but no mcp__acme__semanticSearch call returned in this review',
+    });
   });
 });

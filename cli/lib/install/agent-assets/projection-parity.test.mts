@@ -1,7 +1,7 @@
 /**
  * Edge cases for the projection drift reader. The happy path is pinned against devkit's OWN
- * committed tree in `cli/__tests__/self-host.test.mts`; everything here is a shape that repo cannot
- * produce — an unconfigured surface, a never-synced dir, a symlinked projection, a codex target.
+ * committed tree in `agent-asset-projection-parity.test.mts`; everything here is a shape that repo
+ * cannot produce — an unconfigured surface, a never-synced dir, a symlinked or codex projection.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -187,5 +187,68 @@ describe('projectedLogicals', () => {
     expect(
       projectedLogicals({ root, kind: 'agents', srcDir: 'agents', targets: ['claude'] }),
     ).toEqual(['reviewer.md']);
+  });
+});
+
+// Hook names must be real bundled scripts: the selection lists them from devkit's own agents-hooks/.
+describe('projectionDrift — hooks', () => {
+  const GATE = 'prior-art-gate.mjs';
+  const hooksInput = (root: string, targets: readonly string[] = ['claude', 'codex']) =>
+    ({
+      root,
+      kind: 'hooks',
+      srcDir: 'agents-hooks',
+      targets,
+      selection: { priorArtGate: true },
+    }) as const;
+
+  /** A selected and an unselected source hook, the selected one projected into claude and codex. */
+  function seedHooks(root: string): void {
+    write(root, `agents-hooks/${GATE}`, 'gate\n');
+    write(root, 'agents-hooks/knip-check.sh', 'knip\n');
+    for (const t of ['claude', 'codex']) write(root, `.${t}/hooks/${GATE}`, 'gate\n');
+  }
+
+  it('passes when every selected hook is projected byte-identically, ignoring unselected sources', () => {
+    const root = tempRoot();
+    seedHooks(root);
+    expect(projectionDrift(hooksInput(root))).toEqual([]);
+  });
+
+  it('reports a stale, a missing and an unselected (orphan) hook per target', () => {
+    const root = tempRoot();
+    seedHooks(root);
+    write(root, `.codex/hooks/${GATE}`, 'gate\nplanted\n');
+    write(root, '.claude/hooks/knip-check.sh', 'knip\n');
+    expect(projectionDrift(hooksInput(root, ['claude', 'codex', 'cursor']))).toEqual([
+      'orphan .claude/hooks/knip-check.sh',
+      `stale .codex/hooks/${GATE}`,
+      `missing .cursor/hooks/${GATE}`,
+    ]);
+  });
+
+  it('reports unchecked, never a vacuous pass, when no target is configured', () => {
+    const root = tempRoot();
+    seedHooks(root);
+    expect(projectionDrift(hooksInput(root, []))).toEqual([
+      'unchecked hooks/ — no agentTargets configured, nothing compared',
+    ]);
+  });
+
+  // A symlink-to-dir staged in place of a source lists as a file but reads as EISDIR.
+  it('reports an unreadable hook source once, not once per target', () => {
+    const root = tempRoot();
+    mkdirSync(join(root, 'agents-hooks/elsewhere'), { recursive: true });
+    symlinkSync(join(root, 'agents-hooks/elsewhere'), join(root, `agents-hooks/${GATE}`));
+    for (const t of ['claude', 'codex']) write(root, `.${t}/hooks/${GATE}`, 'gate\n');
+    expect(projectionDrift(hooksInput(root))).toEqual([`unreadable agents-hooks/${GATE}`]);
+  });
+
+  it('expects nothing nested, and nothing when the selection owns no hook', () => {
+    const root = tempRoot();
+    seedHooks(root);
+    write(root, `agents-hooks/nested/${GATE}`, 'gate\n');
+    expect(projectedLogicals(hooksInput(root))).toEqual([GATE]);
+    expect(projectedLogicals({ ...hooksInput(root), selection: {} })).toEqual([]);
   });
 });

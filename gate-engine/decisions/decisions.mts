@@ -63,7 +63,6 @@ import {
   parseIndex,
   renderDecision,
   renderIndex,
-  renderNote,
   renderTarget,
   sanitizeCell,
   today,
@@ -73,7 +72,7 @@ import {
 import { warnNearestAxes } from './dedupe.mts';
 import { runDrift } from './drift.mts';
 import { assertFullNotJson, printFull, printRanked, renderSpine } from './recall/full-print.mts';
-import { noteTextWithRelation, validateTargetSupersedes } from './recall/note-relations.mts';
+import { spliceLiveNote, validateTargetSupersedes } from './recall/note-relations.mts';
 import { type RankResult, rankAxes as rankAxesIn, reindexAll } from './recall/retrieval.mts';
 
 export {
@@ -219,7 +218,7 @@ function addTarget(slug: string, o: AddOptions, p: Paths) {
   console.log(`Recorded Target "${slug}" (${date}).`);
 }
 
-// Cheap convergence note under the current Target. INDEX untouched (a note is not a ruling).
+// Cheap convergence note at the end of the live ruling's section. INDEX untouched (not a ruling).
 function addNote(slug: string, o: AddOptions, p: Paths) {
   if (!o.note) {
     console.error(
@@ -237,8 +236,7 @@ function addNote(slug: string, o: AddOptions, p: Paths) {
   }
   const date = today();
   const parsed = parseDecision(readFileSync(file, 'utf8'));
-  const note = noteTextWithRelation(o.note, o.supersedes, parsed.body, slug);
-  const body = `${parsed.body.replace(TRAILING_WS_RE, '')}\n${renderNote(date, note)}\n`;
+  const body = spliceLiveNote(parsed.body, date, o.note, o.supersedes, slug);
   writeFileAtomic(file, renderDecision({ slug, created: parsed.fm.created || date }, body));
   console.log(`Noted on "${slug}" (${date}).`);
 }
@@ -436,7 +434,7 @@ export async function main(argv: string[]) {
       break;
     }
     case 'rescope': {
-      // Append-only Scope correction: reuses addNote's append path (never touches the Target's own
+      // Append-only Scope correction: a note addNote places in the live ruling's section.
       const [slug, ...rest] = args;
       const scope = flag(rest, '--scope');
       const reason = flag(rest, '--reason');

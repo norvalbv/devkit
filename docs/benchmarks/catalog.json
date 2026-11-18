@@ -839,7 +839,8 @@
         "implementation": [
           "agents-hooks/decision-scope-brief.mjs",
           "agents-hooks/decision-edit-guard.mjs",
-          "cli/lib/install/hook-registration-ledger/registrations.mts"
+          "agents-hooks/edit-targets-lib.mjs",
+          "cli/lib/install/hook-registration-ledger/decisions-registrations.mts"
         ],
         "corpus": ["docs/benchmarks/decisions-brief/**"],
         "scorer": [

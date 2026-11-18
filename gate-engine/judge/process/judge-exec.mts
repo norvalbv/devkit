@@ -70,6 +70,8 @@ export interface ExecJudgeOpts extends CodexSandboxOpts {
   lens?: string;
   /** Fires once per measured claude spawn with the tool calls its permission gate refused. */
   onPermissionDenials?: (denied: string[]) => void;
+  /** Fires once per measured claude spawn with every tool call it made; codex is not measured. */
+  onToolCalls?: (calls: string[]) => void;
   /** Receives the ref of the transcript this spawn stored, for a gate line that names it. */
   onTranscript?: (ref: string) => void;
 }
@@ -201,8 +203,10 @@ function emitJudgeExec(
   if (opts.lens !== undefined) extra.lens = opts.lens;
   // On the ledger the outage detail is queryable: which outage, and until when.
   if (outageDetail !== undefined) extra.outage_detail = outageDetail;
-  const save = judgeBinFor(opts.args) === 'claude' ? saveClaudeCommands : saveCodexCommands;
-  const commandsRef = save(opts.label, stdout, opts.lens);
+  const commandsRef =
+    judgeBinFor(opts.args) === 'claude'
+      ? saveClaudeCommands(opts.label, stdout, opts.lens, opts.onToolCalls)
+      : saveCodexCommands(opts.label, stdout, opts.lens);
   if (commandsRef) extra.commands_ref = commandsRef;
   Object.assign(extra, recordPermissionDenials(opts, stdout, codexGateDenials(opts.label, stdout)));
   const { ref } = recordAgentRun({

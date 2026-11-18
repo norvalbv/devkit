@@ -9,7 +9,7 @@ import {
 } from './constants.mts';
 
 const PINNED_UPSTREAM_IMPLEMENTATION_DIGEST =
-  '12d3da3952fdb06b70de3405fa85aa75d62ce5c89042e9e148c4589bbcb8d80e';
+  'fb28449a39e1b3b79e0a7c1918f16879a6720b6221a55d72b9c160527325da60';
 
 function sourceDigest(): { digest: string; files: string[] } {
   const root = join(import.meta.dirname, '../../../../anti-slop/src');
@@ -34,7 +34,7 @@ function sourceDigest(): { digest: string; files: string[] } {
 describe('vendored anti-slop source', () => {
   it('keeps upstream implementations byte-pinned while composing Devkit extensions', () => {
     const source = sourceDigest();
-    expect(source.files).toHaveLength(20);
+    expect(source.files).toHaveLength(21);
     expect(source.digest).toBe(PINNED_UPSTREAM_IMPLEMENTATION_DIGEST);
     expect(ANTI_SLOP_UPSTREAM_RULE_IDS).toHaveLength(15);
     expect(ANTI_SLOP_DEVKIT_RULE_IDS).toEqual([

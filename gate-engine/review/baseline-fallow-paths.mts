@@ -1,4 +1,7 @@
 // Frozen review runtime: local imports must be listed in PACKAGED_REVIEW_RUNTIME_MODULE_STEMS.
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
 export interface DiffHunk {
   oldStart: number;
   oldCount: number;
@@ -19,6 +22,11 @@ export const FALLOW_CONFIG_FILES = [
   'fallow.toml',
   '.fallow.toml',
 ] as const;
+
+/** The config fallow loads from `dir`: the first `FALLOW_CONFIG_FILES` entry present there. */
+export function firstFallowConfig(dir: string): string | undefined {
+  return FALLOW_CONFIG_FILES.map((file) => join(dir, file)).find((file) => existsSync(file));
+}
 
 type FallowMappingEntry = readonly [string, FallowPathMapping];
 const DROP_FALLOW_VALUE = Symbol('drop-fallow-value');

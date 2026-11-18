@@ -28,6 +28,18 @@ gate_child_poll() {
   done
 }
 
+# bash < 4.3 fails a FIFO open that a SIGCHLD interrupts; retry while the reader lives.
+open_capture_writer() {
+  local fifo=$1 reader=$2 err=$3 tries=0
+  until { exec 8> "$fifo"; } 2>"$err"; do
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ] || ! kill -0 "$reader" 2>/dev/null; then
+      cat -- "$err" >&2
+      return 1
+    fi
+  done
+}
+
 # run_gates_with_capture <worktree> <root> <label> <log> <progress> -- <command...>
 run_gates_with_capture() {
   local wt=$1 root=$2 label=$3 log=$4 progress=$5
@@ -98,7 +110,7 @@ run_gates_with_capture() {
   # receipt; exec keeps $! and tee's $PPID. Every abandon path below must therefore use KILL.
   (trap '' HUP TERM; exec tee -a "${logs[@]}") < "$capture_fifo" >&2 &
   tee_pid=$!
-  if ! exec 8> "$capture_fifo"; then
+  if ! open_capture_writer "$capture_fifo" "$tee_pid" "$capture_dir/open.err"; then
     kill -KILL "$tee_pid" 2>/dev/null || true
     wait "$tee_pid" 2>/dev/null || true
     rm -rf -- "$capture_dir"

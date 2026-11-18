@@ -32,12 +32,8 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$SCRIPT_DIR/queue/slot.sh"
 ship_queue_slot_register
 
-# run-packaged-script.mts hands its private signal-lock root to the managed child. Only
-# review-target.sh implements that handshake; ship inherits the variable and forwards the caller
-# environment intact, so leaving it set would export an unread private path into every gate, hook and
-# nested command — and a nested `devkit review` would take the lock and hold it, after which the
-# outer wrapper stops forwarding signals to THIS ship entirely. Ship's own bash traps
-# (gate-signal-handoff.sh) already produce the same exit statuses, so dropping it costs nothing.
+# Only review-target.sh reads run-packaged-script.mts's signal-lock root; left exported, a nested
+# `devkit review` would take that lock and the wrapper would stop forwarding signals to this ship.
 unset DEVKIT_MANAGED_SIGNAL_ROOT
 # The --resume hand-off marker guards one exec hop; left set, every nested resume in a gate reads it.
 SI_DISPATCHED=${DEVKIT_SHIP_RESUME_DISPATCHED:-}; unset DEVKIT_SHIP_RESUME_DISPATCHED
@@ -679,7 +675,8 @@ if [ "$FROM_BRANCH" -eq 0 ]; then
   fi
   if [ "$PATCH_BASE" != "$BASE" ]; then
     ship_classify_whole_file "$ROOT" "$BASE" "$PATCH_BASE" -- "${GIT_PATHS[@]}"
-    echo "ship: origin/$BASE_REF moved to ${BASE:0:7} since this checkout forked at ${PATCH_BASE:0:7} — staging is anchored at the fork point and three-way merged." >&2
+    # A preserved commit is published as-is, not staged, so only a fresh ship may claim the merge.
+    [ -n "$LOCAL_BRANCH_EXISTS" ] || echo "ship: origin/$BASE_REF moved to ${BASE:0:7} since this checkout forked at ${PATCH_BASE:0:7} — staging is anchored at the fork point and three-way merged." >&2
   fi
 fi
 
@@ -1163,6 +1160,21 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
     fi
   fi
 
+  # Every check above passes for a commit a moved base now conflicts with; GitHub would open it CONFLICTING.
+  RECOVERY_REMEDY=
+  if [ -z "$RECOVERY_REASON" ] && [ "$RECOVERY_PARENT" != "$BASE" ]; then
+    merge_rc=0
+    ship_preserved_merge_check "$ROOT" "$BASE" "$RECOVERY_COMMIT" || merge_rc=$?
+    # Fails closed: publishing unverified would reopen the CONFLICTING-PR exit 0; the re-stage works on any git.
+    if [ "$merge_rc" -eq 1 ]; then
+      RECOVERY_REASON="it no longer merges cleanly into $BASE_REF (${BASE:0:7}), which changed the same lines since ${RECOVERY_PARENT:0:7}"
+      [ -z "$RECOVERY_CONFLICT_HINT" ] || RECOVERY_HINTS+=("$RECOVERY_CONFLICT_HINT")
+    elif [ "$merge_rc" -eq 2 ]; then
+      RECOVERY_REASON="ship could not verify it still merges cleanly into $BASE_REF (${BASE:0:7}), which moved since ${RECOVERY_PARENT:0:7} (the check needs git >= 2.40)"
+    fi
+    [ "$merge_rc" -eq 0 ] || RECOVERY_REMEDY=1
+  fi
+
   if [ -n "$RECOVERY_REASON" ]; then
     echo "branch already exists: $BR" >&2
     echo "  cannot safely resume it: $RECOVERY_REASON" >&2
@@ -1178,6 +1190,8 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
     # instead of running them (sc-2261). Re-print the remedy rather than appending to it.
     if [ -n "$PREFLIGHT_SELF" ]; then
       _ship_orphan_report_self "$PWD" "$BR"
+    elif [ -n "$RECOVERY_REMEDY" ]; then
+      ship_preserved_conflict_remedy
     else
       echo "  choose a new branch name, or inspect and remove the local branch yourself" >&2
     fi
@@ -1663,6 +1677,7 @@ git worktree remove --force "$WT" 2>/dev/null || true
 
 # --wait-ci runs LAST: the push, PR, manifest, intent release and worktree/branch cleanup above are
 # all durable, so a wait that is killed, times out or reports red cannot cost this ship.
+ship_settled_signal_traps # the PR is open: a signal from here on cannot turn ship_end's 0 into a 130
 [ "$WAIT_CI_STRICT" -eq 1 ] || ship_end_record 0 # strict: the verdict is the exit, so the trap records it
 [ "$WAIT_CI" -eq 0 ] || ship_run_wait_ci "$PR_NUM" "$REPO" "$WAIT_CI_TIMEOUT" "$PR_URL" "${WAIT_CI_REQUIRED:-0}"
 exit "$WAIT_CI_STATUS"
