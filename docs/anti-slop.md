@@ -1,6 +1,6 @@
 # Anti-slop capability
 
-Devkit vendors 15 production rules, the full upstream `v0.1.2` ruleset, from
+Devkit vendors 15 production rules, every rule upstream shipped in its first releases, from
 [norvalbv/anti-slop](https://github.com/norvalbv/anti-slop), the maintained fork of
 [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop), at commit
 **b9dbc740905baa1123a3ee4f512fe0933d9e916b** (tag `v0.2.2`). `anti-slop/UPSTREAM.md` lists the
