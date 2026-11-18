@@ -9,6 +9,7 @@ import {
   formatDiagnosis,
   formatRerunNotice,
   formatRerunRescue,
+  formatUndiagnosedExit,
   humanAge,
   passEnv,
   readDiagnosis,
@@ -173,6 +174,25 @@ describe('whether a failure is yours', () => {
     const unhandled = [{ file: '/repo/late.test.ts', message: 'Error: boom' }];
     const lines = formatDiagnosis({ failedFiles: [], flaky: [], unhandled }, '/repo', []);
     expect(lines.join('\n')).not.toMatch(/baseline-status/);
+  });
+});
+
+describe('formatUndiagnosedExit', () => {
+  const failed = { code: 2, interrupted: false, diagnosis: null };
+
+  it('names the exit code and the artifact fate without guessing a cause', () => {
+    const [cleared] = formatUndiagnosedExit({ ...failed, outcome: 'cleared' });
+    expect(cleared).toMatch(/vitest exited 2, .* the previous coverage artifact was removed\.$/);
+    const lines = formatUndiagnosedExit({ ...failed, outcome: 'kept' });
+    expect(lines[0]).toMatch(/no coverage artifact was published from this run\.$/);
+    expect(lines.join('\n')).not.toMatch(/did not run|unhandled|threshold/);
+  });
+
+  it('stays silent on a green, interrupted or already diagnosed run', () => {
+    const diagnosis = { failedFiles: [], flaky: [], unhandled: [{ file: null, message: 'x' }] };
+    expect(formatUndiagnosedExit({ ...failed, code: 0, outcome: 'published' })).toEqual([]);
+    expect(formatUndiagnosedExit({ ...failed, interrupted: true, outcome: 'cleared' })).toEqual([]);
+    expect(formatUndiagnosedExit({ ...failed, diagnosis, outcome: 'cleared' })).toEqual([]);
   });
 });
 

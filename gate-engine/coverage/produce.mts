@@ -42,8 +42,10 @@ import {
   formatDiagnosis,
   formatRerunNotice,
   formatRerunRescue,
+  formatUndiagnosedExit,
   markerCause,
   passEnv,
+  type PublishOutcome,
   raisedTimeoutMs,
   readDiagnosis,
   RESULTS_NAME,
@@ -81,12 +83,6 @@ export const COVERAGE_FILE = `${COVERAGE_DIR}/${REPORT_NAME}`;
 export const RUNS_DIR = `${COVERAGE_DIR}/.runs`;
 /** Long enough it can never catch a live run; short enough that killed runs don't pile up. */
 export const STALE_RUN_MS = 6 * 60 * 60 * 1000;
-
-/**
- * What publishCoverage did. `kept` = a sibling's report survived us; `cleared` = ours was removed.
- * Distinct on purpose — see the doc on publishCoverage.
- */
-export type PublishOutcome = 'published' | 'cleared' | 'kept';
 
 /**
  * This run's reports directory, absolute. pid alone is not enough — pids are recycled and two runs
@@ -481,6 +477,8 @@ export async function produceCoverage(cwd = process.cwd(), argv: string[] = []):
     }
   }
   const { code, outcome } = final;
+  const fate = first.outcome === 'cleared' ? 'cleared' : outcome; // pass 1 may have removed it
+  for (const line of formatUndiagnosedExit({ ...final, outcome: fate })) console.error(line);
 
   // Green tests but no report means the suite never emitted one — most often because `json` is
   // missing from coverage.reporter. The gate still fails CLOSED on the absent artifact, so this is
