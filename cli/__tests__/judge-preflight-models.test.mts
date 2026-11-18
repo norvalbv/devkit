@@ -9,7 +9,7 @@ import {
   parseModelListReply,
   readCodexRateLimits,
 } from '../../gate-engine/judge/codex/rate-limits.mts';
-import { judgeReachability, renderPreflight } from '../lib/ship/preflight/judge.mts';
+import { judgeReachability, remedyLine, renderPreflight } from '../lib/ship/preflight/judge.mts';
 
 /** Model ids `model/list {includeHidden:true}` returned on a free plan (codex 0.162.1). */
 const FREE_PLAN_DATA = [
@@ -143,6 +143,39 @@ describe('judgeReachability — model availability', () => {
     const review = { ...SOL_ON_CORRECTNESS, correctnessModel: 'gpt-5.6-sol@bogus' };
     const statuses = await reach({ ...HEALTHY, planType: 'free', ...fetched }, review);
     expect(statuses.map((s) => s.state)).toEqual(['ok', 'ok', 'ok']);
+  });
+
+  // The live 2026-10-14 ship: terra answered on credits while sol was refused.
+  it('a credit-served lane beside a refused model reads unverified, not EXHAUSTED', async () => {
+    const onCredits: CodexRateLimits = {
+      reached: false,
+      onCredits: true,
+      planType: 'free',
+      usedPercent: 100,
+      windowDurationMins: 43200,
+      ...fetched,
+    };
+    const review = { ...SOL_ON_CORRECTNESS, escalationModel: 'gpt-5.6-sol' };
+    const statuses = await reach(onCredits, review);
+    expect(statuses.map((s) => s.state)).toEqual(['unverified', 'unavailable', 'unavailable']);
+    const out = renderPreflight(statuses).join('\n');
+    expect(out).toContain(
+      'review: gpt-5.6-terra@high via codex — plan limit reached — credit service unverified',
+    );
+    expect(out).not.toContain('EXHAUSTED');
+    // The refused sol roles still fail closed, so the stop banner and its move stay.
+    expect(out).toContain('every reviewer that is not already cached will fail closed');
+    expect(remedyLine(statuses)).toContain('To ship inside this window,');
+  });
+
+  it('an empty served list names the knobs without an empty target list', async () => {
+    const statuses = await reach(
+      { ...HEALTHY, planType: 'free', models: ['gpt-reserve'], visibleModels: [] },
+      SOL_ON_CORRECTNESS,
+    );
+    const out = renderPreflight(statuses).join('\n');
+    expect(out).toContain('(with GUARD_CORRECTNESS_CHUNK=off).');
+    expect(out).not.toContain('the account serves');
   });
 
   it('groups every role refused on one model into a single remedy line', async () => {

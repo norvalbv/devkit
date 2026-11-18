@@ -404,6 +404,10 @@ describe('renderPreflight', () => {
     expect(remedyLine([ok, onCredits, unknown])).toBe('');
   });
 
+  it('remedyLine is empty when credit service is unverified: the read predicts no refusal', () => {
+    expect(remedyLine([{ ...locked[0], state: 'unverified' as const }])).toBe('');
+  });
+
   it('the report closes on the very line ship repeats at its tail, so the two cannot drift', () => {
     const ok = { role: 'review' as const, model: 'haiku', bin: 'claude', state: 'ok' as const };
     const claudeOut = { ...ok, role: 'correctness' as const, state: 'unauthenticated' as const };
@@ -759,6 +763,53 @@ describe('ship_judge_preflight — the remedy reaches the shell, the report stay
     expect(r.stdout).toBe('');
     expect(r.stderr).toContain('REPORT');
     expect(r.stderr).toContain('[REMEDY]');
+  });
+
+  // The live 2026-10-14 free account: plan spent on credits while terra kept answering. A non-empty
+  // remedy here told every agent to move all its judges off a lane that worked.
+  it('hands over no remedy when a spent plan may still be served by credits', () => {
+    const root = repo(['review'], {
+      model: 'gpt-5.6-terra@high',
+      escalationModel: 'gpt-5.6-terra',
+      correctnessModel: 'gpt-5.6-terra',
+    });
+    const limits = JSON.stringify({
+      id: 2,
+      result: {
+        ordinaryUsageAllowed: false,
+        rateLimits: {
+          primary: { usedPercent: 100, windowDurationMins: 43200 },
+          credits: { hasCredits: true, unlimited: false },
+          spendControlReached: false,
+          planType: 'free',
+          rateLimitReachedType: 'rate_limit_reached',
+        },
+      },
+    });
+    const models = JSON.stringify({
+      id: 3,
+      result: { data: [{ id: 'gpt-5.6-terra', model: 'gpt-5.6-terra' }], nextCursor: null },
+    });
+    const codex = join(root, 'codex');
+    writeFileSync(
+      codex,
+      `#!/bin/sh\n[ "$1" = login ] && { echo 'Logged in'; exit 0; }\necho '${limits}'\necho '${models}'\n`,
+    );
+    chmodSync(codex, 0o755);
+    const script = '. "$1"; ship_judge_preflight "$2"; printf "[%s]" "$SHIP_JUDGE_REMEDY" >&2';
+    const r = testSpawnSync('/bin/bash', ['-c', script, 'sh', helper, root], {
+      env: {
+        ...process.env,
+        DEVKIT_GATE_EVENTS: join(root, 'gate-events.jsonl'),
+        DEVKIT_SHIP_ID: 'credits-unverified',
+        GUARD_CODEX_BIN: codex,
+      },
+      encoding: 'utf8',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain(`gpt-5.6-terra@high via ${codex} — plan limit reached — credit`);
+    expect(r.stderr).not.toContain('EXHAUSTED');
+    expect(r.stderr).toMatch(/\[\]\s*$/);
   });
 
   it('still reports and hands over the remedy when the telemetry sink cannot be written', () => {
