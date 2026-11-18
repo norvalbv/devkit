@@ -163,10 +163,10 @@ jobs:
           DEVKIT_INSTALL_LAYOUTS: 1
         run: bun run test:run --shard="$SHARD/4" --reporter=blob --reporter=default
 
-      # An empty or missing directory means the suite ran on a Node that cannot cache this source.
+      # Read both lines together: a Node below 24 still fills the directory, but only with plain JavaScript.
       - name: Compile cache size
         if: always()
-        run: du -sh "$RUNNER_TEMP/node-compile-cache" || echo "no compile cache was written"
+        run: node --version; du -sh "$RUNNER_TEMP/node-compile-cache" || echo "no compile cache was written"
 
       # download-artifact takes the newest artifact per name across run attempts, so a shard that
       # wrote no blob must still upload something, or a re-run would merge an older attempt's blob.
