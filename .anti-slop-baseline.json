@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "upstreamCommit": "e8c4880471b23ab7f216fba7b27d173a6ef07d4c",
+  "upstreamCommit": "b9dbc740905baa1123a3ee4f512fe0933d9e916b",
   "entries": [
     {
       "fingerprint": "00405c2cbbf51afdc430e516723fc2d0fdb22645ae0a01d87c65f1f302ece1ac",
@@ -1257,14 +1257,6 @@
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
       "context": "unknown",
       "count": 7
-    },
-    {
-      "fingerprint": "20de0c6e9c12ecfda33d5c4b9fe896f213ddbf3f1605bf972938baa43f6afbff",
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "gate-engine/review/overrides.mts",
-      "diagnostic": "The explicit open dictionary type on return value of `envOverrides` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "out",
-      "count": 1
     },
     {
       "fingerprint": "20ed5280cdfe16b6d632e0a99af13c34c467e68ffc2d8a2670fd63dbe16a2d7f",
@@ -3219,14 +3211,6 @@
       "count": 1
     },
     {
-      "fingerprint": "58d71ce0f1301ab1579236fc6f832b347e637f6e248aea7b30ad49befaf382c0",
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "gate-engine/ratchets/folder-fanout.mts",
-      "diagnostic": "The explicit open dictionary type on return value of `tallyDirs` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "counts",
-      "count": 1
-    },
-    {
       "fingerprint": "58e536fca44c99067e09635c26434603a700dffd7bcd32c24092db3e94418289",
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/lib/ship/review/projection/runtime.mts",
@@ -3664,14 +3648,6 @@
       "file": "gate-engine/critique/__tests__/capture-normalizer.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "JSON.parse(projection.toString('utf8')) as StoredProjection",
-      "count": 1
-    },
-    {
-      "fingerprint": "6488e6cb58d3d034137c4f23f48f633666f0262d1c1cbeaa5c279aa2e39e7d0f",
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "gate-engine/structure/tree/compile.mts",
-      "diagnostic": "The explicit open dictionary type on return value of `buildRegexParameters` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "params",
       "count": 1
     },
     {
@@ -6123,14 +6099,6 @@
       "count": 1
     },
     {
-      "fingerprint": "a6451ae26b6b83ddeacbc866fcf9d215b2e1a78cd21dffe8f6d593a9d13cb9df",
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "gate-engine/decisions/decision-format.mts",
-      "diagnostic": "The explicit open dictionary type on return value of `parseTargetFields` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "fields",
-      "count": 1
-    },
-    {
       "fingerprint": "a64ffc6ad22fec513f0cd680b5235d2c34d1c4c901c7c86bf881079cf7c82f4f",
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/critique/__tests__/persistence-lock.test.mts",
@@ -7192,14 +7160,6 @@
       "file": "cli/lib/standalone.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "typeof e",
-      "count": 1
-    },
-    {
-      "fingerprint": "c2fe480c4d32841c83c91dce778e34d59b6090c224ae0a6347a7af29db74459f",
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "gate-engine/eval/__tests__/tracker-fixtures.mts",
-      "diagnostic": "The explicit open dictionary type on return value of `readableSnapshot` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "files",
       "count": 1
     },
     {

@@ -67,22 +67,45 @@ describe('vendored anti-slop at the current upstream pin', () => {
     expect(findings.map((group) => [group.file, group.line])).toEqual([['src/probe.ts', 4]]);
   });
 
-  it('passes the staged gate when the base commit holds a baseline from a prior pin', () => {
-    const [prior] = ANTI_SLOP_PRIOR_UPSTREAMS;
-    if (!prior) throw new Error('expected a prior upstream pin');
-    const root = repository('export const clean = 1;\n', prior);
-    git(root, ['-c', 'user.name=t', '-c', 'user.email=t@test.invalid', 'commit', '-qm', 'base']);
-    writeFileSync(join(root, 'src', 'next.ts'), 'export const next = 2;\n');
-    git(root, ['add', 'src/next.ts']);
-    expect(antiSlop(['check', '--staged'], root)).toBe(0);
+  it('reports dictionary aliases whose arguments nest or swap, without dropping the rest of the file', () => {
+    const source = [
+      'type Dict<T> = Record<string, T>;',
+      'type Wrapped<T> = Dict<Readonly<T>>;',
+      'export type Example = Wrapped<unknown>;',
+      'type Pair<A, B> = Record<string, B>;',
+      'type Swapped<A, B> = Pair<B, A>;',
+      'export type Flipped = Swapped<unknown, string>;',
+      'export const read = (value: unknown) => value;',
+      '',
+    ].join('\n');
+    const findings = collectAntiSlopGroups(repository(source), [])
+      .map((group) => [group.ruleId, group.line])
+      .sort((a, b) => Number(a[1]) - Number(b[1]));
+    expect(findings).toEqual([
+      ['anti-slop/no-unsafe-dictionary-type', 3],
+      ['anti-slop/no-unsafe-dictionary-type', 6],
+      ['anti-slop/no-unknown-parameters', 7],
+    ]);
   });
 
-  it('passes an overlay clone whose git-excluded baseline carries a prior pin, without rewriting it', () => {
-    const [prior] = ANTI_SLOP_PRIOR_UPSTREAMS;
-    if (!prior) throw new Error('expected a prior upstream pin');
-    const root = repository('export const clean = 1;\n', prior, true);
-    const before = readFileSync(join(root, ANTI_SLOP_BASELINE_REL), 'utf8');
-    expect(antiSlop(['check', '--staged'], root)).toBe(0);
-    expect(readFileSync(join(root, ANTI_SLOP_BASELINE_REL), 'utf8')).toBe(before);
-  });
+  it.each(ANTI_SLOP_PRIOR_UPSTREAMS)(
+    'passes the staged gate when the base commit holds a baseline from prior pin %s',
+    (prior) => {
+      const root = repository('export const clean = 1;\n', prior);
+      git(root, ['-c', 'user.name=t', '-c', 'user.email=t@test.invalid', 'commit', '-qm', 'base']);
+      writeFileSync(join(root, 'src', 'next.ts'), 'export const next = 2;\n');
+      git(root, ['add', 'src/next.ts']);
+      expect(antiSlop(['check', '--staged'], root)).toBe(0);
+    },
+  );
+
+  it.each(ANTI_SLOP_PRIOR_UPSTREAMS)(
+    'passes an overlay clone whose git-excluded baseline carries prior pin %s, without rewriting it',
+    (prior) => {
+      const root = repository('export const clean = 1;\n', prior, true);
+      const before = readFileSync(join(root, ANTI_SLOP_BASELINE_REL), 'utf8');
+      expect(antiSlop(['check', '--staged'], root)).toBe(0);
+      expect(readFileSync(join(root, ANTI_SLOP_BASELINE_REL), 'utf8')).toBe(before);
+    },
+  );
 });

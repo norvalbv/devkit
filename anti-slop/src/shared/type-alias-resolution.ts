@@ -7,11 +7,26 @@ type TypeScope = ESTree.Node;
 
 type TypeBinding = {
 	readonly alias: ESTree.TSTypeAliasDeclaration | null;
+	/**
+	 * "type" for a declaration or `import type`; "maybe" for a named or default value import, whose
+	 * target may or may not be a type; "none" for a namespace import, which can never name a type, and
+	 * for a `declare global` interface, which merges with the global type instead of shadowing it.
+	 */
+	readonly typeMeaning: TypeMeaning;
 	readonly name: string;
 	readonly scope: TypeScope;
 };
 
+type TypeMeaning = "type" | "maybe" | "none";
+
+type ResolvingAliases = ReadonlySet<ESTree.TSTypeAliasDeclaration>;
+
+/**
+ * A type argument bound to a type parameter, with the substitutions and alias expansions
+ * that were active where the argument was written.
+ */
 type Substitution = {
+	readonly resolvingAliases: ResolvingAliases;
 	readonly substitutions: Substitutions;
 	readonly type: ESTree.TSType;
 };
@@ -41,6 +56,8 @@ function isNode(value: unknown): value is ESTree.Node {
 }
 
 function enclosingTypeScope(node: ESTree.Node): TypeScope {
+	// A named class expression binds its name only inside the expression.
+	if (node.type === "ClassExpression") return node;
 	let current: ESTree.Node | null = node.parent;
 	while (current !== null) {
 		if (
@@ -57,27 +74,58 @@ function enclosingTypeScope(node: ESTree.Node): TypeScope {
 	return node;
 }
 
-function declaredTypeBinding(node: ESTree.Node): {
-	readonly alias: ESTree.TSTypeAliasDeclaration | null;
-	readonly name: string;
-} | null {
+function isTypeOnlyImport(
+	node: ESTree.ImportSpecifier | ESTree.ImportDefaultSpecifier,
+): boolean {
+	return (
+		(node.type === "ImportSpecifier" && node.importKind === "type") ||
+		(node.parent.type === "ImportDeclaration" && node.parent.importKind === "type")
+	);
+}
+
+function mergesWithGlobal(node: ESTree.TSInterfaceDeclaration): boolean {
+	const statement = node.parent.type === "ExportNamedDeclaration" ? node.parent : node;
+	return (
+		statement.parent.type === "TSModuleBlock" &&
+		statement.parent.parent.type === "TSModuleDeclaration" &&
+		statement.parent.parent.kind === "global"
+	);
+}
+
+function declaredTypeBinding(
+	node: ESTree.Node,
+): Omit<TypeBinding, "scope"> | null {
 	if (node.type === "TSTypeAliasDeclaration") {
-		return { alias: node, name: node.id.name };
+		return { alias: node, typeMeaning: "type", name: node.id.name };
+	}
+	if (node.type === "TSInterfaceDeclaration") {
+		return {
+			alias: null,
+			typeMeaning: mergesWithGlobal(node) ? "none" : "type",
+			name: node.id.name,
+		};
 	}
 	if (
-		node.type === "TSInterfaceDeclaration" ||
 		node.type === "TSEnumDeclaration" ||
 		node.type === "ClassDeclaration" ||
 		node.type === "ClassExpression"
 	) {
-		return node.id === null ? null : { alias: null, name: node.id.name };
+		return node.id === null
+			? null
+			: { alias: null, typeMeaning: "type", name: node.id.name };
+	}
+	if (node.type === "ImportNamespaceSpecifier") {
+		return { alias: null, typeMeaning: "none", name: node.local.name };
 	}
 	if (
 		node.type === "ImportSpecifier" ||
-		node.type === "ImportDefaultSpecifier" ||
-		node.type === "ImportNamespaceSpecifier"
+		node.type === "ImportDefaultSpecifier"
 	) {
-		return { alias: null, name: node.local.name };
+		return {
+			alias: null,
+			typeMeaning: isTypeOnlyImport(node) ? "type" : "maybe",
+			name: node.local.name,
+		};
 	}
 	return null;
 }
@@ -171,7 +219,10 @@ export function visibleTypeAlias(
 	return bindings.length === 1 ? (bindings[0]?.alias ?? null) : null;
 }
 
-/** Return whether a local declaration shadows a built-in type at this use. */
+/**
+ * Return whether anything that may name a type shadows a built-in here. Use it where reading the
+ * name as the built-in would report: an ambiguous value import then stays silent.
+ */
 export function hasVisibleTypeBinding(
 	name: string,
 	use: ESTree.Node,
@@ -179,7 +230,88 @@ export function hasVisibleTypeBinding(
 ): boolean {
 	return (
 		lexicalTypeParameterNames(use, environment.visitorKeys).has(name) ||
-		nearestTypeBindings(name, use, environment).length > 0
+		nearestTypeBindings(name, use, environment).some(
+			(binding) => binding.typeMeaning !== "none",
+		)
+	);
+}
+
+/**
+ * Return whether a declaration that definitely names a type shadows a built-in here. Use it where
+ * reading the name as the built-in spares the code: an ambiguous value import then stays silent.
+ */
+export function hasVisibleTypeDeclaration(
+	name: string,
+	use: ESTree.Node,
+	environment: TypeAliasEnvironment,
+): boolean {
+	return (
+		lexicalTypeParameterNames(use, environment.visitorKeys).has(name) ||
+		nearestTypeBindings(name, use, environment).some(
+			(binding) => binding.typeMeaning === "type",
+		)
+	);
+}
+
+function hasSameTypeBinding(
+	first: ESTree.IdentifierReference,
+	second: ESTree.IdentifierReference,
+	environment: TypeAliasEnvironment,
+): boolean {
+	const { name } = first;
+	const { visitorKeys } = environment;
+	if (
+		second.name !== name ||
+		lexicalTypeParameterNames(first, visitorKeys).has(name) ||
+		lexicalTypeParameterNames(second, visitorKeys).has(name)
+	) {
+		return false;
+	}
+	const firstBindings = nearestTypeBindings(name, first, environment);
+	const secondBindings = nearestTypeBindings(name, second, environment);
+	return (
+		firstBindings.length === secondBindings.length &&
+		firstBindings.every((binding, index) => binding === secondBindings[index])
+	);
+}
+
+function collectTypeReferenceRoots(
+	node: ESTree.Node,
+	visitorKeys: VisitorKeys,
+	roots: ESTree.IdentifierReference[],
+): void {
+	if (node.type === "TSTypeReference") {
+		let name = node.typeName;
+		while (name.type === "TSQualifiedName") name = name.left;
+		if (name.type === "Identifier") roots.push(name);
+	}
+	// SAFETY: Oxlint's visitor keys identify only ESTree child-node properties.
+	const fields = node as unknown as Readonly<Record<string, unknown>>;
+	for (const key of visitorKeys[node.type] ?? []) {
+		const value = fields[key];
+		const children = Array.isArray(value) ? value : [value];
+		for (const child of children) {
+			if (isNode(child)) collectTypeReferenceRoots(child, visitorKeys, roots);
+		}
+	}
+}
+
+/** Whether two textually equal types name the same declarations; a shadowing type parameter or local type does not. */
+export function hasSameTypeBindings(
+	first: ESTree.TSType,
+	second: ESTree.TSType,
+	environment: TypeAliasEnvironment,
+): boolean {
+	const firstRoots: ESTree.IdentifierReference[] = [];
+	const secondRoots: ESTree.IdentifierReference[] = [];
+	collectTypeReferenceRoots(first, environment.visitorKeys, firstRoots);
+	collectTypeReferenceRoots(second, environment.visitorKeys, secondRoots);
+	return (
+		firstRoots.length === secondRoots.length &&
+		firstRoots.every((root, index) => {
+			const other = secondRoots[index];
+			return other !== undefined && hasSameTypeBinding(root, other, environment);
+		})
 	);
 }
 
@@ -191,60 +323,126 @@ function aliasSubstitutions(
 	alias: ESTree.TSTypeAliasDeclaration,
 	reference: ESTree.TSTypeReference,
 	base: Substitutions,
+	baseResolving: ResolvingAliases,
+	aliasResolving: ResolvingAliases,
 ): Substitutions | null {
 	const parameters = alias.typeParameters?.params ?? [];
 	const arguments_ = reference.typeArguments?.params ?? [];
-	const next = new Map(base);
+	const next = new Map<string, Substitution>();
 	for (const [index, parameter] of parameters.entries()) {
 		const explicitArgument = arguments_[index];
 		const argument = explicitArgument ?? parameter.default;
 		if (argument === null || argument === undefined) return null;
-		const argumentSubstitutions = explicitArgument === undefined ? next : base;
+		// Explicit arguments were written at the reference; defaults inside the alias.
+		const isDefault = explicitArgument === undefined;
 		next.set(parameter.name.name, {
 			type: argument,
-			substitutions: new Map(argumentSubstitutions),
+			substitutions: new Map(isDefault ? next : base),
+			resolvingAliases: isDefault ? aliasResolving : baseResolving,
 		});
 	}
 	return next;
 }
 
-/** Match a type after resolving visible aliases and substituting their type parameters. */
+/** Alias expansions one resolution may perform before it leaves further aliases unexpanded. */
+const EXPANSION_BUDGET = 1_000;
+
+/** Alias expansions left to one resolution, shared by every branch it walks. */
+export type ExpansionBudget = { remaining: number };
+
+export function createExpansionBudget(): ExpansionBudget {
+	return { remaining: EXPANSION_BUDGET };
+}
+
+/** Count one alias expansion; false once the budget is spent, so the alias stays unexpanded. */
+export function spendExpansion(budget: ExpansionBudget): boolean {
+	budget.remaining -= 1;
+	return budget.remaining >= 0;
+}
+
+/** Whether a resolution left some alias unexpanded, so a negative answer is only partial. */
+export function isExpansionBudgetSpent(budget: ExpansionBudget): boolean {
+	return budget.remaining < 0;
+}
+
+type Resolution = {
+	readonly budget: ExpansionBudget;
+	readonly environment: TypeAliasEnvironment;
+	readonly matcher: ResolvedTypeMatcher;
+	/** A resumed argument's result depends only on its substitution, so each resolves once. */
+	readonly resumed: Map<Substitution, boolean>;
+};
+
+function evaluateResolved(
+	resolution: Resolution,
+	current: ESTree.TSType,
+	substitutions: Substitutions,
+	resolvingAliases: ResolvingAliases,
+): boolean {
+	if (current.type === "TSTypeReference") {
+		const name = typeReferenceName(current);
+		if (name !== null) {
+			const substitution = substitutions.get(name);
+			if (substitution !== undefined && !current.typeArguments?.params.length) {
+				// Resume in the argument's own context so a separate, finite instantiation of an
+				// alias that is still being expanded (`Maybe<Maybe<unknown>>`) is not mistaken for
+				// recursion.
+				const cached = resolution.resumed.get(substitution);
+				if (cached !== undefined) return cached;
+				const result = evaluateResolved(
+					resolution,
+					substitution.type,
+					substitution.substitutions,
+					substitution.resolvingAliases,
+				);
+				resolution.resumed.set(substitution, result);
+				return result;
+			}
+			const alias = visibleTypeAlias(name, current, resolution.environment);
+			if (
+				alias !== null &&
+				!resolvingAliases.has(alias) &&
+				spendExpansion(resolution.budget)
+			) {
+				const nextResolving = new Set(resolvingAliases);
+				nextResolving.add(alias);
+				const nextSubstitutions = aliasSubstitutions(
+					alias,
+					current,
+					substitutions,
+					resolvingAliases,
+					nextResolving,
+				);
+				if (nextSubstitutions !== null) {
+					return evaluateResolved(
+						resolution,
+						alias.typeAnnotation,
+						nextSubstitutions,
+						nextResolving,
+					);
+				}
+			}
+		}
+	}
+	return resolution.matcher(current, (child) =>
+		evaluateResolved(resolution, child, substitutions, resolvingAliases),
+	);
+}
+
+/**
+ * Match a type after resolving visible aliases and substituting their type parameters.
+ * Past the expansion budget an alias stays unexpanded, as a recursive one does, so a matcher
+ * that answers true only for a finding loses findings there but never gains one.
+ */
 export function resolvedTypeMatches(
 	type: ESTree.TSType,
 	environment: TypeAliasEnvironment,
 	matcher: ResolvedTypeMatcher,
 ): boolean {
-	const evaluate = (
-		current: ESTree.TSType,
-		substitutions: Substitutions,
-		resolvingAliases: ReadonlySet<ESTree.TSTypeAliasDeclaration>,
-	): boolean => {
-		if (current.type === "TSTypeReference") {
-			const name = typeReferenceName(current);
-			if (name !== null) {
-				const substitution = substitutions.get(name);
-				if (substitution !== undefined && !current.typeArguments?.params.length) {
-					return evaluate(
-						substitution.type,
-						substitution.substitutions,
-						resolvingAliases,
-					);
-				}
-				const alias = visibleTypeAlias(name, current, environment);
-				if (alias !== null && !resolvingAliases.has(alias)) {
-					const nextSubstitutions = aliasSubstitutions(alias, current, substitutions);
-					if (nextSubstitutions !== null) {
-						const nextResolving = new Set(resolvingAliases);
-						nextResolving.add(alias);
-						return evaluate(alias.typeAnnotation, nextSubstitutions, nextResolving);
-					}
-				}
-			}
-		}
-		return matcher(current, (child) =>
-			evaluate(child, substitutions, resolvingAliases),
-		);
-	};
-
-	return evaluate(type, new Map(), new Set());
+	return evaluateResolved(
+		{ budget: createExpansionBudget(), environment, matcher, resumed: new Map() },
+		type,
+		new Map(),
+		new Set(),
+	);
 }

@@ -1,20 +1,28 @@
 import { defineRule } from "@oxlint/plugins";
 import type { ESTree } from "@oxlint/plugins";
 
-function unwrapParentheses(node: ESTree.Expression): ESTree.Expression {
+/** Peel parentheses and TypeScript-only wrappers, which do not change the runtime value. */
+function unwrapExpression(node: ESTree.Expression): ESTree.Expression {
   let current = node;
-  while (current.type === "ParenthesizedExpression") {
+  while (
+    current.type === "ParenthesizedExpression" ||
+    current.type === "TSAsExpression" ||
+    current.type === "TSSatisfiesExpression" ||
+    current.type === "TSTypeAssertion" ||
+    current.type === "TSNonNullExpression"
+  ) {
     current = current.expression;
   }
   return current;
 }
 
 function isEmptyObjectExpression(node: ESTree.Expression): boolean {
-  return node.type === "ObjectExpression" && node.properties.length === 0;
+  const current = unwrapExpression(node);
+  return current.type === "ObjectExpression" && current.properties.length === 0;
 }
 
 function isConditionalEmptyObjectSpread(node: ESTree.Expression): boolean {
-  const conditional = unwrapParentheses(node);
+  const conditional = unwrapExpression(node);
   return (
     conditional.type === "ConditionalExpression" &&
     (isEmptyObjectExpression(conditional.consequent) ||
