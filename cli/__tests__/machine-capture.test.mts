@@ -166,6 +166,19 @@ describe.runIf(browserReady)('machine capture (headless browser)', () => {
     ]);
   }, 60_000);
 
+  it('still stops the recording and returns when the page stops answering mid-run', async () => {
+    const root = repo();
+    const stuck = [
+      OPEN,
+      'void page.evaluate(() => { for (;;) {} }).catch(() => undefined);',
+      'await new Promise((done) => setTimeout(done, 300));',
+      "throw new Error('stuck page');",
+    ].join('\n');
+    const { evidence, result } = await capture(root, flowFile(root, 'stuck', stuck));
+    expect(result).toMatchObject({ passed: false, error: 'stuck page' });
+    expect(readManifest(evidence).map(({ file }) => file)).toContain('stuck.webm');
+  }, 60_000);
+
   it("refuses a shot named like a step's own still", async () => {
     const root = repo();
     const { result } = await capture(

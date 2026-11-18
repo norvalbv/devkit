@@ -20,6 +20,7 @@ import {
 export const VIEWPORT = { width: 1280, height: 720 };
 const FLOW_TIMEOUT_MS = 5 * 60_000;
 const CAPTURE_TIMEOUT_MS = 30_000;
+const CLEANUP_TIMEOUT_MS = 5_000;
 /** Chromium refuses a capture until the page has drawn a frame, which a just-loaded page has not. */
 const CAPTURE_REFUSED = /Unable to capture screenshot/;
 const CAPTURE_TRIES = 10;
@@ -379,7 +380,8 @@ export async function runFlow(input: RunInput): Promise<RunResult> {
   } catch (cause) {
     error = errorMessage(cause);
   } finally {
-    await notes.clear();
+    // A page that stopped answering must not keep the recorder and the browser from being released.
+    await withTimeout(notes.clear(), CLEANUP_TIMEOUT_MS, 'overlay cleanup').catch(() => undefined);
     if (recording && !(await recorder.stop()))
       error ??= 'the recording was lost, so nothing proves this run';
     await close();
