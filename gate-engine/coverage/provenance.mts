@@ -17,6 +17,7 @@ import {
 } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
+import { JS_TS_SOURCE_RE } from '../config-source-matchers.mts';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { headTreeish } from '../ratchets/git-index.mts';
 import { headHash } from '../review/evidence/staged-git.mts';
@@ -102,9 +103,6 @@ export const git = (cwd: string, args: string[], input?: string): string =>
 
 const nulList = (out: string): string[] => out.split('\0').filter(Boolean);
 
-/** JS/TS sources, the only files a drift exemption can judge, so the only ones whose bytes are kept. */
-export const JS_TS_SOURCE = /\.[cm]?[jt]sx?$/i;
-
 export const sha256 = (bytes: string | Buffer): string =>
   createHash('sha256').update(bytes).digest('hex');
 
@@ -155,7 +153,7 @@ export function snapshotSource(cwd: string, args: string[] = []): SourceSnapshot
     }
     // Source blobs are written (-w) so the gate can later compare the measured bytes themselves.
     for (const write of [true, false]) {
-      const group = toHash.filter((p) => JS_TS_SOURCE.test(p) === write);
+      const group = toHash.filter((p) => JS_TS_SOURCE_RE.test(p) === write);
       const flags = write ? ['hash-object', '-w'] : ['hash-object'];
       // --stdin-paths is newline-delimited; a path containing one is hashed on its own.
       const plain = group.filter((p) => !p.includes('\n'));

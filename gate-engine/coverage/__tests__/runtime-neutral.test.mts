@@ -75,6 +75,11 @@ describe('runtimeNeutral', () => {
       "export const k = 'sourceURL';\n",
       "/** The key. */\nexport const k = 'sourceURL';\n",
     ],
+    [
+      'a JSDoc edit beside an unmoved ignore hint',
+      '/* v8 ignore next */\nexport const a = 1;\n',
+      '/** The answer. */\n/* v8 ignore next */\nexport const a = 1;\n',
+    ],
     // A Windows checkout reads CRLF from disk while git's blob holds LF.
     [
       'a CRLF checkout of an LF blob',
@@ -132,6 +137,16 @@ describe('runtimeNeutral', () => {
       '/** @jsxImportSource preact */\nexport const a = 1;\n',
     ],
     ['a source map comment', 'src/x.js', 'a();\n', 'a();\n//# sourceMappingURL=x.js.map\n'],
+    ['a coverage ignore hint', 'src/x.ts', 'a();\n', '/* istanbul ignore next */\na();\n'],
+    ['a v8 ignore hint removed', 'src/x.ts', '/* v8 ignore next */\na();\n', 'a();\n'],
+    [
+      'an ignore hint moved to other code',
+      'src/x.ts',
+      '/* istanbul ignore next */\na();\nb();\n',
+      'a();\n/* istanbul ignore next */\nb();\n',
+    ],
+    ['a hint spaced twice', 'src/x.ts', 'a();\n', '/* istanbul  ignore next */\na();\n'],
+    ['a hint split across lines', 'src/x.ts', 'a();\n', '/* c8\n   ignore next */\na();\n'],
     ['a non-JS file', 'src/x.vue', '<template/>\n', '<!-- c -->\n<template/>\n'],
   ])('does not hold for %s', (_, path, before, after) => {
     expect(runtimeNeutral(path, before, after)).toBe(false);

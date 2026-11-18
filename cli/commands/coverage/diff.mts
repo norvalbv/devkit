@@ -339,16 +339,24 @@ export default function coverageDiff(args: string[], cwd: string): number {
   const changedSince = nulList(
     run(['diff', '--name-only', '-z', '--no-renames', '--no-relative', mb.sha]).stdout,
   );
+  const neutral = new Map<string, boolean>();
+  const neutralSince = (p: string, measured: string) => {
+    if (!neutral.has(p)) neutral.set(p, neutralDrift(top, p, measured, workingTreeText(top, p)));
+    return neutral.get(p) === true;
+  };
+  const measuredOf = new Map<string, string>();
+  // Any scored row reads line numbers, so only an unscored file may be exempt from this report.
   const stale = bound
-    ? stalePaths(
-        run,
-        top,
-        bound,
-        [...changedSince.filter(reported), ...untracked],
-        (p, measured) =>
-          !(gated(p) && added.has(p)) && neutralDrift(top, p, measured, workingTreeText(top, p)),
-      )
+    ? stalePaths(run, top, bound, [...changedSince.filter(reported), ...untracked], (p, m) => {
+        measuredOf.set(p, m);
+        return !added.has(p) && neutralSince(p, m);
+      })
     : [];
+  // The gate scores only gated files, so its verdict exempts a neutral file it does not score.
+  const gateStale = stale.filter((p) => {
+    const m = measuredOf.get(p);
+    return (gated(p) && added.has(p)) || m === undefined || !neutralSince(p, m);
+  });
 
   console.log(`Coverage of lines added since ${mb.label} (merge-base ${mb.sha.slice(0, 12)}):`);
   let covered = 0;
@@ -394,7 +402,16 @@ export default function coverageDiff(args: string[], cwd: string): number {
   }
 
   const empty = Object.keys(cov).length === 0;
-  const verdict = gateVerdict(cwd, gated, added, rows, notMeasured, empty, bound !== null, stale);
+  const verdict = gateVerdict(
+    cwd,
+    gated,
+    added,
+    rows,
+    notMeasured,
+    empty,
+    bound !== null,
+    gateStale,
+  );
   if (verdict?.pass) console.log(`✓ Coverage gate (scope "diff") would pass — ${verdict.reason}.`);
   else if (verdict) {
     console.error(`🚫 Coverage gate (scope "diff") would FAIL if this ships — ${verdict.reason}.`);

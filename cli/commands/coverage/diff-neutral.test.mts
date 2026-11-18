@@ -107,6 +107,19 @@ describe('devkit coverage-diff — runtime-neutral edits', () => {
     expect(d.out).toContain('would pass — 1/1 added executable lines covered');
   });
 
+  it('still calls a scored file stale after a neutral shift, without changing the verdict', () => {
+    const root = featureRepo();
+    write(root, 'src/a.mts', 'export const a = 1;\nexport const b = 2;\n');
+    // Measured but outside sourceExtensions: coverage-diff scores it, the gate does not.
+    write(root, 'src/x.ts', 'export const x = 1;\nexport const y = 2;\n');
+    measure(root, snapshotSource(root), cov(root, { 'src/a.mts': [1, 2], 'src/x.ts': [1, 2] }));
+    write(root, 'src/x.ts', '// note\nexport const x = 1;\nexport const y = 2;\n');
+    const { g, d } = both(root);
+    expect(g.code).toBe(0);
+    expect(d.out).toMatch(/Changed since the coverage run[^\n]*\n\s+src\/x\.ts/);
+    expect(d.out).toContain('would pass');
+  });
+
   it('fails both when a runtime export lands in that file after the run', () => {
     const root = featureRepo();
     write(root, 'src/a.mts', 'export const a = 1;\nexport const b = 2;\n');
