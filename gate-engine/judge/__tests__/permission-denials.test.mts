@@ -182,6 +182,13 @@ describe('tool calls on a claude judge spawn (sc-6118)', () => {
     expect(heard).toEqual(['[ok] mcp__codebase__searchCode: {"query":"x"}']);
   });
 
+  it('a stream killed before its result still reports the calls that returned', async () => {
+    fakeClaude(undefined, stream.split('\n').slice(0, 2).join('\n'));
+    let heard: string[] | undefined;
+    expect(await execJudgeAsync({ ...opts, onToolCalls: (calls) => (heard = calls) })).toBeNull();
+    expect(heard).toEqual(['[ok] mcp__codebase__searchCode: {"query":"x"}']);
+  });
+
   it('a result with no tool call is a measured empty list', async () => {
     fakeClaude([]);
     let heard: string[] | undefined;

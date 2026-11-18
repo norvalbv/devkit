@@ -252,7 +252,7 @@ function commandLinesOf(events: ClaudeEvent[]): string[] {
 }
 
 /** Store the tool calls as `<label>.commands`; the ref, or null when the judge called no tool.
- * `onToolCalls` hears them only from a stream with a result event: bare text is not measured. */
+ * `onToolCalls` hears them from any claude stream, a killed one too; bare text is not measured. */
 export function saveClaudeCommands(
   label: string,
   raw: string | undefined,
@@ -261,6 +261,6 @@ export function saveClaudeCommands(
 ): string | null {
   const events = claudeEvents(raw);
   const lines = commandLinesOf(events);
-  if (resultEvent(events)) onToolCalls?.(lines);
+  if (events.length > 0) onToolCalls?.(lines);
   return saveSidecar(`${label}.commands`, lines, lens);
 }
