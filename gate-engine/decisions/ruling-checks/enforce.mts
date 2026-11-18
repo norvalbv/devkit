@@ -277,7 +277,11 @@ export async function linkCheck(
       return refuse(`\`${check}\` ${failure.why}; a Check must pass before it is linked.`);
   }
   const { cmdAdd } = await import('../decisions.mts');
-  cmdAdd(slug, { note: `${CHECK_TAG} ${check} — ${reason.trim()}` }, cwd);
+  try {
+    cmdAdd(slug, { note: `${CHECK_TAG} ${check} — ${reason.trim()}` }, cwd);
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  }
   return 0;
 }
 

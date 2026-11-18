@@ -12,7 +12,7 @@ import {
   type VecIndex,
 } from './embeddings.mts';
 import { sections } from './markdown.mts';
-import { axisNotes, lastTaggedNote } from './note-relations.mts';
+import { axisNotes, lastTaggedNote, liveRulingIdOf, liveSectionIndex } from './note-relations.mts';
 import { corpusIdf, orderQualifiers, tokenize } from './qualifiers.mts';
 
 export { cosine, EMBED_MODEL, EMBED_URL, embed } from './embeddings.mts';
@@ -25,8 +25,6 @@ const ANY_DATE_RE = /\b(\d{4}-\d{2}-\d{2})\b/g;
 /** Legacy (pre-Target) schema: `**Ruling:**` / `**Why / target:**` under a bare `## <date> — …`. */
 const RULING_FIELD_RE = /^\*\*Ruling:\*\*\s*(.+)$/gm;
 const WHY_FIELD_RE = /^\*\*(?:Why \/ target|Context):\*\*\s*(.+)$/m;
-const TARGET_HEADING_RE = /^## Target · (\d{4}-\d{2}-\d{2})/gm;
-const LEGACY_HEADING_RE = /^## (\d{4}-\d{2}-\d{2}) /gm;
 
 /** Resolved on-disk paths for one consumer cwd (see decisions.mts `paths()`). */
 export interface RetrievalPaths {
@@ -176,22 +174,9 @@ export function axisEntries(body: string, liveRulingId: string | null): AxisEntr
   const target = currentTarget(body);
   const rulingDate = liveRulingId?.split(':')[1] ?? '';
   const all = sections(body);
-  // The ruling's own section, found by its heading rather than by position. Both schema generations
-  // are named here because both are current somewhere: `## Target · <date>` and the legacy
-  // `## <date> — …` that still accounts for 49 of the real corpus's blocks.
-  // findLast, never find: EVERY other resolution in this engine takes the last match —
-  // currentTarget() takes the last Target block, axisRow takes legacyRulings.at(-1), and the
-  // string-arithmetic this replaced used lastIndexOf. Two blocks share a date whenever an axis is
-  // amended twice in one calendar day (today() is day-granularity, and the real corpus has such
-  // files), and first-match would bind to the SUPERSEDED one — attaching its notes to the current
-  // ruling and orphaning the real ones. That is the same notes-detached-from-their-ruling class the
-  // six earlier review rounds closed.
-  const lastMatching = (prefix: string) => {
-    for (let i = all.length - 1; i >= 0; i -= 1)
-      if (all[i].depth === 2 && all[i].heading.startsWith(prefix)) return all[i];
-    return undefined;
-  };
-  const own = lastMatching(`## Target · ${rulingDate}`) ?? lastMatching(`## ${rulingDate} `);
+  // The ruling's own section, found by its heading rather than by position.
+  const ownIndex = liveSectionIndex(all, liveRulingId);
+  const own = ownIndex === -1 ? undefined : all[ownIndex];
 
   const entries: AxisEntry[] = [
     {
@@ -213,7 +198,6 @@ export function axisEntries(body: string, liveRulingId: string | null): AxisEntr
   // day — so no pointer could name one of them. The shared minter adds the `~N` occurrence suffix
   // (the same scheme supersession.mts uses for same-day Targets) and is numbered axis-wide, so the
   // id a reader sees here is the id an `**Amends:**` can reference.
-  const ownIndex = own ? all.indexOf(own) : -1;
   for (const note of axisNotes(body)) {
     if (note.sectionIndex !== ownIndex) continue;
     entries.push({
@@ -242,15 +226,6 @@ export function effectiveScope(body: string): string {
   const target = currentTarget(body);
   const entries = axisEntries(body, liveRulingIdOf(body, Boolean(target)));
   return lastTaggedNote(entries, SCOPE_NOTE_RE) ?? target?.scope ?? '';
-}
-
-/** Name the block a ruling was read from: `target:<date>`, `entry:<date>` (legacy), or null. */
-export function liveRulingIdOf(body: string, hasTarget: boolean): string | null {
-  const re = hasTarget ? TARGET_HEADING_RE : LEGACY_HEADING_RE;
-  const dates = [...body.matchAll(re)].map((m) => m[1]);
-  // Last heading wins, matching currentTarget's rule — append order IS chronological order here.
-  const last = dates.at(-1);
-  return last ? `${hasTarget ? 'target' : 'entry'}:${last}` : null;
 }
 
 function slugPath(p: RetrievalPaths, slug: string) {
