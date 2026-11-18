@@ -15,9 +15,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { CLI, testSpawnSync } from '../../../cli/__tests__/_helpers.mts';
+import { CLI, runGate as spawnGate, testSpawnSync } from '../../../cli/__tests__/_helpers.mts';
 import { linkCheck } from '../../decisions/ruling-checks/enforce.mts';
 import { DETERMINISTIC } from '../registry.mts';
 
@@ -181,14 +180,7 @@ type Gate = (typeof DETERMINISTIC)[number];
 
 /** Run `gate` from source in `root`; it must pass the clean fixture. */
 function runGate(root: string, gate: Gate, env: Record<string, string>): string {
-  const module = fileURLToPath(
-    new URL(gate.module.replace(/\.mjs$/, '.mts'), new URL('../', import.meta.url)),
-  );
-  const run = testSpawnSync(process.execPath, [module, ...gate.args], {
-    cwd: root,
-    encoding: 'utf8',
-    env: { ...process.env, ...env, SEARCH_CODE_DB: searchCodeDb() },
-  });
+  const run = spawnGate(root, gate, { ...env, SEARCH_CODE_DB: searchCodeDb() });
   expect(run.status, `${gate.id} must pass the clean fixture: ${run.stderr}`).toBe(0);
   return `${run.stdout}${run.stderr}`;
 }

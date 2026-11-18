@@ -22,7 +22,7 @@ Docs-, config-, and comment-only changes do not require a test run.
 ## Write, then run
 
 1. **Decide what to test.** For new behaviour: the happy path plus the edge cases that motivated the code (empty input, boundary values, error paths). For a bug fix: a test that fails on the old code and passes on the fix — that test is the proof the bug is gone.
-2. **Write the test next to its peers**, following the project's existing test layout and naming. Reuse existing fixtures and helpers before adding new ones.
+2. **Write the test next to its peers**, following the project's existing test layout and naming. Reuse existing fixtures and helpers before adding new ones. A test that claims how a whole tool behaves starts from the configuration the tool's installer writes, not a hand-written minimal one: an unset key can leave a check switched off, so the test measures a path no real install runs.
 3. **Run the full command**, not a single-file subset, before declaring done — a change can break a sibling.
 
 ### Before writing a suite
