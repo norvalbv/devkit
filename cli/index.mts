@@ -17,7 +17,7 @@
  * Consumers install prebuilt .mjs — no build on their side.
  */
 import { readFileSync } from 'node:fs';
-import { crashExit, GATE_REASON_ENV } from '../gate-engine/deterministic/reason.mts';
+import { crashExit, GATE_REASON_ENV, stdoutDrained } from '../gate-engine/deterministic/reason.mts';
 import { assertGit } from './lib/guard/require-git.mts';
 import { type CommandMeta, renderCommandHelp, renderTopLevelHelp } from './lib/help/render.mts';
 import { wantsCommandHelp } from './lib/help/wants-help.mts';
@@ -182,6 +182,7 @@ async function main() {
       )
     : process.cwd();
   const code = await mod.default(cmdArgs, cwd);
+  await stdoutDrained();
   process.exit(code ?? 0);
 }
 

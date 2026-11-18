@@ -109,6 +109,27 @@ describe('compareFailures', () => {
     expect(c.fresh).toEqual([]);
   });
 
+  // A truncated PR list still proves its listed names; only the unlisted tail is unknown.
+  it('compares a truncated PR list by its listed names and flags the counts as partial', () => {
+    const run = {
+      ...pr({ 'a.test.mts': 'failed' }),
+      tests: named({ 'a.test.mts': ['t0', 'tNew'] }, true),
+    };
+    const c = compareFailures(run, base(['a.test.mts'], { 'a.test.mts': ['t0'] }));
+    expect(c).toMatchObject({
+      inherited: [{ file: 'a.test.mts', test: 't0' }],
+      fresh: [{ file: 'a.test.mts', test: 'tNew' }],
+      namesKnown: false,
+    });
+  });
+
+  // A file green at the base is all NEW, but a truncated list still hides how many.
+  it('flags the counts as partial for a truncated PR list in a file green at the base', () => {
+    const run = { ...pr({ 'a.test.mts': 'failed' }), tests: named({ 'a.test.mts': ['t0'] }, true) };
+    const c = compareFailures(run, base([]));
+    expect(c).toMatchObject({ fresh: [{ file: 'a.test.mts', test: 't0' }], namesKnown: false });
+  });
+
   it('lists base failures that pass here as fixed', () => {
     const c = compareFailures(
       pr({ 'a.test.mts': 'passed' }),
@@ -120,7 +141,7 @@ describe('compareFailures', () => {
   it('names the sha that answered and its distance from the PR base', () => {
     const answer = { ...base([]), commitsBehindHead: 2 };
     expect(renderComparison(compareFailures(pr({}), answer), answer)[0]).toBe(
-      'compared with main @ bbbbbbbb (run 7, 2 commit(s) before the PR base)',
+      'compared with main @ bbbbbbbb (run 7, 2 commit(s) before the base)',
     );
   });
 });
@@ -230,7 +251,7 @@ describe('baseline-status --at / --against', () => {
     writeFileSync(join(fixture, 'runs.json'), JSON.stringify(runs));
     const { out } = run(['--ref', 'main', '--at', baseSha, '--against', 'pr.json']);
     expect(out).toContain(
-      `compared with main @ ${older.slice(0, 8)} (run 100, 1 commit(s) before the PR base)`,
+      `compared with main @ ${older.slice(0, 8)} (run 100, 1 commit(s) before the base)`,
     );
   });
 

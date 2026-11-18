@@ -3,10 +3,10 @@
  * commit's staged paths (its argv, from extraGates' `{staged}`), so a broken test blocks early.
  */
 
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, extname, join } from 'node:path';
+import { basename, dirname, extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { runVitestDetailed, type VitestRun } from '../../../../gate-engine/coverage/vitest-cli.mts';
 import {
@@ -16,8 +16,12 @@ import {
   type RunDiagnosis,
   UNHANDLED_REPORTER,
 } from '../../../../gate-engine/coverage/failures.mts';
+import { gateTimeoutMs } from '../../../../gate-engine/deterministic/command-gates.mts';
 import { GATE_REASON_ENV, writeGateReason } from '../../../../gate-engine/deterministic/reason.mts';
 import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mts';
+import { type Comparison, label, renderComparison } from '../../baseline-status/compare.mts';
+import { assertVitestReport, SUMMARY_NAME, summarise } from '../../baseline-status/produce.mts';
+import { type BaselineAnswer, resolveRef } from '../../baseline-status/query.mts';
 
 // Runs with every selection: it fails when a module is left unreachable to `vitest related` itself.
 const REACH_TEST = 'cli/__tests__/test-graph-reach.test.mts';
@@ -141,10 +145,23 @@ type Exec = (
   env: NodeJS.ProcessEnv,
 ) => Promise<VitestRun>;
 
+interface CiAttribution {
+  answer: BaselineAnswer;
+  comparison: Comparison;
+}
+
+type Attribute = (
+  argv: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  ms: number,
+) => Promise<CiAttribution | null>;
+
 interface RunOpts {
   staged: Iterable<string>;
   exec?: Exec;
   list?: typeof listRelated;
+  attribute?: Attribute;
 }
 
 /** The test files `vitest related` would select, resolved in-process so no queued vitest CLI starts. */
@@ -206,11 +223,129 @@ function reportDir(): string {
   }
 }
 
+/** One budget for the CI lookup; past it the reason stays as the run left it. */
+const CI_ATTRIBUTION_MS = 25_000;
+/** Kept back from the gate runner's deadline, which replaces any reason with a timeout block. */
+const CI_MARGIN_MS = 5_000;
+/** Inherited failures named in the reason; the full comparison is in the log above it. */
+const NAMED_INHERITED = 3;
+/** Bound on the merge-base call, which runs inside the same gate deadline as the lookup. */
+const GIT_MS = 5_000;
+
+/** The lookup's budget: CI_ATTRIBUTION_MS, or less when the gate's own deadline is near. */
+function ciBudget(root: string): number {
+  const left = gateTimeoutMs(root) - process.uptime() * 1000 - CI_MARGIN_MS;
+  return Math.min(CI_ATTRIBUTION_MS, Math.floor(left));
+}
+
+/** Where HEAD left the default branch, the commit CI is asked about; '' when git cannot say. */
+export function ciBase(root: string): string {
+  const ref = `origin/${resolveRef(root)}`;
+  const opts = { cwd: root, encoding: 'utf8' as const, timeout: GIT_MS };
+  const r = spawnSync('git', ['merge-base', 'HEAD', ref], opts);
+  return r.status === 0 ? r.stdout.trim() : '';
+}
+
+/** The comparison `baseline-status --json` printed, or null on any exit but 0, other output, or the deadline. */
+export function attributeToCi(
+  argv: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  ms = CI_ATTRIBUTION_MS,
+): Promise<CiAttribution | null> {
+  return new Promise((done) => {
+    const [bin = '', ...args] = argv;
+    // In the gate's own group, so a kill of this gate ends it too; its gh calls never hold our pipe.
+    const child = spawn(bin, args, { cwd, env, stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+      out += chunk;
+    });
+    child.once('error', () => {
+      clearTimeout(timer);
+      done(null);
+    });
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      try {
+        const answer = JSON.parse(out);
+        done(code === 0 && answer?.comparison ? { answer, comparison: answer.comparison } : null);
+      } catch {
+        done(null);
+      }
+    });
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      done(null);
+    }, ms);
+  });
+}
+
+/** The reason lines a CI comparison adds: facts about the answering run, never a guess at blame. */
+export function ciLines({ answer, comparison: c }: CiAttribution): string[] {
+  const sha = answer.sha?.slice(0, 8) ?? 'unknown';
+  const behind = answer.commitsBehindHead
+    ? `, ${answer.commitsBehindHead} commit(s) before the base`
+    : '';
+  const hidden = c.inherited.length - NAMED_INHERITED;
+  // A name list missing or cut short leaves some failures compared by file, so the counts are partial.
+  const partial = c.namesKnown ? '' : ' (partial: some compared by file only)';
+  return [
+    `CI at ${sha} (${answer.ref}, run ${answer.runId}${behind}): ${c.inherited.length} inherited, ${c.fresh.length} new${partial}`,
+    ...c.inherited.slice(0, NAMED_INHERITED).map((e) => `inherited · ${label(e)}`),
+    ...(hidden > 0 ? [`(+${hidden} more inherited in the log above)`] : []),
+    ...(c.fresh.length || !c.namesKnown
+      ? ['to run this change in CI instead of on this machine: devkit ci-probe']
+      : []),
+  ];
+}
+
+/** Compare the run's failures with CI's run at the base; no lines when CI cannot answer. */
+async function ciAttribution(
+  report: string,
+  root: string,
+  env: NodeJS.ProcessEnv,
+  attribute: Attribute,
+): Promise<string[]> {
+  try {
+    const base = ciBudget(root) > 0 ? ciBase(root) : '';
+    if (!base) return [];
+    const dir = dirname(report);
+    const summary = join(dir, SUMMARY_NAME);
+    const run = assertVitestReport(JSON.parse(readFileSync(report, 'utf8')));
+    writeFileSync(summary, JSON.stringify(summarise(run, root)));
+    // Re-read after preparing the summary: one deadline covers the whole step.
+    const ms = ciBudget(root);
+    if (ms <= 0) return [];
+    const cli = join(root, 'cli', 'index.mts');
+    const argv = [process.execPath, cli, 'baseline-status', '--at', base, '--against', summary];
+    // gh downloads land in the report dir, which runRelatedTests removes even after a kill.
+    const found = await attribute([...argv, '--json'], root, { ...env, TMPDIR: dir }, ms);
+    const c = found?.comparison;
+    if (!found || !c || c.fresh.length + c.inherited.length === 0) return [];
+    console.log(renderComparison(found.comparison, found.answer).join('\n'));
+    return ciLines(found);
+  } catch {
+    return [];
+  }
+}
+
 /** Record the failure reason. Narration only: nothing here may throw into the verdict. */
-function narrate(result: SpawnResult, report: string, root: string): void {
+async function narrate(
+  result: SpawnResult,
+  report: string,
+  root: string,
+  env: NodeJS.ProcessEnv,
+  attribute: Attribute,
+): Promise<void> {
   try {
     const diagnosis = report ? readDiagnosis(report, result.status ?? 1) : null;
+    // Written before the optional CI step, which can only append lines.
     writeGateReason(relatedTestsReason(result, diagnosis, root));
+    // A killed run reached no verdict, so there is nothing to compare and no time to spend.
+    if (result.status !== null && diagnosis?.failedFiles.length && !diagnosis.unhandled) {
+      writeGateReason(await ciAttribution(report, root, env, attribute));
+    }
   } catch {
     // The exit code already carries the verdict.
   }
@@ -263,7 +398,10 @@ export async function runRelatedTests(root: string, opts: RunOpts): Promise<Vite
     // A signalled gate blocks, even when vitest still exits 0 after the forwarded signal.
     const code = run.interrupted && run.code === 0 ? 1 : run.code;
     // A null status reads as "killed before exiting" in the reason.
-    if (code !== 0) narrate({ status: run.interrupted ? null : code }, report, root);
+    if (code !== 0) {
+      const status = run.interrupted ? null : code;
+      await narrate({ status }, report, root, env, opts.attribute ?? attributeToCi);
+    }
     return { ...run, code };
   } finally {
     try {
