@@ -673,7 +673,8 @@ if [ "$FROM_BRANCH" -eq 0 ]; then
   fi
   if [ "$PATCH_BASE" != "$BASE" ]; then
     ship_classify_whole_file "$ROOT" "$BASE" "$PATCH_BASE" -- "${GIT_PATHS[@]}"
-    echo "ship: origin/$BASE_REF moved to ${BASE:0:7} since this checkout forked at ${PATCH_BASE:0:7} — staging is anchored at the fork point and three-way merged." >&2
+    # A preserved commit is published as-is, not staged, so only a fresh ship may claim the merge.
+    [ -n "$LOCAL_BRANCH_EXISTS" ] || echo "ship: origin/$BASE_REF moved to ${BASE:0:7} since this checkout forked at ${PATCH_BASE:0:7} — staging is anchored at the fork point and three-way merged." >&2
   fi
 fi
 
@@ -1157,6 +1158,21 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
     fi
   fi
 
+  # Every check above passes for a commit a moved base now conflicts with; GitHub would open it CONFLICTING.
+  RECOVERY_REMEDY=
+  if [ -z "$RECOVERY_REASON" ] && [ "$RECOVERY_PARENT" != "$BASE" ]; then
+    merge_rc=0
+    ship_preserved_merge_check "$ROOT" "$BASE" "$RECOVERY_COMMIT" || merge_rc=$?
+    # Fails closed: publishing unverified would reopen the CONFLICTING-PR exit 0; the re-stage works on any git.
+    if [ "$merge_rc" -eq 1 ]; then
+      RECOVERY_REASON="it no longer merges cleanly into $BASE_REF (${BASE:0:7}), which changed the same lines since ${RECOVERY_PARENT:0:7}"
+      [ -z "$RECOVERY_CONFLICT_HINT" ] || RECOVERY_HINTS+=("$RECOVERY_CONFLICT_HINT")
+    elif [ "$merge_rc" -eq 2 ]; then
+      RECOVERY_REASON="ship could not verify it still merges cleanly into $BASE_REF (${BASE:0:7}), which moved since ${RECOVERY_PARENT:0:7} (the check needs git >= 2.40)"
+    fi
+    [ "$merge_rc" -eq 0 ] || RECOVERY_REMEDY=1
+  fi
+
   if [ -n "$RECOVERY_REASON" ]; then
     echo "branch already exists: $BR" >&2
     echo "  cannot safely resume it: $RECOVERY_REASON" >&2
@@ -1172,6 +1188,8 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
     # instead of running them (sc-2261). Re-print the remedy rather than appending to it.
     if [ -n "$PREFLIGHT_SELF" ]; then
       _ship_orphan_report_self "$PWD" "$BR"
+    elif [ -n "$RECOVERY_REMEDY" ]; then
+      ship_preserved_conflict_remedy
     else
       echo "  choose a new branch name, or inspect and remove the local branch yourself" >&2
     fi

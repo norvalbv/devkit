@@ -212,8 +212,9 @@ devkit command.
   deterministic gate prefix are cached, so a retry only pays for the unfinished work; `--resume`
   replays the recorded title/base/body/paths byte-identically, which is exactly what the caches and
   the landed-commit resume verify against. If the commit landed before a timeout surfaced, the retry
-  verifies its gate receipt and publishes that preserved commit without re-running gates; it never
-  adopts a merely same-named or hand-made commit. In explicit-path mode, a fix that ADDS a file rides
+  verifies its gate receipt and publishes that preserved commit without re-running gates, provided it
+  still merges cleanly into the base (otherwise it refuses, names the conflicting paths and prints the
+  re-stage command); it never adopts a merely same-named or hand-made commit. In explicit-path mode, a fix that ADDS a file rides
   the retry as a trailing path (`--resume <branch> -- <new-path>`). Branch-source mode refuses extra
   resume paths because membership is frozen, and refuses a resume whose `HEAD` committed a path
   outside that set; use the fresh full `--from-branch` command it prints for a new set.
