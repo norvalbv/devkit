@@ -169,9 +169,10 @@ function main() {
   const candidates = bash ? unbriefedBashWrites(input, root) : patchTargets(input);
   const texts = [];
   for (const f of file ? [file] : candidates.slice(0, MAX_FILES)) {
-    // A brief past the cap is never read, so its file stays unstamped for a later write.
-    if (retrievalDown || texts.join('\n\n').length >= MAX_BRIEF_CHARS) break;
-    texts.push(briefFor(input, root, f));
+    if (retrievalDown) break;
+    const used = texts.filter(Boolean).join('\n\n').length;
+    // The first brief always prints (emit clips an outlier); a later one must fit what is left.
+    texts.push(briefFor(input, root, f, used ? MAX_BRIEF_CHARS - used - 2 : Infinity));
   }
   emit(texts, bash ? 'PostToolUse' : 'PreToolUse');
 }
@@ -208,7 +209,7 @@ function axesFrom(run) {
 }
 
 /** The brief or retrieval-outage notice for one file, or null when there is nothing to say. */
-function briefFor(input, root, file) {
+function briefFor(input, root, file, budget) {
   const rel = path.isAbsolute(file) ? path.relative(root, file) : file;
   // Outside the project (or above it) is not ours to brief on.
   if (!rel || rel.startsWith('..')) return null;
@@ -256,8 +257,6 @@ function briefFor(input, root, file) {
     return null; // nothing governs this file — stay quiet
   }
 
-  if (claimed(stamp)) return null;
-
   const lines = axes.slice(0, MAX_AXES).map((a) => {
     const ruling = String(a.ruling ?? '').trim();
     const clipped = ruling.length > RULING_CHARS ? `${ruling.slice(0, RULING_CHARS)}…` : ruling;
@@ -268,12 +267,14 @@ function briefFor(input, root, file) {
       ? `\n(${axes.length - MAX_AXES} more — \`guard-decisions scoped-targets --files ${rel}\`)`
       : '';
 
-  return (
+  const brief =
     `Decision records already govern \`${rel}\`. These are settled rulings, not suggestions — ` +
     `follow them, or re-open the axis deliberately via \`guard-decisions add <slug> --target … ` +
     `--evidence-change "<what shifted>"\`. Full text: \`guard-decisions show <slug>\`.\n\n` +
-    `${lines.join('\n')}${more}`
-  );
+    `${lines.join('\n')}${more}`;
+  // A brief the context cap would cut is never read whole, so its file stays unstamped.
+  if (brief.length > budget || claimed(stamp)) return null;
+  return brief;
 }
 
 try {

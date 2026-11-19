@@ -1,5 +1,5 @@
-/** decision-scope-brief on PostToolUse(Bash): the files a Claude Bash call wrote are briefed once,
- * sharing the Edit path's per-(session, file) stamp. */
+/** decision-scope-brief on PostToolUse(Bash): the files a Claude Bash call wrote (bashWrites) are
+ * briefed once, sharing the Edit path's per-(session, file) stamp. */
 import { spawnSync } from 'node:child_process';
 import {
   existsSync,
@@ -9,13 +9,15 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { bashWrites } from '../../agents-hooks/edit-targets-lib.mjs';
 import { mainWithWorktree } from './_worktree-fixture.mts';
 
 const HOOK = fileURLToPath(new URL('../../agents-hooks/decision-scope-brief.mjs', import.meta.url));
@@ -30,7 +32,10 @@ let root: string;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'brief-bash-'));
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+  vi.unstubAllEnvs();
+  rmSync(root, { recursive: true, force: true });
+});
 
 const git = (cwd: string, ...args: string[]) =>
   spawnSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', ...args], {
@@ -159,9 +164,10 @@ describe('decision-scope-brief — files a Bash command wrote', () => {
     gitRepo();
     stub(root, ['src/old.ts', 'src/new.ts']);
     write('src/old.ts');
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2500); // past the 2 s mtime slack
+    // 4 s back, against a 1.5 s + 2 s window: 3.5 s of slack for a slow hook start.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 4000);
     write('src/new.ts');
-    runBash('window', { duration: 0 });
+    runBash('window', { duration: 1500 });
     expect(calls()).toEqual(['scoped-targets --files src/new.ts --brief Bash,3,2000']);
   });
 
@@ -174,13 +180,16 @@ describe('decision-scope-brief — files a Bash command wrote', () => {
     expect(runBash('moved')).toContain('rule-src/a.ts');
   });
 
-  it('leaves a file the context cap would cut unbriefed, so a later write still briefs it', () => {
+  it('never stamps a brief the context cap would cut, so each is shown whole on a later call', () => {
     gitRepo();
     const files = ['src/f0.ts', 'src/f1.ts', 'src/f2.ts'];
-    stub(root, files, 'ok', 3, 'r'.repeat(1900));
+    stub(root, files, 'ok', 3, 'r'.repeat(1900)); // about 5,900 chars a brief: two cross 10,000
     for (const file of files) write(file);
-    expect(context(runBash('cap'))).not.toContain('rule-src/f2.ts');
-    expect(context(runBash('cap'))).toContain('rule-src/f2.ts');
+    const shown = [runBash('cap'), runBash('cap'), runBash('cap')].map(context);
+    expect(shown.map((ctx) => files.filter((f) => ctx.includes(`rule-${f}`)))).toEqual(
+      files.map((f) => [f]),
+    );
+    for (const ctx of shown) expect(ctx.endsWith('…')).toBe(false);
   });
 
   it('asks nothing without duration_ms, on a clean tree, or outside a git repository', () => {
@@ -255,5 +264,58 @@ describe('decision-scope-brief — files a Bash command wrote', () => {
     } finally {
       rmSync(dirname(link), { recursive: true, force: true });
     }
+  });
+});
+
+describe('bashWrites', () => {
+  const bash = { tool_name: 'Bash', duration_ms: 500 };
+
+  it('lists new and rewritten files relative to the root, and nothing for other tools', () => {
+    write('tracked.ts');
+    gitRepo();
+    write('src/new.ts');
+    writeFileSync(join(root, 'tracked.ts'), 'export const x = 2;\n');
+    expect(bashWrites(bash, root).sort()).toEqual(['src/new.ts', 'tracked.ts']);
+    expect(bashWrites({ ...bash, tool_name: 'Edit' }, root)).toEqual([]);
+    expect(bashWrites({ tool_name: 'Bash' }, root)).toEqual([]);
+  });
+
+  it('lists a file the call copied in with its old mtime kept, as cp -p and mv do', () => {
+    gitRepo();
+    backdate(write('copied.ts'));
+    expect(bashWrites(bash, root)).toEqual(['copied.ts']);
+  });
+
+  it('drops deleted files and paths --files cannot carry', () => {
+    write('tracked.ts');
+    gitRepo();
+    unlinkSync(join(root, 'tracked.ts'));
+    write('a,b.ts');
+    expect(bashWrites(bash, root)).toEqual([]);
+  });
+
+  it('reads a git status larger than 1 MiB', () => {
+    gitRepo();
+    const dir = join(root, 'd'.repeat(200));
+    mkdirSync(dir);
+    for (let i = 0; i < 5000; i += 1) writeFileSync(join(dir, `file-${i}.ts`), '');
+    expect(bashWrites(bash, root)).toHaveLength(5000);
+  });
+
+  it('never takes the optional index lock a concurrent commit needs', () => {
+    gitRepo();
+    write('src/a.ts');
+    const realGit = spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim();
+    const bin = join(root, 'node_modules', 'git-bin');
+    mkdirSync(bin, { recursive: true });
+    const log = join(bin, 'git.log');
+    writeFileSync(join(bin, 'git'), `#!/bin/sh\necho "$*" >> '${log}'\nexec '${realGit}' "$@"\n`, {
+      mode: 0o755,
+    });
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
+    expect(bashWrites(bash, root)).toEqual(['src/a.ts']);
+    const gitCalls = readFileSync(log, 'utf8').trim().split('\n');
+    expect(gitCalls).toHaveLength(2);
+    for (const call of gitCalls) expect(call).toMatch(/^--no-optional-locks /);
   });
 });
