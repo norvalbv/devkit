@@ -17,6 +17,7 @@ import {
   type RunDiagnosis,
   UNHANDLED_REPORTER,
 } from '../../../../gate-engine/coverage/failures.mts';
+import { readStarted } from '../../../../gate-engine/coverage/unhandled-reporter.mts';
 import { gateTimeoutMs } from '../../../../gate-engine/deterministic/command-gates.mts';
 import {
   GATE_LABEL_ENV,
@@ -126,6 +127,8 @@ export function noteUnmapped(root: string, paths: string[], grep: Grep = gitGrep
 interface SpawnResult {
   status: number | null;
   error?: Error;
+  /** Where a stopped run's time went, from timingLine. */
+  timing?: string;
 }
 
 type Exec = (
@@ -174,6 +177,7 @@ export function relatedTestsReason(
   diagnosis: RunDiagnosis | null,
   root: string,
 ): string[] {
+  if (result.status === null && result.timing && !result.error) return [result.timing];
   if (result.error || result.status === null) {
     const why = result.error?.message ?? 'it was killed before exiting';
     return [`related-tests could not run vitest: ${why}`];
@@ -203,6 +207,17 @@ export function relatedTestsReason(
     ...named.slice(0, NAMED_TESTS),
     ...(hidden > 0 ? [`(${hidden} more in the full log above)`] : []),
   ];
+}
+
+/** Where a stopped run's time went: selecting, before vitest began (queued or starting), running. */
+export function timingLine(report: string, spawnedAt: number, files: number, now = Date.now()) {
+  const s = (ms: number) => `${Math.max(0, Math.round(ms / 1000))}s`;
+  const head = `${s(spawnedAt - now + process.uptime() * 1000)} selecting · `;
+  if (!report) return `${head}${s(now - spawnedAt)} since launching vitest (start not recorded)`;
+  const began = readStarted(dirname(report));
+  return began
+    ? `${head}${s(began - spawnedAt)} before vitest began · ${s(now - began)} running ${files} test file(s)`
+    : `${head}vitest had not begun after ${s(now - spawnedAt)}`;
 }
 
 /** A private directory for vitest's json report; '' when none can be made, and the run goes unnarrated. */
@@ -443,14 +458,16 @@ export async function runRelatedTests(root: string, opts: RunOpts): Promise<Vite
   delete env[GATE_REASON_ENV];
   delete env[GATE_LABEL_ENV];
   try {
+    const spawnedAt = Date.now();
     const run = await (opts.exec ?? runGrouped)(vitest, args, root, env);
     // A signalled gate blocks, even when vitest still exits 0 after the forwarded signal.
     const code = run.interrupted && run.code === 0 ? 1 : run.code;
     if (report && !run.interrupted) recordSelection(report, root, tests.length);
-    // A null status reads as "killed before exiting" in the reason.
+    // A stopped run has no status; its reason says where its time went instead.
     if (code !== 0) {
       const status = run.interrupted ? null : code;
-      await narrate({ status }, report, root, env, opts.attribute ?? attributeToCi);
+      const timing = timingLine(report, spawnedAt, tests.length);
+      await narrate({ status, timing }, report, root, env, opts.attribute ?? attributeToCi);
     }
     return { ...run, code };
   } finally {

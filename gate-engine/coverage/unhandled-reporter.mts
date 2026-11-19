@@ -6,6 +6,17 @@ import type { Reporter, SerializedError, TestModule, Vitest } from 'vitest/node'
 
 /** Written beside the json report, in the run directory only this run may touch. */
 export const UNHANDLED_NAME = 'unhandled.json';
+/** Beside it: the epoch ms vitest began, after anything that held its start (a machine test queue). */
+export const STARTED_NAME = 'started';
+
+/** When vitest began in `dir`, or 0 when it never reached its reporters. */
+export function readStarted(dir: string): number {
+  try {
+    return Number(readFileSync(join(dir, STARTED_NAME), 'utf8')) || 0;
+  } catch {
+    return 0;
+  }
+}
 
 /** What ended a run that exited non-zero with no failed test. `file` is null when vitest did not say. */
 export interface UnhandledError {
@@ -26,9 +37,11 @@ export default class UnhandledReporter implements Reporter {
     try {
       const { outputFile } = vitest.config;
       const json = outputFile instanceof Object ? outputFile.json : undefined;
-      if (json) this.out = join(dirname(json), UNHANDLED_NAME);
+      if (!json) return;
+      this.out = join(dirname(json), UNHANDLED_NAME);
+      writeFileSync(join(dirname(json), STARTED_NAME), String(Date.now()));
     } catch {
-      this.out = null;
+      /* a missing start stamp only leaves a stopped run's timing unsplit */
     }
   }
 

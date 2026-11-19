@@ -26,6 +26,7 @@ import {
   noteUnmapped,
   relatedTestsReason,
   runRelatedTests,
+  timingLine,
   unmappedPaths,
 } from '../lib/husky/gate-policy/related-tests.mts';
 import { triggerLine } from '../lib/husky/gate-policy/related-tests-selection.mts';
@@ -535,6 +536,57 @@ describe('relatedTestsReason', () => {
       'related-tests could not run vitest: it was killed before exiting',
     ]);
   });
+
+  it('says where a stopped run spent its time, unless vitest never spawned', () => {
+    const timing = '3s selecting · vitest had not begun after 9s';
+    expect(relatedTestsReason({ status: null, timing }, null, '/repo')).toEqual([timing]);
+    const error = new Error('spawn ENOENT');
+    expect(relatedTestsReason({ status: null, error, timing }, null, '/repo')).toEqual([
+      'related-tests could not run vitest: spawn ENOENT',
+    ]);
+  });
+});
+
+describe('timingLine', () => {
+  const now = 10_000_000;
+
+  it('splits a stopped run into the wait before vitest began and the time it ran', () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'related-tests-timing-')));
+    dirs.push(dir);
+    const spawnedAt = now - 3_000_000;
+    writeFileSync(join(dir, 'started'), String(spawnedAt + 2_545_000));
+    const line = timingLine(join(dir, 'results.json'), spawnedAt, 286, now);
+    expect(line).toMatch(
+      /^\d+s selecting · 2545s before vitest began · 455s running 286 test file\(s\)$/,
+    );
+    // Leads the timed-out reason, so it must fit the digest's 140-char cut after the label.
+    expect(`related-tests(timed-out:3000s): ${line}`.length).toBeLessThanOrEqual(140);
+  });
+
+  it('says vitest had not begun when its reporter left no stamp, or wrote an unreadable one', () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'related-tests-timing-')));
+    dirs.push(dir);
+    const pattern = /^\d+s selecting · vitest had not begun after 2990s$/;
+    expect(timingLine(join(dir, 'results.json'), now - 2_990_000, 3, now)).toMatch(pattern);
+    writeFileSync(join(dir, 'started'), 'garbage');
+    expect(timingLine(join(dir, 'results.json'), now - 2_990_000, 3, now)).toMatch(pattern);
+  });
+
+  // With no report dir vitest runs without devkit's reporter, so silence is not evidence.
+  it('claims nothing about the start when no report dir could be made', () => {
+    expect(timingLine('', now - 2_990_000, 3, now)).toMatch(
+      /^\d+s selecting · 2990s since launching vitest \(start not recorded\)$/,
+    );
+  });
+
+  it('never prints a negative wait when the wall clock stepped back between spawn and start', () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'related-tests-timing-')));
+    dirs.push(dir);
+    writeFileSync(join(dir, 'started'), String(now - 3_000_000 - 5_000));
+    expect(timingLine(join(dir, 'results.json'), now - 3_000_000, 1, now)).toMatch(
+      / · 0s before vitest began · 3005s running 1 test file\(s\)$/,
+    );
+  });
 });
 
 describe('runRelatedTests failure reason', () => {
@@ -593,6 +645,31 @@ describe('runRelatedTests failure reason', () => {
     expect(readGateReason(file)).toEqual([
       'No test failed; the run ended on:',
       'cli/__tests__/y.test.mts: TypeError: late boom',
+    ]);
+  });
+
+  it('a stopped run leads its reason with the time before vitest began and the time it ran', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const file = reasonFile();
+    const exec = vi.fn(async (_cmd: string, args: string[]) => {
+      writeFileSync(join(dirname(reportPath(args)!), 'started'), String(Date.now()));
+      return { code: 143, interrupted: true };
+    });
+    expect((await runRelatedTests('/repo', { staged: ['cli/a.mts'], list, exec })).code).toBe(143);
+    expect(readGateReason(file)).toEqual([
+      expect.stringMatching(
+        /^\d+s selecting · \d+s before vitest began · \d+s running 2 test file\(s\)$/,
+      ),
+    ]);
+  });
+
+  it('a run stopped before vitest began says so', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const file = reasonFile();
+    const exec = fakeExec(143, true);
+    await runRelatedTests('/repo', { staged: ['cli/a.mts'], list, exec });
+    expect(readGateReason(file)).toEqual([
+      expect.stringMatching(/^\d+s selecting · vitest had not begun after \d+s$/),
     ]);
   });
 

@@ -54,7 +54,13 @@ import {
   prefixEntry,
   recordPrefix,
 } from '../prefix-cache/prefix-cache.mts';
-import { crashGuarded, type GateFailure, readGateReason, withReasonFiles } from './reason.mts';
+import {
+  crashGuarded,
+  type GateFailure,
+  readGateReason,
+  REASON_LINES,
+  withReasonFiles,
+} from './reason.mts';
 import {
   bypassedSuffixes,
   commandGate,
@@ -268,7 +274,7 @@ function runGates(
       console.log(`▶ deterministic: ${gate.label}`);
       const rc = runArgv(cwd, gate.argv, exec, reasonFile, timeoutMs, gate.label);
       const [nFailed, nSkipped] = [out.failed.length, out.skipped.length];
-      const code = exitCodeOrBlock(out, gate, rc, timeoutMs, startedAt);
+      const code = exitCodeOrBlock(out, gate, rc, timeoutMs, startedAt, reasonFile);
       if (code === null) return;
       const failRc = (suffix = '') =>
         recordFailure(out, gate, suffix, undefined, readGateReason(reasonFile));
@@ -297,28 +303,44 @@ function runGates(
   return out;
 }
 
+/** A stopped gate's own lines first, cut so the runner's lines stay inside the shown excerpt. */
+const stoppedReason = (own: string[], tail: string[]) => [
+  ...own.slice(0, REASON_LINES - tail.length),
+  ...tail,
+];
+
 /** The gate's exit code, or null after recording a gate that never reached one (timed out, killed,
- * did not spawn): no rcLabel, opt-out or strict rule applies, so it blocks as could-not-run. */
+ * did not spawn): no rcLabel, opt-out or strict rule applies, so it blocks as could-not-run.
+ * Lines the gate wrote before it stopped lead the reason, so the digest's cut keeps them. */
 function exitCodeOrBlock(
   out: GateOutcome,
   gate: Gate,
   rc: number | string,
   timeoutMs: number,
   startedAt: number,
+  reasonFile: string,
 ): number | null {
   const exit = EXIT_CODE.safeParse(rc);
   if (exit.success) return exit.data;
   const failure = String(rc);
   const nFailed = out.failed.length;
+  const own = readGateReason(reasonFile);
   if (rc === TIMED_OUT) {
-    recordFailure(out, gate, `(timed-out:${timeoutMs / 1000}s)`, false, timeoutReason(timeoutMs));
+    const reason = stoppedReason(own, timeoutReason(timeoutMs));
+    recordFailure(out, gate, `(timed-out:${timeoutMs / 1000}s)`, false, reason);
   } else {
     const next = failure.startsWith('killed:')
       ? 'Re-run it.'
       : `${gate.argv?.[0]} did not start: check that it exists, is executable and is on PATH.`;
-    recordFailure(out, gate, `(${failure})`, false, [
-      `${failure}: the gate never reached a verdict, so this is not a code finding. ${next}`,
-    ]);
+    recordFailure(
+      out,
+      gate,
+      `(${failure})`,
+      false,
+      stoppedReason(own, [
+        `${failure}: the gate never reached a verdict, so this is not a code finding. ${next}`,
+      ]),
+    );
   }
   emitGateStep(gate.label, failure, startedAt, out.failed[nFailed], false);
   return null;
