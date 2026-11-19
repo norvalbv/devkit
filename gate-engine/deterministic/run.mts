@@ -42,8 +42,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { coverageBypassed, deterministicStrict } from '../config.mts';
 import { emitGateBypass, finishGateTiming } from '../judge/gate-events.mts';
 import { markGateRun } from '../judge/run-context.mts';
@@ -67,21 +66,11 @@ import {
 } from './command-gates.mts';
 import { type ParsedOpts, parseOpts } from './parse-opts.mts';
 import { recheckLines, registryRecheck } from './recheck.mts';
-import { COULD_NOT_RUN, DETERMINISTIC } from './registry.mts';
+import { COULD_NOT_RUN, DETERMINISTIC, gateModulePath } from './registry.mts';
 import { type FailedGate, reportFailures, reportOptedOut } from './report.mts';
 import { canonicalIds, resolveSelection, reviewIds } from './selection.mts';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-// Sibling gate modules are spawned as `node <path>`. In dev the tree is .mts (Node strips types at
-// the repo root); in the shipped dist it is compiled .mjs. Derive the runtime extension from THIS
-// module so the same literals resolve in both — string-literal paths are NOT rewritten by tsc emit.
-const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
-
 const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
-
-// Rewrites a sibling gate module's `.mjs` literal to the runtime extension. Hoisted (perf: no
-// per-gate regex compile).
-const MJS_EXT_RE = /\.mjs$/;
 
 // What `runDeterministic` accepts: every parsed field is optional, plus an injectable `exec`
 // (tests pass a stub; production defaults to execFileSync).
@@ -186,7 +175,7 @@ function narrateRun(plan: RunPlan): void {
 }
 
 function registryGate(g: (typeof DETERMINISTIC)[number], cwd: string, reviewMode: boolean): Gate {
-  const argv = ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args];
+  const argv = ['node', gateModulePath(g), ...g.args];
   return {
     id: g.id,
     label: `guard-${g.id}`,

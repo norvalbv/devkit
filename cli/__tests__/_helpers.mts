@@ -26,6 +26,8 @@ import { availableParallelism, loadavg, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formatLoad } from '../../vitest.global-setup.mjs';
+import type { RawGuardConfigFile } from '../../gate-engine/config.mts';
+import { gateModulePath } from '../../gate-engine/deterministic/registry.mts';
 import { shQuote } from '../lib/ship/redact-secrets.mts';
 import { DEADLINE_NOTICE_ENV } from './test-subprocess.mts';
 
@@ -280,6 +282,8 @@ const FIXTURE_PKG = { name: 'fx', version: '0.0.0', type: 'module' };
  *
  * `tmpRepo(pkg?)` makes a fresh tmp dir seeded with a fixture package.json (pass `pkg` for a
  * custom manifest); `devkit(root, ...args)` runs the CLI in it; `cleanup()` rm's every dir made.
+ * `adoptedRepo(overrides?)` is a git repo carrying the guard.config.json `devkit init --yes` writes,
+ * with `overrides` merged over its top-level keys.
  *
  * @param {string} prefix mkdtemp prefix (a per-suite tag, e.g. 'clean-')
  */
@@ -293,11 +297,53 @@ export function tmpRepos(prefix) {
   };
   const devkit = (root, ...args) =>
     testSpawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: 'utf8' });
+  // Start a test claiming a whole gate's behaviour here: a hand-written minimal config leaves
+  // init-enabled checks, such as the line caps, switched off.
+  const adoptedRepo = (overrides: RawGuardConfigFile = {}) => {
+    const root = tmpRepo();
+    testExecFileSync('git', ['init', '-q'], { cwd: root });
+    testExecFileSync('git', ['config', 'user.email', 'fixture@example.test'], { cwd: root });
+    testExecFileSync('git', ['config', 'user.name', 'Fixture'], { cwd: root });
+    const cfg = { ...initDefaultConfig(), ...overrides };
+    writeFileSync(join(root, 'guard.config.json'), `${JSON.stringify(cfg, null, 2)}\n`);
+    return root;
+  };
   const cleanup = () => {
     for (const r of roots) rmSync(r, { recursive: true, force: true });
     roots = [];
   };
-  return { tmpRepo, devkit, cleanup };
+  return { tmpRepo, devkit, adoptedRepo, cleanup };
+}
+
+let defaultInitConfig: RawGuardConfigFile | undefined;
+
+/** The guard.config.json a default `devkit init --yes` writes. Init runs once per test file. */
+function initDefaultConfig(): RawGuardConfigFile {
+  if (defaultInitConfig) return defaultInitConfig;
+  const { tmpRepo, devkit, cleanup } = tmpRepos('init-config-');
+  try {
+    const root = tmpRepo();
+    const run = devkit(root, 'init', '--yes');
+    if (run.status !== 0) throw new Error(`devkit init --yes exited ${run.status}: ${run.stderr}`);
+    const cfg = JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8'));
+    defaultInitConfig = cfg;
+    return cfg;
+  } finally {
+    cleanup();
+  }
+}
+
+/** Spawn one registry gate in `root` the way guard-deterministic does; `env` adds to process.env. */
+export function runGate(
+  root: string,
+  gate: { module: string; args: readonly string[] },
+  env: NodeJS.ProcessEnv = {},
+) {
+  return testSpawnSync(process.execPath, [gateModulePath(gate), ...gate.args], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+  });
 }
 
 /** Parse a consumer repo's written `.devkit/config.json`. */

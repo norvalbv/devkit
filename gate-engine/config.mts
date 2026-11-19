@@ -113,7 +113,7 @@ type RawReviewConfig = Partial<Omit<ReviewConfig, 'accessibility' | 'paths'>> & 
 
 // Raw shape of a parsed guard.config.json — every field optional, typed as EXPECTED (the JSON
 // boundary). Malformed values are tolerated via the arr()/str()/finite guards, never trusted.
-interface RawGuardConfigFile {
+export interface RawGuardConfigFile {
   boundaries?: string[];
   scanRoots?: string[];
   cloneRoots?: string[];
