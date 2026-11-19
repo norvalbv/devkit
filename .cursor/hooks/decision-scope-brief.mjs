@@ -240,8 +240,6 @@ function briefFor(input, root, file, budget) {
   const axes = axesFrom(run);
   if (axes === null) {
     retrievalDown = true;
-    // A sentinel key, never a relative path: the notice fires once per session WITHOUT burning this
-    // file's brief slot, so the first governed edit after the tool is fixed is still briefed.
     const notice =
       `Decision retrieval DID NOT RUN for \`${rel}\` — \`guard-decisions scoped-targets\` failed, so ` +
       `this edit is UNBRIEFED, not ungoverned. Do not read the absence of a brief as "nothing rules ` +
