@@ -796,7 +796,7 @@ describe('ship run record + orphan preflight', () => {
     // so waitForPath cannot observe a half-written file.
     writeFileSync(
       hook,
-      `#!/bin/sh\necho $$ > "${gatePidFile}"\ntouch "${ready}"\nwhile :; do sleep 0.1; done\n`,
+      `#!/bin/sh\necho $$ > "${gatePidFile}"\ntouch "${ready}"\ni=0\nwhile [ $i -lt 1200 ]; do sleep 0.1; i=$((i+1)); done\n`,
     );
     chmodSync(hook, 0o755);
 
@@ -809,19 +809,29 @@ describe('ship run record + orphan preflight', () => {
       stdio: ['ignore', 'ignore', 'pipe'],
       env: { ...publishEnvFor(env), SHIP_DRY_RUN: '1' },
     });
-    await waitForPath(ready, 60_000, cli);
-    const gatePid = Number(readFileSync(gatePidFile, 'utf8').trim());
-    expect(gatePid).toBeGreaterThan(0);
-    expect(processAlive(gatePid)).toBe(true);
-    const holders = readShipQueue(root).running.map((h) => [h.pid, h.branch]);
+    const exited = once(cli, 'exit');
+    try {
+      await waitForPath(ready, 60_000, cli);
+      const gatePid = Number(readFileSync(gatePidFile, 'utf8').trim());
+      expect(gatePid).toBeGreaterThan(0);
+      expect(processAlive(gatePid)).toBe(true);
+      const holders = readShipQueue(root).running.map((h) => [h.pid, h.branch]);
 
-    cli.kill('SIGTERM');
-    const [code] = await once(cli, 'exit');
-    expect(holders).toEqual([[cli.pid, 'feat/signalled']]);
+      cli.kill('SIGTERM');
+      const [code] = await exited;
+      expect(holders).toEqual([[cli.pid, 'feat/signalled']]);
 
-    expect(code).toBe(143);
-    expect(processAlive(gatePid)).toBe(false);
-    expect(git(['worktree', 'list'])).not.toMatch(/devkit-ship-/);
+      expect(code).toBe(143);
+      expect(processAlive(gatePid)).toBe(false);
+      expect(readShipQueue(root).occupied).toBe(0);
+      expect(git(['worktree', 'list'])).not.toMatch(/devkit-ship-/);
+    } finally {
+      // A failed assertion must not leave the tree cleaning up after afterEach deletes its repo.
+      cli.kill('SIGTERM'); // a no-op once the child has exited
+      const stop = setTimeout(() => cli.kill('SIGKILL'), 20_000);
+      await exited;
+      clearTimeout(stop);
+    }
   }, 120_000);
 
   it('records nothing and reclaims nothing under SHIP_RESOLVE_ONLY', () => {

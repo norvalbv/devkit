@@ -44,10 +44,16 @@ import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { coverageBypassed, deterministicStrict } from '../config.mts';
-import { emitGateBypass, finishGateTiming } from '../judge/gate-events.mts';
+import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-events.mts';
 import { markGateRun } from '../judge/run-context.mts';
 import { reportOlderOverlayRunner } from '../overlay-mode.mts';
-import { describeCachedPrefix, prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
+import {
+  cachedDegradedNotes,
+  type DegradedNote,
+  describeCachedPrefix,
+  prefixEntry,
+  recordPrefix,
+} from '../prefix-cache/prefix-cache.mts';
 import { crashGuarded, type GateFailure, readGateReason, withReasonFiles } from './reason.mts';
 import {
   bypassedSuffixes,
@@ -67,6 +73,7 @@ import {
 import { type ParsedOpts, parseOpts } from './parse-opts.mts';
 import { recheckLines, registryRecheck } from './recheck.mts';
 import { COULD_NOT_RUN, DETERMINISTIC, gateModulePath } from './registry.mts';
+import { z } from 'zod';
 import { type FailedGate, reportFailures, reportOptedOut } from './report.mts';
 import { canonicalIds, resolveSelection, reviewIds } from './selection.mts';
 
@@ -136,6 +143,9 @@ export function prefixCacheScope(scope?: string, effectiveIds?: string[]): strin
   return shipBase ? `${prScope ?? 'devkit-guards'}:ship-base:${shipBase}` : prScope;
 }
 
+// runArgv returns a number for an exit, a string for a gate that never reached one (killed, no spawn).
+const EXIT_CODE = z.number();
+
 // What one run settled before any gate spawned: computed once, passed to every phase below.
 interface RunPlan {
   cwd: string;
@@ -156,6 +166,8 @@ interface GateOutcome {
   skipped: string[];
   /** afterGreen gates not run because an earlier gate failed. */
   notRun: string[];
+  /** Judgements passing registry gates withheld; cached with the PASS so a hit replays them. */
+  degraded: DegradedNote[];
 }
 
 // A cache hit names the gates it did not re-run and every bypass; otherwise a structure bypass is loud.
@@ -168,6 +180,10 @@ function narrateRun(plan: RunPlan): void {
     if (effectiveIds.includes('coverage') && coverageBypassed()) flags.unshift('GUARD_COVERAGE_OK');
     const labels = plan.structure ? [...extras, 'structure-lint'] : extras;
     console.log(describeCachedPrefix(plan.cachedPrefix?.at, effectiveIds, labels, flags));
+    for (const { judge, detail } of cachedDegradedNotes(plan.cachedPrefix)) {
+      console.log(`  ↳ still withheld: ${detail}`);
+      emitGateEvent({ type: 'gate_degraded', judge, cause: 'cached_prefix', detail });
+    }
   } else if (bypassStructure) {
     console.log('⚠️  Structure lint BYPASSED for this run (GUARD_STRUCTURE_OK=1).');
     console.log('   Repository structure was NOT verified for this commit.');
@@ -227,7 +243,14 @@ function runGates(
   exec: typeof execFileSync,
   reviewMode: boolean,
 ): GateOutcome {
-  const out: GateOutcome = { fails: [], failed: [], rechecks: [], skipped: [], notRun: [] };
+  const out: GateOutcome = {
+    fails: [],
+    failed: [],
+    rechecks: [],
+    skipped: [],
+    notRun: [],
+    degraded: [],
+  };
   const timeoutMs = gateTimeoutMs(cwd);
   withReasonFiles((fileFor) => {
     gates.forEach((gate, i) => {
@@ -245,47 +268,66 @@ function runGates(
       console.log(`▶ deterministic: ${gate.label}`);
       const rc = runArgv(cwd, gate.argv, exec, reasonFile, timeoutMs, gate.label);
       const [nFailed, nSkipped] = [out.failed.length, out.skipped.length];
-      // Its own outcome, not an exit code: no rcLabel, opt-out or strict rule applies to it.
-      if (rc === TIMED_OUT) {
-        recordFailure(
-          out,
-          gate,
-          `(timed-out:${timeoutMs / 1000}s)`,
-          false,
-          timeoutReason(timeoutMs),
-        );
-        emitGateStep(gate.label, rc, startedAt, out.failed[nFailed], false);
-        return;
-      }
-      // Not an exit code, so no rcLabel, opt-out or strict rule applies: it blocks as could-not-run.
-      if (typeof rc === 'string') {
-        const next = rc.startsWith('killed:')
-          ? 'Re-run it.'
-          : `${gate.argv[0]} did not start: check that it exists, is executable and is on PATH.`;
-        recordFailure(out, gate, `(${rc})`, false, [
-          `${rc}: the gate never reached a verdict, so this is not a code finding. ${next}`,
-        ]);
-        emitGateStep(gate.label, rc, startedAt, out.failed[nFailed], false);
-        return;
-      }
+      const code = exitCodeOrBlock(out, gate, rc, timeoutMs, startedAt);
+      if (code === null) return;
       const failRc = (suffix = '') =>
         recordFailure(out, gate, suffix, undefined, readGateReason(reasonFile));
       // failOpen2 belongs to the GATE (exit 2 = opt-out), strict to the RUN: so an `--extra`'s
       // fatal exit 2 (never an opt-out) stays `(unexpected:2)` under strict, not a skip.
       // `finally`, so an early return added to this classification still records the gate's step.
       try {
-        if (rc === 1) failRc();
-        else if (gate.rcLabels && Object.hasOwn(gate.rcLabels, rc)) failRc(gate.rcLabels[rc]);
-        else if (rc === 2 && gate.failOpen2) {
+        if (code === 1) failRc();
+        else if (gate.rcLabels && Object.hasOwn(gate.rcLabels, code)) failRc(gate.rcLabels[code]);
+        else if (code === 2 && gate.failOpen2) {
           if (deterministicStrict()) failRc(COULD_NOT_RUN);
           else out.skipped.push(gate.label);
-        } else if (rc !== 0) failRc(`(unexpected:${rc})`);
+        } else if (code !== 0) failRc(`(unexpected:${code})`);
+        else if (gate.id) noteDegraded(out, gate.id, reasonFile);
       } finally {
-        emitGateStep(gate.label, rc, startedAt, out.failed[nFailed], out.skipped.length > nSkipped);
+        emitGateStep(
+          gate.label,
+          code,
+          startedAt,
+          out.failed[nFailed],
+          out.skipped.length > nSkipped,
+        );
       }
     });
   });
   return out;
+}
+
+/** The gate's exit code, or null after recording a gate that never reached one (timed out, killed,
+ * did not spawn): no rcLabel, opt-out or strict rule applies, so it blocks as could-not-run. */
+function exitCodeOrBlock(
+  out: GateOutcome,
+  gate: Gate,
+  rc: number | string,
+  timeoutMs: number,
+  startedAt: number,
+): number | null {
+  const exit = EXIT_CODE.safeParse(rc);
+  if (exit.success) return exit.data;
+  const failure = String(rc);
+  const nFailed = out.failed.length;
+  if (rc === TIMED_OUT) {
+    recordFailure(out, gate, `(timed-out:${timeoutMs / 1000}s)`, false, timeoutReason(timeoutMs));
+  } else {
+    const next = failure.startsWith('killed:')
+      ? 'Re-run it.'
+      : `${gate.argv?.[0]} did not start: check that it exists, is executable and is on PATH.`;
+    recordFailure(out, gate, `(${failure})`, false, [
+      `${failure}: the gate never reached a verdict, so this is not a code finding. ${next}`,
+    ]);
+  }
+  emitGateStep(gate.label, failure, startedAt, out.failed[nFailed], false);
+  return null;
+}
+
+/** A passing registry gate's withheld note (its reason file on exit 0), kept for the prefix cache. */
+function noteDegraded(out: GateOutcome, judge: string, reasonFile: string): void {
+  const note = readGateReason(reasonFile).join(' ');
+  if (note) out.degraded.push({ judge, detail: note });
 }
 
 // A green run records its prefix key, unless a gate opted out: a later hit would replay a verdict
@@ -304,7 +346,8 @@ function finishRun(
   }
   if (!skip) {
     const durationMs = Date.now() - startedAt;
-    if (out.skipped.length === 0) recordPrefix(plan.cwd, { ...cache, durationMs });
+    if (out.skipped.length === 0)
+      recordPrefix(plan.cwd, { ...cache, durationMs, degraded: out.degraded });
     return finishGateTiming('deterministic', startedAt, 0, 'none');
   }
   const cachedDuration =

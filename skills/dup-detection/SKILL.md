@@ -124,7 +124,18 @@ Stale index — dropped 1 candidate pair(s) whose indexed code is NOT in the wor
 ```
 
 That is a *withheld* finding, not a pass: re-index those files (`search-code index --seed-files "<files>"`)
-and re-run to get real coverage back. A `Freshness NOT verified` line means the opposite — the index
+and re-run to get real coverage back. The clean line then reads `among the compared files`, and under
+`--gate` the run records one `gate_degraded` event, so the ship's findings digest lists it as unverified.
+
+In a linked or ship worktree the gate cannot re-index the primary checkout's index. With an
+`indexCommand` configured, it first copies that index into the worktree and refreshes the copy, so an
+edited symbol is re-judged instead of dropped. `{staged-csv}` in `indexCommand` expands to the staged
+files as one already-quoted comma-joined word, so leave it unquoted:
+`search-code index --seed-files {staged-csv}` re-embeds them first.
+If the refresh stops short, the gate names the symbols it left unembedded (`have no embedding yet`).
+A same-tree re-ship replays the cached PASS with that note; run `guard-prefix clear` to re-judge.
+
+A `Freshness NOT verified` line means the opposite — the index
 carries no `raw_code`/`id`, or its paths don't resolve in this checkout, so the pairs above it were
 reported unchecked. Verify the ranges by eye before approving anything. `GUARD_DUP_VERIFY_TREE=0`
 turns the check off.

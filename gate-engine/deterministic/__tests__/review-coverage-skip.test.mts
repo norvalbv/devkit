@@ -1,10 +1,11 @@
 /** Coverage's exit 2 (NOT MEASURED) is a visible skip only under `devkit review`, and a review that
  * skipped a gate never records a prefix key that would let a later review skip it silently. */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { GATE_REASON_ENV } from '../reason.mts';
 import { runDeterministic } from '../run.mts';
 
 let dir = '';
@@ -85,5 +86,33 @@ describe("an opted-out gate on review's verdict line", () => {
     vi.stubEnv('DEVKIT_REVIEW_TEMP_ROOT', '');
     expect(runDeterministic(dir, { exec: coverageExits(2) })).toBe(0);
     expect(existsSync(notices)).toBe(false);
+  });
+});
+
+// guard-dup passes while withholding stale pairs; a same-tree re-ship must not lose that note.
+describe('a passing gate that withheld part of its judgement', () => {
+  it('records the note with the cached PASS and replays it on the hit', () => {
+    vi.stubEnv('DEVKIT_SHIP', '1');
+    const events = join(dir, 'events.jsonl');
+    vi.stubEnv('DEVKIT_GATE_EVENTS', events);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exec = vi.fn((_node: string, argv: string[], opts: { env: Record<string, string> }) => {
+      if (argv[2]?.includes('co-occurrence/matcher'))
+        appendFileSync(opts.env[GATE_REASON_ENV], 'dup: Stale index — dropped 1 candidate pair\n');
+    });
+    const matcherRuns = () =>
+      exec.mock.calls.filter(([, argv]) => argv[2]?.includes('co-occurrence/matcher')).length;
+    expect(runDeterministic(dir, { exec })).toBe(0);
+    expect(runDeterministic(dir, { exec })).toBe(0);
+    expect(matcherRuns()).toBe(1); // the second run was a cache hit
+    expect(log.mock.calls.flat().join('\n')).toContain(
+      'still withheld: dup: Stale index — dropped 1 candidate pair',
+    );
+    const replayed = readFileSync(events, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'gate_degraded');
+    expect(replayed).toMatchObject([{ judge: 'dup', cause: 'cached_prefix' }]);
   });
 });
