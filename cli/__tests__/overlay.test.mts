@@ -61,9 +61,13 @@ const preLedgerAll = () => {
 
 // Stub the overlay fallow resolver (detect/install) at overlay.mts's import, so no test
 // spawns a real `fallow` or a global install. Plain fn (not vi.fn) so restoreAllMocks can't clear it.
+// Upgrade's preflight too. Both read one flag, as the real pair share ensureFallow; only the
+// preflight test turns it off.
+const fallowStub = vi.hoisted(() => ({ resolves: true }));
 vi.mock('../lib/install/install-fallow.mts', async (importOriginal) => ({
   ...(await importOriginal()),
-  resolveOverlayFallow: () => true,
+  resolveOverlayFallow: () => fallowStub.resolves,
+  preflightOverlayFallow: () => fallowStub.resolves,
 }));
 
 // For the overlay-upgrade suite below: keep needsRerun / repoUrl REAL, but stub the
@@ -1651,6 +1655,21 @@ describe('overlay upgrade (re-syncs, not the old bail)', () => {
       if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
       else process.env.XDG_CONFIG_HOME = prevXdg;
     }
+  });
+
+  it('stops before the re-sync when a recorded fallow cannot reach the pin (never drops the gate)', async () => {
+    const root = workRepo();
+    await mkOverlay(root, { selection: { ...defaultSelection(), fallow: true } });
+    expect(readCfg(root).components.fallow).toBe(true);
+    const before = readFileSync(cfgPathOf(root), 'utf8');
+    fallowStub.resolves = false;
+    try {
+      expect(await upgrade([], root)).toBe(1);
+    } finally {
+      fallowStub.resolves = true;
+    }
+    // Byte-identical: fallow is still recorded, so the next upgrade retries it.
+    expect(readFileSync(cfgPathOf(root), 'utf8')).toBe(before);
   });
 
   it('idempotent: re-sync never re-freezes debt (adopted → baseline stays absent), exit 0', async () => {
