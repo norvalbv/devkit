@@ -460,19 +460,19 @@ if [ "$REWRITE" -eq 1 ]; then
     exit 1
   }
 
-  # The replacement must account for every path in the old PR. Rename detection is deliberately
-  # disabled so a rename requires both the deletion and addition. NUL records preserve all valid
-  # Git path bytes except NUL itself.
+  # The replacement must account for every old-PR path the base does not already hold identically;
+  # renames are not detected, so each half counts. NUL records keep every valid Git path byte.
   OLD_MERGE_BASE=$(git merge-base "$BASE" "$EXPECTED_REMOTE") || {
     echo "refusing rewrite: PR head and requested base have no common ancestor" >&2; exit 1
   }
   REQUIRED_SCOPE_FILE=$(mktemp "${TMPDIR:-/tmp}/reship-required.XXXXXX")
-  git diff --name-only --no-renames -z "$OLD_MERGE_BASE" "$EXPECTED_REMOTE" -- > "$REQUIRED_SCOPE_FILE"
+  git diff-tree -r --name-only --no-renames -z "$OLD_MERGE_BASE" "$EXPECTED_REMOTE" -- > "$REQUIRED_SCOPE_FILE"
   MISSING_SCOPE=()
   while IFS= read -r -d '' required_path; do
     required_seen=0
     for p in "${PATHS[@]}"; do [ "$p" = "$required_path" ] && { required_seen=1; break; }; done
-    [ "$required_seen" -eq 1 ] || MISSING_SCOPE+=("$required_path")
+    [ "$required_seen" -eq 1 ] || git diff-tree --quiet "$BASE" "$EXPECTED_REMOTE" -- ":(literal)$required_path" </dev/null ||
+      MISSING_SCOPE+=("$required_path")
   done < "$REQUIRED_SCOPE_FILE"
   if [ "${#MISSING_SCOPE[@]}" -gt 0 ] && [ "$REWRITE_RECEIPT_PROVEN" -eq 0 ]; then
     echo "rewrite brief omits paths from the existing PR:" >&2

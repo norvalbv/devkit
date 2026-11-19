@@ -38,6 +38,7 @@ const GIT_INTEGRATION_TESTS = [
   'cli/__tests__/reship-publish-lock.test.mts',
   'cli/__tests__/reship-release-only-drift.test.mts',
   'cli/__tests__/reship-rewrite-pin.test.mts',
+  'cli/__tests__/reship-rewrite-upstream-landed.test.mts',
   'cli/__tests__/reship.test.mts',
   'cli/__tests__/review.test.mts',
   'cli/__tests__/review-base-inference.test.mts',
