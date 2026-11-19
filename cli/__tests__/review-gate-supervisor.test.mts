@@ -456,7 +456,8 @@ describe('review gate supervisor', () => {
     // The runner's banner keys on this file to say "not the ceiling" for a 124 that never expired.
     // It names the survivor by executable only: never its env (token, secrets) nor its arguments.
     const named = readFileSync(notice, 'utf8');
-    expect(named).toMatch(/^\d+ ppid=\d+ pgid=\d+ up=\S+ node$/m);
+    // Linux reports a Node process's ucomm as its main thread's name, MainThread; macOS says node.
+    expect(named).toMatch(/^\d+ ppid=\d+ pgid=\d+ up=\S+ (?:node|MainThread)$/m);
     for (const secret of [token, 'sentinel-env', fixture.ready, 'input-type']) {
       expect(named).not.toContain(secret);
     }
