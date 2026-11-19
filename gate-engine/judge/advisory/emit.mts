@@ -96,7 +96,7 @@ function hasEstimatedCrap(complexity: FallowComplexity | null | undefined): bool
 
 /** The remedy is the devkit step that feeds ship's FALLOW_COVERAGE, not fallow's own command. */
 const ESTIMATED_CRAP_REMEDY =
-  ' (CRAP estimated, no coverage: run `devkit coverage-run <their tests>` in this checkout, then re-ship)';
+  ' (CRAP estimated: measure it with a full `devkit coverage-run` in this checkout, then re-ship)';
 
 /** A field fallow reshaped reads as absent, so one odd finding never costs the whole report. */
 const loose = <T extends z.ZodType>(schema: T) => schema.optional().catch(undefined);

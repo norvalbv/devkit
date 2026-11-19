@@ -621,9 +621,7 @@ describe('advisory_result', () => {
         [advisory('fallow-advisory', 'finding', detail), shipResult(null)],
         SHIP,
       );
-      expect(render(rows)).toContain(
-        '`devkit coverage-run <their tests>` in this checkout, then re-ship',
-      );
+      expect(render(rows)).toContain('a full `devkit coverage-run` in this checkout, then re-ship');
     }
   });
 });

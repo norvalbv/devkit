@@ -1059,6 +1059,34 @@ describe('prepare_gate_worktree — fallow gets rekeyed coverage, the gate keeps
     expect(readFileSync(r.exported ?? '', 'utf8')).toBe('{}');
   });
 
+  it('drops a staged file the full run predates and says fallow reads the pruned map', () => {
+    const { main, wt } = seedShipWorktree(() => '');
+    const key = `${realpathSync(wt)}/src/a.ts`;
+    const cov = join(main, 'coverage');
+    writeFileSync(join(cov, 'coverage-final.json'), JSON.stringify({ [key]: { path: key } }));
+    const head = rawExecFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: wt,
+      encoding: 'utf8',
+    }).trim();
+    const snapshot = { roots: [realpathSync(wt)], head, dirty: {}, args: [] };
+    mkdirSync(join(cov, '.runs'), { recursive: true });
+    publishManifest(
+      stageManifest(join(cov, '.runs'), join(cov, 'coverage-final.json'), snapshot, 'run-1'),
+      cov,
+    );
+    writeFileSync(join(wt, 'src/a.ts'), 'export const a = 2;\n');
+    rawExecFileSync('git', ['add', 'src/a.ts'], { cwd: wt, env: { ...process.env, ...GIT_ENV } });
+
+    const r = prepareExported(wt, main);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain(
+      'fallow reads coverage with the stale files removed (FALLOW_COVERAGE)',
+    );
+    expect(r.stderr).toContain('coverage predates their edits: src/a.ts');
+    expect(readFileSync(r.exported ?? '', 'utf8')).toBe('{}');
+  });
+
   it("leaves an operator's FALLOW_COVERAGE in place and says so", () => {
     const { main, wt } = seedShipWorktree((m) => m);
 

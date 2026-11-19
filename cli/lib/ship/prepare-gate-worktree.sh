@@ -267,6 +267,7 @@ gate_rebase_coverage() {
   [ -n "$root" ] && [ -f "$out" ] || return 0
   export FALLOW_COVERAGE="$out"
   case "$root" in
+    pruned) echo "  ↳ $purpose: fallow reads coverage with the stale files removed (FALLOW_COVERAGE); the coverage gate reads coverage/ unchanged" >&2 ;;
     scoped\ *) echo "  ↳ $purpose: fallow scores CRAP from static estimates — the linked coverage came from a scoped run (devkit coverage-run ${root#scoped })" >&2 ;;
     *) echo "  ↳ $purpose: fallow reads coverage rekeyed from $root (FALLOW_COVERAGE); the coverage gate reads coverage/ unchanged" >&2 ;;
   esac

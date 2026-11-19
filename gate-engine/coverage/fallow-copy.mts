@@ -7,9 +7,19 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
-import { canonicalPath } from './gate-shared.mts';
+import { canonicalPath, TEST_PATH } from './gate-shared.mts';
 import { COVERAGE_FILE } from './produce.mts';
-import { type ArtifactRead, boundManifest, isScopedRun, readArtifact } from './provenance.mts';
+import {
+  type ArtifactRead,
+  artifactKeysSchema,
+  boundManifest,
+  type Classify,
+  checkProvenance,
+  git,
+  isScopedRun,
+  keysByPath,
+  readArtifact,
+} from './provenance.mts';
 
 /** vitest's v8→istanbul conversion can emit a negative hit count, which fails fallow's u32 parse
  * of the whole file. A negative hit is a miss and the gate counts only hits > 0: 0 keeps totals. */
@@ -144,10 +154,69 @@ function writePrivate(body: string): string {
   return out;
 }
 
-/** What fallow-copy handed fallow: a temp map, and the scoped run's args when it is `{}`. */
+/** Measured files edited after the run, with their map keys, and test files edited after it. */
+export interface StaleCoverage {
+  files: string[];
+  keys: string[];
+  tests: string[];
+}
+
+const classifyForFallow: Classify = (path, measured) =>
+  TEST_PATH.test(path) ? 'test' : measured ? 'production' : 'other';
+
+/** Briefed files whose blob changed since `artifact` was measured; null when fresh or unknown. No
+ * runtime-neutral exemption: a deleted comment still moves the lines fallow joins functions on. */
+export function staleCoverage(
+  cwd: string,
+  coverageDir: string,
+  artifact: ArtifactRead,
+): StaleCoverage | null {
+  const provenance = checkProvenance(cwd, coverageDir, artifact, classifyForFallow);
+  if (provenance.state !== 'drift') return null;
+  const parsed = artifactKeysSchema.safeParse(JSON.parse(artifact.bytes));
+  const byPath = keysByPath(Object.keys(parsed.data ?? {}), provenance.manifest.roots);
+  const files = inIndex(cwd, provenance.production);
+  if (files.length === 0 && provenance.tests.length === 0) return null;
+  return { files, keys: files.flatMap((f) => byPath.get(f) ?? []), tests: provenance.tests };
+}
+
+/** The paths still in the commit's index: fallow scores nothing for a deleted file. provenance's
+ * `git` passes --literal-pathspecs, so `src/[id].mts` matches only itself. */
+function inIndex(cwd: string, paths: string[]): string[] {
+  if (paths.length === 0) return paths;
+  const top = git(cwd, ['rev-parse', '--show-toplevel']).trim();
+  const listed = new Set(git(top, ['ls-files', '-z', '--', ...paths]).split('\0'));
+  return paths.filter((p) => listed.has(p));
+}
+
+/** fallow ≥3.21 estimates a function with no map entry, so dropping a stale file's key estimates
+ * exactly that file and leaves every fresh file measured. */
+export function withoutKeys(map: CoverageMap, keys: readonly string[]): CoverageMap {
+  const drop = new Set(keys);
+  return Object.fromEntries(Object.entries(map).filter(([key]) => !drop.has(key)));
+}
+
+/** The one line both fallow callers print for a stale artifact. */
+export function staleNotice({ files, tests }: StaleCoverage): string {
+  const parts: string[] = [];
+  if (files.length > 0) {
+    parts.push(
+      `fallow scores CRAP for ${files.length} file(s) from static estimates — coverage predates their edits: ${files.join(', ')}; re-measure with a full \`devkit coverage-run\``,
+    );
+  }
+  if (tests.length > 0) {
+    parts.push(
+      `the coverage run predates edits to ${tests.join(', ')}, so measured CRAP may be off`,
+    );
+  }
+  return parts.join(' · ');
+}
+
+/** What fallow-copy handed fallow: a temp map (`{}` for a scoped run), and why it was changed. */
 export interface FallowCopy {
-  path: string;
+  path?: string;
   scopedArgs?: string[];
+  stale?: StaleCoverage;
 }
 
 /** The map fallow should read for `<top>`'s artifact, or `<cwd>`'s when the root has none. Null when
@@ -160,14 +229,30 @@ export function writeFallowCopy(top: string, cwd: string): FallowCopy | null {
   // `{}`, not an unset FALLOW_COVERAGE: fallow auto-reads coverage/ under its cwd.
   const scopedArgs = scopedRunArgs(dirname(report), artifact);
   if (scopedArgs) return { path: writePrivate('{}'), scopedArgs };
-  if (report !== atTop) return null;
+  const stale = staleCoverage(cwd, dirname(report), artifact);
+  const path = writeCopy(top, cwd, report, artifact, stale?.keys ?? []);
+  if (path === null) return stale ? { stale } : null;
+  return stale ? { path, stale } : { path };
+}
+
+/** The clamped, rekeyed, pruned copy's path; null when fallow can read the artifact as it stands. */
+function writeCopy(
+  top: string,
+  cwd: string,
+  report: string,
+  artifact: ArtifactRead,
+  staleKeys: string[],
+): string | null {
+  const atTop = report === join(top, COVERAGE_FILE);
+  if (!atTop && staleKeys.length === 0) return null;
   const raw: unknown = JSON.parse(artifact.bytes);
   const counts = rawHitsSchema.safeParse(raw);
   if (!counts.success) throw new Error(`${report}: ${z.prettifyError(counts.error)}`);
-  const foreign = foreignRoot(Object.keys(counts.data), top);
+  const foreign = atTop ? foreignRoot(Object.keys(counts.data), top) : null;
   const inTop = canonicalPath(cwd) === canonicalPath(top);
-  if (foreign === null && inTop && !hasNegativeHit(counts.data)) return null;
-  const map = coverageMapSchema.parse(raw);
+  const unaided = foreign === null && inTop && !hasNegativeHit(counts.data);
+  if (unaided && staleKeys.length === 0) return null;
+  const map = withoutKeys(coverageMapSchema.parse(raw), staleKeys);
   const copy = foreign === null ? map : rebaseCoverageMap(map, foreign, canonicalPath(top));
-  return { path: writePrivate(JSON.stringify(copy)) };
+  return writePrivate(JSON.stringify(copy));
 }
