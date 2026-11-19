@@ -2,9 +2,9 @@
  * docs/decisions/hook-command-supersession.md. Ledger rows only; stripReclaimedCommands walks. */
 
 import type { AgentProvider } from '../agent-assets/agent-providers.mts';
-import type { HookRegistrationOwnershipV1 } from './codec.mts';
+import type { HookInstallScope, HookRegistrationOwnershipV1 } from './codec.mts';
 import type { OwnedHandler } from './install-support.mts';
-import { nativeProjection } from './lifecycle.mts';
+import { nativeProjection, recoverProjectionHome, scopeAnchor } from './projection.mts';
 import { HOOK_REGISTRATIONS, SUPERSEDED_HOOK_COMMANDS } from './registrations.mts';
 
 /** One prior spelling of a still-live registration, paired with the spelling that replaced it. */
@@ -21,6 +21,7 @@ export interface SupersededProjection {
  * nativeProjection a live install uses, so codex/cursor spellings are never hand-transcribed. */
 export function projectSupersededHookRegistrations(
   provider: AgentProvider,
+  anchor: string | null = null,
 ): readonly SupersededProjection[] {
   const projections: SupersededProjection[] = [];
   const seen = new Set<string>();
@@ -35,8 +36,9 @@ export function projectSupersededHookRegistrations(
         `superseded command names registration "${row.registrationId}", which no longer exists — retire it instead of superseding it`,
       );
     for (const { ownerId, registration } of owned) {
-      const native = nativeProjection(provider, registration);
-      const legacy = nativeProjection(provider, { ...registration, command: row.command });
+      const native = nativeProjection(provider, registration, anchor);
+      // Table rows predate anchoring, so their prior spelling is always the unanchored one.
+      const legacy = nativeProjection(provider, { ...registration, command: row.command }, null);
       if (!native || !legacy || legacy.command === native.command) continue;
       if (seen.has(legacy.command))
         throw new Error(
@@ -68,14 +70,44 @@ const ownsSupersession = (
   entry.native.event === projection.native.event &&
   entry.native.matcher === projection.native.matcher;
 
+/** A row's move onto `anchor` from a prior spelling (unanchored, or a recovered overlay home); a row
+ * already there still owns the unanchored handler a crashed first write left in the document. */
+function anchorReconcile(
+  entry: HookRegistrationOwnershipV1,
+  provider: AgentProvider,
+  destinationRel: string,
+  anchor: string | null,
+): { native: HookRegistrationOwnershipV1['native']; strip: OwnedHandler; moved: boolean } | null {
+  if (entry.provider !== provider || entry.destinationRel !== destinationRel) return null;
+  const owned = Object.hasOwn(HOOK_REGISTRATIONS, entry.ownerId)
+    ? HOOK_REGISTRATIONS[entry.ownerId]
+    : [];
+  const registration = owned.find((candidate) => candidate.registrationId === entry.registrationId);
+  const current = registration && nativeProjection(provider, registration, anchor);
+  if (!current || current.event !== entry.native.event || current.matcher !== entry.native.matcher)
+    return null;
+  const unanchored = anchor === null ? null : nativeProjection(provider, registration, null);
+  const anchors = unanchored !== null && unanchored.command !== current.command;
+  if (current.command === entry.native.command)
+    return anchors ? { native: current, strip: unanchored, moved: false } : null;
+  const prior =
+    (anchors && unanchored.command === entry.native.command) ||
+    (entry.installScope === 'overlay' &&
+      recoverProjectionHome(provider, registration, entry.native.command) !== null);
+  return prior ? { native: current, strip: entry.native, moved: true } : null;
+}
+
 /** Carry superseded rows onto the current spelling; report what they authorise stripping. A row is
  * claimed holding EITHER spelling — the second arm recovers publishPlan's crash window. */
 export function reconcileLegacyHookCommands(
   entries: readonly HookRegistrationOwnershipV1[],
   provider: AgentProvider,
   destinationRel: string,
+  scope: HookInstallScope,
+  home: string | null,
 ) {
-  const projections = projectSupersededHookRegistrations(provider);
+  const anchor = scopeAnchor(scope, home);
+  const projections = projectSupersededHookRegistrations(provider, anchor);
   const stripped: OwnedHandler[] = [];
   let ledgerChanged = false;
   const next = entries.map((entry) => {
@@ -90,8 +122,14 @@ export function reconcileLegacyHookCommands(
           entry.native.command === projection.legacyCommand ||
           entry.native.command === projection.native.command,
       )
-    )
-      return entry;
+    ) {
+      const anchored = anchorReconcile(entry, provider, destinationRel, anchor);
+      if (!anchored) return entry;
+      stripped.push({ ...anchored.strip });
+      if (!anchored.moved) return entry;
+      ledgerChanged = true;
+      return { ...entry, native: { ...anchored.native } };
+    }
     // EVERY prior spelling, not just the one the row holds: a registration can have shipped more
     // than one, and a row already carrying the current command cannot say which the document has.
     for (const projection of owned)
@@ -100,6 +138,9 @@ export function reconcileLegacyHookCommands(
         matcher: projection.native.matcher,
         command: projection.legacyCommand,
       });
+    // A superseded registration's row at the anchor owns the unanchored current spelling too.
+    const atAnchor = anchorReconcile(entry, provider, destinationRel, anchor);
+    if (atAnchor && !atAnchor.moved) stripped.push({ ...atAnchor.strip });
     if (entry.native.command === native.command) return entry;
     ledgerChanged = true;
     return { ...entry, native: { ...native } };

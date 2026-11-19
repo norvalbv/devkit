@@ -11,6 +11,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -32,6 +33,10 @@ import {
 } from './install-hooks.mts';
 
 let roots = [];
+/** An overlay-anchored document or ledger rewritten to the spelling it had before the anchor. */
+const unanchor = (text: string, root: string, token: string) =>
+  text.replaceAll(realpathSync.native(root), token);
+
 function tmpRepo() {
   const root = mkdtempSync(join(tmpdir(), 'hooks-'));
   roots.push(root);
@@ -235,7 +240,7 @@ describe('installHookRegistrations', () => {
 
   it('recovers when added ownership was published before its provider config', () => {
     const root = tmpRepo();
-    const projected = projectHookRegistrations(['agentHooks'], ['codex'], 'shared');
+    const projected = projectHookRegistrations(['agentHooks'], ['codex'], 'shared', null);
     writeHookRegistrationLedger(root, {
       schemaVersion: 1,
       kind: 'agent_hook_registration_ownership',
@@ -960,8 +965,10 @@ describe('superseded hook commands', () => {
     execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
     installHookRegistrations(root, ['searchSteering'], { targets: ['codex'], overlay: true });
     const rel = '.codex/hooks.json';
-    writeFileSync(join(root, rel), downgrade(readFileSync(join(root, rel), 'utf8')));
-    writeFileSync(ledgerPath(root), downgrade(readFileSync(ledgerPath(root), 'utf8')));
+    // The prior spelling predates the overlay anchor, so it was unanchored too.
+    const prior = (text) => unanchor(downgrade(text), root, '$(git rev-parse --show-toplevel)');
+    writeFileSync(join(root, rel), prior(readFileSync(join(root, rel), 'utf8')));
+    writeFileSync(ledgerPath(root), prior(readFileSync(ledgerPath(root), 'utf8')));
 
     expect(() =>
       installHookRegistrations(root, ['searchSteering'], { targets: ['codex'] }),
@@ -981,8 +988,9 @@ describe('superseded hook commands', () => {
     execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
     installHookRegistrations(root, ['searchSteering'], { targets: ['claude'], overlay: true });
     const rel = '.claude/settings.local.json';
-    writeFileSync(join(root, rel), downgrade(readFileSync(join(root, rel), 'utf8')));
-    writeFileSync(ledgerPath(root), downgrade(readFileSync(ledgerPath(root), 'utf8')));
+    const prior = (text) => unanchor(downgrade(text), root, '$CLAUDE_PROJECT_DIR');
+    writeFileSync(join(root, rel), prior(readFileSync(join(root, rel), 'utf8')));
+    writeFileSync(ledgerPath(root), prior(readFileSync(ledgerPath(root), 'utf8')));
 
     expect(() =>
       installHookRegistrations(root, ['searchSteering'], { targets: ['claude'], overlay: true }),
@@ -1188,7 +1196,12 @@ describe('Claude install-scope switch', () => {
   it('a collision in the new file throws before the old file loses its hooks', () => {
     const root = gitRoot();
     installHookRegistrations(root, ['searchSteering'], { targets: ['claude'] });
-    writeFileSync(join(root, LOCAL), readRel(root, SHARED)); // the user's own, unledgered copy
+    // The user's own, unledgered copy, spelled as the overlay scope would register it.
+    const anchored = readRel(root, SHARED).replaceAll(
+      '$CLAUDE_PROJECT_DIR',
+      realpathSync.native(root),
+    );
+    writeFileSync(join(root, LOCAL), anchored);
     const before = readRel(root, SHARED);
     const stored = readFileSync(ledgerPath(root), 'utf8');
 

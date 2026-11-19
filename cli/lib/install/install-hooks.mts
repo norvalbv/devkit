@@ -52,6 +52,7 @@ import {
   otherScopePass,
   ownedKey,
   type ProviderPlan,
+  hookHome,
   publishPlan,
   reclaimPass,
   reportDropped,
@@ -359,7 +360,7 @@ export function installHookRegistrations(
       entries = pass.entries;
       const installed = installProjectedHookRegistrations(
         removed.document,
-        projectHookRegistrations(componentIds, [provider], scope),
+        projectHookRegistrations(componentIds, [provider], scope, hookHome(root)),
         ledgerOf(entries),
         provider,
         scope,

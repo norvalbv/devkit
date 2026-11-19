@@ -668,6 +668,9 @@ describe('overlay (local-only) install', () => {
     expect(existsSync(local)).toBe(true);
     const cmds = JSON.stringify(JSON.parse(readFileSync(local, 'utf8')).hooks);
     expect(cmds).toContain('.claude/hooks/'); // a devkit agent-hook command landed here
+    // Anchored at the home, so an unflagged session in a linked worktree still finds the script.
+    expect(cmds).not.toContain('$CLAUDE_PROJECT_DIR');
+    expect(cmds).toContain(`${realpathSync.native(root)}/.claude/hooks/`);
     // the shared settings.json was NOT created by devkit
     expect(existsSync(join(root, '.claude', 'settings.json'))).toBe(false);
     expect(
@@ -1574,6 +1577,10 @@ describe('overlay hook regeneration (syncOverlayHook + doctor --fix)', () => {
     const home = realpathSync(join(root, '.devkit', 'hooks'));
     expect(realpathSync(hooksPathOf(root))).toBe(home);
     expect(realpathSync(hooksPathOf(linked))).toBe(home);
+    // --fix from a worktree never rewrites the home's registrations with the worktree's path.
+    const local = readFileSync(join(root, '.claude', 'settings.local.json'), 'utf8');
+    expect(local).not.toContain(realpathSync.native(linked));
+    expect(local).toContain(`${realpathSync.native(root)}/.claude/hooks/`);
   });
 });
 

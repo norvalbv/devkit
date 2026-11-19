@@ -71,6 +71,7 @@ describe('trusted provider-native hook projection', () => {
       ['searchSteering', 'agentHooks'],
       ['claude', 'codex', 'cursor'],
       'shared',
+      null,
     );
     expect(providerEntries(projection, 'claude')).toHaveLength(8);
     expect(providerEntries(projection, 'codex')).toHaveLength(8);
@@ -115,6 +116,7 @@ describe('trusted provider-native hook projection', () => {
       ['antiSlop'],
       ['claude', 'codex', 'cursor'],
       'shared',
+      null,
     );
     const ids = (provider: AgentProvider) =>
       providerEntries(projection, provider).map((entry) => entry.registrationId);
@@ -145,7 +147,7 @@ describe('trusted provider-native hook projection', () => {
 
 describe('provider-native install and doctor lifecycle', () => {
   it('emits exact matcher-less Codex groups and preserves every foreign field and handler', () => {
-    const projection = projectHookRegistrations(['agentHooks'], ['codex'], 'shared');
+    const projection = projectHookRegistrations(['agentHooks'], ['codex'], 'shared', null);
     const foreign = { type: 'command', command: 'node ./foreign-stop.mjs', timeout: 17 };
     const existing = {
       description: 'consumer-owned',
@@ -204,7 +206,7 @@ describe('provider-native install and doctor lifecycle', () => {
   });
 
   it('recognizes exact handlers inside legacy grouped Claude settings when ledger-authorized', () => {
-    const projection = projectHookRegistrations(['agentHooks'], ['claude'], 'shared');
+    const projection = projectHookRegistrations(['agentHooks'], ['claude'], 'shared', null);
     const first = installProjectedHookRegistrations({}, projection, null, 'claude', 'shared');
     const hooks = data(first.document.hooks);
     const stopGroups = list(hooks.Stop).map(data);
@@ -228,7 +230,7 @@ describe('provider-native install and doctor lifecycle', () => {
   });
 
   it('reports an authorized command moved to another matcher as drift instead of duplicating it', () => {
-    const projection = projectHookRegistrations(['searchSteering'], ['claude'], 'shared');
+    const projection = projectHookRegistrations(['searchSteering'], ['claude'], 'shared', null);
     const installed = installProjectedHookRegistrations({}, projection, null, 'claude', 'shared');
     const target = providerEntries(projection, 'claude').find(
       (entry) => entry.registrationId === 'search-steering:pre-bash',
@@ -256,7 +258,7 @@ describe('provider-native install and doctor lifecycle', () => {
   });
 
   it('preserves an identical unledgered registration as a collision instead of claiming it', () => {
-    const projection = projectHookRegistrations(['searchSteering'], ['cursor'], 'shared');
+    const projection = projectHookRegistrations(['searchSteering'], ['cursor'], 'shared', null);
     const expected = providerEntries(projection, 'cursor');
     const existing = {
       version: 1,
@@ -277,7 +279,7 @@ describe('provider-native install and doctor lifecycle', () => {
   });
 
   it('blocks a projected registration whose ledger ownership key has stale native fields', () => {
-    const projection = projectHookRegistrations(['searchSteering'], ['cursor'], 'shared');
+    const projection = projectHookRegistrations(['searchSteering'], ['cursor'], 'shared', null);
     const expected = providerEntries(projection, 'cursor');
     const target = expected[0];
     const stale = {
@@ -300,7 +302,7 @@ describe('provider-native install and doctor lifecycle', () => {
   });
 
   it('fails closed on a malformed hook block without overwriting it', () => {
-    const projection = projectHookRegistrations(['searchSteering'], ['claude'], 'shared');
+    const projection = projectHookRegistrations(['searchSteering'], ['claude'], 'shared', null);
     const existing = { consumer: true, hooks: 'foreign-format' };
     const installed = installProjectedHookRegistrations(
       existing,
@@ -317,7 +319,7 @@ describe('provider-native install and doctor lifecycle', () => {
 
 describe('ledger-authorized exact removal', () => {
   it('removes one exact Claude handler while preserving siblings, groups, and foreign keys', () => {
-    const projection = projectHookRegistrations(['agentHooks'], ['claude'], 'shared');
+    const projection = projectHookRegistrations(['agentHooks'], ['claude'], 'shared', null);
     const foreign = { type: 'command', command: 'bash ./foreign.sh', timeout: 9 };
     const existing = {
       permissions: { allow: ['Read'] },
@@ -347,7 +349,7 @@ describe('ledger-authorized exact removal', () => {
   });
 
   it('prunes only empty devkit scaffolding from a fully owned document', () => {
-    const projection = projectHookRegistrations(['agentHooks'], ['claude'], 'shared');
+    const projection = projectHookRegistrations(['agentHooks'], ['claude'], 'shared', null);
     const installed = installProjectedHookRegistrations({}, projection, null, 'claude', 'shared');
     const removed = removeLedgerAuthorizedHookRegistrations(
       installed.document,
@@ -360,7 +362,7 @@ describe('ledger-authorized exact removal', () => {
   });
 
   it('leaves duplicate, decorated, and ledger-tampered candidates untouched as drift/evidence', () => {
-    const projection = projectHookRegistrations(['searchSteering'], ['cursor'], 'shared');
+    const projection = projectHookRegistrations(['searchSteering'], ['cursor'], 'shared', null);
     const installed = installProjectedHookRegistrations({}, projection, null, 'cursor', 'shared');
     const entries = providerEntries(projection, 'cursor');
     const hooks = data(installed.document.hooks);
@@ -408,7 +410,7 @@ describe('ledger-authorized exact removal', () => {
 describe('bounded atomic ledger storage', () => {
   it('round-trips canonical data atomically without temporary siblings', () => {
     const root = tempRoot();
-    const projection = projectHookRegistrations(['searchSteering'], ['cursor'], 'shared');
+    const projection = projectHookRegistrations(['searchSteering'], ['cursor'], 'shared', null);
     const entries = providerEntries(projection, 'cursor').reverse();
     expect(readHookRegistrationLedger(root)).toBeNull();
     withAgentAssetLifecycleLock(root, false, () =>
@@ -441,7 +443,7 @@ describe('bounded atomic ledger storage', () => {
     expect(() =>
       writeHookRegistrationLedger(
         root,
-        ledger(providerEntries(projectHookRegistrations([], [], 'shared'), 'claude')),
+        ledger(providerEntries(projectHookRegistrations([], [], 'shared', null), 'claude')),
       ),
     ).toThrow(/regular file/);
     expect(readFileSync(target, 'utf8')).toBe('{}');

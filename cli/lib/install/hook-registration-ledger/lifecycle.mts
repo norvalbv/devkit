@@ -7,87 +7,33 @@ import {
   hookRegistrationDestination,
 } from './codec.mts';
 import { dataRecord, exactData } from './plain-data.mts';
+import { nativeProjection, scopeAnchor } from './projection.mts';
 import { HOOK_REGISTRATIONS } from './registrations.mts';
 
 export { withAgentAssetLifecycleLock } from '../agent-asset-manifest/lock.mts';
 export { readHookRegistrationLedger, writeHookRegistrationLedger } from './codec.mts';
 
 const TRUSTED_PROJECTIONS = new WeakSet<object>();
-const RUNNER_RE = /^(node|bash)\s+/;
-const CLAUDE_PROJECT_DIR_RE = /"\$CLAUDE_PROJECT_DIR"?\/?/g;
-const CURSOR_EVENT: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-  PreToolUse: { Bash: 'beforeShellExecution' },
-  PostToolUse: { Bash: 'afterShellExecution', 'Edit|Write|MultiEdit': 'afterFileEdit' },
-  Stop: { '': 'stop' },
-  PreCompact: { '': 'preCompact' },
-};
-
 export interface TrustedHookRegistrationProjection {
   readonly entries: readonly HookRegistrationOwnershipV1[];
 }
 
 const emptyEntries = (): HookRegistrationOwnershipV1[] => [];
 
-function codexCommand(command: string): string {
-  return command
-    .replaceAll('$CLAUDE_PROJECT_DIR', '$(git rev-parse --show-toplevel)')
-    .replaceAll('.claude/hooks/', '.codex/hooks/');
-}
-
-function cursorCommand(command: string): string {
-  return command
-    .replace(RUNNER_RE, '')
-    .replace(CLAUDE_PROJECT_DIR_RE, '')
-    .replaceAll('.claude/hooks/', '.cursor/hooks/')
-    .replaceAll('"', '')
-    .trim();
-}
-
-export function nativeProjection(
-  provider: AgentProvider,
-  registration: {
-    event: string;
-    matcher: string;
-    command: string;
-    cursorEvent?: string | null;
-    cursorMatcher?: string;
-    providers?: readonly AgentProvider[];
-  },
-): HookRegistrationOwnershipV1['native'] | null {
-  if (registration.providers && !registration.providers.includes(provider)) return null;
-  const { event, matcher, command } = registration;
-  if (provider === 'claude') return { event, matcher, command };
-  if (provider === 'codex')
-    return {
-      event,
-      matcher: matcher || null,
-      command: codexCommand(command),
-    };
-  if (registration.cursorEvent === null) return null;
-  if (registration.cursorEvent)
-    return {
-      event: registration.cursorEvent,
-      matcher: registration.cursorMatcher || null,
-      command: cursorCommand(command),
-    };
-  const cursorEvent = CURSOR_EVENT[event]?.[matcher];
-  return cursorEvent
-    ? { event: cursorEvent, matcher: null, command: cursorCommand(command) }
-    : null;
-}
-
 /** Derive the only trusted ownership candidates: current bundled registrations, provider-native. */
 export function projectHookRegistrations(
   componentIds: readonly string[],
   targets: readonly AgentProvider[],
   installScope: HookInstallScope,
+  home: string | null,
 ): TrustedHookRegistrationProjection {
   const entries: HookRegistrationOwnershipV1[] = [];
+  const anchor = scopeAnchor(installScope, home);
   for (const ownerId of new Set(componentIds)) {
     for (const registration of HOOK_REGISTRATIONS[ownerId] ?? []) {
       for (const provider of new Set(targets)) {
         if (!isAgentProvider(provider)) throw new Error('hook registration target is invalid');
-        const native = nativeProjection(provider, registration);
+        const native = nativeProjection(provider, registration, anchor);
         if (!native) continue;
         entries.push({
           registrationId: registration.registrationId,
@@ -164,11 +110,13 @@ export function transferHookRegistrationScope(
   entries: readonly HookRegistrationOwnershipV1[],
   provider: AgentProvider,
   installScope: HookInstallScope,
+  home: string,
 ): HookRegistrationOwnershipV1[] {
   const expected = projectHookRegistrations(
     Object.keys(HOOK_REGISTRATIONS),
     [provider],
     installScope,
+    home,
   ).entries;
   return entries.map(
     (entry) =>

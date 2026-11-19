@@ -4,7 +4,7 @@ import { firstDuplicateJsonKey } from '../../../../gate-engine/critique/json-dup
 import { writeFileAtomic } from '../../atomic-write.mts';
 import { isWellFormedUnicode } from '../agent-assets/agent-assets.mts';
 import { type AgentProvider, isAgentProvider } from '../agent-assets/agent-providers.mts';
-import { readBoundedRegularFile } from '../strict-bounded-file-read.mts';
+import { codeOf, readBoundedRegularFile } from '../strict-bounded-file-read.mts';
 
 export const HOOK_REGISTRATION_LEDGER_REL =
   '.devkit/agent-hook-registrations-manifest.json' as const;
@@ -46,7 +46,7 @@ const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const REGISTRATION_ID_RE = /^[a-z0-9][a-z0-9._:-]*$/;
 const EVENT_RE = /^[A-Za-z][A-Za-z0-9_-]*$/;
 const CONTROL_RANGE = String.raw`\x00-\x1F\x7F-\x9F`;
-const CONTROL_RE = new RegExp(`[${CONTROL_RANGE}]`, 'u');
+export const CONTROL_RE = new RegExp(`[${CONTROL_RANGE}]`, 'u');
 const INSTALL_SCOPES = new Set<HookInstallScope>(['shared', 'overlay']);
 
 const DESTINATION: Record<AgentProvider, Record<HookInstallScope, string>> = {
@@ -228,10 +228,6 @@ export function encodeHookRegistrationLedger(ledger: HookRegistrationLedgerV1): 
   }
   const canonical = decodeHookRegistrationLedger(json);
   return `${JSON.stringify(canonical, null, 2)}\n`;
-}
-
-function codeOf(error: unknown): string | undefined {
-  return (error as NodeJS.ErrnoException).code;
 }
 
 /** Strictly read the optional ownership ledger without following its leaf path. */

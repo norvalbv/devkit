@@ -11,6 +11,7 @@ import {
   adoptExactLegacy,
   type HookRegistrationOptions,
   handlerLocation,
+  hookHome,
   ledgerOf,
   otherScopeFile,
   otherScopePass,
@@ -59,6 +60,42 @@ function otherScopeFindings(
   return found;
 }
 
+/** devkit's shared spelling left in the shared file of an overlay repo runs beside the anchored one,
+ * no longer deduplicated by the harness; an unledgered copy is the user's to delete. */
+function unanchoredDuplicates(
+  root: string,
+  provider: AgentProvider,
+  componentIds: string[],
+  entries: HookRegistrationOwnershipV1[],
+): string[] {
+  const file = otherScopeFile(root, provider, 'overlay');
+  if (!file || !dataRecord(file.document)) return [];
+  const projection = projectHookRegistrations(componentIds, [provider], 'shared', null);
+  const ledger = ledgerOf([...projection.entries]);
+  // drifted = more than one copy, or a copy under another matcher: each still runs beside the anchor.
+  const { present, drifted } = checkProjectedHookRegistrations(
+    file.document,
+    projection,
+    ledger,
+    provider,
+    'shared',
+  );
+  return [...present, ...drifted]
+    .filter(
+      ({ registrationId }) =>
+        !entries.some(
+          (entry) =>
+            entry.provider === provider &&
+            entry.destinationRel === file.rel &&
+            entry.registrationId === registrationId,
+        ),
+    )
+    .map(
+      ({ native }) =>
+        `${provider}:unanchored-duplicate ${handlerLocation(file.rel, native)}: ${native.command}`,
+    );
+}
+
 /** Install never writes a tracked overlay destination, so everything found in it is report-only. */
 function trackedAdvisories(root: string, provider: AgentProvider, rel: string): string[] {
   const found = [`${provider}:tracked:${rel}`];
@@ -81,12 +118,15 @@ export function checkHookRegistrations(
   }: Pick<HookRegistrationOptions, 'overlay' | 'targets' | 'legacyOwnedComponentIds'> = {},
 ) {
   const scope: HookInstallScope = overlay ? 'overlay' : 'shared';
+  const home = hookHome(root);
   const ledger = readHookRegistrationLedger(root);
   const missing: string[] = [];
   const advisories: string[] = [];
   for (const provider of requireAgentProviders(targets)) {
     const rel = hookRegistrationDestination(provider, scope);
     advisories.push(...unrecognisedAdvisories(provider, otherScopeFile(root, provider, scope)));
+    if (overlay)
+      advisories.push(...unanchoredDuplicates(root, provider, componentIds, ledger?.entries ?? []));
     // Mirrors skipProvider: install never registers into a tracked overlay file, so this can't be fixed.
     if (overlay && isTracked(root, rel)) {
       advisories.push(...trackedAdvisories(root, provider, rel));
@@ -102,23 +142,29 @@ export function checkHookRegistrations(
     const document = providerDocument(root, provider, rel);
     // Reconcile the ledger, but evaluate the ORIGINAL document below — reporting only the ledger
     // half would hide a settings.json still naming a hook script that does not exist.
-    const legacy = reconcileLegacyHookCommands(ledger?.entries ?? [], provider, rel);
-    if (stripReclaimedCommands(document, provider).changed)
-      missing.push(`${provider}:retired-registration`);
+    const adopted = adoptExactLegacy(
+      ledger?.entries ?? [],
+      document,
+      legacyOwnedComponentIds,
+      provider,
+      scope,
+      home,
+    );
+    const legacy = reconcileLegacyHookCommands(adopted, provider, rel, scope, home);
+    const retired = stripReclaimedCommands(document, provider).changed;
+    if (retired) missing.push(`${provider}:retired-registration`);
     advisories.push(...unrecognisedAdvisories(provider, { rel, document }));
     const elsewhere = otherScopeFindings(root, provider, scope, ledger?.entries ?? []);
     missing.push(...elsewhere.missing);
     advisories.push(...elsewhere.advisories);
-    if (legacy.ledgerChanged) missing.push(`${provider}:superseded-registration`);
-    const effectiveLedger = legacyOwnedComponentIds?.length
-      ? ledgerOf(
-          adoptExactLegacy(legacy.entries, document, legacyOwnedComponentIds, provider, scope),
-        )
-      : ledgerOf(legacy.entries);
+    // A prior spelling the ledger already moved past is still in the document after a crashed write.
+    const leftover =
+      !retired && stripReclaimedCommands(document, provider, legacy.stripped).changed;
+    if (legacy.ledgerChanged || leftover) missing.push(`${provider}:superseded-registration`);
     const result = checkProjectedHookRegistrations(
       document,
-      projectHookRegistrations(componentIds, [provider], scope),
-      effectiveLedger,
+      projectHookRegistrations(componentIds, [provider], scope, home),
+      ledgerOf(legacy.entries),
       provider,
       scope,
     );

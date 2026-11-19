@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { writeFileAtomic } from '../../atomic-write.mts';
 import { readJson } from '../../fs-helpers.mts';
@@ -19,6 +19,7 @@ import {
   hookRegistrationDestination,
 } from './codec.mts';
 import { reconcileLegacyHookCommands } from './legacy-commands.mts';
+import { recoverProjectionHome } from './projection.mts';
 import {
   checkProjectedHookRegistrations,
   projectHookRegistrations,
@@ -42,6 +43,9 @@ export interface ProviderPlan {
   changed: boolean;
   report?: boolean;
 }
+
+/** The overlay anchor: the realpath of the root a run writes, so a symlinked cwd anchors the same. */
+export const hookHome = (root: string) => realpathSync.native(root);
 
 export const ledgerOf = (
   entries: HookRegistrationOwnershipV1[] = [],
@@ -255,20 +259,23 @@ export function reclaimPass(
   legacyOwnedComponentIds?: string[],
 ) {
   const rel = hookRegistrationDestination(provider, scope);
-  const legacy = reconcileLegacyHookCommands(entries, provider, rel);
+  const home = hookHome(root);
   const document = providerDocument(root, provider, rel);
-  const retired = stripReclaimedCommands(document, provider, legacy.stripped);
-  let next = adoptExactLegacy(
-    legacy.entries,
-    retired.document,
+  // Adopt first: a pre-ledger handler is unanchored, so reconcile must see its row to re-anchor it.
+  const adopted = adoptExactLegacy(
+    entries,
+    document,
     legacyOwnedComponentIds,
     provider,
     scope,
+    home,
   );
-  next = transferHookRegistrationScope(next, provider, scope);
+  const legacy = reconcileLegacyHookCommands(adopted, provider, rel, scope, home);
+  const retired = stripReclaimedCommands(document, provider, legacy.stripped);
+  let next = transferHookRegistrationScope(legacy.entries, provider, scope, home);
   const removed = removeLedgerAuthorizedHookRegistrations(
     retired.document,
-    projectHookRegistrations(ids, [provider], scope),
+    projectHookRegistrations(ids, [provider], scope, home),
     ledgerOf(next),
     provider,
     scope,
@@ -327,23 +334,45 @@ export function release(
   return entries.filter((entry) => !keys.has(ownedKey(entry)));
 }
 
+/** Homes the document's handlers are anchored at, each proved by re-rendering a registration. */
+function anchoredHomes(documentText: string, componentIds: string[], provider: AgentProvider) {
+  const registrations = componentIds.flatMap((id) =>
+    Object.hasOwn(HOOK_REGISTRATIONS, id) ? HOOK_REGISTRATIONS[id] : [],
+  );
+  return [...documentText.matchAll(/"command":("(?:[^"\\]|\\.)*")/g)].flatMap(([, literal]) =>
+    registrations.flatMap(
+      (registration) =>
+        recoverProjectionHome(provider, registration, String(JSON.parse(literal))) ?? [],
+    ),
+  );
+}
+
 export function adoptExactLegacy(
   entries: HookRegistrationOwnershipV1[],
   document: unknown,
   componentIds: string[] | undefined,
   provider: AgentProvider,
   scope: HookInstallScope,
+  home: string,
 ) {
   if (!componentIds || !LEGACY_AGENT_PROVIDERS.includes(provider as never)) return entries;
-  const projection = projectHookRegistrations(componentIds, [provider], scope);
-  const exact = checkProjectedHookRegistrations(
-    document,
-    projection,
-    ledgerOf([...projection.entries]),
-    provider,
-    scope,
-  );
-  return adopt(entries, exact.present);
+  // A pre-ledger install is unanchored; a lost ledger leaves an anchor, moved or not. Reconcile re-anchors.
+  const homes = [
+    home,
+    null,
+    ...anchoredHomes(JSON.stringify(document ?? {}), componentIds, provider),
+  ];
+  return [...new Set(homes)].reduce((adopted, anchor) => {
+    const projection = projectHookRegistrations(componentIds, [provider], scope, anchor);
+    const exact = checkProjectedHookRegistrations(
+      document,
+      projection,
+      ledgerOf([...projection.entries]),
+      provider,
+      scope,
+    );
+    return adopt(adopted, exact.present);
+  }, entries);
 }
 
 export function skipProvider(root: string, provider: AgentProvider, rel: string, overlay: boolean) {
@@ -394,7 +423,9 @@ export function publishPlan(
 ): HookRegistrationLedgerV1 {
   const next = ledgerOf(entries);
   if (!dryRun) {
-    const intermediate = plan.changed ? ledgerOf(adopt([...next.entries], previous.entries)) : next;
+    // Previous rows win: after a crash before the document write, the ledger still names the
+    // spelling the document holds, so a re-anchored home stays recoverable.
+    const intermediate = plan.changed ? ledgerOf(adopt([...previous.entries], next.entries)) : next;
     publishLedger(root, intermediate, previous);
     if (plan.changed) writeProvider(root, plan);
     publishLedger(root, next, intermediate);

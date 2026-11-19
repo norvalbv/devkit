@@ -14,7 +14,7 @@ interface BoundedFileReadOptions {
   limitLabel: string;
 }
 
-function codeOf(error: unknown): string | undefined {
+export function codeOf(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException).code;
 }
 
