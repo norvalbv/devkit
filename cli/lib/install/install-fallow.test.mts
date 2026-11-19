@@ -13,6 +13,7 @@ import {
   detectFallow,
   ensureFallow,
   installFallow,
+  preflightOverlayFallow,
   resolveOverlayFallow,
 } from './install-fallow.mts';
 
@@ -172,4 +173,34 @@ describe('resolveOverlayFallow', () => {
       expect(resolveOverlayFallow(cwd, false)).toBe(false);
     },
   );
+});
+
+describe('preflightOverlayFallow', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  it('passes silently when fallow resolves to the pin', () => {
+    fakeBin('fallow', 0, 'fallow 3.6.0\n');
+    fakeBin('bun', 0);
+    expect(preflightOverlayFallow(cwd, false)).toBe(true);
+    expect(spawned()).toEqual(['fallow --version', `bun add -g fallow@${FALLOW_PINNED_VERSION}`]);
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  // The 2026-11-18 fleet upgrade: fallow 3.6.0 installed, every package manager failing.
+  it('fails and names the gate it protects when a below-pin fallow cannot be upgraded', () => {
+    fakeBin('fallow', 0, 'fallow 3.6.0\n');
+    expect(preflightOverlayFallow(cwd, false)).toBe(false);
+    const printed = vi.mocked(console.error).mock.calls.flat().join('\n');
+    expect(printed).toContain(`fallow 3.6.0 is below ${FALLOW_PINNED_VERSION}`);
+    expect(printed).toContain('would turn it off');
+    expect(printed).toContain('re-run `devkit upgrade`');
+  });
+
+  it('dryRun spawns nothing and passes', () => {
+    fakeBin('fallow', 0, 'fallow 3.6.0\n');
+    expect(preflightOverlayFallow(cwd, true)).toBe(true);
+    expect(spawned()).toEqual([]);
+  });
 });

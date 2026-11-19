@@ -199,6 +199,21 @@ export function resolveOverlayFallow(cwd: string, dryRun: boolean): boolean {
   return true;
 }
 
+/**
+ * Overlay upgrade's check before its re-sync: that re-sync records a failed install as unwired,
+ * and upgrade reads its selection from the record, so failing here keeps the gate for a retry.
+ */
+export function preflightOverlayFallow(cwd: string, dryRun: boolean): boolean {
+  const r = ensureFallow({ cwd, dryRun });
+  if (r.ok) return true;
+  console.error(`  ✗ ${r.message}`);
+  console.error(
+    `  ✗ this overlay has the fallow gate on; re-syncing without fallow ${FALLOW_PINNED_VERSION} would turn it off.`,
+  );
+  console.error('    Install it with one of the commands above, then re-run `devkit upgrade`.');
+  return false;
+}
+
 // CLI smoke entry: `node install-fallow.mjs [detect|install]`. Helps verify
 // the helper by hand without the wizard.
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {

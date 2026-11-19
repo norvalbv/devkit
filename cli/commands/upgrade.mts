@@ -36,6 +36,7 @@ import {
 import { rekeyWorkingBaseline } from '../lib/install/anti-slop/baseline-envelope.mts';
 import { collectAntiSlopGroups } from '../lib/install/anti-slop/runner.mts';
 import { lockedCommand } from '../lib/install/init/init-lock.mts';
+import { preflightOverlayFallow } from '../lib/install/install-fallow.mts';
 import { retiredBiomeNotice } from '../lib/install/oxc/root-configs.mts';
 import {
   offerLineGrowth,
@@ -237,6 +238,9 @@ async function upgrade(args: string[], cwd: string): Promise<number> {
         `  ✓ installed v${latest} — running CLI already current, reconciling in this pass.`,
       );
     }
+
+    // A recorded fallow must resolve before the re-sync rewrites the record it is read back from.
+    if (cfg.components?.fallow && !preflightOverlayFallow(cwd, dryRun)) return 1;
 
     console.log(
       '\n2. re-sync (regenerate the git-ignored gate chain + configs for the recorded selection)',
