@@ -1,5 +1,5 @@
 /** The coverage copy the staged fallow gate hands fallow (gate-engine/coverage/fallow-copy.mts). */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   mkdirSync,
   mkdtempSync,
@@ -11,16 +11,28 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'node:url';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import {
+  coverageMapSchema,
   deriveForeignRoot,
   type FallowCopy,
   rebaseCoverageMap,
+  staleNotice,
   writeFallowCopy,
 } from '../fallow-copy.mts';
-import { publishManifest, stageManifest } from '../provenance.mts';
+import { publishManifest, snapshotSource, stageManifest } from '../provenance.mts';
 import { computePercentages } from '../run.mts';
-import { entry } from './_provenance-fixtures.mts';
+import {
+  cleanupRepos,
+  entry,
+  git,
+  measure,
+  repo,
+  stage,
+  trackRoot,
+  write,
+} from './_provenance-fixtures.mts';
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -58,7 +70,7 @@ const map = (branchHits: number) =>
 
 /** The text of a written copy, which is removed with the fixtures. */
 function readCopy(out: FallowCopy | null): string {
-  if (out === null) throw new Error('no copy was written');
+  if (!out?.path) throw new Error('no copy was written');
   dirs.push(out.path);
   return readFileSync(out.path, 'utf8');
 }
@@ -317,5 +329,160 @@ describe('writeFallowCopy — a scoped coverage-run', () => {
     writeFileSync(report, map(-1));
 
     expect(JSON.parse(readCopy(writeFallowCopy(top, top)))).toEqual(JSON.parse(map(0)));
+  });
+});
+
+/** A committed repo with src/a.mts and src/b.mts, measured by a full run keyed under its top. */
+function measured(snapshotArgs: string[] = []) {
+  const { root } = repo();
+  write(root, 'src/b.mts', 'export const b = 1;\n');
+  stage(root);
+  git(root, 'commit', '-q', '-m', 'b');
+  const top = git(root, 'rev-parse', '--show-toplevel');
+  const [a, b] = [`${top}/src/a.mts`, `${top}/src/b.mts`];
+  measure(
+    root,
+    snapshotSource(root, snapshotArgs),
+    JSON.stringify({ [a]: entry(a), [b]: entry(b) }),
+  );
+  return { root, top, a, b };
+}
+
+const keysOf = (copy: FallowCopy | null) =>
+  Object.keys(coverageMapSchema.parse(JSON.parse(readCopy(copy))));
+
+describe('writeFallowCopy — a full run the briefed edits postdate', () => {
+  afterEach(cleanupRepos);
+
+  it("drops a staged edit's key so fallow estimates that file alone, even where it read unaided", () => {
+    const { root, top, b } = measured();
+    write(root, 'src/a.mts', 'export const a = 2;\n');
+    stage(root);
+
+    const copy = writeFallowCopy(top, root);
+
+    expect(keysOf(copy)).toEqual([b]);
+    expect(copy?.stale).toEqual({ files: ['src/a.mts'], keys: [`${top}/src/a.mts`], tests: [] });
+  });
+
+  it('counts a comment-only edit as stale: it still moves the lines fallow joins on', () => {
+    const { root, top, b } = measured();
+    write(root, 'src/a.mts', '// header\nexport const a = 1;\n');
+    stage(root);
+    expect(keysOf(writeFallowCopy(top, root))).toEqual([b]);
+  });
+
+  it('never names a measured file the commit deletes: fallow scores nothing for it', () => {
+    const { root, top } = measured();
+    git(root, 'rm', '-q', 'src/b.mts');
+    write(root, 'src/a.mts', 'export const a = 2;\n');
+    stage(root);
+    expect(writeFallowCopy(top, root)?.stale?.files).toEqual(['src/a.mts']);
+  });
+
+  it('reports nothing stale when the only stale file is the one the commit deletes', () => {
+    const { root, top } = measured();
+    git(root, 'rm', '-q', 'src/b.mts');
+    expect(writeFallowCopy(top, root)).toBeNull();
+  });
+
+  // git reads `[id]` as a glob unless pathspecs are literal; the file must still match itself.
+  it('names a bracketed file (a dynamic-route name) the run predates', () => {
+    const { root } = repo();
+    write(root, 'src/[id].mts', 'export const id = 1;\n');
+    stage(root);
+    git(root, 'commit', '-q', '-m', 'route');
+    const top = git(root, 'rev-parse', '--show-toplevel');
+    const key = `${top}/src/[id].mts`;
+    measure(root, snapshotSource(root), JSON.stringify({ [key]: entry(key) }));
+    write(root, 'src/[id].mts', 'export const id = 2;\n');
+    stage(root);
+
+    expect(writeFallowCopy(top, root)?.stale?.files).toEqual(['src/[id].mts']);
+  });
+
+  it('writes nothing for a fresh artifact', () => {
+    const { root, top } = measured();
+    expect(writeFallowCopy(top, root)).toBeNull();
+  });
+
+  it('keeps the map and only warns when the run predates a test edit', () => {
+    const { root, top } = measured();
+    write(root, 'src/a.test.mts', 'test("a2", () => {});\n');
+    stage(root);
+
+    const copy = writeFallowCopy(top, root);
+
+    expect(copy).toEqual({ stale: { files: [], keys: [], tests: ['src/a.test.mts'] } });
+    expect(staleNotice(copy?.stale ?? { files: [], keys: [], tests: [] })).toBe(
+      'the coverage run predates edits to src/a.test.mts, so measured CRAP may be off',
+    );
+  });
+
+  it('still hands a scoped run {}, stale or not', () => {
+    const { root, top } = measured(['src/a.test.mts']);
+    write(root, 'src/a.mts', 'export const a = 2;\n');
+    stage(root);
+    const copy = writeFallowCopy(top, root);
+    expect(copy?.scopedArgs).toEqual(['src/a.test.mts']);
+    expect(readCopy(copy)).toBe('{}');
+  });
+
+  it("drops the stale key before moving another checkout's keys onto this one", () => {
+    const { root, top } = measured();
+    const wt = join(trackRoot(realpathSync(mkdtempSync(join(tmpdir(), 'fallow-copy-wt-')))), 'wt');
+    git(root, 'worktree', 'add', '-q', '--detach', wt, 'HEAD');
+    symlinkSync(join(root, 'coverage'), join(wt, 'coverage'));
+    write(wt, 'src/a.mts', 'export const a = 2;\n');
+    stage(wt);
+
+    const copy = writeFallowCopy(wt, wt);
+
+    expect(keysOf(copy)).toEqual([`${wt}/src/b.mts`]);
+    expect(copy?.stale?.keys).toEqual([`${top}/src/a.mts`]);
+  });
+
+  // fallow reads a package's own coverage/ unaided, so a copy was never written there before.
+  it("prunes a package dir's own artifact, which fallow would otherwise read stale", () => {
+    const { root, cwd } = repo('pkg');
+    write(cwd, 'src/b.mts', 'export const b = 1;\n');
+    stage(root);
+    git(root, 'commit', '-q', '-m', 'b');
+    const top = git(root, 'rev-parse', '--show-toplevel');
+    const [a, b] = [`${top}/pkg/src/a.mts`, `${top}/pkg/src/b.mts`];
+    measure(cwd, snapshotSource(cwd), JSON.stringify({ [a]: entry(a), [b]: entry(b) }));
+    write(cwd, 'src/a.mts', 'export const a = 2;\n');
+    stage(root);
+
+    const copy = writeFallowCopy(top, cwd);
+
+    expect(keysOf(copy)).toEqual([b]);
+    expect(copy?.stale?.files).toEqual(['pkg/src/a.mts']);
+  });
+
+  it('guard-coverage fallow-copy prints the copy on stdout and the stale files on stderr', () => {
+    const { root } = measured();
+    write(root, 'src/a.mts', 'export const a = 2;\n');
+    stage(root);
+    const cli = fileURLToPath(new URL('../run.mts', import.meta.url));
+
+    const r = spawnSync(process.execPath, [cli, 'fallow-copy'], { cwd: root, encoding: 'utf8' });
+
+    expect(r.status, r.stderr).toBe(0);
+    dirs.push(r.stdout.trim());
+    expect(
+      Object.keys(coverageMapSchema.parse(JSON.parse(readFileSync(r.stdout.trim(), 'utf8')))),
+    ).toHaveLength(1);
+    expect(r.stderr).toContain(
+      'devkit fallow gate: fallow scores CRAP for 1 file(s) from static estimates — coverage predates their edits: src/a.mts; re-measure with a full `devkit coverage-run`',
+    );
+  });
+});
+
+describe('staleNotice', () => {
+  it('names the estimated files, then the test edits, on one line', () => {
+    expect(staleNotice({ files: ['a.mts', 'b.mts'], keys: [], tests: ['a.test.mts'] })).toBe(
+      'fallow scores CRAP for 2 file(s) from static estimates — coverage predates their edits: a.mts, b.mts; re-measure with a full `devkit coverage-run` · the coverage run predates edits to a.test.mts, so measured CRAP may be off',
+    );
   });
 });

@@ -273,7 +273,7 @@ describe('estimated CRAP marker', () => {
 
   it('names the devkit remedy when a CRAP-only finding was scored without coverage', () => {
     const estimated =
-      'verdict=fail (CRAP estimated, no coverage: run `devkit coverage-run <their tests>` in this checkout, then re-ship) · 1 complexity introduced: a.ts:1 — read the fallow section of the log';
+      'verdict=fail (CRAP estimated: measure it with a full `devkit coverage-run` in this checkout, then re-ship) · 1 complexity introduced: a.ts:1 — read the fallow section of the log';
     expect(detail(findings(finding()))).toBe(estimated);
     expect(detail(findings(finding({ coverage_source: 'estimated_component_inherited' })))).toBe(
       estimated,

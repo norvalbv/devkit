@@ -25,7 +25,7 @@ import {
   reviewNotMeasuredEmpty,
 } from './gate-shared.mts';
 import { resolveScope, runDiffCoverage } from './diff-gate.mts';
-import { writeFallowCopy } from './fallow-copy.mts';
+import { staleNotice, writeFallowCopy } from './fallow-copy.mts';
 import { lineHits } from './lines.mts';
 // Shared with the PRODUCER (`devkit coverage-run`) so the path this gate reads and the path that
 // runner writes can never drift apart.
@@ -319,7 +319,8 @@ function runFallowCopy(cwd: string): number {
   try {
     const copy = writeFallowCopy(repoTop(cwd), cwd);
     if (copy === null) return 0;
-    console.log(copy.path);
+    if (copy.path) console.log(copy.path);
+    if (copy.stale) console.error(`devkit fallow gate: ${staleNotice(copy.stale)}`);
     if (copy.scopedArgs) {
       console.error(
         `devkit fallow gate: the coverage artifact came from a scoped run (\`devkit coverage-run ${copy.scopedArgs.join(' ')}\`) — CRAP is estimated for this audit.`,

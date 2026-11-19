@@ -289,6 +289,33 @@ describe.skipIf(!hasFallow)('coverage-rebase against the real fallow binary', ()
     },
   );
 
+  // The pruning premise: a non-empty map missing a file must estimate it, never credit it as covered.
+  it('scores a staged file the full run predates from estimates while the map stays non-empty', () => {
+    const { wt, source, audit } = seedFallowCheckout('', 5, [5, 0]);
+    const report = join(source, 'coverage-final.json');
+    const other = `${realpathSync(wt)}/src/other.js`;
+    const measured = coverageMapSchema.parse(JSON.parse(readFileSync(report, 'utf8')));
+    const [fnEntry] = Object.values(measured);
+    writeFileSync(report, JSON.stringify({ ...measured, [other]: { ...fnEntry, path: other } }));
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: wt, encoding: 'utf8' }).trim();
+    const snapshot = { roots: [realpathSync(wt)], head, dirty: {}, args: [] };
+    publishManifest(stageManifest(join(source, '.runs'), report, snapshot, 'run-1'), source);
+
+    const unpruned = audit({ FALLOW_COVERAGE: report });
+    const result = rebaseWorktreeCoverage(wt, source, outFor(wt));
+    const after = audit({ FALLOW_COVERAGE: outFor(wt) });
+
+    expect(unpruned).not.toContain('"coverage_source":"estimated"');
+    expect(result).toEqual({
+      root: null,
+      stale: { files: ['src/a.js'], keys: [`${realpathSync(wt)}/src/a.js`], tests: [] },
+    });
+    const pruned = coverageMapSchema.parse(JSON.parse(readFileSync(outFor(wt), 'utf8')));
+    expect(Object.keys(pruned)).toEqual([other]);
+    expect(after).not.toContain('"error":true');
+    expect(after).toContain('"coverage_source":"estimated"');
+  });
+
   // fallow reads <cwd>/coverage when FALLOW_COVERAGE is unset, so only the empty map stops the 0%.
   it("scores a scoped run's loaded-but-unrun function from estimates, not as measured 0%", () => {
     const { wt, source, audit } = seedFallowCheckout('', 0, [0, 0]);

@@ -1,13 +1,16 @@
 /** sc-3225 provenance survives ship's fallow rekey (sc-1292): the gate reads the linked artifact
  * byte-exact, so a fresh run passes with its run id and an unseen production edit still blocks. */
-import { mkdtempSync, readFileSync, symlinkSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { rebaseWorktreeCoverage } from '../../../cli/lib/ship/coverage/coverage-rebase.mts';
 import { coverageMapSchema } from '../fallow-copy.mts';
 import {
   cleanupRepos,
+  entry,
   gate,
   git,
   measure,
@@ -16,6 +19,10 @@ import {
   trackRoot,
   write,
 } from './_provenance-fixtures.mts';
+
+const helper = fileURLToPath(
+  new URL('../../../cli/lib/ship/coverage/coverage-rebase.mts', import.meta.url),
+);
 
 beforeEach(() => {
   vi.stubEnv('GUARD_COVERAGE_OK', '');
@@ -80,5 +87,47 @@ describe('ship: coverage provenance after the fallow rekey', () => {
       '"b":{"0":[1,-1]}',
     );
     expect(readFileSync(out, 'utf8')).toContain('"b":{"0":[1,0]}');
+  });
+});
+
+describe('ship: a full run the staged edits postdate', () => {
+  it("drops the stale file's key before the rekey and names the file", () => {
+    const { root } = repo();
+    write(root, 'src/b.mts', 'export const b = 1;\n');
+    stage(root);
+    git(root, 'commit', '-q', '-m', 'b');
+    const [a, b] = [`${root}/src/a.mts`, `${root}/src/b.mts`];
+    measure(root, undefined, JSON.stringify({ [a]: entry(a), [b]: entry(b) }));
+    const wt = join(trackRoot(mkdtempSync(join(tmpdir(), 'coverage-ship-stale-'))), 'wt');
+    git(root, 'worktree', 'add', '-q', '--detach', wt, 'HEAD');
+    write(wt, 'src/a.mts', '// header\nexport const a = 1;\n');
+    stage(wt);
+    const out = join(wt, '..', 'fallow-coverage.json');
+
+    const result = rebaseWorktreeCoverage(wt, join(root, 'coverage'), out);
+
+    expect(result).toEqual({ root, stale: { files: ['src/a.mts'], keys: [a], tests: [] } });
+    const keys = Object.keys(coverageMapSchema.parse(JSON.parse(readFileSync(out, 'utf8'))));
+    expect(keys).toEqual([`${realpathSync(wt)}/src/b.mts`]);
+  });
+
+  it('prints `pruned` when the keys already sit at the worktree and only stale keys were dropped', () => {
+    const { root } = repo();
+    const top = git(root, 'rev-parse', '--show-toplevel');
+    const a = `${top}/src/a.mts`;
+    measure(root, undefined, JSON.stringify({ [a]: entry(a) }));
+    write(root, 'src/a.mts', 'export const a = 2;\n');
+    stage(root);
+    const out = join(trackRoot(mkdtempSync(join(tmpdir(), 'coverage-ship-pruned-'))), 'f.json');
+
+    const r = spawnSync(process.execPath, [helper, root, join(root, 'coverage'), out], {
+      encoding: 'utf8',
+    });
+
+    expect(r.stdout).toBe('pruned\n');
+    expect(r.stderr).toContain(
+      'devkit ship: fallow scores CRAP for 1 file(s) from static estimates',
+    );
+    expect(readFileSync(out, 'utf8')).toBe('{}');
   });
 });
