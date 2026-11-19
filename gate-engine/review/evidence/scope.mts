@@ -169,7 +169,7 @@ export function reportNonRuns(
   }
   if (staged.length > 0 && selected.length === 0 && alreadyReported.size === 0)
     console.error(
-      `guard-review: no reviewer ran — none of the ${staged.length} staged file(s) is in review scope ` +
+      `guard-review: SKIPPED — no domain reviewer ran; none of the ${staged.length} staged file(s) is in review scope ` +
         '(scanRoots, review roots and review.paths in guard.config.json)',
     );
   emitUnselected(selected, alreadyReported);

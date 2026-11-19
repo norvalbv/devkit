@@ -3,12 +3,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { GATE_REASON_ENV } from '../reason.mts';
 import { runDeterministic } from '../run.mts';
 
 const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   delete process.env.DEVKIT_SHIP;
+  delete process.env.GUARD_HOOK_PARITY_OK;
   delete process.env.GUARD_DETERMINISTIC_STRICT;
   delete process.env.FRINK_DETERMINISTIC_STRICT;
   vi.restoreAllMocks();
@@ -61,12 +63,16 @@ describe('runDeterministic — a line names each gate as it starts', () => {
     expect(events).toEqual([
       '▶ deterministic: guard-size',
       'exec node',
+      '  ✓ guard-size passed',
       '▶ deterministic: hook-parity',
       'exec true',
+      '  ✓ hook-parity passed',
       '▶ deterministic: knip',
       'exec knip',
+      '  ✓ knip passed',
       '▶ deterministic: structure-lint',
       'exec eslint',
+      '  ✓ structure-lint passed',
     ]);
   });
 
@@ -100,5 +106,59 @@ describe('runDeterministic — a line names each gate as it starts', () => {
 
     expect(starts()).toEqual([]);
     expect(err.mock.calls.flat().join('\n')).toContain('empty(unrunnable: empty command)');
+  });
+});
+
+describe('runDeterministic — a verdict line closes each gate header', () => {
+  // Throws what execFileSync throws for a gate exiting non-zero or timing out, keyed on its argv.
+  const failing = (byArg: Record<string, { status?: number; code?: string }>) => {
+    const t = timeline();
+    t.exec.mockImplementation((cmd: string, args: string[] = []) => {
+      t.events.push(`exec ${cmd}`);
+      const hit = Object.entries(byArg).find(([k]) => [cmd, ...args].some((a) => a.includes(k)));
+      if (hit) throw Object.assign(new Error(cmd), hit[1]);
+    });
+    return t;
+  };
+
+  it('names a failure, an opt-out and a timeout, never as passed', () => {
+    const { events, exec } = failing({
+      false: { status: 1 },
+      matcher: { status: 2 },
+      slow: { code: 'ETIMEDOUT' },
+      eslint: { status: 2 },
+    });
+    const d = repo(['dup'], { hang: 'slow' });
+    const extra = [{ label: 'hook-parity', cmd: 'false' }];
+
+    expect(runDeterministic(d, { exec, extra, structure: 'eslint src' })).toBe(1);
+
+    expect(events.filter((l) => l.startsWith('  '))).toEqual([
+      '  ⚠ guard-dup opted out — did NOT run',
+      '  ✗ hook-parity failed',
+      '  ✗ hang could not run',
+      '  ✗ structure-lint could not run',
+    ]);
+  });
+
+  it('marks a registry gate that passed with a withheld note as DEGRADED', () => {
+    const { events, exec } = timeline();
+    exec.mockImplementation((_cmd: string, _args: string[], opts: { env: NodeJS.ProcessEnv }) => {
+      writeFileSync(String(opts.env[GATE_REASON_ENV]), 'semantic index unavailable\n');
+    });
+
+    expect(runDeterministic(repo(['size']), { exec })).toBe(0);
+
+    expect(events).toContain('  ⚠ guard-size passed (DEGRADED)');
+  });
+
+  it('marks a gate that passed through its own bypass flag as BYPASSED', () => {
+    process.env.GUARD_HOOK_PARITY_OK = '1';
+    const { events, exec } = timeline();
+    const extra = [{ label: 'hook-parity', cmd: 'true' }];
+
+    expect(runDeterministic(repo([]), { exec, extra })).toBe(0);
+
+    expect(events).toContain('  ⚠ hook-parity BYPASSED — verified nothing');
   });
 });

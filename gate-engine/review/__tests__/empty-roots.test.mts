@@ -123,12 +123,14 @@ describe('reportNonRuns', () => {
   const notices = (alreadyReported: Set<string>) => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     reportNonRuns(['relay/index.ts', 'README.md'], inverted, [], alreadyReported);
-    return spy.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('no reviewer ran'));
+    return spy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((l) => l.includes('no domain reviewer ran'));
   };
 
   it('says so when path scope leaves the commit with no reviewer at all', () => {
     expect(notices(new Set())).toEqual([
-      'guard-review: no reviewer ran — none of the 2 staged file(s) is in review scope ' +
+      'guard-review: SKIPPED — no domain reviewer ran; none of the 2 staged file(s) is in review scope ' +
         '(scanRoots, review roots and review.paths in guard.config.json)',
     ]);
   });
