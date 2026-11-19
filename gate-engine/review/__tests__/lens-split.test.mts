@@ -102,6 +102,13 @@ describe('deriveLensReviewer', () => {
     );
   });
 
+  // The chunk drives the judge's DEVKIT_CORRECTNESS_CHUNK, so a stale one would pin the wrong file.
+  it('re-deriving without a chunk drops the chunk its input carried', () => {
+    const again = deriveLensReviewer(deriveLensReviewer(base, group, 1), group);
+    expect(again.chunk).toBeUndefined();
+    expect(again.stateFile).not.toContain('+c');
+  });
+
   it('leaves the undivided reviewer untouched', () => {
     expect(base.stateFile).toBe('.claude/.correctness-review.json');
     expect(base.cmds.gen).toBe('generate');

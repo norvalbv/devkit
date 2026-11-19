@@ -777,6 +777,7 @@ const correctness = (repo, args, env = {}) =>
   spawnSync('node', [CORRECTNESS, ...args], {
     cwd: repo,
     encoding: 'utf8',
+    timeout: 60_000,
     env: { ...process.env, DEVKIT_CHECKLIST_KEEP: '1', ...env },
   });
 
@@ -975,6 +976,18 @@ describe('correctness checklist — the gate pins a lens judge to its own scope'
 
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(existsSync(statePath(repo, group))).toBe(true);
+  });
+
+  it('reads a zero-padded --chunk as the pinned chunk it names', () => {
+    const repo = stagedRepo();
+
+    const r = correctness(repo, ['generate', '--chunk', '02'], {
+      ...PIN,
+      DEVKIT_CORRECTNESS_CHUNK: '2',
+    });
+
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(existsSync(statePath(repo, 'state-transitions+c2'))).toBe(true);
   });
 
   it("a derived lens judge's spawn env lands a bare generate on the reviewer's own state file", () => {

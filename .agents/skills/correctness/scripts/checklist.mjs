@@ -68,7 +68,7 @@ function extractChunk(argv) {
     console.error('❌ --chunk must be a non-negative integer chunk index');
     process.exit(1);
   }
-  return { chunk: raw, rest: [...argv.slice(0, i), ...argv.slice(i + 2)] };
+  return { chunk: String(Number(raw)), rest: [...argv.slice(0, i), ...argv.slice(i + 2)] };
 }
 
 // Group-scoped path. Sorted so the SAME group always resolves to the same file regardless of the

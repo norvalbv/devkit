@@ -91,6 +91,7 @@ export function deriveLensReviewer(
   const derived: ChecklistReviewer = {
     ...reviewer,
     lens: group,
+    chunk,
     stateFile: `.claude/.correctness-review-${lensGroupId(group)}${chunk === undefined ? '' : `+c${chunk}`}.json`,
     cmds: Object.freeze({
       gen: `${reviewer.cmds.gen} ${arg}`,
@@ -98,6 +99,5 @@ export function deriveLensReviewer(
       fin: `${reviewer.cmds.fin ?? 'finalize'} ${arg}`,
     }),
   };
-  if (chunk !== undefined) derived.chunk = chunk;
   return Object.freeze(derived);
 }
