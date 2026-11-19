@@ -1,11 +1,11 @@
 /** workspaceRoot: the edit hooks act on the linked worktree the payload cwd names, keeping the project's
  * offset inside it, while CLAUDE_PROJECT_DIR stays on the main checkout. */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { workspaceRoot } from '../../agents-hooks/edit-targets-lib.mjs';
+import { rootOf, workspaceRoot } from '../../agents-hooks/edit-targets-lib.mjs';
 import { rootRegistry } from './_helpers.mts';
 import { mainWithWorktree } from './_worktree-fixture.mts';
 
@@ -70,6 +70,28 @@ describe('workspaceRoot', () => {
     const link = join(mkTmp('link-'), 'api');
     symlinkSync(join(main, 'packages', 'api'), link);
     expect(rootFor(link, worktree)).toBe(join(worktree, 'packages', 'api'));
+  });
+
+  // Catches git's physical --show-cdup joined onto a symlinked cwd: the root landed above the worktree.
+  it('moves to the worktree when the payload cwd is a symlink into one of its subdirectories', () => {
+    const { main, worktree } = mainWithWorktree(mkTmp);
+    mkdirSync(join(worktree, 'packages', 'web'), { recursive: true });
+    const link = join(mkTmp('cwd-link-'), 'web');
+    symlinkSync(join(worktree, 'packages', 'web'), link);
+    expect(rootFor(main, link)).toBe(realpathSync(worktree));
+  });
+});
+
+describe('rootOf', () => {
+  // Catches a lexical-only match: a physical apply_patch path missed a root named through a symlink.
+  it('matches a root in the spelling the file uses, logical or physical', () => {
+    const main = mkTmp('rootof-');
+    const link = join(mkTmp('rootof-link-'), 'project');
+    symlinkSync(main, link);
+    const physical = realpathSync(main);
+    expect(rootOf([link], join(link, 'src/a.ts'))).toBe(link);
+    expect(rootOf([link], join(physical, 'src/a.ts'))).toBe(physical);
+    expect(rootOf([link], join(mkTmp('rootof-other-'), 'a.ts'))).toBeUndefined();
   });
 });
 

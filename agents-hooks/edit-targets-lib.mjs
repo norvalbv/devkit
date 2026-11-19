@@ -67,29 +67,33 @@ function revParse(dir, ...args) {
 
 /**
  * The checkout to act on: the project's directory inside the linked worktree holding the payload cwd,
- * spelled as the cwd spells it. The same checkout, an unrelated repository or no cwd keeps projectRoot().
+ * spelled as the cwd spells it unless a symlinked cwd breaks that spelling. The same checkout, an
+ * unrelated repository or no cwd keeps `project`.
  */
-export function workspaceRoot(input) {
-  const project = projectRoot();
+export function workspaceRoot(input, project = projectRoot()) {
   if (!input?.cwd?.trim?.()) return project;
   const at = ['--path-format=absolute', '--show-toplevel', '--git-common-dir'];
   const [cdup, top, common] = revParse(input.cwd, '--show-cdup', ...at);
   const [projectTop, projectCommon] = revParse(project, ...at);
   if (!common || common !== projectCommon || top === projectTop) return project;
-  return path.join(path.resolve(input.cwd, cdup), path.relative(projectTop, baseDir(project)));
+  const logical = path.resolve(input.cwd, cdup);
+  const checkout = baseDir(logical) === top ? logical : top;
+  return path.join(checkout, path.relative(projectTop, baseDir(project)));
 }
 
 /** The checkouts an edit may land in: the payload cwd's worktree first, then the project root. */
 export function hookRoots(input) {
-  return [...new Set([workspaceRoot(input), projectRoot()].map((root) => path.resolve(root)))];
+  const project = projectRoot();
+  return [...new Set([workspaceRoot(input, project), project].map((root) => path.resolve(root)))];
 }
 
-/** The first of `roots` holding `file`, or undefined. */
+/** The first of `roots` holding `file`, in whichever spelling (as given or physical) `file` uses. */
 export function rootOf(roots, file) {
-  return roots.find((root) => {
-    const rel = path.relative(root, file);
-    return rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
-  });
+  for (const spelling of roots.flatMap((root) => [...new Set([root, baseDir(root)])])) {
+    const rel = path.relative(spelling, file);
+    if (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)) return spelling;
+  }
+  return undefined;
 }
 
 function main() {
