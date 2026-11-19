@@ -36,7 +36,7 @@ function fingerprint(lens: string, issue: string): string {
   // findings in one file: fold those on the exact line only.
   if (loc && lensIsCitedFile(lens, loc[1])) return `${lens}||${loc[2]}`;
   if (loc) return `${lens}|${loc[1]}|${Math.floor(Number(loc[2]) / LINE_BUCKET)}`;
-  return `${lens}|${issue.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 80)}`;
+  return `${lens}|${issue.toLowerCase().replace(/\s+/g, ' ').trim()}`;
 }
 
 /** Only lenses the gate still holds against the commit: waived and out-of-charter-dropped lenses
@@ -59,7 +59,8 @@ export function summarizeFindings(items: FindingItem[] | undefined): FindingsSum
   for (const item of items ?? []) {
     if (!isBlockingItem(item)) continue;
     for (const issue of item.issues ?? []) {
-      const key = fingerprint(item.lens, issue);
+      // Per fingerprint: a chunk's finding folded into another chunk's line could not be waived.
+      const key = `${item.fp ?? ''}\0${fingerprint(item.lens, issue)}`;
       if (seen.has(key)) {
         summary.deduped += 1;
         continue;

@@ -95,6 +95,13 @@ describe('summarizeFindings', () => {
     expect(s.total).toBe(1);
   });
 
+  it('keeps two location-less issues that differ only past their first 80 characters', () => {
+    const head = 'the retry loop never backs off when the upstream answers with a throttle, so it ';
+    const s = summarizeFindings([item('lens', [`${head}spins`, `${head}starves the queue`])]);
+    expect(s.total).toBe(2);
+    expect(s.deduped).toBe(0);
+  });
+
   it('does not mistake host:port for file:line — distinct findings stay distinct', () => {
     const s = summarizeFindings([
       item('transport', [
@@ -187,6 +194,20 @@ describe('renderFindingsBlockForParts', () => {
     expect(linesWith(block, 'bbbbbbbbbbbb')).toEqual([
       '  • concurrency-races [bbbbbbbbbbbb] · src/b.ts:80 — race at src/b.ts:80',
     ]);
+  });
+
+  it("keeps a chunk's repeat of another chunk's finding on its own fingerprint line", () => {
+    const chunk = (fp: string) =>
+      failing({
+        items: [item('concurrency-races', ['race at src/a.ts:12'])],
+        blocking: [{ lens: 'concurrency-races', fp }],
+      });
+    const block = renderFindingsBlockForParts('correctness-reviewer', [
+      chunk('aaaaaaaaaaaa'),
+      chunk('bbbbbbbbbbbb'),
+    ]);
+    expect(linesWith(block, 'aaaaaaaaaaaa')).toHaveLength(1);
+    expect(linesWith(block, 'bbbbbbbbbbbb')).toHaveLength(1);
   });
 
   it("falls back to a part's only fingerprint when its lenses are file paths", () => {
