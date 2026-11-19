@@ -192,7 +192,7 @@ ship digest shows as unverified. In a linked or ship worktree with an `indexComm
 the primary's index and refreshes the copy (`{staged-csv}` names the staged files), so an edited symbol
 is re-judged; a refresh that stops short names the symbols it left unembedded. Without an
 `indexCommand` an edited symbol is only dropped, and `devkit doctor` says so as `search-code refresh`
-with the line to add; `devkit doctor --fix` adds it when search-code is the recorded selection.
+with the line to add; `devkit doctor --fix` adds it when search-code is the recorded selection and guard.config.json is not on one line.
 
 ## `devkit doctor` reports `search-code index: DRIFT` or `MISSING`
 

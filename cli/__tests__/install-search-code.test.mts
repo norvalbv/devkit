@@ -191,8 +191,8 @@ describe('installSearchCode indexCommand', () => {
   });
 
   // An empty path is no path: the matcher would resolve it to the checkout directory.
-  it('replaces an empty indexPath like a null', () => {
-    expect(JSON.parse(wired('{\n  "indexPath": ""\n}\n').text).indexPath).toBe(
+  it.each(['""', '" "'])('replaces a blank indexPath (%s) like a null', (value) => {
+    expect(JSON.parse(wired(`{\n  "indexPath": ${value}\n}\n`).text).indexPath).toBe(
       '.search-code/index.db',
     );
   });

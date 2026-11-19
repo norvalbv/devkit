@@ -25,7 +25,7 @@ function repo(
   usable: number,
 ): string {
   const root = mkTmp('doctor-index-command-');
-  writeFileSync(join(root, 'guard.config.json'), JSON.stringify(config));
+  writeFileSync(join(root, 'guard.config.json'), JSON.stringify(config, null, 2));
   mkdirSync(join(root, '.search-code'));
   const db = new DatabaseSync(join(root, '.search-code', 'index.db'));
   db.exec('CREATE TABLE chunks (symbol_name TEXT, embedding BLOB, code_embedding BLOB)');
@@ -58,6 +58,14 @@ describe('doctor — a populated index with no indexCommand', () => {
       sentry: false,
     });
     expect(results.find((r) => r.name === INDEX_REFRESH_CHECK)).toMatchObject({ fixable: true });
+  });
+
+  // init's insert needs a newline after `{`; a fixable row there would re-run init on every --fix.
+  it('is not fixable on a one-line guard.config.json, which init cannot insert into', async () => {
+    const root = repo(WIRED, 2);
+    writeFileSync(join(root, 'guard.config.json'), JSON.stringify(WIRED));
+    const results = await checkGuardConfig(root, true, true, { review: false, sentry: false });
+    expect(results.find((r) => r.name === INDEX_REFRESH_CHECK)).toMatchObject({ fixable: false });
   });
 
   it('reaches the overlay / self-host advisory, which prints only named rows', async () => {

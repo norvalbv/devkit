@@ -35,8 +35,8 @@ const STARTER = `{
 }
 `;
 
-const INDEXPATH_UNSET_RE = /("indexPath"\s*:\s*)(?:null|"")/;
-const INDEXPATH_SET_RE = /"indexPath"\s*:\s*"[^"]+"/;
+const INDEXPATH_UNSET_RE = /("indexPath"\s*:\s*)(?:null|"\s*")/;
+const INDEXPATH_SET_RE = /"indexPath"\s*:\s*"\s*[^"\s][^"]*"/;
 const OPEN_BRACE_RE = /^(\s*\{\s*\n)/;
 // The real key only: a `"//indexCommand"` guidance key has a slash before the `i`, not a quote.
 const INDEXCOMMAND_KEY_RE = /"indexCommand"\s*:/;
@@ -62,7 +62,7 @@ function appendMissingLine(cwd: string, line: string, dryRun: boolean): void {
 }
 
 // Point guard-dup's matcher at the index via guard.config.json `indexPath` (null = opted out). The
-// template ships no indexPath, so insert it; a null or "" is replaced and a configured path kept. Regex
+// template ships no indexPath, so insert it; a null or blank is replaced and a configured path kept. Regex
 // (not JSON round-trip) preserves the //-comment guidance keys, matching the --scan-root patch in init.
 function wireIndex(cwd: string, dryRun: boolean): void {
   const p = join(cwd, 'guard.config.json');
@@ -154,7 +154,8 @@ export function guardConfigKeyPresent(cwd: string, key: string): boolean {
 
 /** doctor's advisory for a populated index with no indexCommand, whose edited functions the dup gate
  * drops as stale. Silent on an empty index: a refresh there is a cold build on every commit.
- * `fixable` when search-code is the recorded selection: --fix re-runs init --search-code, which adds it. */
+ * `fixable` only where --fix's re-run of init --search-code can add it: search-code is the recorded
+ * selection and the config is not on one line (the insert needs a newline after `{`). */
 export function indexCommandRows(
   cwd: string,
   indexPath: string | null,
@@ -169,7 +170,8 @@ export function indexCommandRows(
       'DRIFT',
       'guard.config.json sets no `indexCommand`, so the dup gate never refreshes the index: a function edited since the last index is dropped from its flagged pair as stale instead of re-judged',
       `add "indexCommand": "${DEFAULT_INDEX_COMMAND}" to guard.config.json (or export GUARD_INDEX_COMMAND). Deliberate? Write "indexCommand": null to declare it.`,
-      searchCodeSelected,
+      searchCodeSelected &&
+        OPEN_BRACE_RE.test(readFileSync(join(cwd, 'guard.config.json'), 'utf8')),
       true,
     ),
   ];
