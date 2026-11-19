@@ -6,7 +6,7 @@
  * The engine indexes a repo IFF it finds `search-code.config.json` at the root (its opt-in gate),
  * so writing that file is what "enables search-code here" means.
  */
-import { appendFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   indexToInspect,
@@ -85,7 +85,9 @@ function wireIndex(cwd: string, dryRun: boolean): void {
   const insertable = OPEN_BRACE_RE.test(next);
   if (!keptCommand && insertable)
     next = next.replace(OPEN_BRACE_RE, `$1  "indexCommand": "${DEFAULT_INDEX_COMMAND}",\n`);
-  if (!dryRun) writeFileAtomic(p, next);
+  // Through a symlinked config to its target, keeping that file's mode.
+  const target = realpathSync(p);
+  if (!dryRun) writeFileAtomic(target, next, statSync(target).mode & 0o777);
   const verb = dryRun ? '[dry-run] set' : '✓ set';
   console.log(`  ${verb} indexPath in guard.config.json`);
   if (keptCommand) console.log('  • kept indexCommand in guard.config.json');

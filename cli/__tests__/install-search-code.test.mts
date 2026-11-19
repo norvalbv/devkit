@@ -193,6 +193,20 @@ describe('installSearchCode indexCommand', () => {
     expect(cfg.indexCommand).toBe(DEFAULT_INDEX_COMMAND);
   });
 
+  // An atomic rename over a link would replace it with a copy and drop the file's mode.
+  it('writes through a symlinked guard.config.json and keeps its mode', () => {
+    const root = tmpRepo();
+    const real = join(root, 'shared-guard.json');
+    writeFileSync(real, '{\n  "guards": []\n}\n');
+    fs.chmodSync(real, 0o600);
+    fs.symlinkSync(real, join(root, 'guard.config.json'));
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    installSearchCode(root, false);
+    expect(fs.lstatSync(join(root, 'guard.config.json')).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(readFileSync(real, 'utf8')).indexCommand).toBe(DEFAULT_INDEX_COMMAND);
+    expect(fs.statSync(real).mode & 0o777).toBe(0o600);
+  });
+
   it('dry-run leaves guard.config.json as it was', () => {
     expect(wired('{\n  "guards": []\n}\n', true).text).toBe('{\n  "guards": []\n}\n');
   });
