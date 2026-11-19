@@ -40,16 +40,40 @@ export type Action = 'copy' | 'keep' | 'merge' | 'refuse';
 
 const PLAIN_PATH = /^[\w./@+-]+$/;
 const LITERAL_GIT_ENV = literalPathspecEnv();
+/** Past any local plumbing call on a loaded machine; a reship must never hold its ship slot forever. */
+const GIT_TIMEOUT_MS = 60_000;
 
 /** Run git in <root> with literal pathspecs; stdout bytes, or null on a non-zero exit. */
-function git(root: string, args: string[], input?: Buffer): Buffer | null {
+function git(root: string, args: string[]): Buffer | null {
   const r = spawnSync('git', ['-C', root, '--literal-pathspecs', ...args], {
-    input,
     env: LITERAL_GIT_ENV,
-    stdio: ['pipe', 'pipe', 'ignore'],
+    stdio: ['ignore', 'pipe', 'ignore'],
     maxBuffer: 1 << 30,
+    timeout: GIT_TIMEOUT_MS,
   });
+  // A killed git answered nothing: a null here would read as "absent" or "conflict" to the caller.
+  if (r.error || r.signal)
+    throw new Error(`git ${args[0]} did not finish (${r.error?.message ?? r.signal})`);
   return r.status === 0 ? r.stdout : null;
+}
+
+/** <run> in a fresh temp directory, removed afterwards. */
+function inTempDir<T>(run: (dir: string) => T): T {
+  const dir = mkdtempSync(join(tmpdir(), 'reship-anchor-'));
+  try {
+    return run(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** <run>, with any error it throws prefixed by <path>. */
+function named<T>(path: string, run: () => T): T {
+  try {
+    return run();
+  } catch (e: unknown) {
+    throw new Error(`${shown(path)}: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 const lines = (out: Buffer | null): string[] =>
@@ -91,14 +115,16 @@ function readHere(abs: string): { bytes: Buffer; mode: string } | null {
 export function hereEntry(root: string, path: string): Side {
   const here = readHere(join(root, path));
   if (!here) return null;
-  const args = [
-    'hash-object',
-    '-w',
-    '--stdin',
-    ...(here.mode === '120000' ? [] : ['--path', path]),
-  ];
-  const blob = git(root, args, here.bytes)?.toString('utf8').trim();
-  if (!blob) throw new Error(`could not hash ${shown(path)}`);
+  // A symlink's target is stored as-is; a file is cleaned as if it sat at <path>.
+  const as = here.mode === '120000' ? ['--no-filters'] : ['--path', path];
+  const blob = inTempDir((dir) => {
+    const file = join(dir, 'here');
+    writeFileSync(file, here.bytes);
+    return git(root, ['hash-object', '-w', ...as, file])
+      ?.toString('utf8')
+      .trim();
+  });
+  if (!blob) throw new Error('could not hash the copy');
   return { blob, mode: here.mode };
 }
 
@@ -142,8 +168,7 @@ export function decide(here: Side, tip: Side, anchor: Side): Action {
 
 /** Three-way merge of three blobs; the merged blob, or null on a conflict or a binary file. */
 export function mergeBlobs(root: string, here: Entry, anchor: Entry, tip: Entry): string | null {
-  const dir = mkdtempSync(join(tmpdir(), 'reship-anchor-'));
-  try {
+  return inTempDir((dir) => {
     const files = [here, anchor, tip].map((e, i) => {
       const bytes = git(root, ['cat-file', 'blob', e.blob]);
       if (!bytes) throw new Error(`could not read blob ${e.blob}`);
@@ -151,14 +176,12 @@ export function mergeBlobs(root: string, here: Entry, anchor: Entry, tip: Entry)
       writeFileSync(file, bytes);
       return file;
     });
-    const merged = git(root, ['merge-file', '-p', ...files]);
+    // In place: the merge lands in the first file, hashed unfiltered like the blobs it came from.
+    if (!git(root, ['merge-file', ...files])) return null;
     return (
-      merged &&
-      (git(root, ['hash-object', '-w', '--stdin'], merged)?.toString('utf8').trim() ?? null)
+      git(root, ['hash-object', '-w', '--no-filters', files[0]])?.toString('utf8').trim() ?? null
     );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  });
 }
 
 /** Up to three commits that changed <path> on the tip after the anchor, newest first. */
@@ -342,7 +365,7 @@ function stageEntry(wt: string, path: string, entry: Side): void {
     ? git(wt, ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.blob},${path}`]) &&
       git(wt, ['checkout-index', '-f', '--', path])
     : git(wt, ['update-index', '--force-remove', '--', path]);
-  if (!ok) throw new Error(`could not stage ${shown(path)}`);
+  if (!ok) throw new Error('could not stage it');
   if (!entry) rmSync(join(wt, path), { force: true });
 }
 
@@ -352,7 +375,7 @@ export function stageAppend(
   paths: string[],
 ): number {
   const range = baseRange(root, { tip, head, baseRef }); // one F/M for every path in the run
-  const plans = paths.map((p) => planPath(root, branch, tip, head, p, range));
+  const plans = paths.map((p) => named(p, () => planPath(root, branch, tip, head, p, range)));
   const blocked = plans.filter((p) => p.action === 'refuse');
   const replace = envFlag('SHIP_REPLACE_OK');
   const inseparable = plans.filter((p) => p.base?.refuse);
@@ -401,7 +424,7 @@ export function stageAppend(
   }
   const guards: string[] = [];
   for (const p of plans) {
-    if (p.action !== 'keep') stageEntry(wt, p.path, p.merged ?? p.here);
+    if (p.action !== 'keep') named(p.path, () => stageEntry(wt, p.path, p.merged ?? p.here));
     const own = p.merged && p.here ? `${p.here.mode} ${p.here.blob}` : '=';
     const record = p.action === 'keep' ? '' : p.held ? `${own} ${p.held}` : own;
     guards.push(p.token, record, p.path);
