@@ -1,5 +1,5 @@
 {
-  "scanRoots": ["cli", "gate-engine"],
+  "scanRoots": ["cli", "gate-engine", "scripts", "e2e/lib"],
   "sourceExtensions": ["mts"],
   "fanoutCap": 12,
   "indexPath": ".search-code/index.db",

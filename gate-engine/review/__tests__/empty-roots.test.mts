@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PACKAGED_ROOT_DIRS } from '../../../cli/lib/fs-helpers.mts';
+import { oneLine } from '../../../cli/lib/ship/digest/fields.mts';
 import { resolveGuardConfig, resolveGuardConfigJson } from '../../config.mts';
 import {
   domainsDisabledByEmptyRoots,
   filesRoutedToNoDomain,
+  filesUnseenByCommitGuard,
   filesUnseenByCorrectness,
   reportNonRuns,
   REVIEW_ROUTING_ADVISORY,
@@ -530,4 +532,101 @@ describe('filesUnseenByCorrectness', () => {
       );
     },
   );
+});
+
+describe('filesUnseenByCommitGuard', () => {
+  // A backend root outside scanRoots: the reviewers see relay/, commit-guard does not.
+  const relay = make(['src'], ['src', 'relay'], []);
+  const unseen = (staged: string[], cfg = relay) =>
+    filesUnseenByCommitGuard(selectReviewers(staged, cfg), cfg);
+  const selfHost = () =>
+    resolveGuardConfigJson(
+      readFileSync(join(REPO_ROOT, 'guard.config.json'), 'utf8'),
+      '/nonexistent-cwd-defaults-only',
+    );
+
+  it("devkit's own config sends a scripts/ gate source to commit-guard, beside its test", () => {
+    const staged = ['scripts/git-pathspec-check.mts', 'cli/__tests__/git-pathspec-check.test.mts'];
+    const selection = selectReviewers(staged, selfHost());
+    expect(selection.find((s) => s.reviewer.name === 'commit-guard')?.files).toContain(
+      'scripts/git-pathspec-check.mts',
+    );
+    expect(filesUnseenByCommitGuard(selection, selfHost())).toEqual([]);
+  });
+
+  it("devkit's own config leaves no tracked source file outside commit-guard's reach", () => {
+    const tracked = execFileSync('git', ['ls-files'], { cwd: REPO_ROOT, encoding: 'utf8' })
+      .split('\n')
+      .filter(Boolean);
+    expect(tracked).toContain('e2e/lib/harness.mts');
+    expect(filesUnseenByCommitGuard(selectReviewers(tracked, selfHost()), selfHost())).toEqual([]);
+  });
+
+  it('names a declared source file a reviewer received outside scanRoots', () => {
+    expect(unseen(['relay/x.ts', 'src/a.ts'])).toEqual(['relay/x.ts']);
+  });
+
+  it('stays silent for type declarations, which hold no implementation to compare', () => {
+    expect(
+      unseen(
+        ['next-env.d.ts', 'relay/types.d.ts'],
+        make(['src'], ['src', 'relay', 'next-env.d.ts'], []),
+      ),
+    ).toEqual([]);
+  });
+
+  it('stays silent for tests, files outside sourceExtensions, and under the opt-out', () => {
+    expect(unseen(['relay/x.test.ts', 'relay/hook.mjs', 'relay/run.sh'])).toEqual([]);
+    vi.stubEnv('GUARD_REVIEW_NO_TOPOLOGY_WARN', '1');
+    expect(unseen(['relay/x.ts'])).toEqual([]);
+  });
+
+  const report = (staged: string[], cfg: typeof relay) => {
+    sinkDir = mkdtempSync(join(tmpdir(), 'review-routing-'));
+    const sink = join(sinkDir, 'events.jsonl');
+    vi.stubEnv('DEVKIT_GATE_EVENTS', sink);
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const selection = selectReviewers(staged, cfg);
+    reportNonRuns(staged, cfg, selection, new Set(), new Set(), selection);
+    const [row] = readFileSync(sink, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((event) => event.type === 'advisory_result');
+    return { lines: spy.mock.calls.map((c) => String(c[0])), detail: String(row.detail) };
+  };
+
+  it('prints a scanRoots remedy and writes the fact, never claiming guard-dup skipped it', () => {
+    const { lines, detail } = report(['relay/x.ts'], relay);
+    expect(lines).toContain(
+      'guard-review: 1 source file(s) reached no commit-guard review (relay/x.ts) — ' +
+        'add each path or its directory to scanRoots in guard.config.json',
+    );
+    expect(detail).toBe('1 source file(s) reached no commit-guard review (relay/x.ts)');
+    expect(detail).not.toContain('guard-dup');
+  });
+
+  it('names a file that missed both domain and commit-guard review once, inside the digest cut', () => {
+    // A consumer's mobile/ tree outside every root: correctness alone receives it.
+    const bare = make(['src'], ['src'], []);
+    const cfg = { ...bare, review: { ...bare.review, paths: { include: ['**'], exclude: [] } } };
+    const { lines, detail } = report(['mobile/api.ts', 'src/a.ts'], cfg);
+    expect(lines.filter((l) => l.includes('mobile/api.ts'))).toEqual([
+      'guard-review: 1 source file(s) reached no security/performance reviewer or commit-guard ' +
+        'review (mobile/api.ts) — add each path or its directory to ' +
+        'review.backendRoots/frontendRoots and scanRoots in guard.config.json',
+    ]);
+    expect(oneLine(detail)).toContain('commit-guard');
+  });
+
+  it('never re-names a file the empty-frontendRoots line already named', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bare = make([], [], []);
+    const cfg = { ...bare, review: { ...bare.review, paths: { include: ['**'], exclude: [] } } };
+    const staged = ['src/ui/App.tsx'];
+    const selection = selectReviewers(staged, cfg);
+    expect(filesUnseenByCommitGuard(selection, cfg)).toEqual(staged);
+    reportNonRuns(staged, cfg, selection, new Set(), new Set(), selection);
+    expect(spy.mock.calls.map((c) => String(c[0])).join('\n')).not.toContain('commit-guard');
+  });
 });

@@ -10,7 +10,7 @@
   },
   "//indexing": "sourceRoots mirrors guard.config.json `scanRoots` — the authored surface the dup gate scans. skills/ and templates/ are vendored assets projected into consumer repos, not devkit's own code, so indexing them would surface a consumer's copy as a duplicate of the source it was projected from.",
   "indexing": {
-    "sourceRoots": ["cli", "gate-engine"],
+    "sourceRoots": ["cli", "gate-engine", "scripts", "e2e/lib"],
     "excludePatterns": [
       "**/*.d.ts",
       "**/node_modules/**",
