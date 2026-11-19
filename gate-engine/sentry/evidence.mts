@@ -154,7 +154,7 @@ export interface PackedEvidence {
 // one had the same consequence: a capture it could not see let the cap drop a capture-bearing hunk
 // while `capturesComplete` stayed true, so the gate hard-blocked on evidence it never showed. This
 // test cannot be wrong in that direction. Over-firing only withholds a block, which is safe.
-export const CAPTURE_TOKEN_RE = /\bcapture[A-Z]/;
+const CAPTURE_TOKEN_RE = /\bcapture[A-Z]/;
 
 export const TRUNCATION_MARKER =
   '[EVIDENCE TRUNCATED — later hunks omitted; a swallow whose capture is not shown here may still be ' +
