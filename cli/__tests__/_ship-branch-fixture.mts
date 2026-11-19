@@ -106,8 +106,10 @@ export function resolve(branch, origin, opts) {
 
 export function seedShipRepo({ hookBody = 'exit 0', origin = 'git@github.com:acme/app.git' } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'shipwt-'));
-  dirs.push(dir);
-  const env = { ...process.env, ...GIT_ENV };
+  // A dry-run ship keeps its worktree under TMPDIR; beside the repo, afterAll reaps it with the rest.
+  const shipTmp = mkdtempSync(join(tmpdir(), 'shiptmp-'));
+  dirs.push(dir, shipTmp);
+  const env = { ...process.env, ...GIT_ENV, TMPDIR: shipTmp };
   const git = (args, opts = {}) =>
     execFileSync('git', args, { cwd: dir, env, encoding: 'utf8', ...opts });
   mkdirSync(join(dir, '.husky'), { recursive: true });

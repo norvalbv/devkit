@@ -720,7 +720,7 @@ if [ -z "$LOCAL_BRANCH_EXISTS" ] &&
   exit 1
 fi
 
-WT="${TMPDIR:-/tmp}/devkit-ship-${BR//\//-}-$$"
+WT=$(mktemp -u "${TMPDIR:-/tmp}/devkit-ship-${BR//\//-}.XXXXXX") # a name only; git creates the dir
 # Body: --body "<text>" wins (explicit, no temp file); then --body-file (authored once, survives
 # every retry); then — on --resume — the recorded body, with stdin never consulted (a re-run heredoc
 # does not survive a wrapper, and a closed stdin reads as a silently EMPTY body); else stdin
