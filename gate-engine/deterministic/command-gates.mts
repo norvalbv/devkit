@@ -248,6 +248,20 @@ export function emitGateStep(
   });
 }
 
+/** The line closing a gate's `▶ deterministic:` header, from the same facts as its gate_step row. */
+export function gateVerdictLine(
+  label: string,
+  failure: { verdict: boolean } | undefined,
+  optedOut: boolean,
+  degraded: boolean,
+): string {
+  if (failure) return `  ✗ ${label} ${failure.verdict ? 'failed' : 'could not run'}`;
+  if (optedOut) return `  ⚠ ${label} SKIPPED — opted out, did NOT run`;
+  if (selfBypassed(label.replace(GUARD_PREFIX_RE, '')))
+    return `  ⚠ ${label} BYPASSED — verified nothing`;
+  return degraded ? `  ⚠ ${label} passed (DEGRADED)` : `  ✓ ${label} passed`;
+}
+
 /** What runArgv returns for a gate that produced no exit within its deadline. */
 export const TIMED_OUT = 'timed-out';
 // A hang detector, not a performance budget: a slow gate on a loaded machine is still legitimate.

@@ -431,7 +431,7 @@ describe('unrouted-files notice wiring', () => {
     const repo = consumerRepo({ backend: true });
     captureEvents(repo);
     expect(await runReviewGate(repo, { exec: lensExec(repo) })).toBe(0);
-    expect(stderr()).toContain('api-security-reviewer skipped (GUARD_REVIEW_SKIP)');
+    expect(stderr()).toContain('api-security-reviewer SKIPPED (GUARD_REVIEW_SKIP)');
     expect(stderr()).not.toContain(NOTICE);
     expect(routingRows(repo)).toEqual([]);
   });

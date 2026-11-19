@@ -324,11 +324,21 @@ export function reportVerdictTranscript(name: string, status: string, ref?: stri
     console.error(`guard-review: ${name} — reviewed diff: guard-review transcript ${ref}`);
 }
 
+/** Which ship run judged a cached PASS, when the entry recorded one and this run is a ship. */
+function cachedShipRun(meta: VerdictMeta): string {
+  const run = process.env.DEVKIT_SHIP_ID;
+  if (!run || meta.ship_id === undefined) return '';
+  return meta.ship_id === run
+    ? ' · judged earlier in this ship run'
+    : ' · judged in an earlier ship run';
+}
+
 /** A cached PASS line (`tail` = its provenance), marked and reported when it replays MCP-degraded,
  * followed by the findings the PASS stored. */
 export function printCachedPass(name: string, meta: VerdictMeta, tail: string): void {
   const cause = cachedMcpDegradation(meta);
-  console.error(`guard-review: ${name} — cached PASS${cause ? ' (DEGRADED)' : ''} ${tail}`);
+  const from = cachedShipRun(meta);
+  console.error(`guard-review: ${name} — cached PASS${cause ? ' (DEGRADED)' : ''} ${tail}${from}`);
   if (cause) reportMcpDegraded(name, cause, true);
   reportAdvisories(name, cachedAdvisories(meta));
 }

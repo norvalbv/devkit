@@ -66,6 +66,7 @@ import {
   commandGate,
   emitGateStep,
   extraGatesFor,
+  gateVerdictLine,
   gateTimeoutMs,
   GUARD_PREFIX_RE,
   reportCachedBypasses,
@@ -273,7 +274,11 @@ function runGates(
       const startedAt = Date.now();
       console.log(`▶ deterministic: ${gate.label}`);
       const rc = runArgv(cwd, gate.argv, exec, reasonFile, timeoutMs, gate.label);
-      const [nFailed, nSkipped] = [out.failed.length, out.skipped.length];
+      const [nFailed, nSkipped, nDegraded] = [
+        out.failed.length,
+        out.skipped.length,
+        out.degraded.length,
+      ];
       const code = exitCodeOrBlock(out, gate, rc, timeoutMs, startedAt, reasonFile);
       if (code === null) return;
       const failRc = (suffix = '') =>
@@ -290,12 +295,10 @@ function runGates(
         } else if (code !== 0) failRc(`(unexpected:${code})`);
         else if (gate.id) noteDegraded(out, gate.id, reasonFile);
       } finally {
-        emitGateStep(
-          gate.label,
-          code,
-          startedAt,
-          out.failed[nFailed],
-          out.skipped.length > nSkipped,
+        const [failure, optedOut] = [out.failed[nFailed], out.skipped.length > nSkipped];
+        emitGateStep(gate.label, code, startedAt, failure, optedOut);
+        console.log(
+          gateVerdictLine(gate.label, failure, optedOut, out.degraded.length > nDegraded),
         );
       }
     });
@@ -343,6 +346,7 @@ function exitCodeOrBlock(
     );
   }
   emitGateStep(gate.label, failure, startedAt, out.failed[nFailed], false);
+  console.log(gateVerdictLine(gate.label, out.failed[nFailed], false, false));
   return null;
 }
 
