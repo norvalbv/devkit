@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import {
   existsSync,
   mkdirSync,
@@ -50,8 +51,16 @@ function tempRoot(): string {
   return dir;
 }
 
-afterEach(() => {
-  for (const child of children.splice(0)) child.kill('SIGKILL');
+/** A SIGKILLed child can finish a syscall in root after kill() returns, so wait for its exit. */
+async function killAndReap(list: ChildProcess[]): Promise<void> {
+  const live = list.filter((child) => child.exitCode === null && child.signalCode === null);
+  const exits = live.map((child) => once(child, 'exit'));
+  for (const child of live) child.kill('SIGKILL');
+  await Promise.all(exits);
+}
+
+afterEach(async () => {
+  await killAndReap(children.splice(0));
   for (const pgid of groups.splice(0)) {
     try {
       process.kill(-pgid, 'SIGKILL');
@@ -137,6 +146,17 @@ function readIfPresent(path: string): string {
 
 const lines = (file: string) =>
   existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n') : [];
+
+describe('ship queue test teardown', () => {
+  it('returns only once a killed child has exited, and skips one already reaped', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      stdio: 'ignore',
+    });
+    await killAndReap([child]);
+    expect(child.signalCode).toBe('SIGKILL');
+    await killAndReap([child]); // a reaped child never emits 'exit' again
+  });
+});
 
 describe('ship queue across real processes', () => {
   it('serves three ships one at a time in arrival order', async () => {
