@@ -6,11 +6,17 @@ import {
   renderComparison,
   writeStepSummary,
 } from '../../lib/baseline-status/compare.mts';
+import {
+  DEFAULT_HISTORY_RUNS,
+  queryHistory,
+  renderHistory,
+} from '../../lib/baseline-status/history.mts';
 import type { TestReportSummary } from '../../lib/baseline-status/produce.mts';
 import {
   type BaselineAnswer,
   DEFAULT_MAX_RUNS,
   type FileAnswer,
+  MAX_RUNS_CEILING,
   queryBaseline,
   queryRun,
 } from '../../lib/baseline-status/query.mts';
@@ -29,7 +35,7 @@ import {
   parseSummary,
   workflowSelector,
 } from '../../lib/baseline-status/source.mts';
-import type { TestStatus } from '../../lib/baseline-status/test-verdict.mts';
+import { type TestStatus, normaliseFilePath } from '../../lib/baseline-status/test-verdict.mts';
 import {
   type CheckRow,
   type TerminalOutcome,
@@ -50,6 +56,7 @@ Usage:
                          [--against <summary.json>]
   devkit baseline-status --run <id> [--file <path> [--test <name>]] [--json]
   devkit baseline-status --pr <n> [--json]
+  devkit baseline-status --history --file <path> [--test <name>] [--json] [--max-runs <n>]
 
   --file <path>      answer for one test file, plus the last run in which it passed
   --test <name>      with --file: answer for one test, named as the console prints it
@@ -64,6 +71,8 @@ Usage:
                      inherited, by test name where both runs recorded names; narration only, and
                      also appended to $GITHUB_STEP_SUMMARY when set
   --pr <n>           which of PR <n>'s failing checks its base already had (see below)
+  --history          the file's or test's outcome in each of the workflow's newest runs on every
+                     branch and event; --max-runs then counts runs listed (default: ${DEFAULT_HISTORY_RUNS})
 
 Reads the per-file summary artifact that \`devkit test-report-run\` uploads from a CI workflow.
 Configure both in guard.config.json — { "baselineStatus": { "workflow": "<file>", "artifact":
@@ -115,6 +124,12 @@ appends to a failed verdict: \`attribution=<inherited-only|new|unknown> inherite
 Only inherited-only says none of the red is the PR's. No check registered yet, or any still pending,
 is \`attribution=unknown reason=<no-checks|checks-pending>\`; nothing failing is \`attribution=none\`.
 Exit 2 when gh could not list the PR's checks.
+
+\`--history\` answers "is this flaky in CI?": one row per run, then \`failed X of Y\` over runs with
+a test-level verdict. A file-passed run is listed but left out of the rate, since the test may not
+exist on that branch. It names no flake: a failure on one PR branch only may be that PR's own
+change. In-flight, cancelled and artifact-less runs are listed as skipped. It cannot be combined
+with --ref, --at, --against, --run or --pr.
 Set DEVKIT_BASELINE_DEBUG=1 to surface gh's stderr.`,
 };
 
@@ -230,7 +245,9 @@ const VALUED_FLAGS = new Set([
   '--against',
   '--pr',
 ]);
-const KNOWN_FLAGS = new Set([...VALUED_FLAGS, '--json']);
+const KNOWN_FLAGS = new Set([...VALUED_FLAGS, '--json', '--history']);
+/** Options that pick one run, one branch or one comparison, which `--history` replaces. */
+const NOT_WITH_HISTORY = ['--ref', '--at', '--against', '--run', '--pr'];
 /** Options that pick the branch walk, which a named run replaces. */
 const WALK_FLAGS = ['--ref', '--max-runs', '--workflow', '--at', '--against'];
 
@@ -344,11 +361,43 @@ function renderPr(answer: PrAttribution): void {
   if (answer.detail) console.log(`   ${answer.detail}`);
 }
 
+/** `--max-runs`, or `fallback` when absent; a positive whole number or a usage error. */
+function maxRunsOf(args: string[], fallback: number): number {
+  const raw = flag(args, '--max-runs');
+  const maxRuns = raw ? Number(raw) : fallback;
+  // Integer, not merely finite: `--limit 1.5` fails inside gh, so a bad ARGUMENT would surface as
+  // a gh failure and exit 2 — the code reserved for "the query could not be performed".
+  if (!Number.isInteger(maxRuns) || maxRuns < 1) {
+    throw new UsageError(`--max-runs must be a positive whole number (got ${raw})`);
+  }
+  return maxRuns;
+}
+
+/** `--history`: the file's or test's outcome in each of the workflow's newest runs, all branches. */
+function historyStatus(args: string[], cwd: string): number {
+  const file = flag(args, '--file');
+  if (!file) throw new UsageError('--history needs --file <path>');
+  const other = NOT_WITH_HISTORY.find((name) => args.includes(name));
+  if (other) throw new UsageError(`--history reads every branch, so it cannot take ${other}`);
+  const answer = queryHistory({
+    cwd,
+    path: normaliseFilePath(cwd, file),
+    test: flag(args, '--test'),
+    maxRuns: Math.min(maxRunsOf(args, DEFAULT_HISTORY_RUNS), MAX_RUNS_CEILING),
+    ...source(args, cwd),
+  });
+  if (args.includes('--json')) console.log(JSON.stringify(answer, null, 2));
+  else console.log(renderHistory(answer).join('\n'));
+  return UNPERFORMED.has(answer.reason ?? '') ? 2 : 0;
+}
+
 export default function baselineStatus(args: string[], cwd: string) {
   let answer: BaselineAnswer;
   let pr: TestReportSummary | null = null;
   try {
     assertOnlyKnownArgs(args);
+    // Before --pr: prStatus refuses only valued flags, so it would silently drop --history.
+    if (args.includes('--history')) return historyStatus(args, cwd);
     const prNumber = flag(args, '--pr');
     if (prNumber !== undefined) return prStatus(args, cwd, prNumber);
     const file = flag(args, '--file');
@@ -367,13 +416,7 @@ export default function baselineStatus(args: string[], cwd: string) {
       }
       return report(queryRun({ cwd, runId, file, test, ...source(args, cwd) }), args, true);
     }
-    const maxRunsRaw = flag(args, '--max-runs');
-    const maxRuns = maxRunsRaw ? Number(maxRunsRaw) : DEFAULT_MAX_RUNS;
-    // Integer, not merely finite: `--limit 1.5` fails inside gh, so a bad ARGUMENT would surface as
-    // a gh failure and exit 2 — the code reserved for "the query could not be performed".
-    if (!Number.isInteger(maxRuns) || maxRuns < 1) {
-      throw new UsageError(`--max-runs must be a positive whole number (got ${maxRunsRaw})`);
-    }
+    const maxRuns = maxRunsOf(args, DEFAULT_MAX_RUNS);
     const against = flag(args, '--against');
     if (against && file) {
       throw new UsageError('--file and --against answer different questions; pass one');

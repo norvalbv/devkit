@@ -180,6 +180,27 @@ export function runsForCommit({
     ],
     cwd,
   );
+  return parseRuns(out).filter(
+    (run) => run.headBranch === ref && !run.event.startsWith('pull_request'),
+  );
+}
+
+/** The workflow's newest `limit` runs on every branch and event, whatever their status. */
+export function recentRuns({
+  cwd,
+  workflow,
+  limit,
+}: {
+  cwd: string;
+  workflow: string;
+  limit: number;
+}): RunRef[] {
+  const args = ['run', 'list', '--workflow', workflow, '--limit', String(limit)];
+  return parseRuns(gh([...args, '--json', RUN_FIELDS], cwd));
+}
+
+/** `gh run list --json` output, every entry validated before anything reads it. */
+function parseRuns(out: string): RunRef[] {
   let runs: unknown;
   try {
     runs = JSON.parse(out);
@@ -191,7 +212,7 @@ export function runsForCommit({
   if (!Array.isArray(runs) || !(runs as (RunRefCandidate | null)[]).every(isRunRef)) {
     throw new GhUnavailable('gh-failed', 'gh run list returned JSON this reader cannot use');
   }
-  return runs.filter((run) => run.headBranch === ref && !run.event.startsWith('pull_request'));
+  return runs;
 }
 
 /** GitHub's REST run object, as much of it as RunRef needs; the schema lets three fields be null. */

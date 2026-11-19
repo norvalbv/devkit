@@ -27,13 +27,13 @@ export function headOf(dir: string): string {
   return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
 }
 
-/** Inline JS that prints the runs.json entries whose headSha is the queried commit. */
+/** Inline JS that prints the runs.json entries whose headSha is the queried commit, or all of them. */
 const FILTER =
   'const fs=require("fs");const [f,c]=process.argv.slice(1);const raw=fs.readFileSync(f,"utf8");' +
   'let r;try{r=JSON.parse(raw)}catch{r=null}' +
-  'process.stdout.write(Array.isArray(r)?JSON.stringify(r.filter((x)=>typeof x?.headSha!=="string"||x.headSha===c)):raw)';
+  'process.stdout.write(Array.isArray(r)?JSON.stringify(c?r.filter((x)=>typeof x?.headSha!=="string"||x.headSha===c):r):raw)';
 
-/** The stub's `gh run list --commit <sha>` arm: logs the sha, then answers from runs.json. */
+/** The stub's `gh run list` arm: logs the args, then answers from runs.json, by `--commit` if given. */
 export const RUN_LIST_BY_COMMIT = `commit=""; prev=""
   for a in "$@"; do if [ "$prev" = "--commit" ]; then commit="$a"; fi; prev="$a"; done
   echo "$*" >> "$DEVKIT_TEST_FIXTURE/list.log"

@@ -70,6 +70,8 @@ same directory, kept for the newest 300 runs only (`DEVKIT_TELEMETRY_KEEP`), and
   clone, coverage, anti-slop, comment-budget and decision checks and lists every failure in one block. Follow the printed repair. Existing ratchet debt may shrink; do not
   re-freeze it merely to admit a new violation. A missing or inherited coverage artifact may use the
   documented one-run `GUARD_COVERAGE_OK=1` assertion only when the change did not cause the shortfall.
+- **A test gate failed on a test you did not touch** (`related-tests`, the pre-push suite)? Check
+  whether CI sees it fail too: `devkit baseline-status --history --file <path> --test "<name>"`.
 - **Comment budget** (`guard-comments`) blocks a new standalone comment paragraph with three or
   more changed text lines the first time it is shown. Shorten the comment where possible; a
   paragraph that justifies a workaround means the code is wrong, so fix the code. If every line
