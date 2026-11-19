@@ -12,6 +12,7 @@ import {
   checkIndexStale,
   integrityFindingKey,
   checkRetargetEvidenceChange,
+  checkTargetDateOrder,
   checkTargetHeadingDepth,
   checkTargetRequiredFields,
 } from '../integrity/checks.mts';
@@ -441,6 +442,56 @@ describe('checkRetargetEvidenceChange', () => {
   });
 });
 
+/** An axis whose Target blocks carry exactly these heading dates, in this document order. */
+function axisDated(...dates: string[]): AxisDoc {
+  const blocks = dates.map((date, i) =>
+    cleanBody('my-axis', { extra: i ? '**Evidence-change:** a merge forked the stack.\n' : '' })
+      .replace('\n# my-axis\n', '')
+      .replace('2026-01-05', date),
+  );
+  return {
+    slug: 'my-axis',
+    fm: { slug: 'my-axis', created: '2026-01-01' },
+    body: `\n# my-axis\n${blocks.join('')}`,
+  };
+}
+
+describe('checkTargetDateOrder', () => {
+  it('fires on the last block when a merge left an older Target after a newer one', () => {
+    const findings = checkTargetDateOrder(axisDated('2026-01-05', '2026-03-01', '2026-02-01'));
+    expect(findings.map((f) => [f.check, f.block])).toEqual([
+      ['target-out-of-date-order', '2026-02-01'],
+    ]);
+    expect(findings[0].detail).toContain('guard-decisions add my-axis --target');
+    expect(findings[0].detail).toContain('2026-03-01');
+  });
+
+  it('is silent once a restating Target lands last, though the interior stays out of order', () => {
+    expect(
+      checkTargetDateOrder(axisDated('2026-01-05', '2026-03-01', '2026-02-01', '2026-04-01')),
+    ).toEqual([]);
+  });
+
+  it('is silent on same-day blocks, a single block, and an ascending stack', () => {
+    expect(checkTargetDateOrder(axisDated('2026-01-05', '2026-01-05'))).toEqual([]);
+    expect(checkTargetDateOrder(axisDated('2026-01-05'))).toEqual([]);
+    expect(checkTargetDateOrder(axisDated('2026-01-05', '2026-02-01'))).toEqual([]);
+  });
+
+  it('its mutation refuses a fixture with no ascending pair to put out of order', () => {
+    const indexRow = { slug: 'my-axis', ruling: 'r', why: 'w', updated: '2026-01-05' };
+    for (const axis of [axisDated('2026-01-05'), axisDated('2026-01-05', '2026-01-05')])
+      expect(() => MUTATIONS['target-out-of-date-order']({ axis, indexRow })).toThrow(
+        'two ascending Target dates',
+      );
+  });
+
+  it('is wired into checkAxis', () => {
+    const axis = axisDated('2026-03-01', '2026-02-01');
+    expect(checkAxis(axis, undefined).map((f) => f.check)).toEqual(['target-out-of-date-order']);
+  });
+});
+
 describe('checkIndexStale', () => {
   it("is silent when the INDEX row is at least as new as the axis's last Target", () => {
     const axis = cleanAxis('my-axis');
@@ -492,7 +543,7 @@ describe('checkAxis (combinator)', () => {
           '- 2026-01-07 — **Amends:** note:2026-01-06 — that turned out wrong.\n',
       });
       const fixture =
-        checkId === 'retarget-missing-evidence-change'
+        checkId === 'retarget-missing-evidence-change' || checkId === 'target-out-of-date-order'
           ? {
               axis: retargetedAxis('**Evidence-change:** what shifted.\n'),
               indexRow: { slug: 'my-axis', ruling: 'r', why: 'w', updated: '2026-02-01' },

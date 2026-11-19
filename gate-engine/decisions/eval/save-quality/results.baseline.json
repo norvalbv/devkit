@@ -3,27 +3,27 @@
     {
       "id": "defect-recall",
       "label": "Defect recall (perturbation corpus)",
-      "k": 15,
-      "n": 15
+      "k": 16,
+      "n": 16
     },
     {
       "id": "false-positive-rate",
       "label": "False-positive rate at R80",
       "k": 0,
-      "n": 20,
+      "n": 21,
       "direction": "lower"
     },
     {
       "id": "checks-exercised",
       "label": "Declared checks with a perturbation case",
-      "k": 9,
-      "n": 9
+      "k": 10,
+      "n": 10
     },
     {
       "id": "real-corpus-clean",
       "label": "Real records with no unexpected finding",
-      "k": 67,
-      "n": 67
+      "k": 118,
+      "n": 118
     }
   ],
   "rows": {
@@ -123,6 +123,11 @@
       "unexpected": []
     },
     "defect-target-missing-required-field-02": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "defect-target-out-of-date-order-01": {
       "recallHit": true,
       "falsePositive": false,
       "unexpected": []

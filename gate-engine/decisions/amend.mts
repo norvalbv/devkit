@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { writeFileAtomic } from './atomic-write.mts';
 import {
@@ -18,6 +18,7 @@ import {
   foldLines,
   sanitizeCell,
   today,
+  upsertRow,
   warnIfFolded,
   whyHook,
 } from './decision-format.mts';
@@ -35,7 +36,6 @@ const TRAILING_WS_RE = /\s*$/;
 const LEADING_WS_RE = /^\s+/;
 const TIMELINE_ENTRY_RE = /^(?:## Target · \d{4}-\d{2}-\d{2}\b.*|- \d{4}-\d{2}-\d{2}\s+—\s+.*)$/gm;
 const ENTRY_DATE_RE = /^(?:## Target · |- )(\d{4}-\d{2}-\d{2})\b/;
-const TARGET_DATE_RE = /^## Target · (\d{4}-\d{2}-\d{2})\b/;
 const NOTE_PREFIX_RE = /^- \d{4}-\d{2}-\d{2}\s+—\s+/;
 const LINE_END_RE = /\r?\n/;
 const LINE_LABEL_RE = /^[ \t]*(?:\*\*[^:\r\n]+:\*\*|- (?:Positive|Negative):)/;
@@ -295,31 +295,19 @@ function replaceInTarget(block: string, oldText: string, newText: string) {
   return result;
 }
 
-function regenerateIndex(paths: DecisionPaths) {
-  const previous = existsSync(paths.indexPath)
-    ? parseIndex(readFileSync(paths.indexPath, 'utf8'))
-    : [];
-  const prior = new Map(previous.map((row) => [row.slug, row]));
-  const rows = [];
-  for (const name of readdirSync(paths.decisionsDir).filter(
-    (entry) => entry.endsWith('.md') && entry !== 'INDEX.md',
-  )) {
-    const slug = name.slice(0, -3);
-    const parsed = parseDecision(readFileSync(path.join(paths.decisionsDir, name), 'utf8'));
-    const target = currentTarget(parsed.body);
-    if (!target) {
-      const legacy = prior.get(slug);
-      if (legacy) rows.push(legacy);
-      continue;
-    }
-    rows.push({
-      slug,
-      ruling: sanitizeCell(target.ruling),
-      why: whyHook(target.fields.context ?? ''),
-      updated: target.block.match(TARGET_DATE_RE)?.[1] ?? today(),
-    });
-  }
-  writeFileAtomic(paths.indexPath, renderIndex(rows));
+// Only the amended axis's row is rewritten: every other row stays byte-identical, so an amend can
+// never flip another axis to a different ruling or rewrite a hand-kept cell.
+function upsertIndexRow(paths: DecisionPaths, slug: string, file: string) {
+  const target = currentTarget(parseDecision(readFileSync(file, 'utf8')).body);
+  if (!target) return;
+  const rows = existsSync(paths.indexPath) ? parseIndex(readFileSync(paths.indexPath, 'utf8')) : [];
+  const row = {
+    slug,
+    ruling: sanitizeCell(target.ruling),
+    why: whyHook(target.fields.context ?? ''),
+    updated: target.date || today(),
+  };
+  writeFileAtomic(paths.indexPath, renderIndex(upsertRow(rows, row)));
 }
 
 /**
@@ -386,7 +374,7 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
       file,
       `${current.slice(0, start)}${edited}${current.slice(start + block.length)}`,
     );
-    regenerateIndex(paths);
+    upsertIndexRow(paths, slug, file);
     warnIfFolded('--target-replace', newText);
     console.log(`Amended draft target on "${slug}" (${date}).`);
     return;
@@ -443,7 +431,7 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
   validateTargetSupersedes(options.supersedes, before, slug);
   const body = `${before}\n\n${renderTarget(date, options)}${gap}${source.slice(end)}`;
   writeFileAtomic(file, renderDecision({ slug, created: workingParsed.fm.created || date }, body));
-  regenerateIndex(paths);
+  upsertIndexRow(paths, slug, file);
   warnTargetReplacement(selected.text, body, trailing.length > 0, options);
   const kept = trailing.length
     ? `; kept ${trailing.length} trailing entr${trailing.length === 1 ? 'y' : 'ies'} unchanged`
