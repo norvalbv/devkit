@@ -242,15 +242,17 @@ function briefFor(input, root, file, budget) {
     retrievalDown = true;
     // A sentinel key, never a relative path: the notice fires once per session WITHOUT burning this
     // file's brief slot, so the first governed edit after the tool is fixed is still briefed.
-    if (claimed(stampPath(input.session_id, root, '\u0000retrieval-unavailable'))) return null;
-    return (
+    const notice =
       `Decision retrieval DID NOT RUN for \`${rel}\` — \`guard-decisions scoped-targets\` failed, so ` +
-        `this edit is UNBRIEFED, not ungoverned. Do not read the absence of a brief as "nothing rules ` +
-        `here". Re-run \`guard-decisions scoped-targets --files ${rel}\` before deciding: it is what ` +
-        `evaluates Scope globs, and a text search for the path cannot match globs such as \`dir/**\`. ` +
-        `A later edit to this file re-checks, but a repeat failure this session is not announced ` +
-        `again, so silence then is not a clean answer. Cause: ${outageCause(run, bin)}.`
-    );
+      `this edit is UNBRIEFED, not ungoverned. Do not read the absence of a brief as "nothing rules ` +
+      `here". Re-run \`guard-decisions scoped-targets --files ${rel}\` before deciding: it is what ` +
+      `evaluates Scope globs, and a text search for the path cannot match globs such as \`dir/**\`. ` +
+      `A later edit to this file re-checks, but a repeat failure this session is not announced ` +
+      `again, so silence then is not a clean answer. Cause: ${outageCause(run, bin)}.`;
+    // A sentinel key, never a relative path: the notice fires once per session WITHOUT burning this
+    // file's brief slot, so the first governed edit after the tool is fixed is still briefed.
+    const sentinel = stampPath(input.session_id, root, '\u0000retrieval-unavailable');
+    return notice.length > budget || claimed(sentinel) ? null : notice;
   }
   if (axes.length === 0) {
     if (tool === 'Bash') claimed(`${stamp}.none`); // a Bash call re-touching it skips the retrieval

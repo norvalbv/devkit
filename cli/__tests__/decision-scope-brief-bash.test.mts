@@ -70,6 +70,7 @@ function stub(
   mode: 'ok' | 'fail' = 'ok',
   axes = 1,
   ruling = 'Do.',
+  failing: string[] = [],
 ) {
   mkdirSync(join(dir, 'node_modules', '.bin'), { recursive: true });
   const bin = join(dir, 'node_modules', '.bin', 'guard-decisions');
@@ -77,7 +78,10 @@ function stub(
     JSON.stringify(
       Array.from({ length: axes }, (_, i) => ({ slug: `rule-${f}${i || ''}`, ruling })),
     );
-  const cases = governed.map((f) => `  ${f}) echo '${rulings(f)}';;`);
+  const cases = [
+    ...governed.map((f) => `  ${f}) echo '${rulings(f)}';;`),
+    ...failing.map((f) => `  ${f}) exit 1;;`),
+  ];
   const answer =
     mode === 'fail' ? 'exit 1' : `case "$3" in\n${cases.join('\n')}\n  *) echo '[]';;\nesac`;
   writeFileSync(bin, `#!/bin/sh\necho "$*" >> '${join(root, 'argv.log')}'\n${answer}\n`, {
@@ -190,6 +194,17 @@ describe('decision-scope-brief — files a Bash command wrote', () => {
       files.map((f) => [f]),
     );
     for (const ctx of shown) expect(ctx.endsWith('…')).toBe(false);
+  });
+
+  it('holds an outage notice the cap would cut for a later call, its once-a-session slot unspent', () => {
+    gitRepo();
+    const files = ['src/f0.ts', 'src/f1.ts', 'src/f2.ts'];
+    stub(root, files.slice(0, 2), 'ok', 3, 'r'.repeat(1500), ['src/f2.ts']); // two briefs near 9,700
+    for (const file of files) write(file);
+    const first = context(runBash('late-outage'));
+    expect(first).not.toContain('DID NOT RUN');
+    expect(first.endsWith('…')).toBe(false);
+    expect(context(runBash('late-outage'))).toContain('DID NOT RUN');
   });
 
   it('asks nothing without duration_ms, on a clean tree, or outside a git repository', () => {
