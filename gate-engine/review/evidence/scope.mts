@@ -172,10 +172,15 @@ export function reportNonRuns(
       `guard-review: SKIPPED — no domain reviewer ran; none of the ${staged.length} staged file(s) is in review scope ` +
         '(scanRoots, review roots and review.paths in guard.config.json)',
     );
+  reportSelected(selected);
+  emitUnselected(selected, alreadyReported);
+}
+
+/** The roster line: which reviewers this commit's selection will run or replay from cache. */
+function reportSelected(selected: ReviewerSelection[]): void {
   const names = selected.map((s) => s.reviewer.name);
   if (names.length > 0)
     console.error(`guard-review: ${names.length} reviewer(s) selected: ${names.join(', ')}`);
-  emitUnselected(selected, alreadyReported);
 }
 
 const DOMAIN_REVIEWED = new Set(['backend', 'frontend']);
