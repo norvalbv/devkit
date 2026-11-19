@@ -813,8 +813,8 @@ describe('guard-decisions list (directory-sourced spine, sc-2332)', () => {
     expect(listRows().rows.map((row) => row.slug)).toEqual(['alpha']);
   });
 
-  // amend's regenerateIndex drops an axis with no parseable Target and no prior INDEX row. A `list`
-  // built on that precedent would hide exactly the legacy-schema axis a real consumer still carries.
+  // A full rebuild from the files drops an axis with no parseable Target and no prior INDEX row. A
+  // `list` built that way would hide exactly the legacy-schema axis a real consumer still carries.
   it('keeps a Target-less legacy axis as a well-formed row', () => {
     writeFileSync(
       join(dir, 'legacy.md'),
