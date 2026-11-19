@@ -153,6 +153,16 @@ describe('matcher index refresh', () => {
   it('does NOT refresh when no index exists — never cold-builds inside a gate', () => {
     expect(refreshRan(tmp, join(tmp, 'nonexistent.db'), 'absent')).toBe(false);
   });
+
+  // init now writes a default indexCommand, so an interrupted or schema-only index would otherwise
+  // start a cold build on every commit.
+  it('does NOT refresh an index holding no usable chunk', () => {
+    const empty = join(tmp, 'no-usable-chunk.db');
+    const db = new DatabaseSync(empty);
+    db.exec('CREATE TABLE chunks (symbol_name TEXT, embedding BLOB, code_embedding BLOB)');
+    db.close();
+    expect(refreshRan(tmp, empty, 'empty')).toBe(false);
+  });
 });
 
 // No index configured at all (config indexPath null + no SEARCH_CODE_DB) is the common

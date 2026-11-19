@@ -190,7 +190,9 @@ can still happen for exactly those, so open the named file and re-index if the s
 duplication among the compared files` and, under `--gate`, records one `gate_degraded` event that the
 ship digest shows as unverified. In a linked or ship worktree with an `indexCommand`, the gate copies
 the primary's index and refreshes the copy (`{staged-csv}` names the staged files), so an edited symbol
-is re-judged; a refresh that stops short names the symbols it left unembedded.
+is re-judged; a refresh that stops short names the symbols it left unembedded. Without an
+`indexCommand` an edited symbol is only dropped, and `devkit doctor` says so as `search-code refresh`
+with the line to add.
 
 ## `devkit doctor` reports `search-code index: DRIFT` or `MISSING`
 

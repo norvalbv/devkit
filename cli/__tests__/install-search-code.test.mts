@@ -2,7 +2,7 @@ import fs, { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from '
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { installSearchCode } from '../lib/install/install-search-code.mts';
+import { DEFAULT_INDEX_COMMAND, installSearchCode } from '../lib/install/install-search-code.mts';
 import { tmpRepos } from './_helpers.mts';
 
 const { tmpRepo, devkit, cleanup } = tmpRepos('sc-');
@@ -140,5 +140,81 @@ describe('search-code opt-in component', () => {
       expect(agent).toContain('--json');
       expect(agent).not.toContain('tools/search-code/bin/semantic-search.mjs');
     }
+  });
+});
+
+describe('installSearchCode indexCommand', () => {
+  function wired(config: string, dryRun = false, overlay?: { configTracked: boolean }) {
+    const root = tmpRepo();
+    writeFileSync(join(root, 'guard.config.json'), config);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    installSearchCode(root, dryRun, overlay);
+    const out = log.mock.calls.flat().join('\n');
+    log.mockRestore();
+    return { text: readFileSync(join(root, 'guard.config.json'), 'utf8'), out };
+  }
+
+  it('writes the bounded default next to indexPath', () => {
+    const { text } = wired('{\n  "guards": ["dup"]\n}\n');
+    const cfg = JSON.parse(text);
+    expect(cfg.indexPath).toBe('.search-code/index.db');
+    expect(cfg.indexCommand).toBe(DEFAULT_INDEX_COMMAND);
+  });
+
+  it.each([
+    ['a set value', '"search-code index"'],
+    ['an explicit null', 'null'],
+  ])("keeps %s, the consumer's call", (_, value) => {
+    const { text, out } = wired(
+      `{\n  "indexPath": ".search-code/index.db",\n  "indexCommand": ${value}\n}\n`,
+    );
+    expect(text).toBe(
+      `{\n  "indexPath": ".search-code/index.db",\n  "indexCommand": ${value}\n}\n`,
+    );
+    expect(out).toContain('• kept indexCommand');
+  });
+
+  it('adds it on a re-run where indexPath already holds the default', () => {
+    const { text } = wired('{\n  "indexPath": ".search-code/index.db"\n}\n');
+    expect(JSON.parse(text).indexCommand).toBe(DEFAULT_INDEX_COMMAND);
+  });
+
+  // The insert anchors on a newline after `{`, so a one-line config cannot take it; never claim it did.
+  it('says so instead of claiming the key on a one-line config it cannot insert into', () => {
+    const { text, out } = wired('{"indexPath": null}\n');
+    expect(JSON.parse(text)).toEqual({ indexPath: '.search-code/index.db' });
+    expect(out).not.toContain('set indexCommand');
+    expect(out).toContain('could not wire indexCommand');
+  });
+
+  it('inserts the real key beside a "//indexCommand" guidance key, which stays', () => {
+    const cfg = JSON.parse(wired('{\n  "//indexCommand": "why"\n}\n').text);
+    expect(cfg['//indexCommand']).toBe('why');
+    expect(cfg.indexCommand).toBe(DEFAULT_INDEX_COMMAND);
+  });
+
+  // An atomic rename over a link would replace it with a copy and drop the file's mode.
+  it('writes through a symlinked guard.config.json and keeps its mode', () => {
+    const root = tmpRepo();
+    const real = join(root, 'shared-guard.json');
+    writeFileSync(real, '{\n  "guards": []\n}\n');
+    fs.chmodSync(real, 0o600);
+    fs.symlinkSync(real, join(root, 'guard.config.json'));
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    installSearchCode(root, false);
+    expect(fs.lstatSync(join(root, 'guard.config.json')).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(readFileSync(real, 'utf8')).indexCommand).toBe(DEFAULT_INDEX_COMMAND);
+    expect(fs.statSync(real).mode & 0o777).toBe(0o600);
+  });
+
+  it('dry-run leaves guard.config.json as it was', () => {
+    expect(wired('{\n  "guards": []\n}\n', true).text).toBe('{\n  "guards": []\n}\n');
+  });
+
+  it('overlay with a tracked config keeps its bytes and names both env vars', () => {
+    const { text, out } = wired('{\n  "guards": []\n}\n', false, { configTracked: true });
+    expect(text).toBe('{\n  "guards": []\n}\n');
+    expect(out).toContain('GUARD_INDEX_PATH=');
+    expect(out).toContain(`GUARD_INDEX_COMMAND='${DEFAULT_INDEX_COMMAND}'`);
   });
 });

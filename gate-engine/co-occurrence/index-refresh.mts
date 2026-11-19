@@ -409,6 +409,8 @@ export function refreshIndex(
   staged: ReadonlySet<string> | null,
 ): Set<number> | null {
   if (!cfg.indexCommand || !indexIsInThisCheckout(indexPath, cfg.cwd)) return null;
+  // No usable chunk yet is a cold build too; an unreadable count (null) still refreshes.
+  if (usableChunksAt(indexPath) === 0) return null;
   const before = pendingIdsAt(indexPath);
   try {
     execSync(indexCommandFor(cfg.indexCommand, staged), {

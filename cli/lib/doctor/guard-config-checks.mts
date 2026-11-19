@@ -42,7 +42,13 @@ import {
 } from '../../../gate-engine/judge/outage/family-override.mts';
 import { REVIEWERS } from '../../../gate-engine/review/reviewers.mts';
 import { detectStack, type Stack } from '../detect-stack.mts';
-import { packageDir, readJson } from '../fs-helpers.mts';
+import { packageDir } from '../fs-helpers.mts';
+import {
+  DEFAULT_INDEX_COMMAND,
+  INDEX_REFRESH_CHECK,
+  guardConfigKeyPresent,
+  indexCommandRows,
+} from '../install/install-search-code.mts';
 import { type CheckResult, check } from './check-result.mts';
 import { JUDGE_AUTH_CHECK, judgeAuthResult } from './judge/judge-auth.mts';
 import {
@@ -78,24 +84,9 @@ export interface ReviewRoots {
 interface GateConfigModule {
   resolveGuardConfig(cwd: string): {
     indexPath?: string | null;
+    indexCommand?: string | null;
     review: ReviewRoots & { model: string; escalationModel: string; correctnessModel: string };
   };
-}
-
-/**
- * Does guard.config.json literally carry an `indexPath` key? An explicit `"indexPath": null` is a
- * DECLARED matcher opt-out; an absent key is only an absence. resolveGuardConfig collapses both to
- * null, so the raw file is the one place that difference survives — and it is what gives a repo a
- * way to say "no index here, on purpose" instead of carrying a permanent drift warning.
- */
-function indexPathKeyPresent(cwd: string): boolean {
-  try {
-    const raw = readJson<Record<string, unknown>>(join(cwd, 'guard.config.json'));
-    return raw !== null && 'indexPath' in raw;
-  } catch {
-    // Unparseable is already reported by the validity check; never read a declared opt-out from it.
-    return false;
-  }
 }
 
 /**
@@ -185,7 +176,7 @@ export function checkSearchIndex(
     }
   }
   if (envWired()) return check(SEARCH_INDEX_CHECK, 'OK', 'matcher wired via SEARCH_CODE_DB');
-  if (indexPathKeyPresent(cwd)) {
+  if (guardConfigKeyPresent(cwd, 'indexPath')) {
     return check(SEARCH_INDEX_CHECK, 'OK', 'matcher opted out by explicit `"indexPath": null`');
   }
   const onDisk = existsSync(join(cwd, DEFAULT_INDEX));
@@ -199,7 +190,7 @@ export function checkSearchIndex(
   // --search-code otherwise, so promising a repair there would be a warning that never clears.
   const remediation = searchCodeSelected
     ? 'run `devkit doctor --fix` (re-runs init --search-code, which also writes search-code.config.json and a .gitignore line)'
-    : `run \`devkit init --search-code\`, or set "indexPath": "${DEFAULT_INDEX}" in guard.config.json (or GUARD_INDEX_PATH / SEARCH_CODE_DB). Deliberate? Write "indexPath": null to declare it.`;
+    : `run \`devkit init --search-code\`, or set "indexPath": "${DEFAULT_INDEX}" and "indexCommand": "${DEFAULT_INDEX_COMMAND}" in guard.config.json (or GUARD_INDEX_PATH / SEARCH_CODE_DB). Deliberate? Write "indexPath": null to declare it.`;
   return check(SEARCH_INDEX_CHECK, 'DRIFT', detail, remediation, searchCodeSelected);
 }
 
@@ -256,7 +247,11 @@ export async function checkGuardConfig(
   }
   const resolved = cfg.indexPath ?? null;
   const results = [check('guard.config.json', 'OK', 'valid (resolveGuardConfig parsed it)')];
-  if (dupSelected) results.push(checkSearchIndex(cwd, resolved, searchCodeSelected));
+  if (dupSelected)
+    results.push(
+      checkSearchIndex(cwd, resolved, searchCodeSelected),
+      ...indexCommandRows(cwd, resolved, cfg.indexCommand),
+    );
   const topology = reviewTopology(cwd, cfg.review);
   if (topology) results.push(topology);
   const judging = judges.review || judges.sentry;
@@ -381,10 +376,12 @@ export async function adviseSearchIndex(
     review: false,
     sentry: false,
   });
-  const index = results.find((r) => r.name === SEARCH_INDEX_CHECK);
-  if (!index) return;
-  console.log(`  ${index.status === 'OK' ? '✓' : '⚠'} ${index.name}: ${index.detail}`);
-  if (index.status !== 'OK' && index.remediation) console.log(`      → ${index.remediation}`);
+  for (const row of results.filter((r) =>
+    [SEARCH_INDEX_CHECK, INDEX_REFRESH_CHECK].includes(r.name),
+  )) {
+    console.log(`  ${row.status === 'OK' ? '✓' : '⚠'} ${row.name}: ${row.detail}`);
+    if (row.status !== 'OK' && row.remediation) console.log(`      → ${row.remediation}`);
+  }
 }
 
 /**

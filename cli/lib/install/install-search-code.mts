@@ -6,10 +6,16 @@
  * The engine indexes a repo IFF it finds `search-code.config.json` at the root (its opt-in gate),
  * so writing that file is what "enables search-code here" means.
  */
-import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  indexToInspect,
+  usableChunksAt,
+} from '../../../gate-engine/co-occurrence/index-refresh.mts';
 import { withGitignoreLock } from './gitignore-cache.mts';
-import { writeIfAbsent } from '../fs-helpers.mts';
+import { writeFileAtomic } from '../atomic-write.mts';
+import { type CheckResult, check } from '../doctor/check-result.mts';
+import { readJson, writeIfAbsent } from '../fs-helpers.mts';
 
 export const SEARCH_CODE_CONFIG = 'search-code.config.json';
 const INDEX_LINE = '.search-code/';
@@ -31,6 +37,12 @@ const STARTER = `{
 
 const INDEXPATH_VALUE_RE = /("indexPath"\s*:\s*)(?:null|"[^"]*")/;
 const OPEN_BRACE_RE = /^(\s*\{\s*\n)/;
+// The real key only: a `"//indexCommand"` guidance key has a slash before the `i`, not a quote.
+const INDEXCOMMAND_KEY_RE = /"indexCommand"\s*:/;
+/** Refreshes the index before each dup scan, so an edited function is re-judged rather than dropped.
+ * search-code's own --timeout stays under the gate's 60 s indexCommandTimeoutMs kill. */
+export const DEFAULT_INDEX_COMMAND =
+  'search-code index --timeout 45s --no-wait --seed-files {staged-csv}';
 
 // Append, never rewrite: an edit landing after the read survives, and the lock keeps devkit's own
 // whole-file .gitignore rewriters (cache ensure, prune, repair) from overwriting the append.
@@ -51,7 +63,7 @@ function appendMissingLine(cwd: string, line: string, dryRun: boolean): void {
 // Point guard-dup's matcher at the index via guard.config.json `indexPath` (null = opted out). The
 // template ships no indexPath, so insert it; an existing value is replaced. Regex (not JSON
 // round-trip) preserves the //-comment guidance keys, matching the --scan-root patch in init.
-function setIndexPath(cwd: string, dryRun: boolean): void {
+function wireIndex(cwd: string, dryRun: boolean): void {
   const p = join(cwd, 'guard.config.json');
   if (!existsSync(p)) {
     console.log(
@@ -62,13 +74,26 @@ function setIndexPath(cwd: string, dryRun: boolean): void {
   const raw = readFileSync(p, 'utf8');
   let next: string;
   if (INDEXPATH_VALUE_RE.test(raw)) next = raw.replace(INDEXPATH_VALUE_RE, `$1"${INDEX_PATH}"`);
-  else next = raw.replace(OPEN_BRACE_RE, `$1  "indexPath": "${INDEX_PATH}",\n`);
-  if (next === raw) {
+  else if (OPEN_BRACE_RE.test(raw))
+    next = raw.replace(OPEN_BRACE_RE, `$1  "indexPath": "${INDEX_PATH}",\n`);
+  else {
     console.log('  ! could not wire indexPath into guard.config.json (set it by hand)');
     return;
   }
-  if (!dryRun) writeFileSync(p, next);
-  console.log(`  ${dryRun ? '[dry-run] set' : '✓ set'} indexPath in guard.config.json`);
+  // Any existing indexCommand, null included, is the consumer's call and stays as written.
+  const keptCommand = INDEXCOMMAND_KEY_RE.test(next);
+  const insertable = OPEN_BRACE_RE.test(next);
+  if (!keptCommand && insertable)
+    next = next.replace(OPEN_BRACE_RE, `$1  "indexCommand": "${DEFAULT_INDEX_COMMAND}",\n`);
+  // Through a symlinked config to its target, keeping that file's mode.
+  const target = realpathSync(p);
+  if (!dryRun) writeFileAtomic(target, next, statSync(target).mode & 0o777);
+  const verb = dryRun ? '[dry-run] set' : '✓ set';
+  console.log(`  ${verb} indexPath in guard.config.json`);
+  if (keptCommand) console.log('  • kept indexCommand in guard.config.json');
+  else if (insertable) console.log(`  ${verb} indexCommand in guard.config.json`);
+  else
+    console.log(`  ! could not wire indexCommand — add "indexCommand": "${DEFAULT_INDEX_COMMAND}"`);
 }
 
 /** An `overlay` install edits no tracked file: its caller git-excludes SEARCH_CODE_WRITTEN instead of
@@ -87,9 +112,9 @@ export function installSearchCode(
   if (!overlay) ensureGitignoreLine(cwd, INDEX_LINE, dryRun);
   if (overlay?.configTracked)
     console.log(
-      `  ! guard.config.json is tracked, so overlay leaves it as is — export GUARD_INDEX_PATH=${INDEX_PATH} to wire the dup matcher`,
+      `  ! guard.config.json is tracked, so overlay leaves it as is — export GUARD_INDEX_PATH=${INDEX_PATH} GUARD_INDEX_COMMAND='${DEFAULT_INDEX_COMMAND}' to wire the dup matcher`,
     );
-  else setIndexPath(cwd, dryRun);
+  else wireIndex(cwd, dryRun);
   // The engine is REFERENCED, not vendored — print the install/index steps (devkit ships no engine).
   console.log('  ℹ needs the search-code engine + Ollama. Install once, then index this repo:');
   console.log('      bun add -g git+ssh://git@github.com/norvalbv/search-code.git');
@@ -103,4 +128,39 @@ export function removeSearchCode(cwd: string, dryRun: boolean): void {
   if (!existsSync(cfgPath)) return;
   if (!dryRun) rmSync(cfgPath);
   console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${SEARCH_CODE_CONFIG}`);
+}
+
+export const INDEX_REFRESH_CHECK = 'search-code refresh';
+
+/** Does guard.config.json literally carry `key`? resolveGuardConfig reads an explicit null (a declared
+ * opt-out) and an absent key alike, so only the raw file tells them apart. */
+export function guardConfigKeyPresent(cwd: string, key: string): boolean {
+  try {
+    const raw = readJson<object>(join(cwd, 'guard.config.json'));
+    return raw !== null && key in raw;
+  } catch {
+    // Unparseable is already reported by the validity check; never read a declared opt-out from it.
+    return false;
+  }
+}
+
+/** doctor's advisory for a populated index with no indexCommand, whose edited functions the dup gate
+ * drops as stale. Silent on an empty index: a refresh there is a cold build on every commit. */
+export function indexCommandRows(
+  cwd: string,
+  indexPath: string | null,
+  indexCommand: string | null | undefined,
+): CheckResult[] {
+  if (!indexPath || indexCommand || guardConfigKeyPresent(cwd, 'indexCommand')) return [];
+  if (!usableChunksAt(indexToInspect(indexPath, cwd).indexPath)) return [];
+  return [
+    check(
+      INDEX_REFRESH_CHECK,
+      'DRIFT',
+      'guard.config.json sets no `indexCommand`, so the dup gate never refreshes the index: a function edited since the last index is dropped from its flagged pair as stale instead of re-judged',
+      `add "indexCommand": "${DEFAULT_INDEX_COMMAND}" to guard.config.json (or export GUARD_INDEX_COMMAND). Deliberate? Write "indexCommand": null to declare it.`,
+      false,
+      true,
+    ),
+  ];
 }

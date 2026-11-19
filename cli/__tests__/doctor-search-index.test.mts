@@ -19,6 +19,7 @@ import {
   checkGuardConfig,
   checkSearchIndex,
 } from '../lib/doctor/guard-config-checks.mts';
+import { DEFAULT_INDEX_COMMAND } from '../lib/install/install-search-code.mts';
 import { rootRegistry } from './_helpers.mts';
 
 const { mkTmp, cleanup } = rootRegistry();
@@ -117,6 +118,8 @@ describe('doctor — an unwired search-code index is drift', () => {
     const unowned = await required({ index: true, searchCode: false });
     expect(unowned.fixable).toBe(false);
     expect(unowned.remediation).toContain('devkit init --search-code');
+    // The hand-edit route must wire the refresh too, or the next doctor run raises a second row.
+    expect(unowned.remediation).toContain(DEFAULT_INDEX_COMMAND);
   });
 });
 
