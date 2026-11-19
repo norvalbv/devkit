@@ -247,6 +247,21 @@ describe('overlay hook commands anchor at the overlay home', () => {
     expect(checkAgentHooks(root).ok).toBe(true);
   });
 
+  it('strips the unanchored current command a crashed first upgrade left for a superseded registration', () => {
+    const root = repo();
+    installHookRegistrations(root, ['searchSteering'], overlay());
+    const count = commands(root, LOCAL).length;
+    respell(root, LOCAL, realpathSync.native(root), UNANCHORED.claude);
+    const steering = () => checkHookRegistrations(root, ['searchSteering'], overlay());
+    expect(steering().missing).toContain('claude:superseded-registration');
+
+    installHookRegistrations(root, ['searchSteering'], overlay());
+
+    expect(commands(root, LOCAL)).toHaveLength(count);
+    expect(read(root, LOCAL)).not.toContain('$CLAUDE_PROJECT_DIR');
+    expect(steering().ok).toBe(true);
+  });
+
   it('reports every unledgered copy in a shared settings.json, and survives a non-object one', () => {
     const root = repo();
     const shared = repo();

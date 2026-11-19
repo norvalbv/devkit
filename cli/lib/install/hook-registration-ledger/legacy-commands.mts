@@ -138,6 +138,9 @@ export function reconcileLegacyHookCommands(
         matcher: projection.native.matcher,
         command: projection.legacyCommand,
       });
+    // A superseded registration's row at the anchor owns the unanchored current spelling too.
+    const atAnchor = anchorReconcile(entry, provider, destinationRel, anchor);
+    if (atAnchor && !atAnchor.moved) stripped.push({ ...atAnchor.strip });
     if (entry.native.command === native.command) return entry;
     ledgerChanged = true;
     return { ...entry, native: { ...native } };
