@@ -48,10 +48,16 @@ function makeRepo(dirs: Record<string, number>, { governed = true, bin = true } 
   return root;
 }
 
-function run(root: string, filePath: string, { tool = 'Write', session = `s${++sessions}` } = {}) {
-  const input = { tool_name: tool, session_id: session, tool_input: { file_path: filePath } };
+type RunOptions = { tool?: string; session?: string; cwd?: string };
+
+function run(
+  root: string,
+  filePath: string,
+  { tool = 'Write', session = `s${++sessions}`, cwd }: RunOptions = {},
+) {
+  const input = { tool_name: tool, session_id: session, cwd, tool_input: { file_path: filePath } };
   return spawnSync('node', [HOOK], {
-    cwd: root,
+    cwd: cwd ?? root,
     encoding: 'utf8',
     env: { ...process.env, PATH, CLAUDE_PROJECT_DIR: root },
     input: JSON.stringify(input),
@@ -99,6 +105,20 @@ describe('fanout-brief', () => {
   it('judges an absolute file_path inside the project', () => {
     const root = makeRepo({ pile: 12 });
     expect(run(root, join(root, 'src/pile/new.ts'))).toContain('src/pile: 12→13/12');
+  });
+
+  // Catches a hook rooted at CLAUDE_PROJECT_DIR: every file in a linked worktree read as outside it.
+  it('judges a new file in the linked worktree the payload cwd names, with the main checkout bin', () => {
+    const root = makeRepo({ pile: 12 });
+    const worktree = join(mkdtempSync(join(tmpdir(), 'fanout-brief-wt-')), 'wt');
+    roots.push(dirname(worktree));
+    execFileSync('git', ['worktree', 'add', '-q', '--detach', worktree], { cwd: root });
+    const out = run(root, join(worktree, 'src/pile/new.ts'), { cwd: worktree });
+    expect(out).toContain('src/pile: 12→13/12');
+    // Catches a worktree-only root: a write into the main checkout from that session went unchecked.
+    expect(run(root, join(root, 'src/pile/new.ts'), { cwd: worktree })).toContain(
+      'src/pile: 12→13/12',
+    );
   });
 
   it('stays silent when the folder has room or the file already exists', () => {
