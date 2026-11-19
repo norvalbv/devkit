@@ -88,7 +88,8 @@ export interface CascadeOpts {
    * sets it to the budget actually left, so a judge started near the ceiling dies with its own
    * named timeout instead of the supervisor's opaque 124. */
   judgeTimeoutMs?: number;
-  /** Also attach the off-wire full-text vector (`itemsFull`) — a bench that banks findings. */
+  /** Attach the off-wire full-text vector (`itemsFull`) on every status — a bench that banks
+   * findings. A FAIL carries it regardless. */
   fullItems?: boolean;
   /** Set when this run's judges spawn without a verdict-bearing MCP server (sc-2837); a PASS then
    * carries it as `mcpDegraded`. Computed once per gate run by the caller, not per spawn. */
@@ -183,7 +184,8 @@ export async function runCascade(
     });
     const finalState = readChecklistState(cwd, sel.reviewer) ?? captureState;
     if (!retryableReason(res)) reportDeniedCalls(sel.reviewer, res, spawn.denied, finalState);
-    attachItems(res, finalState, disposition, { full: opts.fullItems });
+    // A FAIL keeps the uncut issue text so the findings block can print what the author must fix.
+    attachItems(res, finalState, disposition, { full: opts.fullItems || res.status === 'fail' });
     // Read before the finally deletes the artifact — the flag lives nowhere else (sc-2317).
     const mcpCause = mcpSpawn.cause();
     const calls = unmeasured ? null : toolCalls;

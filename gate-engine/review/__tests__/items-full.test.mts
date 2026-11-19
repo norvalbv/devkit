@@ -111,6 +111,23 @@ describe('attachItems itemsFull', () => {
     expect(existsSync(stateFile)).toBe(false);
     expect(exec).toHaveBeenCalledTimes(1);
   });
+  it('keeps the uncut text on a gate-path FAIL, off the event, with no option set', async () => {
+    const cwd = consumerRepo({ backend: true });
+    const reviewer = REVIEWERS.find((r) => r.name === 'correctness-reviewer')!;
+    const exec = mkExec(async () => {
+      writeFileSync(join(cwd, reviewer.stateFile!), JSON.stringify(state));
+      return 'VERDICT: FAIL';
+    });
+    const res = await runCascade(
+      { reviewer, files: ['src/main/db.ts'] },
+      { cwd, cfg: resolveGuardConfig(cwd), exec },
+    );
+    expect(res.status).toBe('fail');
+    expect(res.itemsFull?.[0].issues).toEqual([long]);
+    expect(res.items?.[0].issues?.[0]).toHaveLength(200);
+    expect(JSON.stringify(itemFields(res))).not.toContain('UNIQUE-TAIL-MARKER');
+    expect(Object.keys(itemFields(res))).not.toContain('capture');
+  });
   it('keeps the wire copy at 200 chars and carries the full text only on itemsFull when asked', () => {
     const res = outcome();
     // SAFETY: a minimal ChecklistState — attachItems reads items[].{name,status,issues} only.
