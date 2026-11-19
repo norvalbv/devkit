@@ -1,12 +1,34 @@
 /**
- * The runs that can answer for a branch: its GitHub head's first-parent commits, looked up by sha.
+ * The runs that can answer: a branch's GitHub head's first-parent commits, looked up by sha, or
+ * for `--history` the workflow's newest runs on every branch.
  *
  * Distance from the head is then a fact about git, not about how fresh GitHub's run listing is.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { gitRunner, line, ok } from '../ship/base-drift/git-run.mts';
-import { GhUnavailable, type RunRef, branchHead, runsForCommit } from './gh.mts';
+import {
+  GhUnavailable,
+  type RunRef,
+  type UnknownReason,
+  branchHead,
+  isUsableRun,
+  recentRuns,
+  runsForCommit,
+} from './gh.mts';
+import type { FileOutcome, TestReportSummary } from './produce.mts';
+import { loadSummary } from './source.mts';
+import { type TestStatus, normaliseTestName, testVerdict } from './test-verdict.mts';
+
+/** Download failures that describe one run's artifact, so the window goes on without it. */
+const RUN_DATA_REASONS = new Set<UnknownReason>([
+  'no-artifact',
+  'artifact-unreadable',
+  'schema-mismatch',
+]);
+
+/** `--history` window: about a third of listed runs are in flight or cancelled and carry no report. */
+export const DEFAULT_HISTORY_RUNS = 20;
 
 /** A run, and how many first-parent commits its commit sits behind the branch head. */
 export interface WalkedRun {
@@ -93,4 +115,187 @@ export class BranchWalk {
       return false; // no shallow file: the clone is complete
     }
   }
+}
+
+/** One run's line in `--history`: the file's outcome, or under `--test` that test's verdict. */
+export type HistoryStatus = TestStatus | FileOutcome | 'not-in-run';
+
+export interface HistoryRow {
+  runId: number;
+  attempt: number;
+  branch: string;
+  event: string;
+  sha: string;
+  createdAt: string;
+  status: HistoryStatus;
+  reason?: string;
+}
+
+export interface HistoryAnswer {
+  workflow: string;
+  path: string;
+  test?: string;
+  /** Runs gh listed, usable or not; `rows` plus `skippedRuns` account for every one. */
+  listed: number;
+  /** Newest first. */
+  rows: HistoryRow[];
+  skippedRuns: { runId: number; branch: string; conclusion: string; why: string }[];
+  /** `failed` and `passed` make the rate; `filePassed` does not, since its test may not exist there. */
+  counts: { failed: number; passed: number; filePassed: number; other: number };
+  latestFailure: { runId: number; createdAt: string } | null;
+  failedBranches: string[];
+  passedBranches: string[];
+  reason?: UnknownReason;
+  detail?: string;
+}
+
+/** What one run's summary says about the file, or the test in it; no git probe of other heads. */
+function rowStatus(
+  summary: TestReportSummary,
+  path: string,
+  test: string | undefined,
+): Pick<HistoryRow, 'status' | 'reason'> {
+  if (!Object.hasOwn(summary.files, path)) {
+    return { status: 'not-in-run', reason: "the file is not in this run's report" };
+  }
+  const outcome = summary.files[path];
+  if (!test) return { status: outcome };
+  const { status, reason } = testVerdict(summary, outcome, path, test);
+  return reason ? { status, reason } : { status };
+}
+
+/** A run `--history` could not read, with the reason. */
+function skipped(run: RunRef, why: string): HistoryAnswer['skippedRuns'][number] {
+  return {
+    runId: run.databaseId,
+    branch: run.headBranch,
+    conclusion: run.conclusion || run.status,
+    why,
+  };
+}
+
+/** Fill the counts and branch spread from the rows, which arrive newest first. */
+function tally(answer: HistoryAnswer): void {
+  const failed = new Set<string>();
+  const passed = new Set<string>();
+  for (const row of answer.rows) {
+    if (row.status === 'failed') {
+      answer.counts.failed++;
+      failed.add(row.branch);
+      answer.latestFailure ??= { runId: row.runId, createdAt: row.createdAt };
+    } else if (row.status === 'passed') {
+      answer.counts.passed++;
+      passed.add(row.branch);
+    } else if (row.status === 'file-passed') answer.counts.filePassed++;
+    else answer.counts.other++;
+  }
+  answer.failedBranches = [...failed];
+  answer.passedBranches = [...passed];
+}
+
+/**
+ * One file's, or one test's, outcome in each of the workflow's newest runs on every branch.
+ * GitHub's unfiltered run list is fresh; only its branch-filtered form serves stale pages.
+ */
+export function queryHistory({
+  cwd,
+  workflow,
+  artifact,
+  path,
+  test,
+  maxRuns,
+}: {
+  cwd: string;
+  workflow: string;
+  artifact: string;
+  path: string;
+  test?: string;
+  maxRuns: number;
+}): HistoryAnswer {
+  const name = test === undefined ? undefined : normaliseTestName(test, path);
+  const answer: HistoryAnswer = {
+    workflow,
+    path,
+    listed: 0,
+    rows: [],
+    skippedRuns: [],
+    counts: { failed: 0, passed: 0, filePassed: 0, other: 0 },
+    latestFailure: null,
+    failedBranches: [],
+    passedBranches: [],
+  };
+  if (name !== undefined) answer.test = name;
+  let runs: RunRef[];
+  try {
+    runs = recentRuns({ cwd, workflow, limit: maxRuns });
+  } catch (e) {
+    if (!(e instanceof GhUnavailable)) throw e;
+    return { ...answer, reason: e.reason, detail: e.message };
+  }
+  answer.listed = runs.length;
+  for (const run of runs) {
+    if (!isUsableRun(run)) {
+      answer.skippedRuns.push(
+        skipped(run, 'did not run to a pass/fail conclusion, so it carries no test report'),
+      );
+      continue;
+    }
+    let summary: TestReportSummary;
+    try {
+      summary = loadSummary({ cwd, run, artifact });
+    } catch (e) {
+      // A run without a readable report is a fact about that run; gh failing to answer is not.
+      if (e instanceof GhUnavailable && !RUN_DATA_REASONS.has(e.reason)) {
+        answer.reason = e.reason;
+        answer.detail = e.message;
+        break;
+      }
+      answer.skippedRuns.push(skipped(run, e instanceof Error ? e.message : String(e)));
+      continue;
+    }
+    answer.rows.push({
+      runId: run.databaseId,
+      attempt: run.attempt,
+      branch: run.headBranch,
+      event: run.event,
+      sha: run.headSha,
+      createdAt: run.createdAt,
+      ...rowStatus(summary, path, name),
+    });
+  }
+  tally(answer);
+  return answer;
+}
+
+/** `--history` as plain text: one line per run, then the rate over test-level verdicts only. */
+export function renderHistory(answer: HistoryAnswer): string[] {
+  const subject = answer.test ? `${answer.path} > ${answer.test}` : answer.path;
+  if (answer.reason) {
+    return [`❔ history of ${subject} unknown — ${answer.reason}`, `   ${answer.detail ?? ''}`];
+  }
+  const lines = [`History of ${subject} in ${answer.workflow}, newest first, all branches:`];
+  for (const row of answer.rows) {
+    const where = `${row.branch} (${row.event}, ${row.sha.slice(0, 8)})`;
+    lines.push(`  ${row.createdAt}  run ${row.runId}  ${where}  ${row.status}`);
+  }
+  for (const s of answer.skippedRuns) {
+    lines.push(`  skipped run ${s.runId} on ${s.branch} (${s.conclusion}): ${s.why}`);
+  }
+  const { failed, passed, filePassed } = answer.counts;
+  const level = answer.test ? 'a test-level verdict' : 'a file verdict';
+  const latest = answer.latestFailure;
+  const last = latest ? ` (latest failure: run ${latest.runId}, ${latest.createdAt})` : '';
+  lines.push(`failed ${failed} of ${failed + passed} run(s) with ${level}${last}`);
+  const on = answer.failedBranches.join(', ') || 'none';
+  lines.push(`  failed on: ${on} · passed on ${answer.passedBranches.length} branch(es)`);
+  if (filePassed) {
+    lines.push(`  file passed in ${filePassed} more run(s): test presence unverified, not counted`);
+  }
+  const usable = answer.rows.length;
+  const newest = answer.rows[0]?.createdAt;
+  const window = usable ? ` · window ${answer.rows.at(-1)?.createdAt} → ${newest}` : '';
+  lines.push(
+    `  listed ${answer.listed}, usable ${usable}, skipped ${answer.skippedRuns.length}${window}`,
+  );
+  return lines;
 }

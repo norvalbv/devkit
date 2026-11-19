@@ -62,6 +62,14 @@ The answer names the branch `head` it walked back from and `commitsBehindHead`; 
 `devkit baseline-status --at <base sha> --against <run's summary.json>` splits its failures into
 NEW (not failing at the base run) and inherited, by test name where both runs recorded names.
 
+**"Fails in CI, passes locally" — is it flaky?** The default branch's latest run cannot say: most
+CI runs are on pull requests. `devkit baseline-status --history --file <path> --test "<name>"`
+lists that test's outcome in each of the workflow's newest runs on every branch (`--max-runs`,
+default 20), then `failed X of Y run(s) with a test-level verdict` and the branches it failed on.
+Never hand-scrape `gh run view --log-failed` for this. `file-passed` runs are listed but left out
+of the rate, since the test may not exist on that branch. A failure on one PR branch only may be
+that PR's own change, not a flake: check the branch before calling it one.
+
 ## Fixing failures — max 2 cycles
 
 When the suite fails:
