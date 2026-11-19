@@ -153,7 +153,6 @@ describe('provider-native install and doctor lifecycle', () => {
       null,
       'codex',
       'shared',
-      null,
     );
     expect(installed.changed).toBe(true);
     expect(installed.ownershipEntries).toHaveLength(6);
@@ -187,7 +186,6 @@ describe('provider-native install and doctor lifecycle', () => {
       ownership,
       'codex',
       'shared',
-      null,
     );
     expect(repeated.changed).toBe(false);
     expect(repeated.ownershipEntries).toHaveLength(6);
@@ -209,7 +207,6 @@ describe('provider-native install and doctor lifecycle', () => {
       authorized,
       'claude',
       'shared',
-      null,
     );
     expect(bootstrap.changed).toBe(false);
     expect(bootstrap.ownershipEntries).toHaveLength(6);
@@ -241,7 +238,6 @@ describe('provider-native install and doctor lifecycle', () => {
       ledger(installed.ownershipEntries),
       'claude',
       'shared',
-      null,
     );
     expect(repeated.changed).toBe(false);
     expect(repeated.blocked.map((entry) => entry.registrationId)).toEqual([target.registrationId]);
@@ -261,7 +257,6 @@ describe('provider-native install and doctor lifecycle', () => {
       null,
       'cursor',
       'shared',
-      null,
     );
     expect(installed.collisions.map((entry) => entry.registrationId)).toEqual([
       expected[0].registrationId,
@@ -284,7 +279,6 @@ describe('provider-native install and doctor lifecycle', () => {
       ledger([stale]),
       'cursor',
       'shared',
-      null,
     );
     expect(installed.blocked.map((entry) => entry.registrationId)).toEqual([target.registrationId]);
     expect(installed.untrustedLedgerEntries).toEqual([stale]);
@@ -303,7 +297,6 @@ describe('provider-native install and doctor lifecycle', () => {
       null,
       'claude',
       'shared',
-      null,
     );
     expect(installed.changed).toBe(false);
     expect(installed.blocked).toHaveLength(2);
@@ -325,7 +318,6 @@ describe('ledger-authorized exact removal', () => {
       null,
       'claude',
       'shared',
-      null,
     );
     const ownership = ledger(installed.ownershipEntries);
     const removed = removeLedgerAuthorizedHookRegistrations(
@@ -334,7 +326,6 @@ describe('ledger-authorized exact removal', () => {
       ownership,
       'claude',
       'shared',
-      null,
     );
     expect(removed.removed).toHaveLength(6);
     expect(removed.drifted).toEqual([]);
@@ -353,7 +344,6 @@ describe('ledger-authorized exact removal', () => {
       ledger(installed.ownershipEntries),
       'claude',
       'shared',
-      null,
     );
     expect(removed.document).toEqual({ hooks: {} });
   });
@@ -379,7 +369,6 @@ describe('ledger-authorized exact removal', () => {
       ledger(installed.ownershipEntries),
       'cursor',
       'shared',
-      null,
     );
     expect(duplicateResult.drifted.map((entry) => entry.registrationId)).toContain(
       entries[0].registrationId,
@@ -398,7 +387,6 @@ describe('ledger-authorized exact removal', () => {
       ledger([tampered]),
       'cursor',
       'shared',
-      null,
     );
     expect(untrusted.changed).toBe(false);
     expect(untrusted.untrustedLedgerEntries).toEqual([tampered]);

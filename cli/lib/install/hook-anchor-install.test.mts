@@ -47,8 +47,19 @@ const commands = (root: string, rel: string): string[] =>
 const overlay = (targets = ['claude']) => ({ overlay: true, targets });
 const install = (root: string, targets = ['claude'], extra = {}) =>
   installHookRegistrations(root, ['priorArtGate'], { ...overlay(targets), ...extra });
+const checkAgentHooks = (root: string) => checkHookRegistrations(root, ['agentHooks'], overlay());
 const check = (root: string, targets = ['claude']) =>
   checkHookRegistrations(root, ['priorArtGate'], overlay(targets));
+
+function canWrite(dir: string): boolean {
+  try {
+    writeFileSync(join(dir, '.probe'), '');
+    rmSync(join(dir, '.probe'));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Rewrite a file from one spelling of the home to another, the way an older install left it. */
 function respell(root: string, rel: string, from: string, to: string) {
@@ -124,13 +135,17 @@ describe('overlay hook commands anchor at the overlay home', () => {
     expect(check(moved).ok).toBe(true);
   });
 
-  it('recovers a re-anchor that crashed before its provider file was written', () => {
+  it('recovers a re-anchor that crashed before its provider file was written', (ctx) => {
     const root = repo();
     install(root);
     const before = realpathSync.native(root);
     const moved = join(root, '..', 'moved');
     renameSync(root, moved);
     chmodSync(join(moved, '.claude'), 0o555);
+    if (canWrite(join(moved, '.claude'))) {
+      chmodSync(join(moved, '.claude'), 0o755);
+      ctx.skip(); // a privileged process (root) writes through the mode, so nothing can fail here
+    }
     try {
       expect(() => install(moved)).toThrow();
     } finally {
@@ -215,6 +230,38 @@ describe('overlay hook commands anchor at the overlay home', () => {
 
     expect(commands(moved, LOCAL)).toHaveLength(count);
     expect(read(moved, LOCAL)).not.toContain(before);
+  });
+
+  it('strips the unanchored handler a crashed first upgrade left beside an anchored ledger', () => {
+    const root = repo();
+    installHookRegistrations(root, ['agentHooks'], overlay());
+    const count = commands(root, LOCAL).length;
+    // The first upgrade wrote its ledger, then died before rewriting the provider file.
+    respell(root, LOCAL, realpathSync.native(root), UNANCHORED.claude);
+    expect(checkAgentHooks(root).missing).toContain('claude:superseded-registration');
+
+    installHookRegistrations(root, ['agentHooks'], overlay());
+
+    expect(commands(root, LOCAL)).toHaveLength(count);
+    expect(read(root, LOCAL)).not.toContain('$CLAUDE_PROJECT_DIR');
+    expect(checkAgentHooks(root).ok).toBe(true);
+  });
+
+  it('reports every unledgered copy in a shared settings.json, and survives a non-object one', () => {
+    const root = repo();
+    const shared = repo();
+    installHookRegistrations(shared, ['priorArtGate'], { targets: ['claude'] });
+    const doc = JSON.parse(read(shared, '.claude/settings.json'));
+    doc.hooks.PostToolUse[0].hooks.push({ ...doc.hooks.PostToolUse[0].hooks[0] });
+    mkdirSync(join(root, '.claude'));
+    writeFileSync(join(root, '.claude/settings.json'), JSON.stringify(doc));
+    install(root);
+    const duplicates = (r: string) =>
+      check(r).advisories.filter((a) => a.startsWith('claude:unanchored-duplicate'));
+    expect(duplicates(root)).toHaveLength(4);
+
+    writeFileSync(join(root, '.claude/settings.json'), '[]');
+    expect(duplicates(root)).toEqual([]);
   });
 
   it('switches Codex between scopes in its one hooks file, leaving exactly one spelling', () => {

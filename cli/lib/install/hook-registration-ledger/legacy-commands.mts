@@ -70,34 +70,31 @@ const ownsSupersession = (
   entry.native.event === projection.native.event &&
   entry.native.matcher === projection.native.matcher;
 
-/** The current spelling of a row holding an anchor other than `anchor`: unanchored, or (overlay
- * rows only, since only overlay anchors) a home recovered from the row and proved by re-render. */
-function reanchoredNative(
+/** A row's move onto `anchor` from a prior spelling (unanchored, or a recovered overlay home); a row
+ * already there still owns the unanchored handler a crashed first write left in the document. */
+function anchorReconcile(
   entry: HookRegistrationOwnershipV1,
   provider: AgentProvider,
   destinationRel: string,
   anchor: string | null,
-): HookRegistrationOwnershipV1['native'] | null {
+): { native: HookRegistrationOwnershipV1['native']; strip: OwnedHandler; moved: boolean } | null {
   if (entry.provider !== provider || entry.destinationRel !== destinationRel) return null;
   const owned = Object.hasOwn(HOOK_REGISTRATIONS, entry.ownerId)
     ? HOOK_REGISTRATIONS[entry.ownerId]
     : [];
   const registration = owned.find((candidate) => candidate.registrationId === entry.registrationId);
-  if (!registration) return null;
-  const current = nativeProjection(provider, registration, anchor);
-  if (
-    !current ||
-    current.command === entry.native.command ||
-    current.event !== entry.native.event ||
-    current.matcher !== entry.native.matcher
-  )
+  const current = registration && nativeProjection(provider, registration, anchor);
+  if (!current || current.event !== entry.native.event || current.matcher !== entry.native.matcher)
     return null;
-  const unanchored = anchor !== null && nativeProjection(provider, registration, null);
-  if (unanchored && unanchored.command === entry.native.command) return current;
-  const recovered =
-    entry.installScope === 'overlay' &&
-    recoverProjectionHome(provider, registration, entry.native.command);
-  return recovered ? current : null;
+  const unanchored = anchor === null ? null : nativeProjection(provider, registration, null);
+  const anchors = unanchored !== null && unanchored.command !== current.command;
+  if (current.command === entry.native.command)
+    return anchors ? { native: current, strip: unanchored, moved: false } : null;
+  const prior =
+    (anchors && unanchored.command === entry.native.command) ||
+    (entry.installScope === 'overlay' &&
+      recoverProjectionHome(provider, registration, entry.native.command) !== null);
+  return prior ? { native: current, strip: entry.native, moved: true } : null;
 }
 
 /** Carry superseded rows onto the current spelling; report what they authorise stripping. A row is
@@ -126,11 +123,12 @@ export function reconcileLegacyHookCommands(
           entry.native.command === projection.native.command,
       )
     ) {
-      const reanchored = reanchoredNative(entry, provider, destinationRel, anchor);
-      if (!reanchored) return entry;
-      stripped.push({ ...entry.native });
+      const anchored = anchorReconcile(entry, provider, destinationRel, anchor);
+      if (!anchored) return entry;
+      stripped.push({ ...anchored.strip });
+      if (!anchored.moved) return entry;
       ledgerChanged = true;
-      return { ...entry, native: { ...reanchored } };
+      return { ...entry, native: { ...anchored.native } };
     }
     // EVERY prior spelling, not just the one the row holds: a registration can have shipped more
     // than one, and a row already carrying the current command cannot say which the document has.

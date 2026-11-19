@@ -263,8 +263,33 @@ describe('reconcileLegacyHookCommands — overlay anchor', () => {
     expect(result.stripped).toEqual([{ ...prePlan(command).native }]);
   });
 
-  it('leaves a row already at the current anchor alone', () => {
+  it('keeps a row already at the current anchor, which still owns its unanchored handler', () => {
     const result = overlay([prePlan(at('/new'))]);
+    expect(result.ledgerChanged).toBe(false);
+    expect(result.entries[0].native.command).toBe(at('/new'));
+    expect(result.stripped).toEqual([{ ...prePlan(OLD).native }]);
+  });
+
+  it('never strips the current command of a provider the anchor leaves unanchored', () => {
+    const entry = {
+      registrationId: 'decisions:pre-edit',
+      ownerId: 'decisions',
+      provider: 'cursor',
+      installScope: 'overlay',
+      destinationRel: '.cursor/hooks.json',
+      native: {
+        event: 'preToolUse',
+        matcher: 'Write|Delete',
+        command: '.cursor/hooks/decision-edit-guard.mjs',
+      },
+    };
+    const result = reconcileLegacyHookCommands(
+      [entry],
+      'cursor',
+      '.cursor/hooks.json',
+      'overlay',
+      '/h',
+    );
     expect(result).toMatchObject({ ledgerChanged: false, stripped: [] });
   });
 

@@ -69,11 +69,19 @@ function unanchoredDuplicates(
   entries: HookRegistrationOwnershipV1[],
 ): string[] {
   const file = otherScopeFile(root, provider, 'overlay');
-  if (!file) return [];
+  if (!file || !dataRecord(file.document)) return [];
   const projection = projectHookRegistrations(componentIds, [provider], 'shared', null);
   const ledger = ledgerOf([...projection.entries]);
-  return checkProjectedHookRegistrations(file.document, projection, ledger, provider, 'shared')
-    .present.filter(
+  // drifted = more than one copy, or a copy under another matcher: each still runs beside the anchor.
+  const { present, drifted } = checkProjectedHookRegistrations(
+    file.document,
+    projection,
+    ledger,
+    provider,
+    'shared',
+  );
+  return [...present, ...drifted]
+    .filter(
       ({ registrationId }) =>
         !entries.some(
           (entry) =>
@@ -143,13 +151,16 @@ export function checkHookRegistrations(
       home,
     );
     const legacy = reconcileLegacyHookCommands(adopted, provider, rel, scope, home);
-    if (stripReclaimedCommands(document, provider).changed)
-      missing.push(`${provider}:retired-registration`);
+    const retired = stripReclaimedCommands(document, provider).changed;
+    if (retired) missing.push(`${provider}:retired-registration`);
     advisories.push(...unrecognisedAdvisories(provider, { rel, document }));
     const elsewhere = otherScopeFindings(root, provider, scope, ledger?.entries ?? []);
     missing.push(...elsewhere.missing);
     advisories.push(...elsewhere.advisories);
-    if (legacy.ledgerChanged) missing.push(`${provider}:superseded-registration`);
+    // A prior spelling the ledger already moved past is still in the document after a crashed write.
+    const leftover =
+      !retired && stripReclaimedCommands(document, provider, legacy.stripped).changed;
+    if (legacy.ledgerChanged || leftover) missing.push(`${provider}:superseded-registration`);
     const result = checkProjectedHookRegistrations(
       document,
       projectHookRegistrations(componentIds, [provider], scope, home),
