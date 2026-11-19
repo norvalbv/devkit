@@ -68,7 +68,7 @@ function extractChunk(argv) {
     console.error('❌ --chunk must be a non-negative integer chunk index');
     process.exit(1);
   }
-  return { chunk: raw, rest: [...argv.slice(0, i), ...argv.slice(i + 2)] };
+  return { chunk: String(Number(raw)), rest: [...argv.slice(0, i), ...argv.slice(i + 2)] };
 }
 
 // Group-scoped path. Sorted so the SAME group always resolves to the same file regardless of the
@@ -81,6 +81,28 @@ const lensPath = (lens, chunk) => {
 };
 
 const log = console.log;
+
+const scopeFlags = (lens, chunk) =>
+  `--lens ${[...lens].sort().join(',')}${chunk != null ? ` --chunk ${chunk}` : ''}`;
+
+// The gate pins a lens judge to its group and chunk through the env, so a judge that drops a flag
+// still writes the artifact the gate reads, and one naming another judge's scope is refused.
+function pinnedScope(lens, chunk) {
+  const { DEVKIT_CORRECTNESS_LENS: pinned, DEVKIT_CORRECTNESS_CHUNK: pinnedChunk } = process.env;
+  if (!pinned) return { lens, chunk };
+  const own = {
+    lens: extractLens(['--lens', pinned]).lens,
+    chunk: pinnedChunk ? extractChunk(['--chunk', pinnedChunk]).chunk : null,
+  };
+  const asked = scopeFlags(lens ?? own.lens, chunk ?? own.chunk);
+  if (asked !== scopeFlags(own.lens, own.chunk)) {
+    console.error(
+      `❌ This judge owns ${scopeFlags(own.lens, own.chunk)}; ${asked} belongs to another judge.`,
+    );
+    process.exit(1);
+  }
+  return own;
+}
 
 // Non-empty, known-lens checklists as `--lens` values (an fs error yields none). Chunk suffixes
 // are dropped: chunks share item names, so a chunk menu could steer a judge into another's file.
@@ -252,8 +274,9 @@ function generate(lens) {
   for (const item of items) log(`  - [${item.category}] ${item.name}`);
 }
 
-const { lens, rest: afterLens } = extractLens(process.argv.slice(2));
-const { chunk, rest } = extractChunk(afterLens);
+const { lens: typedLens, rest: afterLens } = extractLens(process.argv.slice(2));
+const { chunk: typedChunk, rest } = extractChunk(afterLens);
+const { lens, chunk } = pinnedScope(typedLens, typedChunk);
 ACTIVE_PATH = lensPath(lens, chunk);
 const args = rest;
 const cmd = args[0];

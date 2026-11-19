@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { withStagedFiles } from '../../gate-engine/review/evidence/staged-files-env.mts';
+import { deriveLensReviewer } from '../../gate-engine/review/lens/groups.mts';
+import { hasChecklist, REVIEWERS } from '../../gate-engine/review/reviewers.mts';
 
 // The synced skill checklist scripts run INSIDE consumer commit reviews with staged filenames
 // as input — the exact place a crafted path must never reach a shell. vitest deliberately
@@ -32,6 +35,10 @@ const CHECKLIST_CASES = [
   ['frontend-performance', '.frontend-performance-review.json'],
   ['frontend-security', '.frontend-security-review.json'],
 ] as const;
+
+const CORRECTNESS_REVIEWER = REVIEWERS.find((r) => r.name === 'correctness-reviewer');
+if (!CORRECTNESS_REVIEWER || !hasChecklist(CORRECTNESS_REVIEWER))
+  throw new Error('correctness-reviewer must be a checklist reviewer');
 
 const dirs = [];
 afterEach(() => {
@@ -763,34 +770,35 @@ describe('checklist scripts — git runs with stdin closed', () => {
   });
 });
 
+const CORRECTNESS = fileURLToPath(
+  new URL('../../skills/correctness/scripts/checklist.mjs', import.meta.url),
+);
+const correctness = (repo, args, env = {}) =>
+  spawnSync('node', [CORRECTNESS, ...args], {
+    cwd: repo,
+    encoding: 'utf8',
+    timeout: 60_000,
+    env: { ...process.env, DEVKIT_CHECKLIST_KEEP: '1', ...env },
+  });
+
+function stagedRepo() {
+  const repo = mkdtempSync(join(tmpdir(), 'checklist-lens-hint-'));
+  dirs.push(repo);
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  mkdirSync(join(repo, 'src'), { recursive: true });
+  writeFileSync(join(repo, 'src', 'a.ts'), 'export const a = 1;\n');
+  execFileSync('git', ['add', '-A'], { cwd: repo });
+  return repo;
+}
+
+const lensFile = (repo, group, body = '{"items":[]}') => {
+  const p = join(repo, '.claude', `.correctness-review-${group}.json`);
+  mkdirSync(join(repo, '.claude'), { recursive: true });
+  writeFileSync(p, body);
+  return p;
+};
+
 describe('correctness checklist — a missing artifact names the path read and the lens groups', () => {
-  const CORRECTNESS = fileURLToPath(
-    new URL('../../skills/correctness/scripts/checklist.mjs', import.meta.url),
-  );
-  const correctness = (repo, args) =>
-    spawnSync('node', [CORRECTNESS, ...args], {
-      cwd: repo,
-      encoding: 'utf8',
-      env: { ...process.env, DEVKIT_CHECKLIST_KEEP: '1' },
-    });
-
-  function stagedRepo() {
-    const repo = mkdtempSync(join(tmpdir(), 'checklist-lens-hint-'));
-    dirs.push(repo);
-    execFileSync('git', ['init', '-q'], { cwd: repo });
-    mkdirSync(join(repo, 'src'), { recursive: true });
-    writeFileSync(join(repo, 'src', 'a.ts'), 'export const a = 1;\n');
-    execFileSync('git', ['add', '-A'], { cwd: repo });
-    return repo;
-  }
-
-  const lensFile = (repo, group, body = '{"items":[]}') => {
-    const p = join(repo, '.claude', `.correctness-review-${group}.json`);
-    mkdirSync(join(repo, '.claude'), { recursive: true });
-    writeFileSync(p, body);
-    return p;
-  };
-
   it('check-item without --lens after a lensed generate names the path and the --lens remedy', () => {
     const repo = stagedRepo();
     const gen = correctness(repo, ['generate', '--lens', 'writer-reader-contracts']);
@@ -895,5 +903,115 @@ describe('correctness checklist — a missing artifact names the path read and t
     expect(r.stdout).toContain('No checklist at .claude/.correctness-review.json');
     expect(r.stdout).toContain('Run: generate');
     expect(r.stderr).toBe('');
+  });
+});
+
+describe('correctness checklist — the gate pins a lens judge to its own scope', () => {
+  const PIN = { DEVKIT_CORRECTNESS_LENS: 'state-transitions' };
+  const statePath = (repo, group) => join(repo, '.claude', `.correctness-review-${group}.json`);
+
+  it('bare commands under the pinned env work the lens checklist the gate verifies', () => {
+    const repo = stagedRepo();
+
+    for (const args of [
+      ['generate'],
+      ['check-item', 'state-transitions', '--pass'],
+      ['finalize'],
+    ]) {
+      const r = correctness(repo, args, PIN);
+      expect(r.status, `${args[0]}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+
+    const state = JSON.parse(readFileSync(statePath(repo, 'state-transitions'), 'utf8'));
+    expect(state.items.map((i) => [i.name, i.status])).toEqual([['state-transitions', 'pass']]);
+    expect(existsSync(join(repo, '.claude', '.correctness-review.json'))).toBe(false);
+  });
+
+  it('a pinned chunk scopes a bare generate to that chunk', () => {
+    const repo = stagedRepo();
+
+    const r = correctness(repo, ['generate'], { ...PIN, DEVKIT_CORRECTNESS_CHUNK: '2' });
+
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(existsSync(statePath(repo, 'state-transitions+c2'))).toBe(true);
+    expect(existsSync(statePath(repo, 'state-transitions'))).toBe(false);
+  });
+
+  it.each([
+    ['another group', ['generate', '--lens', 'concurrency-races'], '--lens concurrency-races'],
+    [
+      'a chunk it was not given',
+      ['generate', '--chunk', '1'],
+      '--lens state-transitions --chunk 1',
+    ],
+  ])('refuses a flag naming %s and leaves every checklist untouched', (_, args, asked) => {
+    const repo = stagedRepo();
+    const body = '{"items":[{"name":"concurrency-races","status":"pass","issues":[]}]}';
+    const other = lensFile(repo, 'concurrency-races', body);
+
+    const r = correctness(repo, args, PIN);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      `This judge owns --lens state-transitions; ${asked} belongs to another judge.`,
+    );
+    expect(readFileSync(other, 'utf8')).toBe(body);
+    expect(existsSync(statePath(repo, 'state-transitions'))).toBe(false);
+  });
+
+  // A two-lens group typed in another order is the same scope, never another judge's.
+  it.each([
+    ['state-transitions', 'state-transitions', 'state-transitions'],
+    [
+      'concurrency-races,state-transitions',
+      'state-transitions,concurrency-races',
+      'concurrency-races+state-transitions',
+    ],
+  ])('accepts a flag that repeats its own scope (%s as %s)', (pinned, typed, group) => {
+    const repo = stagedRepo();
+
+    const r = correctness(repo, ['generate', '--lens', typed], {
+      DEVKIT_CORRECTNESS_LENS: pinned,
+    });
+
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(existsSync(statePath(repo, group))).toBe(true);
+  });
+
+  it('reads a zero-padded --chunk as the pinned chunk it names', () => {
+    const repo = stagedRepo();
+
+    const r = correctness(repo, ['generate', '--chunk', '02'], {
+      ...PIN,
+      DEVKIT_CORRECTNESS_CHUNK: '2',
+    });
+
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(existsSync(statePath(repo, 'state-transitions+c2'))).toBe(true);
+  });
+
+  it("a derived lens judge's spawn env lands a bare generate on the reviewer's own state file", () => {
+    const repo = stagedRepo();
+    const derived = deriveLensReviewer(CORRECTNESS_REVIEWER, ['state-transitions'], 0);
+    const stale = { ...process.env, DEVKIT_CORRECTNESS_LENS: 'concurrency-races' };
+
+    const r = spawnSync('node', [CORRECTNESS, 'generate'], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: withStagedFiles(stale, derived, ['src/a.ts']),
+    });
+
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(existsSync(join(repo, derived.stateFile))).toBe(true);
+    expect(existsSync(join(repo, CORRECTNESS_REVIEWER.stateFile))).toBe(false);
+  });
+
+  it('an undivided reviewer inherits no lens scope from its parent', () => {
+    const parent = { DEVKIT_CORRECTNESS_LENS: 'state-transitions', DEVKIT_CORRECTNESS_CHUNK: '3' };
+
+    const env = withStagedFiles(parent, CORRECTNESS_REVIEWER, ['src/a.ts']);
+
+    expect(env.DEVKIT_CORRECTNESS_LENS).toBeUndefined();
+    expect(env.DEVKIT_CORRECTNESS_CHUNK).toBeUndefined();
   });
 });

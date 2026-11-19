@@ -43,6 +43,8 @@ export interface Reviewer {
    * presence tells `wrapPrompt` the brief's own command lines carry no `--lens` and so cannot be
    * deferred to. Never set on a REVIEWERS table entry. */
   lens?: readonly string[];
+  /** Set ONLY by `deriveLensReviewer` for a chunked lens judge — the diff slice it covers. */
+  chunk?: number;
   /** When set, the reviewer runs SINGLE-PASS at this model — no first-pass→escalation cascade, its FAIL
    * blocks directly. Used by the correctness reviewer: the reviewer-eval bench measured that the
    * opus escalation OVERTURNS real correctness bugs (a "confirm or overturn" opus, handed a subtle
