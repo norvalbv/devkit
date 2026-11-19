@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { CHECK_BUCKETS, CHECKS_JSON_FIELDS, parseChecksJson, } from './checks-json.mjs';
 export { CHECK_BUCKETS, CHECKS_JSON_FIELDS, parseChecksJson };
 import { classifyChecksFailure } from './classify.mjs';
+import { headRunsPoller } from './head-runs.mjs';
 import { requiredSetPoller } from './required.mjs';
 import { withFailedSteps } from './steps.mjs';
 import { recordCiEvent } from './telemetry.mjs';
@@ -32,6 +33,7 @@ const PERMANENT = new Set([
     'gh-missing',
     'gh-unauthenticated',
     'not-a-github-repo',
+    'merge-conflict',
 ]);
 const emptyCounts = () => ({
     pass: 0,
@@ -128,6 +130,7 @@ export async function waitForChecks(options) {
     let lastLine = '';
     let lastEmitAt = started;
     let streakOutcome = null;
+    let streakHead;
     let streak = 0;
     let firstTerminalAt = null;
     let transient = 0;
@@ -191,15 +194,17 @@ export async function waitForChecks(options) {
                 streakOutcome = null;
             }
             else {
-                // A flip between two TERMINAL outcomes (pass -> fail without passing through pending)
-                // changes the set, so the grace restarts with it instead of inheriting the replaced clock.
-                if (last.outcome === streakOutcome && firstTerminalAt !== null)
+                // A flip between two TERMINAL outcomes, or a new PR head, restarts the grace: neither may inherit
+                // the replaced clock or the confirmations another head earned.
+                const same = last.outcome === streakOutcome && result.head === streakHead;
+                if (same && firstTerminalAt !== null)
                     streak += 1;
                 else {
                     firstTerminalAt = now();
                     streak = 1;
                 }
                 streakOutcome = last.outcome;
+                streakHead = result.head;
                 // Both bars, not either: the poll count survives a flap, the wall-clock grace survives a
                 // workflow_run job or a stale re-push rollup that registers after the first terminal poll.
                 if (streak >= confirmations && now() - firstTerminalAt >= settleGraceMs)
@@ -312,7 +317,7 @@ async function main(argv) {
     const checks = ghChecksPoller({ pr, repo, cwd, required, exec });
     const narrowed = required ? requiredSetPoller(checks, { pr, repo, cwd, exec }) : null;
     const result = await waitForChecks({
-        poll: narrowed?.poll ?? checks,
+        poll: narrowed?.poll ?? headRunsPoller(checks, { pr, repo, cwd, exec }),
         timeoutMs: seconds * 1000,
         intervalMs,
         settleGraceMs,

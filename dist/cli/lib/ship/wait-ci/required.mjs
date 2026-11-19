@@ -8,12 +8,22 @@ const RULESET_CONTEXTS = '.[] | select(.type == "required_status_checks") | .par
 const CLASSIC_CONTEXTS = '.protection.required_status_checks.contexts[]?';
 /** GitHub's 403 for rulesets on a plan without them: none can apply, so it is an empty set, not trouble. */
 const PLAN_REFUSED = /upgrade to github \w+ or make this repository public/i;
-/** The base branch's required contexts, from two reads that need no admin rights. Throws on gh trouble. */
+/** The PR's base branch's required contexts. Throws on gh trouble. */
 export function readRequiredContexts({ pr, repo, cwd, exec }) {
     const view = ['pr', 'view', pr, '--repo', repo, '--json', 'baseRefName', '--jq', '.baseRefName'];
-    const base = encodeURIComponent(exec(view, cwd).trim());
-    const rules = ['api', '--paginate', `repos/${repo}/rules/branches/${base}`];
-    const classic = ['api', `repos/${repo}/branches/${base}`];
+    return contextsForBase(exec(view, cwd).trim(), { repo, cwd, exec });
+}
+/** `gh api` arguments for a repo given as `owner/repo` or, from a GHES PR url, `host/owner/repo`. */
+export function apiArgs(repo, path, flags = []) {
+    const parts = repo.split('/');
+    const host = parts.length === 3 ? ['--hostname', parts[0]] : [];
+    return ['api', ...flags, ...host, `repos/${parts.slice(-2).join('/')}/${path}`];
+}
+/** A branch's required contexts, from two reads that need no admin rights. Throws on gh trouble. */
+export function contextsForBase(baseRef, { repo, cwd, exec }) {
+    const base = encodeURIComponent(baseRef);
+    const rules = apiArgs(repo, `rules/branches/${base}`, ['--paginate']);
+    const classic = apiArgs(repo, `branches/${base}`);
     const out = `${rulesetContexts(exec, [...rules, '--jq', RULESET_CONTEXTS], cwd)}\n${exec([...classic, '--jq', CLASSIC_CONTEXTS], cwd)}`;
     return [...new Set(out.split('\n').map((l) => l.trim()))].filter(Boolean);
 }

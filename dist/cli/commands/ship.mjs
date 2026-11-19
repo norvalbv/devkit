@@ -154,7 +154,10 @@ Usage:
                       means not failing on that base run, so a flake reads as new; unknown names a
                       reason= or counts unsure= files whose test names cannot settle it.
                       A running Actions job with an already-failed step is red at once, named by
-                      failed-steps=<job › step>.
+                      failed-steps=<job › step>. A green set also needs the head's own Actions runs:
+                      a queued run holds the wait, a conflicting PR with no pull_request run ends
+                      unavailable reason=merge-conflict, every check the base requires must report, and
+                      a head with no pull_request run passes only when mergeable, not stacked, and run-free.
                       A red that ends the wait while any check still runs says attribution=unknown
                       reason=run-in-progress: the unfinished run may still add failures.
                       The verdict NEVER reaches the exit code (unless --wait-ci-strict): a red PR is

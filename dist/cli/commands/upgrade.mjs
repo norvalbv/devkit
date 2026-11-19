@@ -31,6 +31,7 @@ import { adoptActivatedAntiSlopFindings, captureAntiSlopBaselineActivation, } fr
 import { rekeyWorkingBaseline } from '../lib/install/anti-slop/baseline-envelope.mjs';
 import { collectAntiSlopGroups } from '../lib/install/anti-slop/runner.mjs';
 import { lockedCommand } from '../lib/install/init/init-lock.mjs';
+import { preflightOverlayFallow } from '../lib/install/install-fallow.mjs';
 import { retiredBiomeNotice } from '../lib/install/oxc/root-configs.mjs';
 import { offerLineGrowth, offerNewGates, offerOptionalComponents, overlayOwnsLineGrowth, } from '../lib/install/upgrade-offers.mjs';
 import { resyncOverlayAgentSurfaces } from '../lib/overlay.mjs';
@@ -181,6 +182,9 @@ async function upgrade(args, cwd) {
             target = latest;
             console.log(`  ✓ installed v${latest} — running CLI already current, reconciling in this pass.`);
         }
+        // A recorded fallow must resolve before the re-sync rewrites the record it is read back from.
+        if (cfg.components?.fallow && !preflightOverlayFallow(cwd, dryRun))
+            return 1;
         console.log('\n2. re-sync (regenerate the git-ignored gate chain + configs for the recorded selection)');
         // structure as recorded, never the normalized default: an adopted overlay is never re-baselined.
         const structure = cfg.components?.structure ?? false;

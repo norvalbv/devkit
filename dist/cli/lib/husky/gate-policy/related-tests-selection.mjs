@@ -33,6 +33,21 @@ function parseSelection(line, repo, branch) {
         return undefined;
     }
 }
+// vitest's forceRerunTriggers (**/package.json, **/{vitest,vite}.config.*, setupFiles) select the
+// whole suite, which CI already runs.
+const RERUN_TRIGGER_RE = /(^|\/)(package\.json|(vitest|vite)\.config\.[^/]*)$|^vitest\.setup\.mjs$/;
+/** The staged paths the related-test listing starts from, sorted, minus the full-suite triggers. */
+export function relatedPaths(staged) {
+    return [...staged].filter((p) => !RERUN_TRIGGER_RE.test(p)).sort();
+}
+/** Names the staged full-suite triggers this gate leaves to CI; undefined when none is staged. */
+export function triggerLine(staged) {
+    const triggers = [...staged].filter((p) => RERUN_TRIGGER_RE.test(p)).sort();
+    if (!triggers.length)
+        return undefined;
+    const more = triggers.length > NAMED ? ` (+${triggers.length - NAMED})` : '';
+    return `related-tests: ${triggers.length} staged full-suite trigger(s), so CI runs vitest's whole suite: ${triggers.slice(0, NAMED).join(', ')}${more}`;
+}
 /** The newest selection this ship's repo+branch recorded; undefined outside a ship or with none. */
 export function previousSelection(env = process.env) {
     const { DEVKIT_SHIP_REPO: repo, DEVKIT_SHIP_BRANCH: branch } = env;
@@ -101,4 +116,20 @@ export function recordSelection(report, root, files) {
     catch {
         // An unreadable report records nothing; the next attempt just prints no comparison.
     }
+}
+// The env-scrub test reads these from disk, so no import edge selects it. The ship-script pattern
+// mirrors that test's own top-level scan of cli/lib/ship.
+const SCRUB_TEST = 'cli/__tests__/vitest-setup-env-scrub.test.mts';
+const SCRUB_INPUT_RE = /^cli\/lib\/ship\/[^/]+\.sh$|^vitest\.setup\.mjs$|^vitest(\.e2e)?\.config\.mjs$/;
+// The agent-asset parity test reads hook sources, their projections and the selection from disk.
+const PARITY_TEST = 'cli/__tests__/agent-asset-projection-parity.test.mts';
+const PARITY_INPUT_RE = /^agents-hooks\/|^\.(claude|codex|cursor)\/hooks\/|^\.devkit\/config\.json$/;
+const FORCED = [
+    [SCRUB_INPUT_RE, SCRUB_TEST],
+    [PARITY_INPUT_RE, PARITY_TEST],
+];
+/** The disk-reading tests a staged path selects, which `vitest related` would never run. */
+export function forcedTests(staged) {
+    const paths = [...staged];
+    return FORCED.filter(([re]) => paths.some((p) => re.test(p))).map(([, test]) => test);
 }

@@ -2,6 +2,7 @@
  * The deterministic guard registry guard-deterministic (./run.mts) runs, in fixed order. Split from
  * the orchestrator so the gate set reads as data; run.mts owns selection, spawning and aggregation.
  */
+import { fileURLToPath } from 'node:url';
 const ANTI_SLOP_COMPONENT = 'antiSlop';
 // guard-comments' exit 4 blocks, but like unexpected/could-not-run it is not a verdict.
 export const UNREADABLE_EVIDENCE = '(unreadable-evidence)';
@@ -68,3 +69,10 @@ export const DETERMINISTIC = [
         rcLabels: NO_VERDICT_LABELS,
     },
 ];
+// In dev the tree is .mts; in the shipped dist it is .mjs. tsc emit leaves string literals alone.
+const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
+const MJS_EXT_RE = /\.mjs$/;
+/** The absolute path of a registry gate's module, in this install's extension. */
+export function gateModulePath(gate) {
+    return fileURLToPath(new URL(gate.module.replace(MJS_EXT_RE, SELF_EXT), import.meta.url));
+}

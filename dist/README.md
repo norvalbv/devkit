@@ -111,7 +111,7 @@ A fresh install sets up all three. Pass `--no-claude`, `--no-codex` or `--no-cur
 You need Git, [Bun](https://bun.sh/) and Node.js 23.6 or newer. In the repository you want to guard:
 
 ```bash
-bun add -D git+https://github.com/norvalbv/devkit.git#v0.77.0
+bun add -D git+https://github.com/norvalbv/devkit.git#v0.77.1
 bunx devkit init
 bunx devkit doctor
 ```

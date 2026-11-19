@@ -720,7 +720,7 @@ if [ -z "$LOCAL_BRANCH_EXISTS" ] &&
   exit 1
 fi
 
-WT="${TMPDIR:-/tmp}/devkit-ship-${BR//\//-}-$$"
+WT=$(mktemp -u "${TMPDIR:-/tmp}/devkit-ship-${BR//\//-}.XXXXXX") # a name only; git creates the dir
 # Body: --body "<text>" wins (explicit, no temp file); then --body-file (authored once, survives
 # every retry); then — on --resume — the recorded body, with stdin never consulted (a re-run heredoc
 # does not survive a wrapper, and a closed stdin reads as a silently EMPTY body); else stdin
@@ -1134,20 +1134,7 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
     BRANCH_TREE=$(git rev-parse "$RECOVERY_COMMIT^{tree}")
     if [ "$RECOVERY_TREE" != "$BRANCH_TREE" ]; then
       RECOVERY_REASON="the current scoped files no longer match its commit"
-      # Name them: "some scoped file changed" is unactionable on a wide ship, and the commonest cause is
-      # the gate chain's own formatter re-staging inside the worktree, not an edit the operator made.
-      RECOVERY_DRIFT_N=0
-      RECOVERY_DRIFT_LIST=
-      while IFS= read -r drifted; do
-        RECOVERY_DRIFT_N=$((RECOVERY_DRIFT_N + 1))
-        if [ "$RECOVERY_DRIFT_N" -le 5 ]; then
-          RECOVERY_DRIFT_LIST="${RECOVERY_DRIFT_LIST:+$RECOVERY_DRIFT_LIST }$drifted"
-        fi
-      done < <(git diff --name-only "$BRANCH_TREE" "$RECOVERY_TREE")
-      if [ "$RECOVERY_DRIFT_N" -gt 5 ]; then
-        RECOVERY_DRIFT_LIST="$RECOVERY_DRIFT_LIST (+$((RECOVERY_DRIFT_N - 5)) more)"
-      fi
-      RECOVERY_HINTS+=("differing paths ($RECOVERY_DRIFT_N): $RECOVERY_DRIFT_LIST")
+      ship_recovery_drift_hint "$BRANCH_TREE" "$RECOVERY_TREE"
       RECOVERY_HINTS+=("a pre-commit formatter rewrites and re-stages inside the ship worktree, so its commit can differ from your tree — see it with: git diff $BR -- <path>")
       # The second reason a correct commit legitimately differs from $ROOT, and the one this resume
       # check cannot distinguish: when the base moved under this checkout, the preserved commit holds
@@ -1161,19 +1148,7 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   fi
 
   # Every check above passes for a commit a moved base now conflicts with; GitHub would open it CONFLICTING.
-  RECOVERY_REMEDY=
-  if [ -z "$RECOVERY_REASON" ] && [ "$RECOVERY_PARENT" != "$BASE" ]; then
-    merge_rc=0
-    ship_preserved_merge_check "$ROOT" "$BASE" "$RECOVERY_COMMIT" || merge_rc=$?
-    # Fails closed: publishing unverified would reopen the CONFLICTING-PR exit 0; the re-stage works on any git.
-    if [ "$merge_rc" -eq 1 ]; then
-      RECOVERY_REASON="it no longer merges cleanly into $BASE_REF (${BASE:0:7}), which changed the same lines since ${RECOVERY_PARENT:0:7}"
-      [ -z "$RECOVERY_CONFLICT_HINT" ] || RECOVERY_HINTS+=("$RECOVERY_CONFLICT_HINT")
-    elif [ "$merge_rc" -eq 2 ]; then
-      RECOVERY_REASON="ship could not verify it still merges cleanly into $BASE_REF (${BASE:0:7}), which moved since ${RECOVERY_PARENT:0:7} (the check needs git >= 2.40)"
-    fi
-    [ "$merge_rc" -eq 0 ] || RECOVERY_REMEDY=1
-  fi
+  ship_preserved_merge_verdict
 
   if [ -n "$RECOVERY_REASON" ]; then
     echo "branch already exists: $BR" >&2
