@@ -12,12 +12,13 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { collectResults } from '../commands/doctor.mts';
 import syncHookRunner, { replacePin } from '../commands/sync/sync-hook-runner.mts';
 import { replaceableHooksPathPin } from '../lib/doctor/hook-checks.mts';
+import { ownedHooksRel } from '../lib/doctor/hooks-path.mts';
 import { runSelfHostDoctor } from '../lib/doctor/self-host-doctor.mts';
 import { rootRegistry, testSpawnSync } from './_helpers.mts';
 
@@ -479,6 +480,46 @@ describe('doctor — whose hooks run in this checkout', () => {
 
     syncHookRunner([], wt);
     expect(scopedPin(wt)).toBe(join(root, '.husky', '_'));
+  });
+});
+
+describe('ownedHooksRel — an absolute hooksPath as the checkout-relative path ship runs', () => {
+  it('names the path relative to the DEEPEST checkout holding it', () => {
+    const root = huskyRepo('MAIN');
+    const nested = join(root, '.claude', 'worktrees', 'x');
+    git(root, '-c', 'core.hooksPath=/dev/null', 'worktree', 'add', '-q', '-b', 'x', nested);
+
+    expect(ownedHooksRel(root, join(root, '.husky'))).toBe('.husky');
+    expect(ownedHooksRel(root, join(nested, '.husky', '_'))).toBe('.husky/_');
+    expect(ownedHooksRel(nested, join(root, '.husky'))).toBe('.husky');
+    expect(ownedHooksRel(root, root)).toBe('.'); // never '', which the shell reads as "unset"
+  });
+
+  it.skipIf(process.platform !== 'darwin')(
+    'matches a /var spelling to git’s /private/var registry',
+    () => {
+      const root = huskyRepo('MAIN');
+      const spelled = realpathSync(root).replace(/^\/private/, '');
+
+      expect(ownedHooksRel(root, join(spelled, '.husky'))).toBe('.husky');
+    },
+  );
+
+  it('names the path through a symlinked spelling of the checkout, keeping its configured tail', () => {
+    const root = huskyRepo('MAIN');
+    const via = join(mkTmp('doctor-hookspath-via-'), 'main');
+    symlinkSync(root, via);
+
+    expect(ownedHooksRel(root, join(via, '.husky', '_'))).toBe('.husky/_');
+  });
+
+  it('leaves relative, external and git-dir values alone', () => {
+    const root = huskyRepo('MAIN');
+
+    expect(ownedHooksRel(root, '.husky')).toBeNull();
+    expect(ownedHooksRel(root, join(mkTmp('doctor-hookspath-ext-'), 'hooks'))).toBeNull();
+    expect(ownedHooksRel(root, join(root, '.git', 'hooks'))).toBeNull();
+    expect(ownedHooksRel(root, `${root}/.husky/../../outside`)).toBeNull(); // `..` escapes the checkout
   });
 });
 

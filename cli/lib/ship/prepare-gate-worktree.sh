@@ -381,6 +381,7 @@ gate_dependency_preflight_tool() {
 }
 
 . "$(dirname "${BASH_SOURCE[0]}")/prepare-gate-worktree/node-modules-source.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/prepare-gate-worktree/gate-hook-path.sh"
 # The linked install is the ENGINE the worktree hook runs. One older than `.devkit/baselines`
 # (< 0.53.0) misjudges every grandfathered ratchet entry in a repo that stores baselines there, so
 # stop before any commit with the remedy (sc-1934). Exit 2 or a missing helper is a diagnostic that
@@ -404,37 +405,6 @@ gate_baseline_reader_preflight() {
   esac
 }
 
-# The pre-commit hook ship will run in the ephemeral worktree. This is the single resolver shared by
-# preparation and commit: overlay wins when projected, an explicit core.hooksPath is honoured, an
-# unset path falls back to the projected package-mode Husky runner, and Git's default hooks directory
-# is the final candidate. Returning a non-executable candidate is intentional — callers fail closed
-# with a useful path instead of treating absence as an opt-out.
-gate_worktree_pre_commit() {
-  local wt=$1 root=${2:-} hooks_path default_hooks_dir
-  if [ -n "$root" ] && [ -x "$(gate_overlay_root "$root")/.devkit/hooks/pre-commit" ]; then
-    printf '%s\n' "$wt/.devkit/hooks/pre-commit"
-    return 0
-  fi
-  hooks_path=$(git -C "$wt" config --get core.hooksPath 2>/dev/null) || hooks_path=''
-  if [ -z "$hooks_path" ]; then
-    if [ -e "$wt/.husky/_/pre-commit" ] || [ -L "$wt/.husky/_/pre-commit" ]; then
-      printf '%s\n' "$wt/.husky/_/pre-commit"
-      return 0
-    fi
-    default_hooks_dir=$(git -C "$wt" rev-parse --git-path hooks 2>/dev/null) || default_hooks_dir=''
-    [ -n "$default_hooks_dir" ] || return 0
-    case $default_hooks_dir in
-      /*) printf '%s\n' "$default_hooks_dir/pre-commit" ;;
-      *) printf '%s\n' "$wt/$default_hooks_dir/pre-commit" ;;
-    esac
-    return 0
-  fi
-  case $hooks_path in
-    /*) printf '%s\n' "$hooks_path/pre-commit" ;;
-    *) printf '%s\n' "$wt/$hooks_path/pre-commit" ;;
-  esac
-}
-
 # prepare_gate_worktree <worktree> <consumer-root> <purpose> [extra-link-dir...]
 # Where <root>'s overlay lives: its own, else the overlay home's, from the one TS resolver (a linked
 # worktree only borrows the git-excluded overlay, sc-4157). Empty when the repo is not overlay.
@@ -449,27 +419,6 @@ gate_overlay_root() {
 # runs, so ship and review read the caller's own gate inputs, its branch-local copies included.
 gate_project_caller() {
   gate_overlay_root "$1" --project >&2
-}
-
-# The hook directory git will actually use, relative to the checkout <dir>; empty when hooksPath is
-# absolute (a global hooks dir is never projected). Package-mode Husky points at its ignored `.husky/_`
-# runner, while a standalone install deliberately points at the committed `.husky` directory and needs
-# no generated runner. `.husky/_` is the fallback when hooksPath is unset so the devkit-install
-# preflight stays fail-closed. Pass `inherited` to answer for a worktree not yet created: it gets every
-# scope EXCEPT <dir>'s own config.worktree (extensions.worktreeConfig), so that scope is skipped.
-gate_hook_link_rel() {
-  local hooks_path
-  if [ "${2:-}" = inherited ]; then
-    hooks_path=$(git -C "$1" config --show-scope --get-all core.hooksPath 2>/dev/null |
-      awk -F'\t' '$1 != "worktree" { v = substr($0, length($1) + 2) } END { print v }') || hooks_path=''
-  else
-    hooks_path=$(git -C "$1" config --get core.hooksPath 2>/dev/null) || hooks_path=''
-  fi
-  if [ -z "$hooks_path" ]; then
-    printf '%s\n' .husky/_
-  elif [[ "$hooks_path" != /* ]]; then
-    printf '%s\n' "$hooks_path"
-  fi
 }
 
 # Can a gate worktree for <root> get a hook chain? Read-only, so ship runs it BEFORE it creates a branch
@@ -492,7 +441,11 @@ gate_hook_source_preflight() {
     return 1
   fi
   local rel main_root
-  if [ -n "$wt" ]; then rel=$(gate_hook_link_rel "$wt"); else rel=$(gate_hook_link_rel "$root" inherited); fi
+  if [ -n "$wt" ]; then
+    rel=$(gate_hook_link_rel "$wt") || return 1
+  else
+    rel=$(gate_hook_link_rel "$root" inherited) || return 1
+  fi
   [ -n "$rel" ] || return 0
   if [ -n "$wt" ] && { [ -e "$wt/$rel" ] || [ -L "$wt/$rel" ]; }; then return 0; fi
   main_root=$(gate_main_worktree "$root")
@@ -539,7 +492,7 @@ prepare_gate_worktree() {
 
   local main_root hook_link_rel
   main_root=$(gate_main_worktree "$root")
-  hook_link_rel=$(gate_hook_link_rel "$wt")
+  hook_link_rel=$(gate_hook_link_rel "$wt") || return 1
   # Append after `.devkit`: overlay mode must project the complete directory before its nested
   # hooksPath is considered, rather than materializing only `.devkit/hooks`.
   [ -z "$hook_link_rel" ] || link_dirs+=("$hook_link_rel")

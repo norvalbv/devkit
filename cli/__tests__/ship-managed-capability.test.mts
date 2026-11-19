@@ -342,10 +342,11 @@ describe('ship managed capability refresh — degraded environments', () => {
     const copy = join(lone, 'prepare-gate-worktree.sh');
     writeFileSync(copy, readFileSync(prepareGateWorktreeScript, 'utf8'));
     mkdirSync(join(lone, 'prepare-gate-worktree'));
-    copyFileSync(
-      join(dirname(prepareGateWorktreeScript), 'prepare-gate-worktree/node-modules-source.sh'),
-      join(lone, 'prepare-gate-worktree/node-modules-source.sh'),
-    );
+    for (const sibling of ['node-modules-source.sh', 'gate-hook-path.sh'])
+      copyFileSync(
+        join(dirname(prepareGateWorktreeScript), 'prepare-gate-worktree', sibling),
+        join(lone, 'prepare-gate-worktree', sibling),
+      );
 
     const res = spawnSync(
       '/bin/bash',

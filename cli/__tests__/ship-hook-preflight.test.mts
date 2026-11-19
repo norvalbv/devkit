@@ -30,6 +30,9 @@ import {
   seedShipRepoLocalRemote,
 } from './_ship-branch-fixture.mts';
 
+// Never called: declares the spawned emitter to vitest's graph, so `vitest related` selects this file.
+void (() => import('../lib/ship/prepare-gate-worktree/hooks-path-rel.mts'));
+
 const helperPath = fileURLToPath(new URL('../lib/ship/prepare-gate-worktree.sh', import.meta.url));
 const MISSING_RUNNER_RE = /missing \.husky\/_ in /;
 const INIT_HINT_RE = /not been initialised with devkit — run `devkit init`/;
@@ -128,12 +131,28 @@ describe('gate_hook_source_preflight — read-only, before any worktree exists',
     expect(preflight(dir, '').stdout.trim()).toBe('REFUSED');
   });
 
-  it('does not judge an absolute hooksPath (a global hooks dir is never projected)', () => {
+  it('does not judge an external absolute hooksPath (a global hooks dir is never projected)', () => {
     const { dir, git } = seedShipRepo();
+    const external = mkdtempSync(join(tmpdir(), 'hookpre-global-'));
+    dirs.push(external);
     rmSync(join(dir, '.husky/_'), { recursive: true, force: true });
-    git(['config', 'core.hooksPath', join(dir, 'nowhere')], { stdio: 'ignore' });
+    git(['config', 'core.hooksPath', join(external, 'nowhere')], { stdio: 'ignore' });
 
     expect(preflight(dir, 'HEAD').stdout.trim()).toBe('PASS');
+  });
+
+  // An absolute value inside a checkout is judged as its relative form: the gate worktree runs its own.
+  it('judges an absolute hooksPath inside this repo as the relative path it names', () => {
+    const { dir, git } = seedShipRepo();
+    git(['config', 'core.hooksPath', join(dir, 'nowhere')], { stdio: 'ignore' });
+    expect(preflight(dir, 'HEAD').stderr).toMatch(/missing nowhere in /);
+
+    git(['config', 'core.hooksPath', join(dir, '.husky/_')], { stdio: 'ignore' });
+    expect(preflight(dir, 'HEAD').stdout.trim()).toBe('PASS');
+    rmSync(join(dir, '.husky/_'), { recursive: true, force: true });
+    const r = preflight(dir, 'HEAD');
+    expect(r.stdout.trim()).toBe('REFUSED');
+    expect(r.stderr).toMatch(MISSING_RUNNER_RE);
   });
 
   it("judges the hooksPath a NEW worktree inherits, not the caller's per-worktree override", () => {
@@ -345,5 +364,71 @@ describe('reship.sh — an overlay borrowed by a linked worktree (sc-4157)', () 
     expect(readFileSync(join(linked, '.devkit/last-ship-gates-pr-open.log'), 'utf8')).toMatch(
       /RESUMED_OVERLAY_MARKER/,
     );
+  });
+});
+
+describe('gate_hooks_path_value — the core.hooksPath a gate worktree reads', () => {
+  const resolve = (dir: string, value: string, env: NodeJS.ProcessEnv = process.env) =>
+    spawnSync(
+      '/bin/bash',
+      ['-c', `. "${helperPath}"; gate_hooks_path_value "$1" "$2"`, '_', dir, value],
+      {
+        encoding: 'utf8',
+        env: { ...env, ...GIT_ENV },
+      },
+    );
+
+  it('names an in-repo absolute dir relatively, and leaves overlay and relative values verbatim', () => {
+    const { dir } = seedShipRepo();
+
+    expect(resolve(dir, join(dir, '.husky')).stdout).toBe('.husky\n');
+    expect(resolve(dir, join(dir, '.devkit/hooks')).stdout).toBe(`${join(dir, '.devkit/hooks')}\n`);
+    expect(resolve(dir, '.husky/_').stdout).toBe('.husky/_\n');
+  });
+
+  // git expands a leading `~` in core.hooksPath, so `~/hooks` is an external dir, not `$wt/~/hooks`.
+  it('reads a ~ hooksPath as git does, in both scopes', () => {
+    const { dir, git } = seedShipRepo();
+    const home = realpathSync(mkdtempSync(join(tmpdir(), 'hookpre-home-')));
+    dirs.push(home);
+    git(['config', 'core.hooksPath', '~/hooks'], { stdio: 'ignore' });
+    const linkRel = (mode: string) =>
+      spawnSync(
+        '/bin/bash',
+        ['-c', `. "${helperPath}"; gate_hook_link_rel "$1" $2`, '_', dir, mode],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, ...GIT_ENV, HOME: home },
+        },
+      );
+
+    for (const mode of ['', 'inherited']) expect(linkRel(mode).stdout).toBe(''); // external: never projected
+    expect(
+      spawnSync('/bin/bash', ['-c', `. "${helperPath}"; gate_worktree_pre_commit "$1"`, '_', dir], {
+        encoding: 'utf8',
+        env: { ...process.env, ...GIT_ENV, HOME: home },
+      }).stdout,
+    ).toBe(`${join(home, 'hooks/pre-commit')}\n`);
+  });
+
+  // `git commit` dies on a `~user` git cannot expand; ship's own `-c` override would not, so refuse.
+  it('refuses a ~user hooksPath git cannot expand rather than treat it as unset', () => {
+    const { dir, git } = seedShipRepo();
+    git(['config', 'core.hooksPath', '~devkit-no-such-user/hooks'], { stdio: 'ignore' });
+
+    const r = preflight(dir, 'HEAD');
+
+    expect(r.stdout.trim()).toBe('REFUSED');
+    expect(r.stderr).toMatch(/git cannot read core\.hooksPath/);
+  });
+
+  it('fails closed, printing nothing, when the resolver cannot run', () => {
+    const { dir } = seedShipRepo();
+
+    const r = resolve(dir, join(dir, '.husky'), { PATH: '/usr/bin:/bin' }); // no node on this PATH
+
+    expect(r.status).toBe(1);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toMatch(/could not resolve core\.hooksPath .* \(gates must not fail open\)/);
   });
 });
