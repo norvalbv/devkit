@@ -137,6 +137,21 @@ function isServerModule(file, text) {
     return ROUTE_HANDLER_RE.test(file.split('/').pop() ?? '') && HTTP_METHOD_EXPORT_RE.test(text);
 }
 const filesOfDomain = (selection, domain) => new Set(selection.filter((s) => s.reviewer.domain === domain).flatMap((s) => s.files));
+// A type declaration holds no implementation for a duplication review to compare.
+const TYPE_DECLARATION_RE = /\.d\.[cm]?ts$/;
+/** Declared-source files some reviewer received that commit-guard did not (they sit outside
+ * scanRoots), read off the real selection. guard-dup is index-scoped, so this never speaks for it. */
+export function filesUnseenByCommitGuard(selection, cfg) {
+    if (envFlag('REVIEW_NO_TOPOLOGY_WARN'))
+        return [];
+    const { isSource } = sourceMatchers(cfg.sourceExtensions);
+    const seen = filesOfDomain(selection, 'code');
+    const received = new Set(selection.flatMap((s) => s.files));
+    return [...received].filter((f) => {
+        const name = f.split('/').pop() ?? '';
+        return (!seen.has(f) && !TEST_INFIX.test(name) && !TYPE_DECLARATION_RE.test(name) && isSource(name));
+    });
+}
 /** Server-marked code a frontend reviewer received and no backend reviewer did. Silent when the
  * repo declares no backend, so a pure-UI topology never hears it. */
 export function serverFilesSeenOnlyByFrontend(selection, cfg, readStaged) {
@@ -176,6 +191,14 @@ export function filesUnseenByCorrectness(staged, selection, cfg) {
     const scope = { include: ['**'], exclude: SYNCED_ASSET_EXCLUDES };
     return selectReviewFiles(staged, { paths: scope, roots: [], sourceExtensions: [] }).filter((f) => !seen.has(f) && isRoutableCode(f, cfg));
 }
+/** One unrouted-files fact: a stderr line with its config remedy, and the bare fact for the row. */
+function pushRoutingFact(facts, files, missed, keys) {
+    if (files.length === 0)
+        return;
+    const fact = `${files.length} source file(s) reached no ${missed} (${evidenceNames(files)})`;
+    console.error(`guard-review: ${fact} — add each path or its directory to ${keys} in guard.config.json`);
+    facts.push(fact);
+}
 /** Names code that missed its security/performance or correctness review: one stderr line per kind, one row. */
 function reportUnroutedFiles(selection, cfg, staged, alreadyNamed, readStaged) {
     const unnamed = (files) => files.filter((f) => !alreadyNamed.has(f));
@@ -187,13 +210,15 @@ function reportUnroutedFiles(selection, cfg, staged, alreadyNamed, readStaged) {
         facts.push(fact);
     }
     const noDomain = unnamed(filesRoutedToNoDomain(selection, cfg));
+    const noDup = unnamed(filesUnseenByCommitGuard(selection, cfg));
     const unseen = unnamed(filesUnseenByCorrectness(staged, selection, cfg));
-    if (noDomain.length > 0) {
-        const fact = `${noDomain.length} source file(s) reached no security/performance reviewer (${evidenceNames(noDomain)})`;
-        console.error(`guard-review: ${fact} — add each path or its directory to ` +
-            'review.backendRoots/frontendRoots in guard.config.json');
-        facts.push(fact);
-    }
+    // A file that missed both is named once, first, so its commit-guard miss survives the digest's cut.
+    const dup = new Set(noDup);
+    const both = new Set(noDomain.filter((f) => dup.has(f)));
+    const domainRoots = 'review.backendRoots/frontendRoots';
+    pushRoutingFact(facts, [...both], 'security/performance reviewer or commit-guard review', `${domainRoots} and scanRoots`);
+    pushRoutingFact(facts, noDomain.filter((f) => !both.has(f)), 'security/performance reviewer', domainRoots);
+    pushRoutingFact(facts, noDup.filter((f) => !both.has(f)), 'commit-guard review', 'scanRoots');
     if (unseen.length > 0) {
         const fact = `${unseen.length} code file(s) reached no correctness reviewer (${evidenceNames(unseen)})`;
         console.error(`guard-review: ${fact} — review.paths is absent, so correctness reviews only declared roots ` +

@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { MIN_TIMEOUT_S, attribute, defaultExec, ghChecksPoller, parseTimeoutSeconds, verdictLine, waitForChecks, } from '../../lib/ship/wait-ci/wait.mjs';
 import { classifyChecksFailure } from '../../lib/ship/wait-ci/classify.mjs';
+import { headRunsPoller } from '../../lib/ship/wait-ci/head-runs.mjs';
 const DEFAULT_TIMEOUT_S = 900;
 export const meta = {
     name: 'ci-verdict',
@@ -26,8 +27,13 @@ a PR url from another repository ends in attribution=unknown.
 A settled PR still answers after a ~30s confirmation grace. For CI that is still running, pass a
 --timeout that outlasts it and run the command in the background: a killed wait prints no verdict.
 
+A green set also needs the head's own Actions runs and every check the base branch requires: a queued
+run holds the wait, and a head with no pull_request run passes only when it is mergeable, not stacked,
+and has no workflow run at all.
+
 Exit 0 = a verdict, red or timed-out included. Exit 2 = no verdict could be formed (no gh, not
-authenticated, no such PR, no GitHub remote). Exit 1 = a bad argument.`,
+authenticated, no such PR, no GitHub remote, or reason=merge-conflict: a conflicting PR whose head
+has no pull_request run, which GitHub never starts on one). Exit 1 = a bad argument.`,
 };
 class UsageError extends Error {
 }
@@ -116,8 +122,10 @@ export default async function ciVerdict(args, cwd, deps = {}) {
         return 2;
     }
     const { pr, repo } = resolved;
+    const exec = deps.exec ?? defaultExec();
+    const checks = ghChecksPoller({ pr, repo, cwd, required, exec });
     const result = await waitForChecks({
-        poll: ghChecksPoller({ pr, repo, cwd, required, exec: deps.exec }),
+        poll: required ? checks : headRunsPoller(checks, { pr, repo, cwd, exec }),
         timeoutMs: timeoutS * 1000,
         ...deps.wait,
     }).then((r) => ({ ...r, required }));

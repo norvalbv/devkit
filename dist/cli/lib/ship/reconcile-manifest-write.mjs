@@ -264,8 +264,9 @@ function applyAnchorGuards(classified, guards) {
     return classified
         .filter((e) => e !== null && guards.get(e.path)?.record !== '')
         .map((e) => {
-        const [mode, blobSha] = guards.get(e.path)?.record.split(' ') ?? [];
-        return blobSha ? { ...e, mode, blobSha } : e;
+        const [a, b, c] = guards.get(e.path)?.record.split(' ') ?? [];
+        const [own, heldBase] = a === '=' ? [undefined, b] : [b && { mode: a, blobSha: b }, c];
+        return { ...e, ...own, ...(heldBase && { heldBase }) };
     });
 }
 /** A concurrent ship that already replaced the record this one anchored on wins. */
@@ -289,7 +290,8 @@ function mergeEntry(existing, branch, entries, gone, guards) {
         const prev = byPath.get(p);
         if (!prev || prev.op === 'delete' || !isFresh(byPath, guards, p))
             continue;
-        byPath.set(p, { ...prev, op: 'delete' });
+        const { heldBase: _, ...rest } = prev;
+        byPath.set(p, { ...rest, op: 'delete' });
         changed++;
     }
     if (changed === 0)

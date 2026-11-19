@@ -6,7 +6,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { patchTargets, projectRoot } from './edit-targets-lib.mjs';
+import { hookRoots, patchTargets } from './edit-targets-lib.mjs';
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'apply_patch']);
 // preflight's own overrun verdict: exit 1 alone also means an uncaught throw.
@@ -22,8 +22,8 @@ function configDir(root, file) {
 }
 
 /** The installed guard-size bin, falling back to PATH; never bunx/npx, which fetch from the network. */
-function guardSizeBin(dir, root) {
-  for (const base of [dir, root]) {
+function guardSizeBin(dir, roots) {
+  for (const base of [dir, ...roots]) {
     const bin = join(base, 'node_modules', '.bin', 'guard-size');
     if (existsSync(bin)) return bin;
   }
@@ -31,29 +31,29 @@ function guardSizeBin(dir, root) {
 }
 
 /** Files the edit touched, grouped by the guard.config.json directory that governs them. */
-function editedFilesByConfig(input, root) {
+function editedFilesByConfig(input, roots) {
   const groups = new Map();
   // `.trim?.()` exists only on strings, so it also drops every non-string value.
   const named = [input?.tool_input?.file_path, input?.tool_input?.path].filter((p) => p?.trim?.());
   named.push(...patchTargets(input));
   for (const path of new Set(named)) {
-    const abs = resolve(root, path);
+    const abs = resolve(roots[0], path);
     if (!existsSync(abs) || !statSync(abs).isFile()) continue;
     const real = realpathSync(abs);
-    if (!real.startsWith(root + sep)) continue;
-    const dir = configDir(root, real);
+    const root = roots.find((r) => real.startsWith(r + sep));
+    const dir = root && configDir(root, real);
     if (dir) groups.set(dir, [...(groups.get(dir) ?? []), relative(dir, real)]);
   }
   return groups;
 }
 
 /** preflight's overrun block for each over-ceiling group, or an empty list. */
-function overruns(input, projectDir) {
+function overruns(input, checkouts) {
   if (!EDIT_TOOLS.has(input?.tool_name)) return [];
-  const root = realpathSync(projectDir);
+  const roots = checkouts.filter((root) => existsSync(root)).map((root) => realpathSync(root));
   const reports = [];
-  for (const [dir, rels] of editedFilesByConfig(input, root)) {
-    const run = spawnSync(guardSizeBin(dir, root), ['preflight', '--base', 'HEAD', '--', ...rels], {
+  for (const [dir, rels] of editedFilesByConfig(input, roots)) {
+    const run = spawnSync(guardSizeBin(dir, roots), ['preflight', '--base', 'HEAD', '--', ...rels], {
       cwd: dir,
       encoding: 'utf8',
       timeout: 5000,
@@ -68,7 +68,7 @@ function main() {
   let output = {};
   try {
     const input = JSON.parse(readFileSync(0, 'utf8'));
-    const reports = overruns(input, projectRoot());
+    const reports = overruns(input, hookRoots(input));
     if (reports.length > 0) {
       const additionalContext = `guard-size, measured after this edit:\n${reports.join('\n')}\nNet growth past the ceiling blocks the commit: trim this change, or move whole functions (with their tests) to another file.`;
       output = { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext } };

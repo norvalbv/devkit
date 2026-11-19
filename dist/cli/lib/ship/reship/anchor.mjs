@@ -80,7 +80,7 @@ export function anchorEntry(root, branch, tip, head, path) {
     if (shipped?.mode && shipped.op === 'delete')
         return { entry: null, token };
     if (shipped?.mode && git(root, ['cat-file', '-e', shipped.blobSha])) {
-        return { entry: { blob: shipped.blobSha, mode: shipped.mode }, token };
+        return { entry: { blob: shipped.blobSha, mode: shipped.mode }, token, held: shipped.heldBase };
     }
     const fork = head ? mergeBase(root, tip, head) : '';
     // Unrelated histories: nothing to anchor on, so the tip stands in and the path is copied as before.
@@ -174,6 +174,14 @@ function baseRange(root, { tip, head, baseRef }) {
     const from = to ? mergeBase(root, tip, to) : '';
     return from ? [from, to] : ['', ''];
 }
+/** [F, M] for one path, from M's base against the tip and the base its anchoring record holds. */
+function pathRange(root, tip, [f, m], held) {
+    if (!held || !m)
+        return [f, m];
+    // Only <held> itself may replace F: the record's blob holds no other base, and a tie goes to it.
+    const bases = lines(git(root, ['merge-base', '--all', m, tip, held]));
+    return [bases.includes(held) ? held : f, m];
+}
 /** Leave out <baseRef> changes the caller's HEAD holds and the PR tip does not (a local base merge). */
 export function stripBase(root, here, tipEntry, opts, path) {
     const none = { here, commits: [], refuse: false };
@@ -186,19 +194,25 @@ export function stripBase(root, here, tipEntry, opts, path) {
     const commits = lines(git(root, ['log', '-3', '--no-renames', '--format=%h %s', `${from}..${to}`, '--', path]));
     const stripped = withoutBase(root, here, f, m);
     if (stripped === undefined)
-        return tipHoldsCopy(root, here, m, tipEntry) ? none : { here, commits, refuse: true };
+        return tipHoldsCopy(root, here, m, tipEntry)
+            ? { ...none, held: to }
+            : { here, commits, refuse: true, held: to };
     return sameEntry(stripped, here) ? none : { here: stripped, commits, refuse: false };
 }
 /** Plan one briefed path. A `merge` that conflicts comes back as `refuse`. */
 export function planPath(root, branch, tip, head, path, range = ['', '']) {
     const tipEntry = treeEntry(root, tip, path);
-    const strip = stripBase(root, hereEntry(root, path), tipEntry, { tip, head, baseRef: '', range }, path);
+    const { entry: anchor, since, token, held: kept } = anchorEntry(root, branch, tip, head, path);
+    const own = pathRange(root, tip, range, kept);
+    const copy = hereEntry(root, path);
+    const strip = stripBase(root, copy, tipEntry, { tip, head, baseRef: '', range: own }, path);
     const here = strip.here;
     const base = strip.commits.length > 0 || strip.refuse ? strip : undefined;
-    const { entry: anchor, since, token } = anchorEntry(root, branch, tip, head, path);
+    const carried = own[0] !== range[0] ? own[0] : range[1] ? undefined : kept;
+    const held = copy ? (strip.held ?? carried) : undefined;
     let action = decide(here, tipEntry, anchor);
     if (action === 'copy')
-        return { path, action, here, tip: tipEntry, commits: [], token, base };
+        return { path, action, here, tip: tipEntry, commits: [], token, base, held };
     let merged;
     if (action === 'merge' && here && tipEntry && anchor) {
         const blob = mergeBlobs(root, here, anchor, tipEntry);
@@ -208,7 +222,7 @@ export function planPath(root, branch, tip, head, path, range = ['', '']) {
             action = 'refuse';
     }
     const commits = foreignCommits(root, tip, path, anchor, since);
-    return { path, action, here, tip: tipEntry, merged, commits, token, base };
+    return { path, action, here, tip: tipEntry, merged, commits, token, base, held };
 }
 /** The commits a report names for <p>: the base's when <base>, else the PR branch's. */
 const listed = (p, base) => (base ? p.base?.commits : p.commits) ?? [];
@@ -264,7 +278,8 @@ export function stageAppend({ root, wt, branch, tip, head, out, baseRef = '' }, 
     for (const p of plans) {
         if (p.action !== 'keep')
             stageEntry(wt, p.path, p.merged ?? p.here);
-        const record = p.action === 'keep' ? '' : p.merged && p.here ? `${p.here.mode} ${p.here.blob}` : '=';
+        const own = p.merged && p.here ? `${p.here.mode} ${p.here.blob}` : '=';
+        const record = p.action === 'keep' ? '' : p.held ? `${own} ${p.held}` : own;
         guards.push(p.token, record, p.path);
     }
     const left = plans.filter((p) => p.base && !p.base.refuse);

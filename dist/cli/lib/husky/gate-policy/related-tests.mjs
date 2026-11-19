@@ -17,35 +17,12 @@ import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mj
 import { label, renderComparison } from '../../baseline-status/compare.mjs';
 import { assertVitestReport, escapesRoot, SUMMARY_NAME, summarise, } from '../../baseline-status/produce.mjs';
 import { resolveRef } from '../../baseline-status/query.mjs';
-import { previousSelection, recordSelection, relatedDrivers, selectionLines, } from './related-tests-selection.mjs';
+import { forcedTests, previousSelection, recordSelection, relatedDrivers, relatedPaths, selectionLines, triggerLine, } from './related-tests-selection.mjs';
 // Runs with every selection: it fails when a module is left unreachable to `vitest related` itself.
 const REACH_TEST = 'cli/__tests__/test-graph-reach.test.mts';
-// The env-scrub test reads these from disk, so no import edge selects it. The ship-script pattern
-// mirrors that test's own top-level scan of cli/lib/ship.
-const SCRUB_TEST = 'cli/__tests__/vitest-setup-env-scrub.test.mts';
-const SCRUB_INPUT_RE = /^cli\/lib\/ship\/[^/]+\.sh$|^vitest\.setup\.mjs$|^vitest(\.e2e)?\.config\.mjs$/;
-// The agent-asset parity test reads hook sources, their projections and the selection from disk.
-const PARITY_TEST = 'cli/__tests__/agent-asset-projection-parity.test.mts';
-const PARITY_INPUT_RE = /^agents-hooks\/|^\.(claude|codex|cursor)\/hooks\/|^\.devkit\/config\.json$/;
-const FORCED = [
-    [SCRUB_INPUT_RE, SCRUB_TEST],
-    [PARITY_INPUT_RE, PARITY_TEST],
-];
-/** The disk-reading tests a staged path selects, which `vitest related` would never run. */
-export function forcedTests(staged) {
-    const paths = [...staged];
-    return FORCED.filter(([re]) => paths.some((p) => re.test(p))).map(([, test]) => test);
-}
 import { errorMessage } from '../../ship/review/shared/common.mjs';
-// vitest's forceRerunTriggers (**/package.json, **/{vitest,vite}.config.*, setupFiles) select the
-// whole suite, which CI already runs.
-const RERUN_TRIGGER_RE = /(^|\/)(package\.json|(vitest|vite)\.config\.[^/]*)$|^vitest\.setup\.mjs$/;
 /** Failing tests named in the reason; the rest stay in vitest's own output above it. */
 const NAMED_TESTS = 5;
-/** The staged paths the related-test listing starts from, sorted, minus the full-suite triggers. */
-export function relatedPaths(staged) {
-    return [...staged].filter((p) => !RERUN_TRIGGER_RE.test(p)).sort();
-}
 // Source modules whose reachability the reach test guards.
 const SOURCE_RE = /\.[cm]?[jt]sx?$/;
 // Extensions vite can hold in its module graph; any other staged path never selects a test.
@@ -344,10 +321,12 @@ export async function runRelatedTests(root, opts) {
     const paths = relatedPaths(staged);
     // From the raw set: relatedPaths drops vitest.setup.mjs, which the env-scrub test binds.
     const forced = forcedTests(staged);
-    if (!paths.length && !forced.length) {
-        console.log('related-tests: none selected');
+    const trigger = triggerLine(staged);
+    if (trigger)
+        console.log(trigger);
+    // The entrypoint rejects an empty staged set, so here every staged path is a trigger it named.
+    if (!paths.length && !forced.length)
         return { code: 0, interrupted: false };
-    }
     let files = [];
     try {
         if (paths.length)

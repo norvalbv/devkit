@@ -41,8 +41,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { coverageBypassed, deterministicStrict } from '../config.mjs';
 import { emitGateBypass, finishGateTiming } from '../judge/gate-events.mjs';
 import { markGateRun } from '../judge/run-context.mjs';
@@ -52,18 +51,10 @@ import { crashGuarded, readGateReason, withReasonFiles } from './reason.mjs';
 import { bypassedSuffixes, commandGate, emitGateStep, extraGatesFor, gateTimeoutMs, GUARD_PREFIX_RE, reportCachedBypasses, runArgv, structureBypassed, TIMED_OUT, timeoutReason, } from './command-gates.mjs';
 import { parseOpts } from './parse-opts.mjs';
 import { recheckLines, registryRecheck } from './recheck.mjs';
-import { COULD_NOT_RUN, DETERMINISTIC } from './registry.mjs';
+import { COULD_NOT_RUN, DETERMINISTIC, gateModulePath } from './registry.mjs';
 import { reportFailures, reportOptedOut } from './report.mjs';
 import { canonicalIds, resolveSelection, reviewIds } from './selection.mjs';
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-// Sibling gate modules are spawned as `node <path>`. In dev the tree is .mts (Node strips types at
-// the repo root); in the shipped dist it is compiled .mjs. Derive the runtime extension from THIS
-// module so the same literals resolve in both — string-literal paths are NOT rewritten by tsc emit.
-const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
-// Rewrites a sibling gate module's `.mjs` literal to the runtime extension. Hoisted (perf: no
-// per-gate regex compile).
-const MJS_EXT_RE = /\.mjs$/;
 export function prefixCacheScope(scope, effectiveIds) {
     const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
     const mergeBase = process.env.DEVKIT_REVIEW_MERGE_BASE;
@@ -140,7 +131,7 @@ function narrateRun(plan) {
     }
 }
 function registryGate(g, cwd, reviewMode) {
-    const argv = ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args];
+    const argv = ['node', gateModulePath(g), ...g.args];
     return {
         id: g.id,
         label: `guard-${g.id}`,
