@@ -33,6 +33,7 @@ import {
   SEARCH_INDEX_CHECK,
 } from '../lib/doctor/guard-config-checks.mts';
 import { bindClaudeFamily } from '../lib/doctor/judge/judge-family.mts';
+import { INDEX_REFRESH_CHECK } from '../lib/install/install-search-code.mts';
 import { printPriorArtAdvisoryHealth } from '../lib/doctor/prior-art-health.mts';
 import { hookChecks } from '../lib/doctor/hook-checks.mts';
 import { runOverlayDoctor } from '../lib/doctor/overlay-doctor.mts';
@@ -271,7 +272,8 @@ function applyFix(
   // that precondition — the check clears it only when the selection can actually reproduce the
   // wiring, so --fix never re-inits chasing a warning it has no flag to clear.
   const indexDrift = results.some(
-    (r) => r.name === SEARCH_INDEX_CHECK && r.fixable && r.status !== 'OK',
+    (r) =>
+      [SEARCH_INDEX_CHECK, INDEX_REFRESH_CHECK].includes(r.name) && r.fixable && r.status !== 'OK',
   );
   if (needsInit || hookDrift || indexDrift) {
     const args = ['init', '--stack', stack, ...selectionFlags(sel)];

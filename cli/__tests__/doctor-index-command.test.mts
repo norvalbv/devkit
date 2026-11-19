@@ -51,6 +51,15 @@ describe('doctor — a populated index with no indexCommand', () => {
     expect(row?.remediation).toContain('"indexCommand": null');
   });
 
+  // --fix re-runs init --search-code only for a repo whose recorded selection has it.
+  it('is fixable when search-code is the recorded selection', async () => {
+    const results = await checkGuardConfig(repo(WIRED, 2), true, true, {
+      review: false,
+      sentry: false,
+    });
+    expect(results.find((r) => r.name === INDEX_REFRESH_CHECK)).toMatchObject({ fixable: true });
+  });
+
   it('reaches the overlay / self-host advisory, which prints only named rows', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     await adviseSearchIndex(repo(WIRED, 1), { guards: ['dup'] });

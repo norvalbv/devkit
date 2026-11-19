@@ -35,7 +35,8 @@ const STARTER = `{
 }
 `;
 
-const INDEXPATH_VALUE_RE = /("indexPath"\s*:\s*)(?:null|"[^"]*")/;
+const INDEXPATH_UNSET_RE = /("indexPath"\s*:\s*)(?:null|"")/;
+const INDEXPATH_SET_RE = /"indexPath"\s*:\s*"[^"]+"/;
 const OPEN_BRACE_RE = /^(\s*\{\s*\n)/;
 // The real key only: a `"//indexCommand"` guidance key has a slash before the `i`, not a quote.
 const INDEXCOMMAND_KEY_RE = /"indexCommand"\s*:/;
@@ -61,8 +62,8 @@ function appendMissingLine(cwd: string, line: string, dryRun: boolean): void {
 }
 
 // Point guard-dup's matcher at the index via guard.config.json `indexPath` (null = opted out). The
-// template ships no indexPath, so insert it; an existing value is replaced. Regex (not JSON
-// round-trip) preserves the //-comment guidance keys, matching the --scan-root patch in init.
+// template ships no indexPath, so insert it; a null or "" is replaced and a configured path kept. Regex
+// (not JSON round-trip) preserves the //-comment guidance keys, matching the --scan-root patch in init.
 function wireIndex(cwd: string, dryRun: boolean): void {
   const p = join(cwd, 'guard.config.json');
   if (!existsSync(p)) {
@@ -72,8 +73,11 @@ function wireIndex(cwd: string, dryRun: boolean): void {
     return;
   }
   const raw = readFileSync(p, 'utf8');
+  const keptPath = INDEXPATH_SET_RE.test(raw);
   let next: string;
-  if (INDEXPATH_VALUE_RE.test(raw)) next = raw.replace(INDEXPATH_VALUE_RE, `$1"${INDEX_PATH}"`);
+  if (keptPath) next = raw;
+  else if (INDEXPATH_UNSET_RE.test(raw))
+    next = raw.replace(INDEXPATH_UNSET_RE, `$1"${INDEX_PATH}"`);
   else if (OPEN_BRACE_RE.test(raw))
     next = raw.replace(OPEN_BRACE_RE, `$1  "indexPath": "${INDEX_PATH}",\n`);
   else {
@@ -87,9 +91,13 @@ function wireIndex(cwd: string, dryRun: boolean): void {
     next = next.replace(OPEN_BRACE_RE, `$1  "indexCommand": "${DEFAULT_INDEX_COMMAND}",\n`);
   // Through a symlinked config to its target, keeping that file's mode.
   const target = realpathSync(p);
-  if (!dryRun) writeFileAtomic(target, next, statSync(target).mode & 0o777);
+  if (!dryRun && next !== raw) writeFileAtomic(target, next, statSync(target).mode & 0o777);
   const verb = dryRun ? '[dry-run] set' : '✓ set';
-  console.log(`  ${verb} indexPath in guard.config.json`);
+  console.log(
+    keptPath
+      ? '  • kept indexPath in guard.config.json'
+      : `  ${verb} indexPath in guard.config.json`,
+  );
   if (keptCommand) console.log('  • kept indexCommand in guard.config.json');
   else if (insertable) console.log(`  ${verb} indexCommand in guard.config.json`);
   else
@@ -145,11 +153,13 @@ export function guardConfigKeyPresent(cwd: string, key: string): boolean {
 }
 
 /** doctor's advisory for a populated index with no indexCommand, whose edited functions the dup gate
- * drops as stale. Silent on an empty index: a refresh there is a cold build on every commit. */
+ * drops as stale. Silent on an empty index: a refresh there is a cold build on every commit.
+ * `fixable` when search-code is the recorded selection: --fix re-runs init --search-code, which adds it. */
 export function indexCommandRows(
   cwd: string,
   indexPath: string | null,
   indexCommand: string | null | undefined,
+  searchCodeSelected: boolean,
 ): CheckResult[] {
   if (!indexPath || indexCommand || guardConfigKeyPresent(cwd, 'indexCommand')) return [];
   if (!usableChunksAt(indexToInspect(indexPath, cwd).indexPath)) return [];
@@ -159,7 +169,7 @@ export function indexCommandRows(
       'DRIFT',
       'guard.config.json sets no `indexCommand`, so the dup gate never refreshes the index: a function edited since the last index is dropped from its flagged pair as stale instead of re-judged',
       `add "indexCommand": "${DEFAULT_INDEX_COMMAND}" to guard.config.json (or export GUARD_INDEX_COMMAND). Deliberate? Write "indexCommand": null to declare it.`,
-      false,
+      searchCodeSelected,
       true,
     ),
   ];

@@ -250,7 +250,7 @@ export async function checkGuardConfig(
   if (dupSelected)
     results.push(
       checkSearchIndex(cwd, resolved, searchCodeSelected),
-      ...indexCommandRows(cwd, resolved, cfg.indexCommand),
+      ...indexCommandRows(cwd, resolved, cfg.indexCommand, searchCodeSelected),
     );
   const topology = reviewTopology(cwd, cfg.review);
   if (topology) results.push(topology);
