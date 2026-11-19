@@ -1,4 +1,4 @@
-import { chmodSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { rewriteRepo, runReship as run } from './_reship-rewrite-fixture.mts';
@@ -52,6 +52,32 @@ describe('reship --base — old-PR paths the base already carries identically', 
     expect(g(['--git-dir', bare, 'diff-tree', '--name-only', '-r', newMain, replacement])).toBe(
       'conflict.txt',
     );
+  });
+
+  it('omits a landed nested path even when the PR changes a sibling in its directory', () => {
+    const repo = rewriteRepo();
+    const { dir, g } = repo;
+    g(['checkout', '-q', 'feature']);
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src/landed.txt'), 'landed\n');
+    writeFileSync(join(dir, 'src/own.txt'), 'own\n');
+    g(['add', 'src']);
+    g(['commit', '-q', '-m', 'nested paths']);
+    g(['push', '-q', 'origin', 'HEAD:feat/pr']);
+    const prHead = g(['rev-parse', 'HEAD']);
+    landOnMain(repo, (d) => {
+      mkdirSync(join(d, 'src'));
+      writeFileSync(join(d, 'src/landed.txt'), 'landed\n');
+    });
+    mkdirSync(join(dir, 'src'), { recursive: true });
+    writeFileSync(join(dir, 'src/own.txt'), 'own\n');
+    const r = run([...BRIEF_OWN_PATH, 'src/own.txt'], dir, {
+      ...repo.env,
+      PR_HEAD_OID: prHead,
+      SHIP_DRY_RUN: '1',
+    });
+    expect(r.stderr).not.toContain('rewrite brief omits paths');
+    expect(r.status, r.stderr).toBe(0);
   });
 
   it('still requires the half of a rename the base does not carry', () => {

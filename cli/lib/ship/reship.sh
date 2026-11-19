@@ -471,7 +471,7 @@ if [ "$REWRITE" -eq 1 ]; then
   while IFS= read -r -d '' required_path; do
     required_seen=0
     for p in "${PATHS[@]}"; do [ "$p" = "$required_path" ] && { required_seen=1; break; }; done
-    [ "$required_seen" -eq 1 ] || git diff-tree --quiet "$BASE" "$EXPECTED_REMOTE" -- ":(literal)$required_path" </dev/null ||
+    [ "$required_seen" -eq 1 ] || git diff-tree -r --quiet "$BASE" "$EXPECTED_REMOTE" -- ":(literal)$required_path" </dev/null ||
       MISSING_SCOPE+=("$required_path")
   done < "$REQUIRED_SCOPE_FILE"
   if [ "${#MISSING_SCOPE[@]}" -gt 0 ] && [ "$REWRITE_RECEIPT_PROVEN" -eq 0 ]; then
