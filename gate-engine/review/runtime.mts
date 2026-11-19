@@ -230,10 +230,10 @@ export interface ReviewOutcome {
   /** Sidecar ref holding the full vector when inlining it would breach the event byte budget. Set
    * INSTEAD of `items`, never alongside it. */
   itemsRef?: string;
-  /** Off-wire copy of the vector with full issue text, for a bench that banks findings (sc-2493).
-   * Present only when the cascade was asked for it; never serialized onto an event. */
+  /** Off-wire copy of the vector with full issue text: what a FAIL's findings block prints, and
+   * what a bench banks. Present on a FAIL or when the cascade was asked; never on an event. */
   itemsFull?: Array<ReviewItem & { issues: string[]; itemIndex?: number }>;
-  /** Versioned private capture, including empty and missing artifacts; opt-in with itemsFull. */
+  /** Versioned private capture, including empty and missing artifacts; set alongside itemsFull. */
   capture?: ReviewCapture;
   /** The model that actually ran the first pass (Reviewer.model pin, else the cascade default).
    * Absent only when no judge ran (missing brief). Telemetry/cache must report THIS, never the

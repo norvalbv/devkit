@@ -7,20 +7,16 @@ import { readTranscript } from '../../judge/transcript-store.mts';
 import { issueLocations, LOCATION_RE } from '../contracts/response.mts';
 import type { ReviewItem, ReviewOutcome } from '../runtime.mts';
 
-const FINDINGS_CAP = 12;
-const ISSUE_LINE_CHARS = 160;
 const LINE_BUCKET = 5;
 /** Printed once per run under the first findings block, whichever reviewer or lens it came from. */
 export const CLASS_FIX_HINT =
   '  ↳ A finding naming one input of a check, or one site of a rule the change states, stands for a class: fix + test every instance (commit-gates skill).';
 
 export interface FindingsSummary {
-  /** One rendered line per distinct blocking finding, capped at FINDINGS_CAP. */
+  /** One rendered line per distinct blocking finding, each carrying the whole issue text. */
   lines: string[];
-  /** Distinct blocking findings before the cap, plus issues the per-lens cap dropped. */
+  /** Distinct blocking findings, plus issues the per-lens cap dropped. */
   total: number;
-  /** Findings counted in `total` that no line shows. */
-  unlisted: number;
   /** Issue strings folded into an earlier line (same lens + file + 5-line bucket, or same text;
    * a file-keyed lens folds on the same line). */
   deduped: number;
@@ -40,7 +36,7 @@ function fingerprint(lens: string, issue: string): string {
   // findings in one file: fold those on the exact line only.
   if (loc && lensIsCitedFile(lens, loc[1])) return `${lens}||${loc[2]}`;
   if (loc) return `${lens}|${loc[1]}|${Math.floor(Number(loc[2]) / LINE_BUCKET)}`;
-  return `${lens}|${issue.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 80)}`;
+  return `${lens}|${issue.toLowerCase().replace(/\s+/g, ' ').trim()}`;
 }
 
 /** Only lenses the gate still holds against the commit: waived and out-of-charter-dropped lenses
@@ -53,38 +49,40 @@ export function isBlockingItem(item: ReviewItem): boolean {
   );
 }
 
-/** Every blocking issue a reviewer's lenses reported, one line each, deduplicated and bounded. */
-export function summarizeFindings(items: ReviewItem[] | undefined): FindingsSummary {
+/** A lens item tagged with the fingerprint its waive command names, when the valve minted one. */
+type FindingItem = ReviewItem & { fp?: string };
+
+/** Every blocking issue a reviewer's lenses reported, one whole line each, deduplicated. */
+export function summarizeFindings(items: FindingItem[] | undefined): FindingsSummary {
   const seen = new Set<string>();
-  const summary: FindingsSummary = { lines: [], total: 0, deduped: 0, unlisted: 0 };
+  const summary: FindingsSummary = { lines: [], total: 0, deduped: 0 };
   for (const item of items ?? []) {
     if (!isBlockingItem(item)) continue;
     for (const issue of item.issues ?? []) {
-      const key = fingerprint(item.lens, issue);
+      // Per fingerprint: a chunk's finding folded into another chunk's line could not be waived.
+      const key = `${item.fp ?? ''}\0${fingerprint(item.lens, issue)}`;
       if (seen.has(key)) {
         summary.deduped += 1;
         continue;
       }
       seen.add(key);
-      listOrCount(summary, 1, () => issueLine(item.lens, issue));
+      summary.total += 1;
+      summary.lines.push(issueLine(item, issue));
     }
     const omitted = item.issues_omitted ?? 0;
-    if (omitted > 0) listOrCount(summary, omitted, () => omittedLine(item.lens, omitted));
+    if (omitted > 0) {
+      summary.total += omitted;
+      summary.lines.push(omittedLine(item.lens, omitted));
+    }
   }
   return summary;
 }
 
-/** Counts `count` findings and lists them on one line while FINDINGS_CAP has room. */
-function listOrCount(summary: FindingsSummary, count: number, line: () => string): void {
-  summary.total += count;
-  if (summary.lines.length < FINDINGS_CAP) summary.lines.push(line());
-  else summary.unlisted += count;
-}
-
-function issueLine(lens: string, issue: string): string {
+function issueLine(item: FindingItem, issue: string): string {
   const loc = issue.match(LOCATION_RE);
-  const text = issue.replace(/\s+/g, ' ').trim().slice(0, ISSUE_LINE_CHARS);
-  return `  • ${lens}${loc ? ` · ${loc[1]}:${loc[2]}` : ''} — ${text}`;
+  const id = item.fp ? ` [${item.fp}]` : '';
+  const text = issue.replace(/\s+/g, ' ').trim();
+  return `  • ${item.lens}${id}${loc ? ` · ${loc[1]}:${loc[2]}` : ''} — ${text}`;
 }
 
 /** The per-lens cap dropped these before the gate saw their text, so the remedy is the knob. */
@@ -105,8 +103,21 @@ function resolveItems(res: ReviewOutcome, readRef: ItemsRefReader): ReviewItem[]
     // SAFETY: the sidecar is written by attachItems as JSON.stringify of the capped ReviewItem[].
     return raw ? (JSON.parse(raw) as ReviewItem[]) : undefined;
   } catch {
-    return undefined; // best-effort — the transcript still carries everything
+    return undefined; // best-effort — the judge's own prose is still printed below the block
   }
+}
+
+/** One part's items, each tagged with the fingerprint its waive command names: its lens's own, else
+ * the part's only one. Per part, because a chunked lens holds one fingerprint per chunk. */
+function findingItems(part: ReviewOutcome, readRef: ItemsRefReader): FindingItem[] {
+  const blocking = part.blocking ?? [];
+  const sole = blocking.length === 1 ? blocking[0].fp : undefined;
+  // A capture that refused any item is incomplete, and a dropped finding is worse than a cut one.
+  const full = part.capture?.provenance === 'exact-checklist' ? part.itemsFull : undefined;
+  return (full ?? resolveItems(part, readRef) ?? []).map((it) => ({
+    ...it,
+    fp: blocking.find((b) => b.lens === it.lens)?.fp ?? sole,
+  }));
 }
 
 /** The block printed under a FAILED reviewer's reason — ONE block per reviewer, merged across a
@@ -118,14 +129,13 @@ export function renderFindingsBlockForParts(
   withHint = true,
   driftDeps: Partial<ScopeDriftDeps> = {},
 ): string {
-  const items = parts.flatMap((part) => resolveItems(part, readRef) ?? []);
-  const { lines, total, deduped, unlisted } = summarizeFindings(items);
+  const items = parts.flatMap((part) => findingItems(part, readRef));
+  const { lines, total, deduped } = summarizeFindings(items);
   if (lines.length === 0) return '';
   const folded = deduped > 0 ? `, ${deduped} duplicate(s) folded` : '';
-  const more = unlisted > 0 ? `\n  …and ${unlisted} more not shown` : '';
   const hint = withHint ? `\n${CLASS_FIX_HINT}` : '';
   const drift = scopeDriftHint(name, items, driftDeps);
-  return `${name}: ${total} finding(s)${folded}:\n${lines.join('\n')}${more}${hint}${drift ? `\n${drift}` : ''}`;
+  return `${name}: ${total} finding(s)${folded}:\n${lines.join('\n')}${hint}${drift ? `\n${drift}` : ''}`;
 }
 
 /** Single-outcome convenience over renderFindingsBlockForParts. */

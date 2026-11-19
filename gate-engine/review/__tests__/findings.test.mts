@@ -95,6 +95,13 @@ describe('summarizeFindings', () => {
     expect(s.total).toBe(1);
   });
 
+  it('keeps two location-less issues that differ only past their first 80 characters', () => {
+    const head = 'the retry loop never backs off when the upstream answers with a throttle, so it ';
+    const s = summarizeFindings([item('lens', [`${head}spins`, `${head}starves the queue`])]);
+    expect(s.total).toBe(2);
+    expect(s.deduped).toBe(0);
+  });
+
   it('does not mistake host:port for file:line — distinct findings stay distinct', () => {
     const s = summarizeFindings([
       item('transport', [
@@ -118,15 +125,129 @@ describe('summarizeFindings', () => {
     expect(s.lines[0]).toContain('src/z.ts:3');
   });
 
-  it('caps the rendered lines at 12 but keeps counting', () => {
+  it('renders every distinct finding, however many', () => {
     const issues = Array.from({ length: 15 }, (_, i) => `defect in src/f${i}.ts:${i * 100 + 1}`);
     const s = summarizeFindings([item('lens', issues)]);
-    expect(s.lines).toHaveLength(12);
+    expect(s.lines).toHaveLength(15);
     expect(s.total).toBe(15);
+  });
+
+  it('prints the whole issue on one line, however long or wrapped', () => {
+    const issue = `src/a.ts:12 with queue capacity >1,\n  ${'append A can push caller blob A, '.repeat(20)}and regress the anchor WHOLE-TAIL`;
+    const { lines } = summarizeFindings([item('concurrency-races', [issue])]);
+    expect(lines[0].endsWith('and regress the anchor WHOLE-TAIL')).toBe(true);
+    expect(lines[0]).not.toContain('\n');
+    expect(lines[0]).toContain('capacity >1, append A');
   });
 });
 
 describe('renderFindingsBlockForParts', () => {
+  const failing = (over: Partial<ReviewOutcome>): ReviewOutcome => ({
+    name: 'correctness-reviewer',
+    status: 'fail',
+    reason: 'r',
+    escalated: false,
+    ...over,
+  });
+  const tail = `${'the stale anchor wins the fast-forward push, '.repeat(8)}FULL-TAIL`;
+  const linesWith = (block: string, fp: string) =>
+    block.split('\n').filter((line) => line.includes(fp));
+
+  it('prints the uncut text under the fingerprint its waive command names', () => {
+    const issues = [`src/a.ts:12 ${tail}-1`, `src/b.ts:80 ${tail}-2`, `src/c.ts:300 ${tail}-3`];
+    const block = renderFindingsBlockForParts('correctness-reviewer', [
+      failing({
+        items: [item('concurrency-races', [issues[0].slice(0, 200)])],
+        itemsFull: [
+          { ...item('concurrency-races', issues.slice(0, 2)), issues: issues.slice(0, 2) },
+          { ...item('state-transitions', [issues[2]]), issues: [issues[2]] },
+        ],
+        capture: { version: 1, provenance: 'exact-checklist', items: [] },
+        blocking: [
+          { lens: 'concurrency-races', fp: 'aaaaaaaaaaaa' },
+          { lens: 'state-transitions', fp: 'bbbbbbbbbbbb' },
+        ],
+      }),
+    ]);
+    expect(linesWith(block, 'aaaaaaaaaaaa')).toEqual([
+      `  • concurrency-races [aaaaaaaaaaaa] · src/a.ts:12 — ${issues[0]}`,
+      `  • concurrency-races [aaaaaaaaaaaa] · src/b.ts:80 — ${issues[1]}`,
+    ]);
+    expect(linesWith(block, 'bbbbbbbbbbbb')).toEqual([
+      `  • state-transitions [bbbbbbbbbbbb] · src/c.ts:300 — ${issues[2]}`,
+    ]);
+  });
+
+  it("tags each chunk of one lens with that chunk's own fingerprint", () => {
+    const chunk = (issue: string, fp: string) =>
+      failing({
+        items: [item('concurrency-races', [issue])],
+        blocking: [{ lens: 'concurrency-races', fp }],
+      });
+    const block = renderFindingsBlockForParts('correctness-reviewer', [
+      chunk('race at src/a.ts:12', 'aaaaaaaaaaaa'),
+      chunk('race at src/b.ts:80', 'bbbbbbbbbbbb'),
+    ]);
+    expect(linesWith(block, 'aaaaaaaaaaaa')).toEqual([
+      '  • concurrency-races [aaaaaaaaaaaa] · src/a.ts:12 — race at src/a.ts:12',
+    ]);
+    expect(linesWith(block, 'bbbbbbbbbbbb')).toEqual([
+      '  • concurrency-races [bbbbbbbbbbbb] · src/b.ts:80 — race at src/b.ts:80',
+    ]);
+  });
+
+  it("keeps a chunk's repeat of another chunk's finding on its own fingerprint line", () => {
+    const chunk = (fp: string) =>
+      failing({
+        items: [item('concurrency-races', ['race at src/a.ts:12'])],
+        blocking: [{ lens: 'concurrency-races', fp }],
+      });
+    const block = renderFindingsBlockForParts('correctness-reviewer', [
+      chunk('aaaaaaaaaaaa'),
+      chunk('bbbbbbbbbbbb'),
+    ]);
+    expect(linesWith(block, 'aaaaaaaaaaaa')).toHaveLength(1);
+    expect(linesWith(block, 'bbbbbbbbbbbb')).toHaveLength(1);
+  });
+
+  it("falls back to a part's only fingerprint when its lenses are file paths", () => {
+    const block = renderFindingsBlockForParts('commit-guard', [
+      failing({
+        name: 'commit-guard',
+        items: [item('src/a.ts', ['duplicates helper']), item('src/b.ts', ['duplicates util'])],
+        blocking: [{ lens: '(finding)', fp: 'cccccccccccc' }],
+      }),
+    ]);
+    expect(linesWith(block, 'cccccccccccc')).toHaveLength(2);
+  });
+
+  it('falls back to the event copy when the full-text capture refused an item', () => {
+    const block = renderFindingsBlockForParts('correctness-reviewer', [
+      failing({
+        items: [
+          item('concurrency-races', ['race at src/a.ts:12']),
+          item('auth', ['gap at src/b.ts:80']),
+        ],
+        itemsFull: [{ ...item('auth', ['gap at src/b.ts:80']), issues: ['gap at src/b.ts:80'] }],
+        capture: { version: 1, provenance: 'missing-invalid', items: [] },
+      }),
+    ]);
+    expect(block).toContain('correctness-reviewer: 2 finding(s):');
+    expect(block).toContain('concurrency-races · src/a.ts:12');
+  });
+
+  it('prints no bracket when the valve minted no fingerprint, or several that match no lens', () => {
+    const items = [item('src/a.ts', ['duplicates helper'])];
+    const ambiguous = [
+      { lens: 'x', fp: 'aaaaaaaaaaaa' },
+      { lens: 'y', fp: 'bbbbbbbbbbbb' },
+    ];
+    for (const blocking of [undefined, ambiguous]) {
+      const block = renderFindingsBlockForParts('commit-guard', [failing({ items, blocking })]);
+      expect(block).toContain('  • src/a.ts — duplicates helper');
+    }
+  });
+
   it("merges a split reviewer's failing lens parts into ONE block with a shared dedup pass", () => {
     const part = (lens: string, issues: string[]): ReviewOutcome => {
       const res: ReviewOutcome = {
@@ -214,14 +335,14 @@ describe('renderFindingsBlock', () => {
     expect(renderFindingsBlock(res)).not.toContain('past the per-lens cap');
   });
 
-  it('folds dropped issues into the overflow tail once the line cap is full', () => {
+  it('still names dropped issues after twelve other lines', () => {
     const full = Array.from({ length: 12 }, (_, i) => `defect in src/f${i}.ts:${i * 100 + 1}`);
     const block = renderFindingsBlock(
       outcome([item('a', full), item('b', ['x src/b.ts:1'], { issues_omitted: 2 })]),
     );
     expect(block).toContain('api-security-reviewer: 15 finding(s):');
-    expect(block).not.toContain('past the per-lens cap');
-    expect(block).toContain('…and 3 more not shown');
+    expect(block).toContain('b — +2 more issue(s) past the per-lens cap');
+    expect(block).not.toContain('more not shown');
   });
 
   it('ignores the omission count on a lens that no longer blocks', () => {
@@ -234,11 +355,12 @@ describe('renderFindingsBlock', () => {
     expect(renderFindingsBlock(outcome([item('a', [], { status: 'pass' })]))).toBe('');
   });
 
-  it('names the reviewer, the counts, and the overflow', () => {
+  it('names the reviewer and the counts, and lists every finding', () => {
     const issues = Array.from({ length: 14 }, (_, i) => `defect in src/f${i}.ts:${i * 100 + 1}`);
     const block = renderFindingsBlock(outcome([item('lens', [...issues, issues[0]])]));
     expect(block).toContain('api-security-reviewer: 14 finding(s), 1 duplicate(s) folded:');
-    expect(block).toContain('…and 2 more not shown');
+    expect(block.split('\n').filter((line) => line.startsWith('  • '))).toHaveLength(14);
+    expect(block).not.toContain('more not shown');
   });
 });
 
@@ -281,10 +403,10 @@ describe('class-fix hint', () => {
     for (const line of CLASS_FIX_HINT.split('\n')) expect(line.length).toBeLessThanOrEqual(160);
   });
 
-  it('still hints when the findings run past the 12-line cap', () => {
+  it('hints once below a long block', () => {
     const many = Array.from({ length: 14 }, (_, i) => `race in src/f${i}.ts:${i * 100 + 1}`);
     const block = renderFindingsBlock(outcome([item('concurrency-races', many)]));
-    expect(block).toContain('…and 2 more not shown');
+    expect(block).toContain('concurrency-races · src/f13.ts:1301');
     expect(countHint(block)).toBe(1);
   });
 

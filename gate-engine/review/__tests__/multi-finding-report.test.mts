@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLASS_FIX_HINT } from '../evidence/findings.mts';
+import { FOUR_WAY_LENS_GROUPS, lensGroupId } from '../lens/groups.mts';
 import { runReviewGate } from '../run-review.mts';
 import {
   cleanupReviewFixtures,
@@ -19,6 +20,8 @@ afterEach(() => {
   cleanupReviewFixtures();
   vi.restoreAllMocks();
 });
+
+const longTail = `${' and every later caller inherits the unchecked id'.repeat(6)} AUTHZ-WHOLE-TAIL`;
 
 describe('multi-finding FAIL report', () => {
   it('a FAILing reviewer lists every distinct lens issue once, bounded, above the transcript', async () => {
@@ -43,7 +46,9 @@ describe('multi-finding FAIL report', () => {
                 name: 'auth',
                 category: 'B',
                 status: 'fail',
-                issues: ['missing authz check at src/main/other.ts:40 for the delete route'],
+                issues: [
+                  `missing authz check at src/main/other.ts:40 for the delete route${longTail}`,
+                ],
               },
               { name: 'transport', category: 'C', status: 'pass', issues: [] },
             ],
@@ -73,7 +78,45 @@ describe('multi-finding FAIL report', () => {
     // The bounded deduped list…
     expect(out).toContain('api-security-reviewer: 2 finding(s), 1 duplicate(s) folded:');
     expect(out).toContain('injection · src/main/db.ts:12');
-    expect(out).toContain('auth · src/main/other.ts:40');
+    // …each line whole, and the text past the event's cut stays off the event.
+    const auth = out.split('\n').find((line) => line.includes('auth · src/main/other.ts:40'));
+    expect(auth?.endsWith('AUTHZ-WHOLE-TAIL')).toBe(true);
+    expect(JSON.stringify(events)).not.toContain('AUTHZ-WHOLE-TAIL');
+  });
+
+  it('each waivable finding is printed whole on a line naming the fingerprint its own waive command takes', async () => {
+    const repo = consumerRepo({ backend: true });
+    const failing = ['state-transitions', 'concurrency-races'];
+    const exec = mkExec(async ({ label }) => {
+      writeArtifact(repo, label);
+      // The shipped default: one judge per lens, each writing its own group-scoped artifact.
+      for (const group of FOUR_WAY_LENS_GROUPS) {
+        const fails = failing.includes(group[0]);
+        const issues = fails ? [`${group[0]} defect at src/main/db.ts:12${longTail}`] : [];
+        writeFileSync(
+          join(repo, `.claude/.correctness-review-${lensGroupId(group)}.json`),
+          JSON.stringify({
+            items: [{ name: group[0], category: 'X', status: fails ? 'fail' : 'pass', issues }],
+          }),
+        );
+      }
+      return label.includes('correctness') ? 'VERDICT: FAIL — recorded' : 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    const lines = err.mock.calls.flat().join('\n').split('\n');
+    const fps = failing.map((lens) => {
+      const waive = lines.find((line) =>
+        line.includes(`guard-review waive correctness-reviewer:${lens} `),
+      );
+      const fp = waive?.match(/ ([0-9a-f]{12}) /)?.[1];
+      const finding = lines.filter((line) =>
+        line.startsWith(`  • ${lens} [${fp}] · src/main/db.ts:12`),
+      );
+      expect(finding).toHaveLength(1);
+      expect(finding[0].endsWith('AUTHZ-WHOLE-TAIL')).toBe(true);
+      return fp;
+    });
+    expect(new Set(fps).size).toBe(2);
   });
 
   it('the block survives an items spill to the sidecar (itemsRef), where res.items is absent', async () => {
