@@ -21,4 +21,12 @@ export const DECISIONS_REGISTRATIONS: HookRegistration[] = [
     cursorEvent: 'preToolUse',
     cursorMatcher: 'Write',
   },
+  // A Bash call names no file, so its writes are found after it ran, from duration_ms: Claude-only.
+  {
+    registrationId: 'decisions:scope-brief-bash',
+    event: 'PostToolUse',
+    matcher: 'Bash',
+    command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/decision-scope-brief.mjs"',
+    providers: ['claude'],
+  },
 ];

@@ -70,6 +70,26 @@ function fireEdit(scratch: string, stamp: string, file: string) {
   );
 }
 
+/** Every PostToolUse(Bash) command in the scratch settings, after a Bash call that wrote `file`. */
+function fireBash(scratch: string, stamp: string, file: string) {
+  writeFileSync(join(scratch, file), 'export const touched = true;\n');
+  const settings = JSON.parse(readFileSync(join(scratch, '.claude', 'settings.json'), 'utf8'));
+  const input = JSON.stringify({
+    session_id: `bench-test-${Math.random().toString(36).slice(2)}`,
+    hook_event_name: 'PostToolUse',
+    tool_name: 'Bash',
+    tool_input: { command: 'sed -i "" s/a/b/ file' },
+    duration_ms: 60_000,
+  });
+  const env = childEnv(scratch, stamp, target.dir);
+  for (const entry of settings.hooks.PostToolUse)
+    for (const hook of entry.hooks)
+      spawnSync('sh', ['-c', hook.command], { cwd: scratch, input, env, encoding: 'utf8' });
+  return readProgress(join(stamp, 'tap.jsonl')).filter(
+    (row) => row.registration === 'decisions:scope-brief-bash',
+  );
+}
+
 describe('fixtures', () => {
   it.each(Object.keys(specs))('%s fails to pass in the bench scratch setup', (id) => {
     expect(validateTask(id)).toEqual([]);
@@ -115,6 +135,14 @@ describe('delivery parity with the shipped hooks', () => {
     expect(governed.briefChars).toBeGreaterThan(0);
     const [ungoverned] = fireEdit(scratch, tempDir('brief-stamp-'), 'package.json');
     expect(ungoverned).toMatchObject({ rel: 'package.json', slugs: [], briefChars: 0 });
+  });
+
+  it('a Bash write to the governed file is briefed through the tap; an ungoverned one is quiet', () => {
+    const [governed] = fireBash(scratchFor(true), tempDir('brief-stamp-'), target.file);
+    expect(governed).toMatchObject({ tool: 'Bash', outage: false });
+    expect(governed.slugs).toContain(target.slug);
+    const [ungoverned] = fireBash(scratchFor(true), tempDir('brief-stamp-'), 'package.json');
+    expect(ungoverned).toMatchObject({ tool: 'Bash', slugs: [], briefChars: 0, outage: false });
   });
 
   it('a stub that exits 1 yields the outage notice and no slugs', () => {
