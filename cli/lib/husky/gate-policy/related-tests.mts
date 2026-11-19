@@ -38,24 +38,17 @@ import {
   previousSelection,
   recordSelection,
   relatedDrivers,
+  relatedPaths,
   selectionLines,
+  triggerLine,
 } from './related-tests-selection.mts';
 
 // Runs with every selection: it fails when a module is left unreachable to `vitest related` itself.
 const REACH_TEST = 'cli/__tests__/test-graph-reach.test.mts';
 import { errorMessage } from '../../ship/review/shared/common.mts';
 
-// vitest's forceRerunTriggers (**/package.json, **/{vitest,vite}.config.*, setupFiles) select the
-// whole suite, which CI already runs.
-const RERUN_TRIGGER_RE = /(^|\/)(package\.json|(vitest|vite)\.config\.[^/]*)$|^vitest\.setup\.mjs$/;
-
 /** Failing tests named in the reason; the rest stay in vitest's own output above it. */
 const NAMED_TESTS = 5;
-
-/** The staged paths the related-test listing starts from, sorted, minus the full-suite triggers. */
-export function relatedPaths(staged: Iterable<string>): string[] {
-  return [...staged].filter((p) => !RERUN_TRIGGER_RE.test(p)).sort();
-}
 
 // Source modules whose reachability the reach test guards.
 const SOURCE_RE = /\.[cm]?[jt]sx?$/;
@@ -413,10 +406,10 @@ export async function runRelatedTests(root: string, opts: RunOpts): Promise<Vite
   const paths = relatedPaths(staged);
   // From the raw set: relatedPaths drops vitest.setup.mjs, which the env-scrub test binds.
   const forced = forcedTests(staged);
-  if (!paths.length && !forced.length) {
-    console.log('related-tests: none selected');
-    return { code: 0, interrupted: false };
-  }
+  const trigger = triggerLine(staged);
+  if (trigger) console.log(trigger);
+  // The entrypoint rejects an empty staged set, so here every staged path is a trigger it named.
+  if (!paths.length && !forced.length) return { code: 0, interrupted: false };
   let files: string[] = [];
   try {
     if (paths.length) files = await (opts.list ?? listRelated)(root, paths);

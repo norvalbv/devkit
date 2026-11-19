@@ -37,6 +37,23 @@ function parseSelection(line: string, repo: string, branch: string): Selection |
   }
 }
 
+// vitest's forceRerunTriggers (**/package.json, **/{vitest,vite}.config.*, setupFiles) select the
+// whole suite, which CI already runs.
+const RERUN_TRIGGER_RE = /(^|\/)(package\.json|(vitest|vite)\.config\.[^/]*)$|^vitest\.setup\.mjs$/;
+
+/** The staged paths the related-test listing starts from, sorted, minus the full-suite triggers. */
+export function relatedPaths(staged: Iterable<string>): string[] {
+  return [...staged].filter((p) => !RERUN_TRIGGER_RE.test(p)).sort();
+}
+
+/** Names the staged full-suite triggers this gate leaves to CI; undefined when none is staged. */
+export function triggerLine(staged: Iterable<string>): string | undefined {
+  const triggers = [...staged].filter((p) => RERUN_TRIGGER_RE.test(p)).sort();
+  if (!triggers.length) return undefined;
+  const more = triggers.length > NAMED ? ` (+${triggers.length - NAMED})` : '';
+  return `related-tests: ${triggers.length} staged full-suite trigger(s), so CI runs vitest's whole suite: ${triggers.slice(0, NAMED).join(', ')}${more}`;
+}
+
 /** The newest selection this ship's repo+branch recorded; undefined outside a ship or with none. */
 export function previousSelection(env: NodeJS.ProcessEnv = process.env): Selection | undefined {
   const { DEVKIT_SHIP_REPO: repo, DEVKIT_SHIP_BRANCH: branch } = env;

@@ -24,11 +24,11 @@ import { configExtraGates } from '../../gate-engine/deterministic/command-gates.
 import {
   listRelated,
   noteUnmapped,
-  relatedPaths,
   relatedTestsReason,
   runRelatedTests,
   unmappedPaths,
 } from '../lib/husky/gate-policy/related-tests.mts';
+import { triggerLine } from '../lib/husky/gate-policy/related-tests-selection.mts';
 
 const GATE = join(import.meta.dirname, '..', 'lib', 'husky', 'gate-policy', 'related-tests.mts');
 
@@ -73,32 +73,6 @@ function editedRepo(): string {
   return repo;
 }
 
-describe('relatedPaths', () => {
-  it('drops the full-suite triggers and sorts the rest', () => {
-    expect(
-      relatedPaths([
-        'src/b.mts',
-        'package.json',
-        'vitest.config.mjs',
-        'src/a.mts',
-        'vitest.setup.mjs',
-      ]),
-    ).toEqual(['src/a.mts', 'src/b.mts']);
-  });
-
-  // vitest's triggers are `**/package.json` and `**/{vitest,vite}.config.*`; every release stages dist/package.json.
-  it('drops nested trigger files too, keeping look-alikes', () => {
-    expect(
-      relatedPaths([
-        'dist/package.json',
-        'templates/app/vite.config.ts',
-        'vitest.e2e.config.mjs',
-        'cli/package-json.mts',
-      ]),
-    ).toEqual(['cli/package-json.mts', 'vitest.e2e.config.mjs']);
-  });
-});
-
 describe('runRelatedTests', () => {
   it('passes without listing or running vitest when nothing is staged', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -106,10 +80,34 @@ describe('runRelatedTests', () => {
     const exec = fakeExec(0);
     const none = { code: 0, interrupted: false };
     expect(await runRelatedTests('/repo', { staged: [], list, exec })).toEqual(none);
-    expect(await runRelatedTests('/repo', { staged: ['package.json'], list, exec })).toEqual(none);
     expect(list).not.toHaveBeenCalled();
     expect(exec).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith('related-tests: none selected');
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  // A bare "none selected" read as "this change has no tests" when CI runs the whole suite for it.
+  it('names a lone full-suite trigger and runs nothing', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const list = vi.fn(async () => ['/repo/a.test.mts']);
+    const exec = fakeExec(0);
+    expect(await runRelatedTests('/repo', { staged: ['package.json'], list, exec })).toEqual({
+      code: 0,
+      interrupted: false,
+    });
+    expect(list).not.toHaveBeenCalled();
+    expect(exec).not.toHaveBeenCalled();
+    expect(log.mock.calls).toEqual([[triggerLine(['package.json'])]]);
+    expect(log.mock.calls[0][0]).toContain("so CI runs vitest's whole suite: package.json");
+  });
+
+  it('names a staged trigger alongside the selection for the other paths', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const list = vi.fn(async () => ['/repo/cli/a.test.mts']);
+    const exec = fakeExec(0);
+    await runRelatedTests('/repo', { staged: ['package.json', 'cli/a.mts'], list, exec });
+    expect(list).toHaveBeenCalledWith('/repo', ['cli/a.mts']);
+    expect(log).toHaveBeenCalledWith(triggerLine(['package.json']));
+    expect(exec).toHaveBeenCalledOnce();
   });
 
   it('passes without spawning vitest when no test relates to the staged paths', async () => {
@@ -205,6 +203,7 @@ describe('runRelatedTests', () => {
       join('/repo', SCRUB),
       join('/repo', REACH),
     ]);
+    expect(log).toHaveBeenCalledWith(triggerLine(['vitest.setup.mjs']));
     expect(log).toHaveBeenCalledWith(
       'related-tests: 2 test file(s) for 0 staged path(s), 1 forced',
     );
@@ -368,6 +367,7 @@ describe('related-tests entrypoint', () => {
       .filter(Boolean);
     const r = spawnSync(process.execPath, [GATE, ...staged], { cwd: repo, encoding: 'utf8' });
     expect(r.stdout).toContain(', 1 forced');
+    expect(r.stdout).toContain(`${triggerLine(['vitest.setup.mjs'])}\n`);
     expect(r.stdout).not.toContain('not run here');
   });
 });

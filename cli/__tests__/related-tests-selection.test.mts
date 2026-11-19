@@ -17,7 +17,9 @@ import {
   previousSelection,
   recordSelection,
   relatedDrivers,
+  relatedPaths,
   selectionLines,
+  triggerLine,
 } from '../lib/husky/gate-policy/related-tests-selection.mts';
 
 const dirs: string[] = [];
@@ -57,6 +59,62 @@ const row = (
     slowest,
     ...over,
   });
+
+describe('relatedPaths', () => {
+  it('drops the full-suite triggers and sorts the rest', () => {
+    expect(
+      relatedPaths([
+        'src/b.mts',
+        'package.json',
+        'vitest.config.mjs',
+        'src/a.mts',
+        'vitest.setup.mjs',
+      ]),
+    ).toEqual(['src/a.mts', 'src/b.mts']);
+  });
+
+  // vitest's triggers are `**/package.json` and `**/{vitest,vite}.config.*`; every release stages dist/package.json.
+  it('drops nested trigger files too, keeping look-alikes', () => {
+    expect(
+      relatedPaths([
+        'dist/package.json',
+        'templates/app/vite.config.ts',
+        'vitest.e2e.config.mjs',
+        'cli/package-json.mts',
+      ]),
+    ).toEqual(['cli/package-json.mts', 'vitest.e2e.config.mjs']);
+  });
+});
+
+describe('triggerLine', () => {
+  it('is undefined when no full-suite trigger is staged', () => {
+    expect(triggerLine(['cli/a.mts', 'cli/package-json.mts', 'vitest.e2e.config.mjs'])).toBe(
+      undefined,
+    );
+  });
+
+  it('names every staged trigger, sorted, nested ones included', () => {
+    expect(
+      triggerLine(['vitest.setup.mjs', 'cli/a.mts', 'dist/package.json', 'package.json']),
+    ).toBe(
+      "related-tests: 3 staged full-suite trigger(s), so CI runs vitest's whole suite: dist/package.json, package.json, vitest.setup.mjs",
+    );
+  });
+
+  // A benchmark data commit can stage dozens of package.json files at once.
+  it('names the first three and counts the rest', () => {
+    const staged = [
+      'e/package.json',
+      'd/package.json',
+      'c/package.json',
+      'b/package.json',
+      'a/package.json',
+    ];
+    expect(triggerLine(staged)).toBe(
+      "related-tests: 5 staged full-suite trigger(s), so CI runs vitest's whole suite: a/package.json, b/package.json, c/package.json (+2)",
+    );
+  });
+});
 
 describe('selectionLines', () => {
   const root = '/repo';
