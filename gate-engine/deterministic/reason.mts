@@ -109,6 +109,12 @@ export function stdoutDrained(ms = DRAIN_MS): Promise<void> {
   });
 }
 
+/** A pass that withheld part of its judgement: the note rides a cached PASS and replays on a hit. */
+export function exitDegradedPass(note: string): never {
+  writeGateReason(note ? [note] : []);
+  process.exit(0);
+}
+
 /** A gate threw instead of reaching a verdict: keep the stack in the log, record its first line. */
 export function crashExit(error: Error): never {
   console.error(error);

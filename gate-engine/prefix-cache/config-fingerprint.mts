@@ -26,6 +26,7 @@ import {
   resolveJscpdBin,
 } from '../co-occurrence/jscpd-bin.mts';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mts';
+import { seedSource } from '../co-occurrence/index-refresh.mts';
 
 const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
 
@@ -93,8 +94,9 @@ export function gateConfigFingerprint(cwd: string): string {
   const allowlist =
     allowlistAbs && existsSync(allowlistAbs) ? sha256(readFileSync(allowlistAbs)) : 'absent';
 
-  // (3) search-code index — stat proxy (unset → 'none', configured-but-absent → 'missing').
-  const index = statProxy(resolveFromCwd(cfg, 'indexPath'), 'missing');
+  // (3) search-code index — stat proxy (unset → 'none', configured-but-absent → 'missing'). A linked
+  // worktree that seeds its own copy stats the primary it copies, or check and record would differ.
+  const index = statProxy(seedSource(cfg) ?? resolveFromCwd(cfg, 'indexPath'), 'missing');
 
   // (4) jscpd availability + version. Resolve the SAME bin the clone gate uses. The bare-PATH terminal
   // (global install) is a stable token — statSync('jscpd') is cwd-relative and would throw. An absolute

@@ -1,11 +1,18 @@
-import { spawnSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { reportUnindexed, unindexedNotice, unindexedStaged } from '../index-refresh.mts';
+import { pendingChunks } from '../chunk-index.mts';
+import { indexCommandFor, refreshIndex } from '../index-refresh.mts';
+import {
+  pendingNotice,
+  reportDegraded,
+  unindexedNotice,
+  unindexedStaged,
+} from '../freshness/withheld.mts';
 
 const MATCHER = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'matcher.mts');
 const CLEAN_RE = /since the last baseline\. ✓/;
@@ -126,26 +133,38 @@ describe('unindexedNotice', () => {
   });
 });
 
-describe('reportUnindexed', () => {
+describe('reportDegraded', () => {
   afterEach(() => vi.unstubAllEnvs());
-  const scope = () => ({
+  const scope = (gate = true) => ({
     cwd: tmp,
     scanRoots: ['src'],
     sourceExtensions: ['ts'],
     includeTests: false,
     indexPath: dbPath,
+    gate,
+  });
+  const withheld = (changed: Set<string> | null, rows: { file_path: string }[] = []) => {
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      return reportDegraded({ changed, rows, dropped: [], db, pendingBefore: null }, scope());
+    } finally {
+      db.close();
+    }
+  };
+
+  it('withholds nothing for an unscoped scan', () => {
+    expect(withheld(null)).toBe('');
   });
 
-  it('does nothing for an unscoped scan', () => {
-    expect(reportUnindexed(null, [], scope())).toEqual([]);
-  });
-
-  it('returns the notice and writes one gate_degraded event', () => {
+  it('reports the file and writes one gate_degraded event', () => {
     const events = join(tmp, 'report-events.jsonl');
     vi.stubEnv('DEVKIT_GATE_EVENTS', events);
-    const rows = [{ file_path: 'src/a.ts' }];
-    const lines = reportUnindexed(new Set(['src/a.ts', 'src/new.ts']), rows, scope());
-    expect(lines[0]).toContain('not compared: src/new.ts');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    expect(withheld(new Set(['src/a.ts', 'src/new.ts']), [{ file_path: 'src/a.ts' }])).toContain(
+      'not compared: src/new.ts',
+    );
+    expect(log.mock.calls.flat().join('\n')).toContain('not compared: src/new.ts');
+    log.mockRestore();
     const [ev] = readFileSync(events, 'utf8')
       .trim()
       .split('\n')
@@ -155,16 +174,166 @@ describe('reportUnindexed', () => {
 
   // Catches the wiring: the remedy must follow where the index physically lives, not a constant.
   it('picks the remedy from whether this checkout owns the index', () => {
-    const changed = new Set(['src/new.ts']);
-    expect(reportUnindexed(changed, [], scope())[1]).toContain('search-code index');
+    const lines = (indexPath: string) => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      const w = {
+        changed: new Set(['src/new.ts']),
+        rows: [],
+        dropped: [],
+        db,
+        pendingBefore: null,
+      };
+      reportDegraded(w, { ...scope(false), indexPath });
+      db.close();
+      const out = log.mock.calls.flat().join('\n');
+      log.mockRestore();
+      return out;
+    };
+    expect(lines(dbPath)).toContain('search-code index');
     const elsewhere = mkdtempSync(join(tmpdir(), 'unindexed-primary-'));
     try {
       writeFileSync(join(elsewhere, 'index.db'), '');
-      const shared = { ...scope(), indexPath: join(elsewhere, 'index.db') };
-      expect(reportUnindexed(changed, [], shared)[1]).toContain('shared from another checkout');
+      expect(lines(join(elsewhere, 'index.db'))).toContain('shared from another checkout');
     } finally {
       rmSync(elsewhere, { recursive: true, force: true });
     }
+  });
+});
+
+describe('reportDegraded merges every withheld comparison', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const pair = {
+    idA: 1,
+    symbolA: 'dupA',
+    fileA: 'src/a.ts',
+    idB: 2,
+    symbolB: 'dupB',
+    fileB: 'src/b.ts',
+  };
+  const bothStale = {
+    pair,
+    stale: [
+      { chunkId: 1, symbol: 'dupA', file: 'src/a.ts' },
+      { chunkId: 2, symbol: 'dupB', file: 'src/b.ts' },
+    ],
+  };
+  const run = (gate: boolean) => {
+    const events = join(tmp, `merged-${gate}-${Math.random().toString(36).slice(2)}.jsonl`);
+    vi.stubEnv('DEVKIT_GATE_EVENTS', events);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    const w = {
+      changed: new Set(['src/new.ts']),
+      rows: [],
+      dropped: [bothStale],
+      db,
+      pendingBefore: null,
+    };
+    const scope = { cwd: tmp, scanRoots: ['src'], sourceExtensions: ['ts'], includeTests: false };
+    const withheld = reportDegraded(w, { ...scope, indexPath: dbPath, gate });
+    db.close();
+    const out = log.mock.calls.flat().join('\n');
+    log.mockRestore();
+    const lines = existsSync(events) ? readFileSync(events, 'utf8').trim().split('\n') : [];
+    return { withheld, out, events: lines.map((l) => JSON.parse(l)) };
+  };
+
+  // The digest keeps one unverified row per gate, so two events would hide one cause.
+  it('records a stale drop and an unindexed file as ONE event naming both', () => {
+    const { withheld, out, events } = run(true);
+    expect(withheld).toContain('Stale index — dropped 1 candidate pair');
+    expect(out).toContain('Stale index — dropped 1 candidate pair');
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ judge: 'dup', cause: 'stale_index_drop+unindexed_staged' });
+    expect(events[0].detail).toContain('src/a.ts');
+    expect(events[0].detail).toContain('src/b.ts');
+    expect(events[0].detail).toContain('src/new.ts');
+  });
+
+  // An agent's pre-flight scan must not inflate the countable degraded rate.
+  it('prints but records nothing outside --gate', () => {
+    const { withheld, out, events } = run(false);
+    expect(withheld).toContain('not compared: src/new.ts');
+    expect(out).toContain('not compared: src/new.ts');
+    expect(events).toEqual([]);
+  });
+});
+
+describe('pendingNotice', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const pending = [
+    { id: 1, file: 'src/a.ts', symbol: 'edited' },
+    { id: 2, file: 'src/far.ts', symbol: 'drifted' },
+    { id: 3, file: 'src/far.ts', symbol: 'neverEmbedded' },
+    { id: 4, file: 'src/new.ts', symbol: 'fresh' },
+  ];
+  const changed = new Set(['src/a.ts', 'src/new.ts']);
+
+  it('names staged symbols and counts only what this refresh left behind', () => {
+    const lines = pendingNotice(pending, new Set([3]), changed, ['src/new.ts']);
+    expect(lines[0]).toContain('2 indexed symbol(s) have no embedding yet');
+    expect(lines).toContain('  edited  src/a.ts');
+    expect(lines.join('\n')).not.toContain('src/new.ts');
+    expect(lines).toContain("  and 1 outside the staged files, left by this run's index refresh");
+  });
+
+  it('is empty when nothing staged is pending and no refresh ran', () => {
+    expect(pendingNotice(pending, null, new Set(['src/b.ts']), [])).toEqual([]);
+  });
+
+  it('names the prefix-cache clear in a ship, where a re-ship replays the PASS', () => {
+    vi.stubEnv('DEVKIT_SHIP', '1');
+    expect(pendingNotice(pending, null, changed, []).at(-1)).toContain('guard-prefix clear');
+  });
+});
+
+// An unreadable index must read as "nothing pending", never throw out of the commit hook.
+describe('pending reads fail open', () => {
+  it('pendingChunks is empty on a foreign schema; refreshIndex still runs on an unopenable index', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('CREATE TABLE chunks (x INTEGER)');
+    expect(pendingChunks(db)).toEqual([]);
+    db.close();
+    const garbage = join(tmp, 'not-a-db');
+    mkdirSync(garbage, { recursive: true });
+    const cfg = { cwd: tmp, indexCommand: 'true', indexCommandTimeoutMs: 10_000 };
+    expect(refreshIndex(garbage, cfg, null)).toEqual(new Set());
+  });
+});
+
+describe('indexCommandFor', () => {
+  const argv = (staged: Set<string> | null) =>
+    JSON.parse(
+      execSync(
+        indexCommandFor(
+          `node -e "console.log(JSON.stringify(process.argv.slice(1)))" {staged-csv}`,
+          staged,
+        ),
+        {
+          encoding: 'utf8',
+        },
+      ),
+    );
+
+  it('expands to ONE shell word, quotes and spaces included', () => {
+    expect(argv(new Set(["src/a'b c.ts", 'src/d.ts']))).toEqual(["src/a'b c.ts,src/d.ts"]);
+  });
+
+  it('expands to an empty word for an unscoped scan', () => {
+    expect(argv(null)).toEqual(['']);
+  });
+
+  // One `sh -c` argument is capped (128 KiB on Linux): an oversized list must not cost the refresh.
+  it('drops an oversized staged list rather than the refresh', () => {
+    const many = new Set(Array.from({ length: 5000 }, (_, i) => `src/generated/file-${i}.ts`));
+    expect(argv(many)).toEqual(['']);
+  });
+
+  // cmd.exe reads single quotes literally, so a quoted list there would carry the quotes and any `&`.
+  it('passes an empty word on Windows', () => {
+    const cmd = indexCommandFor('index --seed-files {staged-csv}', new Set(['a&b.ts']), 'win32');
+    expect(cmd).toBe('index --seed-files ""');
   });
 });
 

@@ -35,7 +35,14 @@ import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { clearEntries, devkitDataFile, loadEntries, saveEntries } from '../judge/verdict-store.mts';
+import {
+  clearEntries,
+  devkitDataFile,
+  loadEntries,
+  saveEntries,
+  type VerdictMeta,
+} from '../judge/verdict-store.mts';
+import { z } from 'zod';
 import { humanAge } from '../coverage/failures.mts';
 import { gateConfigFingerprint } from './config-fingerprint.mts';
 
@@ -70,7 +77,20 @@ interface KeyOpts {
   versionSalt?: string;
 }
 
-type RecordOpts = KeyOpts & { durationMs?: number };
+/** A judgement a passing gate withheld (guard-dup's stale drops): kept with the PASS, replayed on a hit. */
+export interface DegradedNote {
+  judge: string;
+  detail: string;
+}
+const DEGRADED_NOTES = z.array(z.object({ judge: z.string(), detail: z.string() }));
+
+type RecordOpts = KeyOpts & { durationMs?: number; degraded?: DegradedNote[] };
+
+/** The notes a cached PASS carries; [] for an entry written before them, or a malformed one. */
+export function cachedDegradedNotes(entry: VerdictMeta | null): DegradedNote[] {
+  const notes = DEGRADED_NOTES.safeParse(entry?.degraded);
+  return notes.success ? notes.data : [];
+}
 
 /**
  * The cache key for the current staged index, or null when it cannot be computed (not a
@@ -124,14 +144,11 @@ export function recordPrefix(cwd: string, opts: RecordOpts = {}) {
   if (!shipScoped()) return;
   const key = computeKey(cwd, opts);
   if (!key) return;
-  saveEntries(devkitDataFile(cwd, STORE_FILE), {
-    [key]: {
-      at: new Date().toISOString(),
-      ...(typeof opts.durationMs === 'number' && Number.isFinite(opts.durationMs)
-        ? { duration_ms: Math.max(0, Math.round(opts.durationMs)) }
-        : {}),
-    },
-  });
+  const entry: VerdictMeta = { at: new Date().toISOString() };
+  if (typeof opts.durationMs === 'number' && Number.isFinite(opts.durationMs))
+    entry.duration_ms = Math.max(0, Math.round(opts.durationMs));
+  if (opts.degraded?.length) entry.degraded = opts.degraded;
+  saveEntries(devkitDataFile(cwd, STORE_FILE), { [key]: entry });
 }
 
 /** The line a cache hit prints: every gate it did not re-run, and any bypass flag set for this run.

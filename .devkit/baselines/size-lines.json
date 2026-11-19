@@ -11,7 +11,7 @@
     "cli/lib/ship/reship.sh": 1194,
     "cli/lib/ship/review-target.sh": 1018,
     "cli/lib/ship/ship-branch.sh": 1658,
-    "gate-engine/co-occurrence/matcher.mts": 538,
+    "gate-engine/co-occurrence/matcher.mts": 501,
     "gate-engine/critique/eval/bench.mts": 1164,
     "gate-engine/decisions/detect.mts": 527,
     "gate-engine/decisions/eval/bench.mts": 806,

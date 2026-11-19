@@ -12,25 +12,35 @@
  *   · A linked worktree reusing the primary checkout's index (the documented way to gate there).
  *     Indexers resolve their DB from the working root and key chunks repo-relative, so refreshing
  *     through a symlinked index overwrites the PRIMARY's rows with this checkout's code — and the
- *     primary's next commit is then gated against a branch it never saw.
+ *     primary's next commit is then gated against a branch it never saw. With an indexCommand,
+ *     the worktree refreshes its own VACUUM INTO copy instead (seedIndexCopy).
  */
 
 import { execFileSync, execSync } from 'node:child_process';
-import { existsSync, realpathSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
-import { usableChunkCount } from './chunk-index.mts';
-import { sourceMatchers } from '../config.mts';
-import { reasonDetail } from '../deterministic/reason.mts';
-import { emitGateEvent } from '../judge/gate-events.mts';
-import { underRoot } from '../review/scope/policy.mts';
+import {
+  existsSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { pendingChunks, usableChunkCount } from './chunk-index.mts';
+import { processIsAlive } from '../judge/process/identity.mts';
 
 const MTIME_TOLERANCE_MS = 1;
 const BACKSLASH_RE = /\\/g;
-const SAMPLE = 6;
-const TESTS_DIR = '__tests__/';
+export const SAMPLE = 6;
+const STAGED_CSV = '{staged-csv}';
+const MAX_STAGED_CSV = 64 * 1024;
+const SEED_TMP_RE = /^\.index-seed-(\d+)\.db$/;
 
 /** The first SAMPLE paths, comma-joined, with a `(+k more)` tail. */
-const sampleFiles = (files: readonly string[]) => {
+export const sampleFiles = (files: readonly string[]) => {
   const more = files.length - SAMPLE;
   return `${files.slice(0, SAMPLE).join(', ')}${more > 0 ? ` (+${more} more)` : ''}`;
 };
@@ -72,7 +82,7 @@ export function primaryCheckout(cwd: string): string | null {
 
 /** `path` at the same place under the primary checkout, relative to this linked worktree's toplevel.
  * Null in the primary itself, outside git, or for a path outside this worktree. */
-function primaryCounterpart(path: string, cwd: string): string | null {
+export function primaryCounterpart(path: string, cwd: string): string | null {
   try {
     const top = execFileSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], {
       encoding: 'utf-8',
@@ -120,14 +130,76 @@ export function indexToInspect(indexPath: string, cwd: string) {
   return { indexPath: fallback, reads: `${fallback} (the primary checkout's)` };
 }
 
+/** The primary's populated index a linked worktree copies for its indexCommand to refresh, or null.
+ * Ignores the local file, so the prefix-cache fingerprint agrees before and after the copy. */
+export function seedSource(cfg: {
+  cwd: string;
+  indexPath: string | null;
+  indexCommand: string | null;
+}): string | null {
+  if (!cfg.indexCommand || cfg.indexPath == null) return null;
+  const primary = primaryCounterpart(resolve(cfg.cwd, cfg.indexPath), cfg.cwd);
+  return primary && (usableChunksAt(primary) ?? 0) > 0 ? primary : null;
+}
+
+/** `path` resolves to `cwd` itself or somewhere beneath it, through any symlinks. */
+function resolvesInside(path: string, cwd: string): boolean {
+  const rel = relative(realpathSync(cwd), realpathSync(path));
+  return !rel.startsWith('..') && !isAbsolute(rel);
+}
+
+/** Remove seed temp files a killed gate left behind; a live pid may still be writing its own. */
+function sweepOrphanSeeds(dir: string): void {
+  for (const name of readdirSync(dir)) {
+    const pid = SEED_TMP_RE.exec(name)?.[1];
+    if (pid && !processIsAlive(Number(pid))) rmSync(join(dir, name), { force: true });
+  }
+}
+
+/** Copy `source` to `local` so the refresh never writes the primary. Replaces only an absent index or
+ * ship's own link: a regular file may be a running build beside its WAL. Best effort. */
+export function seedIndexCopy(local: string, source: string, cwd: string): void {
+  let link = false;
+  try {
+    link = lstatSync(local).isSymbolicLink();
+    if (!link || process.env.DEVKIT_SHIP !== '1' || indexIsInThisCheckout(local, cwd)) return;
+  } catch {
+    // Absent: create it.
+  }
+  const tmp = join(dirname(local), `.index-seed-${process.pid}.db`);
+  try {
+    mkdirSync(dirname(local), { recursive: true });
+    if (!resolvesInside(dirname(local), cwd)) return;
+    sweepOrphanSeeds(dirname(local));
+    const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
+    const src = new DatabaseSync(source, { readOnly: true });
+    try {
+      src.exec('PRAGMA busy_timeout = 2000');
+      src.exec(`VACUUM INTO '${tmp.replaceAll("'", "''")}'`);
+    } finally {
+      src.close();
+    }
+    // rename replaces the link itself, never its target; link() refuses an index created meanwhile.
+    if (link) renameSync(tmp, local);
+    else linkSync(tmp, local);
+  } catch {
+    // A locked source, a full disk, a concurrent seed that won: keep borrowing.
+  } finally {
+    rmSync(tmp, { force: true });
+  }
+}
+
 /** The index the matcher reads: the configured one, or (when `borrow`) the primary's when a linked
- * worktree has none usable. A caller that writes the index passes false: it must own what it writes. */
+ * worktree has none usable. A caller that writes the index passes false: it must own what it writes.
+ * With an indexCommand, a borrowing worktree first seeds its own copy (seedIndexCopy) to refresh. */
 export function linkedWorktreeIndex(
-  cfg: { cwd: string; indexPath: string | null },
+  cfg: { cwd: string; indexPath: string | null; indexCommand: string | null },
   borrow: boolean,
 ): string | null {
   if (cfg.indexPath == null) return null;
   const local = resolve(cfg.cwd, cfg.indexPath);
+  const source = borrow ? seedSource(cfg) : null;
+  if (source) seedIndexCopy(local, source, cfg.cwd);
   const primary = borrow ? primaryIndexFallback(local, cfg.cwd) : null;
   if (!primary) return local;
   process.stderr.write(
@@ -296,18 +368,50 @@ export function missingIndexMessage(indexPath: string, cfg: { cwd: string }): st
   return `${head}  A linked worktree reads the primary checkout's index automatically, but ${primary} has no usable index either: build it there with your indexer.`;
 }
 
+/** `{staged-csv}` in indexCommand: the scoped scan's staged paths as ONE shell-quoted, comma-joined
+ * word (search-code's `--seed-files` shape), or '' for an unscoped scan. */
+export function indexCommandFor(
+  command: string,
+  staged: ReadonlySet<string> | null,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const csv = [...(staged ?? [])].join(',');
+  // cmd.exe ignores POSIX quotes, and Linux caps one `sh -c` argument: there only seed order is lost.
+  if (platform === 'win32' || csv.length > MAX_STAGED_CSV)
+    return command.replaceAll(STAGED_CSV, '""');
+  return command.replaceAll(STAGED_CSV, `'${csv.replaceAll("'", "'\\''")}'`);
+}
+
+/** Pending chunk rowids before a refresh, so the gate can name what the refresh left unembedded. */
+function pendingIdsAt(dbPath: string): Set<number> {
+  const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
+  try {
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      return new Set(pendingChunks(db).map((c) => c.id));
+    } finally {
+      db.close();
+    }
+  } catch {
+    return new Set();
+  }
+}
+
 /**
  * Run the configured indexer, or do nothing. Never throws, never blocks: one attempt, hard
  * wall-clock kill, output discarded, every failure swallowed. A slightly stale index is a weaker
- * gate; a commit that hangs or fails on its indexer is a broken one.
+ * gate; a commit that hangs or fails on its indexer is a broken one. Returns the pending chunk ids
+ * from before the run (null when nothing ran), since a cut-short run leaves edited chunks unembedded.
  */
 export function refreshIndex(
   indexPath: string,
   cfg: { cwd: string; indexCommand: string | null; indexCommandTimeoutMs: number },
-): void {
-  if (!cfg.indexCommand || !indexIsInThisCheckout(indexPath, cfg.cwd)) return;
+  staged: ReadonlySet<string> | null,
+): Set<number> | null {
+  if (!cfg.indexCommand || !indexIsInThisCheckout(indexPath, cfg.cwd)) return null;
+  const before = pendingIdsAt(indexPath);
   try {
-    execSync(cfg.indexCommand, {
+    execSync(indexCommandFor(cfg.indexCommand, staged), {
       cwd: cfg.cwd,
       stdio: 'ignore',
       timeout: cfg.indexCommandTimeoutMs,
@@ -316,62 +420,5 @@ export function refreshIndex(
   } catch {
     // Timeout, missing binary, a concurrent writer holding the DB — all non-fatal by design.
   }
-}
-
-// Staged files the dup matcher could not compare (no usable chunk), named so a clean pass is honest.
-export interface UnindexedScope {
-  cwd: string;
-  scanRoots: readonly string[];
-  sourceExtensions: string[];
-  includeTests: boolean;
-}
-
-/** Staged scan-root source files present on disk with no usable chunk in the index, sorted. */
-export function unindexedStaged(
-  changed: ReadonlySet<string>,
-  indexed: ReadonlySet<string>,
-  scope: UnindexedScope,
-): string[] {
-  const { isSource, isTest } = sourceMatchers(scope.sourceExtensions);
-  return [...changed]
-    .filter(
-      (f) =>
-        !indexed.has(f) &&
-        isSource(f) &&
-        (scope.includeTests || !(isTest(f) || f.includes(TESTS_DIR))) &&
-        scope.scanRoots.some((root) => underRoot(f, root)) &&
-        existsSync(resolve(scope.cwd, f)),
-    )
-    .sort();
-}
-
-/** The lines naming the uncompared files, with a remedy that depends on who owns the index. */
-export function unindexedNotice(files: readonly string[], ownsIndex: boolean): string[] {
-  if (files.length === 0) return [];
-  return [
-    `${files.length} staged file(s) have no usable (embedded) chunks in the index — not compared: ${sampleFiles(files)}`,
-    ownsIndex
-      ? '  Run `search-code index` to embed them; a file the indexer excludes or cannot chunk stays uncompared.'
-      : '  The index is shared from another checkout and cannot cover files new on this branch.',
-  ];
-}
-
-/** The clean-run line: honest about scope when some staged files were not compared. */
-export const cleanLine = (skipped: readonly string[]) =>
-  `No new duplication ${skipped.length ? 'among the compared files' : 'since the last baseline'}. ✓`;
-
-/** Name the staged files `rows` cannot compare, as a degraded run; advisory, the gate still exits 0. */
-export function reportUnindexed(
-  changed: ReadonlySet<string> | null,
-  rows: readonly { file_path: string }[],
-  scope: UnindexedScope & { indexPath: string },
-): string[] {
-  if (!changed) return [];
-  const files = unindexedStaged(changed, new Set(rows.map((r) => r.file_path)), scope);
-  const notice = unindexedNotice(files, indexIsInThisCheckout(scope.indexPath, scope.cwd));
-  if (notice.length === 0) return notice;
-  for (const line of notice) console.log(line);
-  const detail = reasonDetail('dup', notice);
-  emitGateEvent({ type: 'gate_degraded', judge: 'dup', cause: 'unindexed_staged', detail });
-  return notice;
+  return before;
 }

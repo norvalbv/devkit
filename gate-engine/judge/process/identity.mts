@@ -37,7 +37,7 @@ export function processStartIdentity(resolve: ProcessStartResolver = psProcessSt
   );
 }
 
-function processIsAlive(pid: number): boolean {
+export function processIsAlive(pid: number): boolean {
   if (!isProcessId(pid)) return false;
   try {
     process.kill(pid, 0);

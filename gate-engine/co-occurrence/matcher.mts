@@ -47,7 +47,7 @@ import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { envBool, resolveFromCwd, resolveGuardConfig } from '../config.mts';
-import { exitGate, failLine } from '../deterministic/reason.mts';
+import { exitDegradedPass, exitGate, failLine } from '../deterministic/reason.mts';
 import {
   ALLOWLIST_CLI,
   type AllowlistPair,
@@ -67,19 +67,15 @@ import {
   freshnessNotice,
   orderKey,
   partitionFresh,
+  pendingChunks,
   USABLE_CHUNK_WHERE,
   verifierForIndex,
 } from './chunk-index.mts';
 import { type Label, scoreLabels, symKey } from './bench/score-labels.mts';
 import { classifyPair } from './classify.mts';
 import { isExpired } from './decay.mts';
-import {
-  cleanLine,
-  linkedWorktreeIndex,
-  missingIndexMessage,
-  refreshIndex,
-  reportUnindexed,
-} from './index-refresh.mts';
+import { linkedWorktreeIndex, missingIndexMessage, refreshIndex } from './index-refresh.mts';
+import { cleanLine, reportDegraded } from './freshness/withheld.mts';
 
 // ── Types ── the row shape, blob decode and freshness live in chunk-index.mts (index-read boundary).
 // Tier + size thresholds (mirrors resolveGuardConfig().thresholds + --flag overrides).
@@ -177,8 +173,9 @@ if (dbPath == null) {
 if (!existsSync(dbPath)) cannotRun(missingIndexMessage(dbPath, cfg));
 // Judge the code being COMMITTED, not the last indexed state. Silently no-ops unless refreshing
 // is safe here — index-refresh.mts documents the two ways an unconditional refresh goes wrong.
-refreshIndex(dbPath, cfg);
-const unindexedScope = { ...cfg, includeTests: INCLUDE_TESTS, indexPath: dbPath };
+const changedSet = CHANGED ? loadChangedSet(cfg.cwd) : null;
+const pendingBefore = refreshIndex(dbPath, cfg, changedSet);
+const degradedScope = { ...cfg, includeTests: INCLUDE_TESTS, indexPath: dbPath, gate: GATE };
 
 // allowlistPath resolves from DEFAULTS (a non-null string) so this never fires at
 // runtime, but resolveFromCwd's contract is string|null — guard it (fail-open, like
@@ -195,8 +192,6 @@ const allowlistPath: string = allowlistPathRaw;
 // the module-scope path + this gate's label so the refusal message reads "co-occurrence
 // matcher: …" exactly as before.
 const loadAllowlist = () => loadAllowlistFile(allowlistPath, 'co-occurrence matcher');
-
-const changedSet = CHANGED ? loadChangedSet(cfg.cwd) : null;
 
 // ── Load + normalize ────────────────────────────────────────────────────────
 let db: DatabaseSync;
@@ -327,12 +322,13 @@ function runScan() {
   );
   // Before the clean short-circuit: a withheld finding must still be visible, or "clean" reads as
   // "nothing there" when it really means "the index disagrees with the disk".
-  for (const l of freshnessNotice(dropped, { verified: verifier.enabled, blocking: false }))
-    console.log(l);
-  const skipped = reportUnindexed(changedSet, rows, unindexedScope);
+  const withheld = reportDegraded(
+    { changed: changedSet, rows, dropped, db, pendingBefore },
+    degradedScope,
+  );
   if (ONLY_NEW && pairs.length === 0) {
-    console.log(cleanLine(skipped));
-    if (GATE) process.exit(0);
+    console.log(cleanLine(withheld !== ''));
+    if (GATE) exitDegradedPass(withheld);
     return;
   }
   const displayed: Pair[] = [];
@@ -369,7 +365,7 @@ function runScan() {
     console.log(['', ...notice].join('\n'));
     exitGate(1, [...displayed.map(pairName), ...notice]);
   }
-  if (GATE) exitGate(0, []);
+  if (GATE) exitDegradedPass(withheld);
 }
 
 function runBench() {
@@ -446,9 +442,14 @@ function runBaseline() {
 function runReconcile() {
   // loadAllowlist() refuses (exit 2) on a corrupt-but-present file, so reconcile can't wipe it.
   const detected = new Set(detect(KNOBS).map(symFileKey));
+  // An unembedded chunk cannot be detected, so its approvals are unjudged, not resolved.
+  const pending = new Set(pendingChunks(db).map((c) => `${c.symbol}\0${c.file}`));
+  const live = (p: AllowlistPair) =>
+    detected.has(symFileKey(p)) ||
+    [`${p.symbolA}\0${p.fileA}`, `${p.symbolB}\0${p.fileB}`].some((k) => pending.has(k));
   const { pairs, clones } = loadAllowlist();
-  const kept = pairs.filter((p) => detected.has(symFileKey(p)));
-  const dropped = pairs.filter((p) => !detected.has(symFileKey(p)));
+  const kept = pairs.filter(live);
+  const dropped = pairs.filter((p) => !live(p));
   console.log(
     `Reconcile: ${pairs.length} pair(s) → keep ${kept.length}, drop ${dropped.length} (no longer a current candidate).`,
   );
