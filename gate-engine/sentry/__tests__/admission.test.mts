@@ -34,8 +34,13 @@ const SRC_CONTEXT_CATCH = seg('src/flow.ts', '-const a = 1;', '+const a = 2;', '
 const SRC_ADDS_CAPTURE = seg('src/flow.ts', ' x();', '+captureContained(err);');
 const README = seg('README.md', '+Retry, or catch the error and throw it again.');
 const TEST_ONLY = seg('src/__tests__/flow.test.ts', '+try { run(); } catch (e) { fail(e); }');
-// A capture look-alike on another receiver is local error plumbing, not instrumentation.
-const SRC_STACK_TRACE = seg('src/err.ts', ' super(msg);', '+Error.captureStackTrace(this);');
+// Admission matches the raw capture token, receiver or not: dropping `scope.captureException` matters.
+const SRC_DROPS_SCOPED_CAPTURE = seg(
+  'src/flow.ts',
+  ' } catch (e) {',
+  '-  scope.captureException(e);',
+  ' }',
+);
 const SRC_REMOVES_CATCH = seg('src/flow.ts', ' run();', '-} catch (e) {', '-  report(e);', ' }');
 
 describe('sentrySkipCause', () => {
@@ -64,11 +69,11 @@ describe('sentrySkipCause', () => {
       null,
     ],
     [
-      'Error.captureStackTrace is not a capture → skipped',
-      'Keep error stacks',
-      SRC_STACK_TRACE,
+      'removing a receiver-qualified capture → judged',
+      'Quiet the flow runner',
+      SRC_DROPS_SCOPED_CAPTURE,
       false,
-      'no_source_error_hunk',
+      null,
     ],
     [
       'plain-English subject + an added capture → judged',

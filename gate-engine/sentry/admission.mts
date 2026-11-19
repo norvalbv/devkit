@@ -4,8 +4,7 @@
  */
 
 import { filePathOf, splitDiffByFile } from '../judge/diff-focus.mts';
-import { captureSymbols } from './capture-lexer.mts';
-import { ERROR_HUNK_RE, TEST_PATH_RE } from './evidence.mts';
+import { CAPTURE_TOKEN_RE, ERROR_HUNK_RE, TEST_PATH_RE } from './evidence.mts';
 
 const SENTRY_JUDGE_TYPE_RE = /^(fix|feat|perf|refactor)(\([^)]*\))?!?:/i;
 const DOC_PATH_RE = /\.(?:md|mdx|mdc|markdown|rst|adoc|txt)$/i;
@@ -53,7 +52,7 @@ function changesErrorHandling(segment: string): boolean {
     .some(
       (l) =>
         (l.startsWith('+') || l.startsWith('-')) &&
-        (ERROR_HUNK_RE.test(l) || captureSymbols(l.slice(1)).length > 0),
+        (ERROR_HUNK_RE.test(l) || CAPTURE_TOKEN_RE.test(l)),
     );
 }
 

@@ -3,8 +3,7 @@
  * too. A fix/feat/perf/refactor subject only WIDENS admission (a source change with no error token).
  */
 import { filePathOf, splitDiffByFile } from '../judge/diff-focus.mjs';
-import { captureSymbols } from './capture-lexer.mjs';
-import { ERROR_HUNK_RE, TEST_PATH_RE } from './evidence.mjs';
+import { CAPTURE_TOKEN_RE, ERROR_HUNK_RE, TEST_PATH_RE } from './evidence.mjs';
 const SENTRY_JUDGE_TYPE_RE = /^(fix|feat|perf|refactor)(\([^)]*\))?!?:/i;
 const DOC_PATH_RE = /\.(?:md|mdx|mdc|markdown|rst|adoc|txt)$/i;
 const SKIP_PROSE = {
@@ -33,7 +32,7 @@ function changesErrorHandling(segment) {
     return body
         .split('\n')
         .some((l) => (l.startsWith('+') || l.startsWith('-')) &&
-        (ERROR_HUNK_RE.test(l) || captureSymbols(l.slice(1)).length > 0));
+        (ERROR_HUNK_RE.test(l) || CAPTURE_TOKEN_RE.test(l)));
 }
 /** Why this commit skips the judge, or null to judge it. A `null` diff (git could not read it)
  * judges: fail toward judging (on the diff tier the run then degrades to warn-only). */
