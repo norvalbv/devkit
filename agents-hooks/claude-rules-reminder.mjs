@@ -5,13 +5,23 @@
 // compaction). If the agent cannot recall all of them verbatim, it should STOP and tell the
 // user rather than work from a partial memory.
 //
-// Portable (W-3): reads CLAUDE.md from the CONSUMER cwd (CLAUDE_PROJECT_DIR). MUST self-skip
+// Portable (W-3): reads CLAUDE.md from the CONSUMER checkout (workspaceRoot). MUST self-skip
 // silently when no CLAUDE.md exists, or when it has no numbered `<rule id=` markers — so a
 // repo without that convention is never nagged.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { workspaceRoot } from './edit-targets-lib.mjs';
 
-const projectDir = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
+/** The hook payload, or {} when stdin is not JSON. */
+function readInput() {
+  try {
+    return JSON.parse(readFileSync(0, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+const projectDir = workspaceRoot(readInput());
 
 let count = 0;
 try {

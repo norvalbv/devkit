@@ -12,11 +12,11 @@
     "comment-budget-preflight.mjs": "c3b73144ff3b0b43dca075898146f145cbfa888a67ac39533672d20e589267e1",
     "decision-edit-guard.mjs": "02227d7a2c837475559f0df2426517635c51685c32eed9c59c7541e927eae780",
     "decision-scope-brief.mjs": "a87d83b1d1e6be9cbf6401b416ef6cb70ca14684c0e276ae2a11f6b28acc7ef0",
-    "edit-targets-lib.mjs": "ff8093abb7c542e10b3b77ec7d9d882c374d0a24ca948528c316c84ca2b4f137",
-    "fanout-brief.mjs": "9355f02fa8b9bf42e20c513d27ab815bc1c5386a393b46dba70b84f0b4cdd578",
-    "placement-brief.mjs": "44bdd60f09b823b520e93f10c7efff1cd59659ea2ec39e60566a30b058544f91",
+    "edit-targets-lib.mjs": "5de9dc353ebd11645dc107aee3bb3df0e192069dba390bab3330e8aacf3eb915",
+    "fanout-brief.mjs": "4ebd92c40ae3bc5421babc1353b5263783edad061afa222e56c66c88350bd7fc",
+    "placement-brief.mjs": "c9e1e171a7d8f004bd35f51068a123b19d9b5df4ae7236397a6cbdc336aa4a64",
     "prior-art-gate.mjs": "e4dac4e6c1734e7e7429fc634bca9be1a545da2612f7f1d054d2b0f54b99d59b",
-    "size-headroom-check.mjs": "3b9774c6f063e981f6d1aed6126033bf9a53259836b703bd711c594c7461ff89"
+    "size-headroom-check.mjs": "f50137027a23a4a4f9d43fa40f0ea6d5df04e35ef680d5252574a1bd46de375e"
   },
   "providers": {
     "claude": {
@@ -30,11 +30,11 @@
         "comment-budget-preflight.mjs": "c3b73144ff3b0b43dca075898146f145cbfa888a67ac39533672d20e589267e1",
         "decision-edit-guard.mjs": "02227d7a2c837475559f0df2426517635c51685c32eed9c59c7541e927eae780",
         "decision-scope-brief.mjs": "a87d83b1d1e6be9cbf6401b416ef6cb70ca14684c0e276ae2a11f6b28acc7ef0",
-        "edit-targets-lib.mjs": "ff8093abb7c542e10b3b77ec7d9d882c374d0a24ca948528c316c84ca2b4f137",
-        "fanout-brief.mjs": "9355f02fa8b9bf42e20c513d27ab815bc1c5386a393b46dba70b84f0b4cdd578",
-        "placement-brief.mjs": "44bdd60f09b823b520e93f10c7efff1cd59659ea2ec39e60566a30b058544f91",
+        "edit-targets-lib.mjs": "5de9dc353ebd11645dc107aee3bb3df0e192069dba390bab3330e8aacf3eb915",
+        "fanout-brief.mjs": "4ebd92c40ae3bc5421babc1353b5263783edad061afa222e56c66c88350bd7fc",
+        "placement-brief.mjs": "c9e1e171a7d8f004bd35f51068a123b19d9b5df4ae7236397a6cbdc336aa4a64",
         "prior-art-gate.mjs": "e4dac4e6c1734e7e7429fc634bca9be1a545da2612f7f1d054d2b0f54b99d59b",
-        "size-headroom-check.mjs": "3b9774c6f063e981f6d1aed6126033bf9a53259836b703bd711c594c7461ff89"
+        "size-headroom-check.mjs": "f50137027a23a4a4f9d43fa40f0ea6d5df04e35ef680d5252574a1bd46de375e"
       }
     },
     "codex": {
@@ -48,11 +48,11 @@
         "comment-budget-preflight.mjs": "c3b73144ff3b0b43dca075898146f145cbfa888a67ac39533672d20e589267e1",
         "decision-edit-guard.mjs": "02227d7a2c837475559f0df2426517635c51685c32eed9c59c7541e927eae780",
         "decision-scope-brief.mjs": "a87d83b1d1e6be9cbf6401b416ef6cb70ca14684c0e276ae2a11f6b28acc7ef0",
-        "edit-targets-lib.mjs": "ff8093abb7c542e10b3b77ec7d9d882c374d0a24ca948528c316c84ca2b4f137",
-        "fanout-brief.mjs": "9355f02fa8b9bf42e20c513d27ab815bc1c5386a393b46dba70b84f0b4cdd578",
-        "placement-brief.mjs": "44bdd60f09b823b520e93f10c7efff1cd59659ea2ec39e60566a30b058544f91",
+        "edit-targets-lib.mjs": "5de9dc353ebd11645dc107aee3bb3df0e192069dba390bab3330e8aacf3eb915",
+        "fanout-brief.mjs": "4ebd92c40ae3bc5421babc1353b5263783edad061afa222e56c66c88350bd7fc",
+        "placement-brief.mjs": "c9e1e171a7d8f004bd35f51068a123b19d9b5df4ae7236397a6cbdc336aa4a64",
         "prior-art-gate.mjs": "e4dac4e6c1734e7e7429fc634bca9be1a545da2612f7f1d054d2b0f54b99d59b",
-        "size-headroom-check.mjs": "3b9774c6f063e981f6d1aed6126033bf9a53259836b703bd711c594c7461ff89"
+        "size-headroom-check.mjs": "f50137027a23a4a4f9d43fa40f0ea6d5df04e35ef680d5252574a1bd46de375e"
       }
     },
     "cursor": {
@@ -66,11 +66,11 @@
         "comment-budget-preflight.mjs": "c3b73144ff3b0b43dca075898146f145cbfa888a67ac39533672d20e589267e1",
         "decision-edit-guard.mjs": "02227d7a2c837475559f0df2426517635c51685c32eed9c59c7541e927eae780",
         "decision-scope-brief.mjs": "a87d83b1d1e6be9cbf6401b416ef6cb70ca14684c0e276ae2a11f6b28acc7ef0",
-        "edit-targets-lib.mjs": "ff8093abb7c542e10b3b77ec7d9d882c374d0a24ca948528c316c84ca2b4f137",
-        "fanout-brief.mjs": "9355f02fa8b9bf42e20c513d27ab815bc1c5386a393b46dba70b84f0b4cdd578",
-        "placement-brief.mjs": "44bdd60f09b823b520e93f10c7efff1cd59659ea2ec39e60566a30b058544f91",
+        "edit-targets-lib.mjs": "5de9dc353ebd11645dc107aee3bb3df0e192069dba390bab3330e8aacf3eb915",
+        "fanout-brief.mjs": "4ebd92c40ae3bc5421babc1353b5263783edad061afa222e56c66c88350bd7fc",
+        "placement-brief.mjs": "c9e1e171a7d8f004bd35f51068a123b19d9b5df4ae7236397a6cbdc336aa4a64",
         "prior-art-gate.mjs": "e4dac4e6c1734e7e7429fc634bca9be1a545da2612f7f1d054d2b0f54b99d59b",
-        "size-headroom-check.mjs": "3b9774c6f063e981f6d1aed6126033bf9a53259836b703bd711c594c7461ff89"
+        "size-headroom-check.mjs": "f50137027a23a4a4f9d43fa40f0ea6d5df04e35ef680d5252574a1bd46de375e"
       }
     }
   }

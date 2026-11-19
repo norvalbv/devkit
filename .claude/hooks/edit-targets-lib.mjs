@@ -59,6 +59,39 @@ export function projectRoot() {
   return (run.status === 0 && run.stdout.trim()) || process.cwd();
 }
 
+/** `git rev-parse` output lines for `dir`, or [] when it is not inside a git work tree. */
+function revParse(dir, ...args) {
+  const run = spawnSync('git', ['-C', dir, 'rev-parse', ...args], { encoding: 'utf8', timeout: 5000 });
+  return run.status === 0 ? run.stdout.split('\n') : [];
+}
+
+/**
+ * The checkout to act on: the project's directory inside the linked worktree holding the payload cwd,
+ * spelled as the cwd spells it. The same checkout, an unrelated repository or no cwd keeps projectRoot().
+ */
+export function workspaceRoot(input) {
+  const project = projectRoot();
+  if (!input?.cwd?.trim?.()) return project;
+  const at = ['--path-format=absolute', '--show-toplevel', '--git-common-dir'];
+  const [cdup, top, common] = revParse(input.cwd, '--show-cdup', ...at);
+  const [projectTop, projectCommon] = revParse(project, ...at);
+  if (!common || common !== projectCommon || top === projectTop) return project;
+  return path.join(path.resolve(input.cwd, cdup), path.relative(projectTop, baseDir(project)));
+}
+
+/** The checkouts an edit may land in: the payload cwd's worktree first, then the project root. */
+export function hookRoots(input) {
+  return [...new Set([workspaceRoot(input), projectRoot()].map((root) => path.resolve(root)))];
+}
+
+/** The first of `roots` holding `file`, or undefined. */
+export function rootOf(roots, file) {
+  return roots.find((root) => {
+    const rel = path.relative(root, file);
+    return rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+  });
+}
+
 function main() {
   let input = null;
   try {

@@ -13,7 +13,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { projectRoot, writtenFiles } from './edit-targets-lib.mjs';
+import { hookRoots, rootOf, writtenFiles } from './edit-targets-lib.mjs';
 
 const CALL_TIMEOUT_MS = 10_000;
 
@@ -55,8 +55,8 @@ function renderAdvisory(input, text) {
 }
 
 /** One preflight per config root, over every new file it governs. */
-function rootAdvisory(project, root, rels) {
-  const bin = resolveBin([root, project], 'guard-structure');
+function rootAdvisory(roots, root, rels) {
+  const bin = resolveBin([root, ...roots], 'guard-structure');
   if (!bin) return null;
   const run = spawnSync(bin, ['preflight', '--', ...rels], {
     cwd: root,
@@ -74,13 +74,14 @@ function rootAdvisory(project, root, rels) {
 
 export function main() {
   const input = readJson(0);
-  const project = path.resolve(projectRoot());
+  const roots = hookRoots(input);
   const byRoot = new Map();
-  for (const file of writtenFiles(input, project)) {
-    const root = existsSync(file) ? null : configRoot(project, file);
+  for (const file of writtenFiles(input, roots[0])) {
+    const project = rootOf(roots, file);
+    const root = !project || existsSync(file) ? null : configRoot(project, file);
     if (root) byRoot.set(root, [...(byRoot.get(root) ?? []), path.relative(root, file)]);
   }
-  const texts = [...byRoot].map(([root, rels]) => rootAdvisory(project, root, rels)).filter(Boolean);
+  const texts = [...byRoot].map(([root, rels]) => rootAdvisory(roots, root, rels)).filter(Boolean);
   if (texts.length === 0) return;
   process.stdout.write(`${JSON.stringify(renderAdvisory(input, texts.join('\n\n')))}\n`);
 }

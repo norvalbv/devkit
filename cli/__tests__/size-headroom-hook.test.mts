@@ -73,7 +73,7 @@ const edit = (filePath: string, toolName = 'Edit') => ({
 
 function runHook(
   root: string,
-  payload: ReturnType<typeof edit>,
+  payload: ReturnType<typeof edit> & { cwd?: string },
   projectDir = root,
   path = ISOLATED_PATH,
 ) {
@@ -131,6 +131,21 @@ describe('size-headroom-check.mjs', () => {
     const root = repo(5, { 'src/a.ts': lines(5) });
     const outside = repo(5, { 'src/a.ts': lines(9) });
     expect(runHook(root, edit(join(outside, 'src/a.ts'))).output).toEqual({});
+  });
+
+  // Catches a hook rooted at CLAUDE_PROJECT_DIR: an edit in a linked worktree read as outside the project.
+  it('reports an over-cap edit in the linked worktree the payload cwd names, with the main checkout bin', () => {
+    const root = repo(5, { 'src/a.ts': lines(5) });
+    const worktree = join(mkTmp('size-headroom-wt-'), 'wt');
+    git(root, 'worktree', 'add', '-q', '--detach', worktree);
+    rmSync(join(worktree, 'node_modules'), { recursive: true, force: true });
+    writeFileSync(join(worktree, 'src/a.ts'), lines(7));
+    const payload = { ...edit(join(worktree, 'src/a.ts')), cwd: worktree };
+    expect(context(runHook(root, payload).output)).toContain('src/a.ts: 7 lines (max 5)');
+    // Catches a worktree-only root: an edit to the main checkout from that session went unchecked.
+    writeFileSync(join(root, 'src/a.ts'), lines(8));
+    const inMain = { ...edit(join(root, 'src/a.ts')), cwd: worktree };
+    expect(context(runHook(root, inMain).output)).toContain('src/a.ts: 8 lines (max 5)');
   });
 
   it('stays silent when no guard.config.json governs the file', () => {

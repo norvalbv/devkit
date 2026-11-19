@@ -11,7 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 
 const HOOK = fileURLToPath(new URL('../../agents-hooks/placement-brief.mjs', import.meta.url));
 // No global devkit bins: only the stubs a test writes into node_modules/.bin can answer.
@@ -98,6 +98,38 @@ describe('placement-brief', () => {
     stub(pkg, 'guard-structure', 'blocks', 1);
     run({ file_path: 'packages/a/src/bad.ts' });
     expect(calls()).toEqual([`${pkg} preflight -- src/bad.ts`]);
+  });
+
+  // Catches a hook rooted at CLAUDE_PROJECT_DIR: a file in a linked worktree had no config root.
+  it('preflights a new file in the linked worktree the payload cwd names, with the main checkout bin', () => {
+    const git = (...args: string[]) =>
+      spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+    git('init', '-q');
+    git('add', 'guard.config.json');
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'base');
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'placement-brief-wt-')));
+    onTestFinished(() => rmSync(outside, { recursive: true, force: true }));
+    const worktree = join(outside, 'wt');
+    git('worktree', 'add', '-q', '--detach', worktree);
+    stub(root, 'guard-structure', 'blocks: Allowed names = index.ts', 1);
+    const write = (filePath: string) =>
+      spawnSync(process.execPath, [HOOK], {
+        cwd: worktree,
+        encoding: 'utf8',
+        env: { ...process.env, PATH, CLAUDE_PROJECT_DIR: root },
+        input: JSON.stringify({
+          tool_name: 'Write',
+          cwd: worktree,
+          tool_input: { file_path: filePath },
+        }),
+      }).stdout;
+    expect(write(join(worktree, 'src/helpers.ts'))).toContain('`src/helpers.ts` is a new file');
+    // Catches a worktree-only root: a write into the main checkout from that session went unchecked.
+    expect(write(join(root, 'src/other.ts'))).toContain('`src/other.ts` is a new file');
+    expect(calls()).toEqual([
+      `${worktree} preflight -- src/helpers.ts`,
+      `${root} preflight -- src/other.ts`,
+    ]);
   });
 
   it('stays silent outside the project or when no guard.config.json governs the path', () => {
