@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "devkitVersion": "0.77.0",
+  "devkitVersion": "0.77.1",
   "upstreamCommit": "2a0fcf324de7804f5396e845a689243fdb1acfbe",
   "pluginApiVersion": "1.78.0",
   "ruleIds": [
