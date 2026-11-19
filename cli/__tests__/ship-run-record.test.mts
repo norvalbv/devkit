@@ -734,8 +734,8 @@ describe('ship run record + orphan preflight', () => {
     expect(worktreeList(git)).not.toContain(wt);
   });
 
-  it('does not confuse feat/x with feat-x, which share a worktree path', () => {
-    // ship-branch.sh names its worktree devkit-ship-${BR//\//-}-$$, so the two branches collide THERE.
+  it('does not confuse feat/x with feat-x, which flatten to the same worktree name', () => {
+    // ship-branch.sh flattens `/` to `-` in its worktree name, so the two branches share it.
     // Ownership therefore comes from the record and the branch ref, never from the path.
     const { dir, env, git } = seedShipRepoLocalRemote();
     seedScopedFile(dir);
