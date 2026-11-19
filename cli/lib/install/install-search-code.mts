@@ -35,8 +35,9 @@ const STARTER = `{
 }
 `;
 
-const INDEXPATH_UNSET_RE = /("indexPath"\s*:\s*)(?:null|"\s*")/;
-const INDEXPATH_SET_RE = /"indexPath"\s*:\s*"\s*[^"\s][^"]*"/;
+const INDEXPATH_NULL_RE = /("indexPath"\s*:\s*)null/;
+// A JSON string literal, escapes included, so `\t` or `\u0020` is judged by what it decodes to.
+const INDEXPATH_STRING_RE = /("indexPath"\s*:\s*)"((?:[^"\\]|\\.)*)"/;
 const OPEN_BRACE_RE = /^(\s*\{\s*\n)/;
 // The real key only: a `"//indexCommand"` guidance key has a slash before the `i`, not a quote.
 const INDEXCOMMAND_KEY_RE = /"indexCommand"\s*:/;
@@ -61,8 +62,43 @@ function appendMissingLine(cwd: string, line: string, dryRun: boolean): void {
   console.log(`  ${dryRun ? '[dry-run] ensure' : '✓ ensured'} ${line} in .gitignore`);
 }
 
-// Point guard-dup's matcher at the index via guard.config.json `indexPath` (null = opted out). The
-// template ships no indexPath, so insert it; a null or blank is replaced and a configured path kept. Regex
+/** Does a JSON string literal's body decode to blank? A malformed escape counts as content. */
+function isBlankJsonString(body: string): boolean {
+  try {
+    return JSON.parse(`"${body}"`).trim() === '';
+  } catch {
+    return false;
+  }
+}
+
+/** Can init's regex insert add a key? It needs a newline right after `{`; unreadable reads as no. */
+function keyInsertable(cwd: string): boolean {
+  try {
+    return OPEN_BRACE_RE.test(readFileSync(join(cwd, 'guard.config.json'), 'utf8'));
+  } catch {
+    return false;
+  }
+}
+
+interface WiredPath {
+  next: string;
+  kept: boolean;
+}
+
+/** `raw` with indexPath wired: a configured path kept, a null or blank one replaced, an absent key
+ * inserted. Null when the layout takes no insert. */
+function withIndexPath(raw: string): WiredPath | null {
+  const str = INDEXPATH_STRING_RE.exec(raw);
+  if (str && !isBlankJsonString(str[2] ?? '')) return { next: raw, kept: true };
+  const value = `$1"${INDEX_PATH}"`;
+  if (str) return { next: raw.replace(INDEXPATH_STRING_RE, value), kept: false };
+  if (INDEXPATH_NULL_RE.test(raw))
+    return { next: raw.replace(INDEXPATH_NULL_RE, value), kept: false };
+  if (!OPEN_BRACE_RE.test(raw)) return null;
+  return { next: raw.replace(OPEN_BRACE_RE, `$1  "indexPath": "${INDEX_PATH}",\n`), kept: false };
+}
+
+// Point guard-dup's matcher at the index via guard.config.json `indexPath` (null = opted out). Regex
 // (not JSON round-trip) preserves the //-comment guidance keys, matching the --scan-root patch in init.
 function wireIndex(cwd: string, dryRun: boolean): void {
   const p = join(cwd, 'guard.config.json');
@@ -73,17 +109,13 @@ function wireIndex(cwd: string, dryRun: boolean): void {
     return;
   }
   const raw = readFileSync(p, 'utf8');
-  const keptPath = INDEXPATH_SET_RE.test(raw);
-  let next: string;
-  if (keptPath) next = raw;
-  else if (INDEXPATH_UNSET_RE.test(raw))
-    next = raw.replace(INDEXPATH_UNSET_RE, `$1"${INDEX_PATH}"`);
-  else if (OPEN_BRACE_RE.test(raw))
-    next = raw.replace(OPEN_BRACE_RE, `$1  "indexPath": "${INDEX_PATH}",\n`);
-  else {
+  const wired = withIndexPath(raw);
+  if (!wired) {
     console.log('  ! could not wire indexPath into guard.config.json (set it by hand)');
     return;
   }
+  const keptPath = wired.kept;
+  let next = wired.next;
   // Any existing indexCommand, null included, is the consumer's call and stays as written.
   const keptCommand = INDEXCOMMAND_KEY_RE.test(next);
   const insertable = OPEN_BRACE_RE.test(next);
@@ -170,8 +202,7 @@ export function indexCommandRows(
       'DRIFT',
       'guard.config.json sets no `indexCommand`, so the dup gate never refreshes the index: a function edited since the last index is dropped from its flagged pair as stale instead of re-judged',
       `add "indexCommand": "${DEFAULT_INDEX_COMMAND}" to guard.config.json (or export GUARD_INDEX_COMMAND). Deliberate? Write "indexCommand": null to declare it.`,
-      searchCodeSelected &&
-        OPEN_BRACE_RE.test(readFileSync(join(cwd, 'guard.config.json'), 'utf8')),
+      searchCodeSelected && keyInsertable(cwd),
       true,
     ),
   ];

@@ -1,6 +1,6 @@
 /** doctor's advisory for a populated search-code index with no `indexCommand`, where an edited
  * function in a flagged dup pair is dropped as stale instead of re-judged. */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +9,7 @@ import {
   DEFAULT_INDEX_COMMAND,
   INDEX_REFRESH_CHECK,
   guardConfigKeyPresent,
+  indexCommandRows,
 } from '../lib/install/install-search-code.mts';
 import { rootRegistry } from './_helpers.mts';
 
@@ -66,6 +67,13 @@ describe('doctor — a populated index with no indexCommand', () => {
     writeFileSync(join(root, 'guard.config.json'), JSON.stringify(WIRED));
     const results = await checkGuardConfig(root, true, true, { review: false, sentry: false });
     expect(results.find((r) => r.name === INDEX_REFRESH_CHECK)).toMatchObject({ fixable: false });
+  });
+
+  // The insertability read must not throw if the config vanishes after the earlier checks.
+  it('is not fixable, and does not throw, when guard.config.json cannot be read', () => {
+    const root = repo(WIRED, 2);
+    rmSync(join(root, 'guard.config.json'));
+    expect(indexCommandRows(root, WIRED.indexPath, null, true)).toMatchObject([{ fixable: false }]);
   });
 
   it('reaches the overlay / self-host advisory, which prints only named rows', async () => {

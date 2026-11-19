@@ -135,7 +135,8 @@ files as one already-quoted comma-joined word, so leave it unquoted:
 `devkit init --search-code` writes the bounded default
 (`search-code index --timeout 45s --no-wait --seed-files {staged-csv}`) when the key is absent, and
 `devkit doctor` flags a populated index without one as `search-code refresh` (`doctor --fix` adds it
-when search-code is the recorded selection and the config is not on one line); write `"indexCommand": null` to opt out. A configured
+when search-code is the recorded selection and guard.config.json has a newline right after its
+opening `{`; otherwise add the line by hand); write `"indexCommand": null` to opt out. A configured
 `indexPath` is kept on a re-run; only a `null` or blank string is replaced. In search-code's remote mode each refresh spends describe calls on
 the changed chunks.
 If the refresh stops short, the gate names the symbols it left unembedded (`have no embedding yet`).

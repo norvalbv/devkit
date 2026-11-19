@@ -191,10 +191,20 @@ describe('installSearchCode indexCommand', () => {
   });
 
   // An empty path is no path: the matcher would resolve it to the checkout directory.
-  it.each(['""', '" "'])('replaces a blank indexPath (%s) like a null', (value) => {
-    expect(JSON.parse(wired(`{\n  "indexPath": ${value}\n}\n`).text).indexPath).toBe(
-      '.search-code/index.db',
-    );
+  it.each(['""', '" "', '"\\t"', '"\\u0020"'])(
+    'replaces a blank indexPath (%s) like a null',
+    (value) => {
+      expect(JSON.parse(wired(`{\n  "indexPath": ${value}\n}\n`).text).indexPath).toBe(
+        '.search-code/index.db',
+      );
+    },
+  );
+
+  // The path is judged by its decoded value; an escaped quote is content, kept byte for byte.
+  it('keeps a configured indexPath that contains an escaped quote', () => {
+    const before = '{\n  "indexPath": "idx/a\\"b.db"\n}\n';
+    const { text } = wired(before);
+    expect(JSON.parse(text).indexPath).toBe('idx/a"b.db');
   });
 
   // The insert anchors on a newline after `{`, so a one-line config cannot take it; never claim it did.
