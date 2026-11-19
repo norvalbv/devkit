@@ -1,6 +1,7 @@
 import fs, { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_INDEX_COMMAND, installSearchCode } from '../lib/install/install-search-code.mts';
 import { tmpRepos } from './_helpers.mts';
@@ -179,6 +180,33 @@ describe('installSearchCode indexCommand', () => {
     expect(JSON.parse(text).indexCommand).toBe(DEFAULT_INDEX_COMMAND);
   });
 
+  // A monorepo or custom indexPath is the consumer's: a re-run (doctor --fix included) keeps it.
+  it('keeps a configured indexPath and still adds indexCommand', () => {
+    const { text, out } = wired('{\n  "indexPath": "idx/index.db"\n}\n');
+    expect(JSON.parse(text)).toMatchObject({
+      indexPath: 'idx/index.db',
+      indexCommand: DEFAULT_INDEX_COMMAND,
+    });
+    expect(out).toContain('• kept indexPath');
+  });
+
+  // An empty path is no path: the matcher would resolve it to the checkout directory.
+  it.each(['""', '" "', '"\\t"', '"\\u0020"'])(
+    'replaces a blank indexPath (%s) like a null',
+    (value) => {
+      expect(JSON.parse(wired(`{\n  "indexPath": ${value}\n}\n`).text).indexPath).toBe(
+        '.search-code/index.db',
+      );
+    },
+  );
+
+  // The path is judged by its decoded value; an escaped quote is content, kept byte for byte.
+  it('keeps a configured indexPath that contains an escaped quote', () => {
+    const before = '{\n  "indexPath": "idx/a\\"b.db"\n}\n';
+    const { text } = wired(before);
+    expect(JSON.parse(text).indexPath).toBe('idx/a"b.db');
+  });
+
   // The insert anchors on a newline after `{`, so a one-line config cannot take it; never claim it did.
   it('says so instead of claiming the key on a one-line config it cannot insert into', () => {
     const { text, out } = wired('{"indexPath": null}\n');
@@ -216,5 +244,30 @@ describe('installSearchCode indexCommand', () => {
     expect(text).toBe('{\n  "guards": []\n}\n');
     expect(out).toContain('GUARD_INDEX_PATH=');
     expect(out).toContain(`GUARD_INDEX_COMMAND='${DEFAULT_INDEX_COMMAND}'`);
+  });
+});
+
+// The repair end to end: doctor's refresh row is fixable for a search-code selection, and --fix
+// re-runs init --search-code, which puts the key back.
+describe('doctor --fix and the indexCommand refresh row', () => {
+  it('restores a removed indexCommand over a populated index', () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--stack', 'generic', '--yes', '--search-code').status).toBe(0);
+    const path = join(root, 'guard.config.json');
+    const cfg = JSON.parse(readFileSync(path, 'utf8'));
+    delete cfg.indexCommand;
+    writeFileSync(path, `${JSON.stringify(cfg, null, 2)}\n`);
+    mkdirSync(join(root, '.search-code'), { recursive: true });
+    const db = new DatabaseSync(join(root, '.search-code', 'index.db'));
+    db.exec('CREATE TABLE chunks (symbol_name TEXT, embedding BLOB, code_embedding BLOB)');
+    db.prepare('INSERT INTO chunks VALUES (?, ?, ?)').run(
+      'fn',
+      new Uint8Array(4),
+      new Uint8Array(4),
+    );
+    db.close();
+    expect(devkit(root, 'doctor').stdout).toContain('search-code refresh');
+    devkit(root, 'doctor', '--fix');
+    expect(JSON.parse(readFileSync(path, 'utf8')).indexCommand).toBe(DEFAULT_INDEX_COMMAND);
   });
 });
