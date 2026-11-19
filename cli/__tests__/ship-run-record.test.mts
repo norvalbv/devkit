@@ -823,7 +823,7 @@ describe('ship run record + orphan preflight', () => {
 
       expect(code).toBe(143);
       expect(processAlive(gatePid)).toBe(false);
-      expect(readShipQueue(root).running).toEqual([]);
+      expect(readShipQueue(root).occupied).toBe(0);
       expect(git(['worktree', 'list'])).not.toMatch(/devkit-ship-/);
     } finally {
       // A failed assertion must not leave the tree cleaning up after afterEach deletes its repo.
