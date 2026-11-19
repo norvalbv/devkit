@@ -19,3 +19,4 @@ created: 2026-10-13
 **Revisit-when:** A gate that handles SIGTERM without exiting holds a commit, an orphaned gate child on a plain commit causes a wedge, or per-gate timing in telemetry shows the default is wrong by more than a factor of two
 **Scope:** gate-engine/deterministic/**
 **Source:** shortcut · sc-5466
+- 2026-11-19 — A gate stopped by the deadline or a signal now leads its could-not-run reason with the lines it wrote to its reason file before it stopped, ahead of the generic timeout text, so the 140-char digest cut keeps them. related-tests uses this to split its budget into selecting, before vitest began (a machine test queue or startup), and running, which tells a busy machine apart from a slow selection. The deadline itself is unchanged: starting the clock when vitest begins was left to the owner, since it changes how this Target measures.

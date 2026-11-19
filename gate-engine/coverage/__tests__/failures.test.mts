@@ -19,7 +19,11 @@ import {
   TL_SCALE_SNIPPET,
   TIMEOUT_FINGERPRINT,
 } from '../failures.mts';
-import UnhandledReporter, { UNHANDLED_NAME, type UnhandledError } from '../unhandled-reporter.mts';
+import UnhandledReporter, {
+  readStarted,
+  UNHANDLED_NAME,
+  type UnhandledError,
+} from '../unhandled-reporter.mts';
 
 let roots: string[] = [];
 const makeRoot = () => {
@@ -893,6 +897,16 @@ describe('the reporter devkit injects into the consumer vitest', () => {
       { file: '/r/a.test.ts', message: 'EnvironmentTeardownError: Cannot load x' },
       { file: null, message: 'Error: no name, no path' },
     ]);
+  });
+
+  it('stamps when vitest began beside the json report, which readStarted reads back', () => {
+    const root = makeRoot();
+    expect(readStarted(root)).toBe(0);
+    const before = Date.now();
+    new UnhandledReporter().onInit(vitestWith({ json: join(root, 'results.json') }));
+
+    expect(readStarted(root)).toBeGreaterThanOrEqual(before);
+    expect(readStarted(root)).toBeLessThanOrEqual(Date.now());
   });
 
   // Loaded into the consumer's run: a throw here would turn their green run red.

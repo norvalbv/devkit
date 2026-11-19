@@ -70,13 +70,14 @@ async function gone(pid: number, timeoutMs = 5_000): Promise<boolean> {
 describe('related-tests gate signalled mid-run', () => {
   // SIGHUP and SIGQUIT come from the terminal, which no longer reaches vitest's detached group.
   it.each(['SIGTERM', 'SIGINT', 'SIGHUP', 'SIGQUIT'] as const)(
-    'ends vitest and its worker on %s, and blocks',
+    'ends vitest and its worker on %s, blocks, and says no vitest start was recorded',
     async (signal) => {
       const repo = fixtureRepo();
       const pidsFile = join(repo, 'pids');
+      const reason = join(repo, 'reason.txt');
       const child = spawn(process.execPath, [GATE, 'a.mts'], {
         cwd: repo,
-        env: { ...process.env, PIDS_FILE: pidsFile },
+        env: { ...process.env, PIDS_FILE: pidsFile, DEVKIT_GATE_REASON_FILE: reason },
         stdio: ['ignore', 'ignore', 'pipe'],
       });
       if (child.pid) pids.push(child.pid);
@@ -88,6 +89,10 @@ describe('related-tests gate signalled mid-run', () => {
       expect(await exited).not.toBe(0);
       expect(await gone(main)).toBe(true);
       expect(await gone(worker)).toBe(true);
+      // The fake vitest loads no reporter, so it never stamps its start.
+      expect(readFileSync(reason, 'utf8')).toMatch(
+        /^\d+s selecting · \d+s since launching vitest, no start recorded/,
+      );
     },
   );
 });

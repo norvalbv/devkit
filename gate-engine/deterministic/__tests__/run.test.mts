@@ -1784,6 +1784,40 @@ describe('runDeterministic — a gate that outlives its deadline', () => {
     },
   );
 
+  // A stopped gate's own account of where its time went is the line the digest can still show.
+  it.each([
+    [{ code: 'ETIMEDOUT', status: null }, 'guard-size(timed-out:1800s): 3s selecting · no exit'],
+    [{ status: null, signal: 'SIGTERM' }, 'guard-size(killed:SIGTERM): 3s selecting · killed:'],
+  ])(
+    'a stopped gate leads its block with the reason it wrote before it stopped',
+    (thrown, lead) => {
+      const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const d = repo(['size']);
+      const sink = join(d, 'events.jsonl');
+      process.env.DEVKIT_GATE_EVENTS = sink;
+      const exec = vi.fn((_node, _argv, opts) => {
+        writeFileSync(opts.env.DEVKIT_GATE_REASON_FILE, '3s selecting\n');
+        throw Object.assign(new Error('stopped'), thrown);
+      });
+      expect(runDeterministic(d, { exec })).toBe(1);
+      expect(eventsOf(sink)[0].detail.startsWith(lead)).toBe(true);
+      expect(err.mock.calls.flat().join('\n')).toContain('3s selecting');
+    },
+  );
+
+  it("a stopped gate's long reason never pushes the runner's remedy out of the shown excerpt", () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = vi.fn((_node, _argv, opts) => {
+      writeFileSync(opts.env.DEVKIT_GATE_REASON_FILE, `${Array(30).fill('own line').join('\n')}\n`);
+      throw Object.assign(new Error('stopped'), { code: 'ETIMEDOUT', status: null });
+    });
+    expect(runDeterministic(repo(['size']), { exec })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('no exit within 1800s');
+    expect(out).toContain('GUARD_GATE_TIMEOUT_MS');
+    expect(out).not.toContain('more line(s) in the full log above');
+  });
+
   it('a gate killed by a signal with no deadline involved is named killed, never timed-out', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exec = vi.fn(() => {
