@@ -54,7 +54,7 @@ const occurrences = (document, needle) =>
   JSON.stringify(document).split(JSON.stringify(needle).slice(1, -1)).length - 1;
 /** Reconcile the ledger, then apply the strip its rows authorise — what an install does in order. */
 const reconcile = (document, entries, provider = 'claude', rel = '.claude/settings.json') => {
-  const legacy = reconcileLegacyHookCommands(entries, provider, rel);
+  const legacy = reconcileLegacyHookCommands(entries, provider, rel, 'shared', null);
   const retired = stripReclaimedCommands(document, provider, legacy.stripped);
   return { ...legacy, document: retired.document, documentChanged: retired.changed };
 };
@@ -236,5 +236,56 @@ describe('reconcileLegacyHookCommands — strip blast radius', () => {
     const result = reconcile(document, entries, 'cursor', '.cursor/hooks.json');
     expect(eventOf(result.document, 'beforeShellExecution')).toBeUndefined();
     expect(occurrences(result.document, cursorLegacy)).toBe(1);
+  });
+});
+
+describe('reconcileLegacyHookCommands — overlay anchor', () => {
+  const OLD = 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs"';
+  const at = (home) => `node "${home}/.claude/hooks/prior-art-gate.mjs"`;
+  const prePlan = (command, installScope = 'overlay') => ({
+    registrationId: 'prior-art-gate:pre-plan',
+    ownerId: 'priorArtGate',
+    provider: 'claude',
+    installScope,
+    destinationRel: '.claude/settings.local.json',
+    native: { event: 'PreToolUse', matcher: 'ExitPlanMode|Task|Agent', command },
+  });
+  const overlay = (entries, home = '/new') =>
+    reconcileLegacyHookCommands(entries, 'claude', '.claude/settings.local.json', 'overlay', home);
+
+  it.each([
+    ['the unanchored spelling', OLD],
+    ['a moved home', at('/old')],
+  ])('carries %s onto the current anchor and strips it', (_, command) => {
+    const result = overlay([prePlan(command)]);
+    expect(result.ledgerChanged).toBe(true);
+    expect(result.entries[0].native.command).toBe(at('/new'));
+    expect(result.stripped).toEqual([{ ...prePlan(command).native }]);
+  });
+
+  it('leaves a row already at the current anchor alone', () => {
+    const result = overlay([prePlan(at('/new'))]);
+    expect(result).toMatchObject({ ledgerChanged: false, stripped: [] });
+  });
+
+  it('never recovers a home from a shared-scope row, which devkit never anchors', () => {
+    const result = reconcileLegacyHookCommands(
+      [prePlan(at('/old'), 'shared')],
+      'claude',
+      '.claude/settings.local.json',
+      'shared',
+      '/new',
+    );
+    expect(result).toMatchObject({ ledgerChanged: false, stripped: [] });
+  });
+
+  it('never claims a row that names another matcher or owner', () => {
+    const entry = prePlan(at('/old'));
+    for (const row of [
+      { ...entry, native: { ...entry.native, matcher: 'Edit' } },
+      { ...entry, ownerId: 'someoneElse' },
+      { ...entry, ownerId: 'constructor' },
+    ])
+      expect(overlay([row])).toMatchObject({ ledgerChanged: false, stripped: [] });
   });
 });

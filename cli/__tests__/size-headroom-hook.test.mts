@@ -14,7 +14,7 @@ import {
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { nativeProjection } from '../lib/install/hook-registration-ledger/lifecycle.mts';
+import { nativeProjection } from '../lib/install/hook-registration-ledger/projection.mts';
 import { HOOK_REGISTRATIONS } from '../lib/install/hook-registration-ledger/registrations.mts';
 import {
   EDIT_TARGETS_LIB,
@@ -246,8 +246,8 @@ describe('size-headroom-check ownership', () => {
   it('projects to Claude and Codex but not to Cursor, whose afterFileEdit has no output', () => {
     const [registration] = HOOK_REGISTRATIONS.size ?? [];
     expect(registration).toMatchObject({ event: 'PostToolUse', matcher: 'Edit|Write|MultiEdit' });
-    expect(nativeProjection('cursor', registration!)).toBeNull();
-    expect(nativeProjection('claude', registration!)?.command).toContain(SIZE_HEADROOM_HOOK);
-    expect(nativeProjection('codex', registration!)?.event).toBe('PostToolUse');
+    expect(nativeProjection('cursor', registration!, null)).toBeNull();
+    expect(nativeProjection('claude', registration!, null)?.command).toContain(SIZE_HEADROOM_HOOK);
+    expect(nativeProjection('codex', registration!, null)?.event).toBe('PostToolUse');
   });
 });

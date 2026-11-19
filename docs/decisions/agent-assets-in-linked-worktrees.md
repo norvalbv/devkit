@@ -20,3 +20,4 @@ created: 2026-10-19
 **Scope:** gate-engine/deterministic/gate-inputs.mts,cli/lib/husky/overlay/overlay-home.mts,cli/lib/husky/overlay/projection-report.mts,cli/commands/sync/sync-worktree.mts
 **Category:** consumer-distribution
 **Source:** web · sc-4244
+- 2026-11-19 — Overlay installs now register their Claude and Codex hook commands at the overlay home's absolute path (overlay-hook-command-anchor), so an unflagged Claude session or a Codex session in a linked worktree runs devkit's hooks without anything projected into the worktree. Still uncovered: a package install whose /.claude/ is gitignored (its settings.json is not read from the main checkout), Cursor, and config-driven hooks in a fresh worktree before the overlay links guard.config.json and .devkit at its first commit.

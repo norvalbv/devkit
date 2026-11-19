@@ -1051,14 +1051,6 @@
       "count": 1
     },
     {
-      "fingerprint": "1bc050806a0dda555de05b368efa5eb5b40dcc24efdf414e780d60e022649e05",
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "cli/lib/install/hook-registration-ledger/lifecycle.mts",
-      "diagnostic": "The explicit open dictionary type on binding `CURSOR_EVENT` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "{",
-      "count": 1
-    },
-    {
       "fingerprint": "1bdf6e10a07e4952fe632dab0a5dbaf775ca548b4203fc47cfdf9ffb528c98fb",
       "ruleId": "anti-slop/no-unsafe-external-record-access",
       "file": "cli/commands/update.mts",
@@ -5712,6 +5704,14 @@
       "file": "gate-engine/review/__tests__/lens-split.test.mts",
       "diagnostic": "This assertion chain discards type evidence. Keep the original precise type, or parse untrusted input at its boundary before narrowing it.",
       "context": "merged as unknown as { items?: unknown[]; itemTally: Record<string, number> }",
+      "count": 1
+    },
+    {
+      "fingerprint": "99ee94ee6a1b9bf231e7554fd89cc83f03f536292684fae97207102c74266baa",
+      "ruleId": "anti-slop/no-known-value-widening",
+      "file": "cli/lib/install/hook-registration-ledger/projection.mts",
+      "diagnostic": "The explicit open dictionary type on binding `CURSOR_EVENT` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
+      "context": "{",
       "count": 1
     },
     {
