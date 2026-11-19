@@ -75,7 +75,8 @@ ship_run_wait_ci() {
     # In the background: a trapped signal ends `wait` at once, even one landing before node started.
     node "$script" --pr "$pr" --repo "$repo" --timeout "$timeout" ${req:+"$req"} ${strict:+"$strict"} &
     waiter=$!
-    [ "$WAIT_CI_SIGNAL" -ne 0 ] || wait "$waiter" || rc=$?
+    # A signal before the wait reached no verdict, even when it already killed and reaped the waiter.
+    if [ "$WAIT_CI_SIGNAL" -ne 0 ]; then rc=$WAIT_CI_SIGNAL; else wait "$waiter" || rc=$?; fi
     if [ "$WAIT_CI_SIGNAL" -ne 0 ] && kill -TERM "$waiter" 2>/dev/null; then
       wait "$waiter" 2>/dev/null || :
       rc=$WAIT_CI_SIGNAL

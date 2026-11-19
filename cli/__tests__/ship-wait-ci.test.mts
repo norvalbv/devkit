@@ -408,6 +408,28 @@ echo REACHED_NEXT_LINE`,
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain('REACHED_NEXT_LINE');
   });
+
+  it('reports an interrupt that killed and reaped the waiter before the wait began', () => {
+    // The DEBUG trap lands the signal between the launch and the wait, after node has died of it.
+    const binDir = mkdtempSync(join(tmpdir(), 'wait-ci-node-'));
+    writeFileSync(join(binDir, 'node'), '#!/bin/sh\nexit 130\n', { mode: 0o755 });
+    const r = spawnSync(
+      '/bin/bash',
+      [
+        '-c',
+        `set -euo pipefail
+SCRIPT_DIR='${shipLibDir()}'
+. "$SCRIPT_DIR/wait-ci/args.sh"
+set -T
+trap 'if [[ $BASH_COMMAND == "waiter=\\$!" ]]; then sleep 0.3; WAIT_CI_SIGNAL=130; fi' DEBUG
+ship_run_wait_ci 42 acme/app 900 https://x/42`,
+      ],
+      { encoding: 'utf8', env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` } },
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('ci-outcome=not-run pr=42 reason=interrupted');
+  });
 });
 
 describe('the timeout floor', () => {
