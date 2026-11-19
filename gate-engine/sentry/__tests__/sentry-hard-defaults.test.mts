@@ -62,8 +62,12 @@ describe('gate mode is hard by default (spawned; stubbed claude, message tier, t
   const gate = (env: Record<string, string>, msg: string) => {
     const wlDir = mkdtempSync(join(tmpdir(), 'sentry-hard-wl-'));
     const storeDir = realpathSync(mkdtempSync(join(tmpdir(), 'sentry-hard-store-')));
-    stubs.push(wlDir, storeDir);
+    // Admission reads the staged index, so the spawn runs in an empty repo, never this checkout's.
+    const cwd = mkdtempSync(join(tmpdir(), 'sentry-hard-cwd-'));
+    stubs.push(wlDir, storeDir, cwd);
+    spawnSync('git', ['init', '-q'], { cwd });
     return spawnSync('node', [SCRIPT, '--gate', msg], {
+      cwd,
       env: {
         ...process.env,
         GUARD_REVIEW_MODEL: 'haiku', // stubbed `claude` on PATH; the default judge family is codex

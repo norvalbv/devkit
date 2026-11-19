@@ -17,6 +17,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { renderSelection } from '../../judge/diff-focus.mts';
+import { skipLine, subjectOf } from '../admission.mts';
 import { buildEvidence, selectSentryHunks, type SentryEvidence } from '../evidence.mts';
 import {
   buildContext,
@@ -29,39 +30,13 @@ import {
   parseSentryVerdict,
   run,
   sentryExit,
-  shouldJudge,
   skipReason,
-  subjectOf,
   watchlistHas,
   watchlistLine,
 } from '../check-sentry.mts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = resolve(HERE, '..', 'check-sentry.mts');
-
-describe('shouldJudge (only behaviour-bearing types reach the LLM)', () => {
-  it.each([
-    ['fix(executor): disarm task-signal on dead chats', true],
-    ['feat: add a thing', true],
-    ['perf(db): batch updates', true],
-    ['refactor!: drop legacy path', true], // breaking-! tolerated
-    ['docs(x): document y', false],
-    ['chore(biome): organize imports', false],
-    ['style: sort imports', false],
-    ['bump packages', false], // non-conventional one-liner
-    ['fixes', false],
-    ['', false],
-  ])('judges %j → %j', (msg, judged) => {
-    expect(shouldJudge(msg)).toBe(judged);
-  });
-
-  it('reads the subject past leading comment / blank lines', () => {
-    expect(subjectOf('# a comment\n\nfix(api): map FK violations')).toBe(
-      'fix(api): map FK violations',
-    );
-    expect(shouldJudge('# scissor\n\nfeat: real subject')).toBe(true);
-  });
-});
 
 describe('parseSentryVerdict (first-line, confident single hit; null = no block)', () => {
   it.each([
@@ -328,7 +303,7 @@ describe('cleanMessage (drop git template comments, trim, cap; CRLF-tolerant)', 
     const cleaned = cleanMessage(raw);
     expect(cleaned.startsWith('fix(api): map FK violations')).toBe(true);
     expect(cleaned).not.toContain('Please enter'); // comment lines stripped
-    expect(shouldJudge(cleaned)).toBe(true);
+    expect(subjectOf(cleaned)).toBe('fix(api): map FK violations');
   });
 
   it('caps a runaway message at 4000 chars', () => {
@@ -420,25 +395,21 @@ describe('watchlist dedup (subject-keyed; amend/retry must not dup, distinct sub
   });
 });
 
-describe('skipReason (pre-claude bypass: env override or trivial commit type)', () => {
+describe('skipReason (pre-claude env bypass)', () => {
   it('returns the env-skip reason when GUARD_NO_SENTRY_JUDGE is set', () => {
     vi.stubEnv('GUARD_NO_SENTRY_JUDGE', '1');
-    expect(skipReason('fix(x): y')).toContain('NO_SENTRY_JUDGE');
+    expect(skipReason()).toContain('NO_SENTRY_JUDGE');
     vi.unstubAllEnvs();
   });
 
   it('respects the FRINK_* back-compat alias', () => {
     vi.stubEnv('FRINK_NO_SENTRY_JUDGE', '1');
-    expect(skipReason('fix(x): y')).toContain('NO_SENTRY_JUDGE');
+    expect(skipReason()).toContain('NO_SENTRY_JUDGE');
     vi.unstubAllEnvs();
   });
 
-  it('returns the trivial-type reason for a non-judged commit type', () => {
-    expect(skipReason('chore(x): y')).toContain('SKIP');
-  });
-
-  it('returns null for a behaviour-bearing type → proceed to judge', () => {
-    expect(skipReason('fix(x): y')).toBeNull();
+  it('returns null with no bypass set → on to the content decision', () => {
+    expect(skipReason()).toBeNull();
   });
 });
 
@@ -506,7 +477,7 @@ describe('run dispatch (in-process; covers readMessage + skipReason + applyGateR
       'fix(x): y',
       '⚠️  Sentry gate BYPASSED for this run (GUARD_NO_SENTRY_JUDGE=1).',
     ],
-    [{}, 'chore(x): y', 'sentry-judge: SKIP (trivial commit type / empty — not judged)'],
+    [{}, '', skipLine('empty_message')],
     [
       { GUARD_SENTRY_NO_LLM: '1' },
       'fix(x): y',
@@ -521,8 +492,8 @@ describe('run dispatch (in-process; covers readMessage + skipReason + applyGateR
     expect(callRun(false, 'fix(x): y', { GUARD_NO_SENTRY_JUDGE: '1' })).toBe(0);
   });
 
-  it('report mode: a trivial commit type free-skips, exits 0', () => {
-    expect(callRun(false, 'chore(x): y')).toBe(0);
+  it('report mode: an empty message free-skips, exits 0', () => {
+    expect(callRun(false, '')).toBe(0);
   });
 
   it('gate mode: judged commit, LLM disabled → no verdict → exits 0 even in hard mode', () => {
@@ -535,8 +506,16 @@ describe('run dispatch (in-process; covers readMessage + skipReason + applyGateR
 describe('check-sentry gate — fail-open / bypass / free-skip (one verdict line per run)', () => {
   const verdictLines = (stderr) =>
     stderr.split('\n').filter((l) => /sentry-judge: (PASS|SKIP)|sentry-advisory: MONITOR/.test(l));
+  // Admission reads the staged index, so each spawn runs in an empty repo, never this checkout's.
+  const emptyRepo = () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'sentry-cwd-'));
+    stubs.push(cwd);
+    spawnSync('git', ['init', '-q'], { cwd });
+    return cwd;
+  };
   const gate = (env, msg) =>
     spawnSync('node', [SCRIPT, '--gate', msg], {
+      cwd: emptyRepo(),
       // GUARD_REVIEW_MODEL: the stub on PATH is a fake `claude`; the default is codex-family.
       env: { ...process.env, GUARD_REVIEW_MODEL: 'haiku', ...privateStore(), ...env },
       encoding: 'utf8',
@@ -569,8 +548,8 @@ describe('check-sentry gate — fail-open / bypass / free-skip (one verdict line
     expect(gate({ GUARD_NO_SENTRY_JUDGE: '1' }, 'fix(x): y').status).toBe(0);
   });
 
-  it('a trivial commit type free-skips (no claude) → exit 0', () => {
-    expect(gate({}, 'chore(x): y').status).toBe(0);
+  it('an empty message free-skips (no claude) → exit 0', () => {
+    expect(gate({}, '').status).toBe(0);
   });
 
   it('GUARD_SENTRY_NO_LLM=1 → no judgement → exit 0 even in hard mode, never blocks', () => {
@@ -578,9 +557,9 @@ describe('check-sentry gate — fail-open / bypass / free-skip (one verdict line
   });
 
   it('report mode (no --gate) prints a verdict line and exits 0', () => {
-    const r = spawnSync('node', [SCRIPT, 'chore(x): y'], { encoding: 'utf8' }); // trivial: no judge call
+    const r = spawnSync('node', [SCRIPT, ''], { encoding: 'utf8' }); // empty: no judge call
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain('sentry-judge: SKIP (trivial commit type');
+    expect(r.stdout).toContain(skipLine('empty_message'));
   });
 
   it('judged commit + healthy SKIP verdict → exit 0: the judge ran and was parsed (no warning)', () => {

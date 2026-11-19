@@ -75,9 +75,7 @@ describe('gate bypass telemetry', () => {
     'sentry records %s at its skip',
     (flag) => {
       process.env[flag] = '1';
-      expect(skipReason('feat: adds a network call')).toContain(
-        `BYPASSED for this run (${flag}=1)`,
-      );
+      expect(skipReason()).toContain(`BYPASSED for this run (${flag}=1)`);
       const bypass = events().find((e) => e.bypass === flag);
       expect(bypass).toMatchObject({ gate: 'sentry', status: 'could_not_run' });
     },
