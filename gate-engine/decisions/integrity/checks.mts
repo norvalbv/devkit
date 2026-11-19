@@ -15,13 +15,15 @@
  * decision-records-cli-owned-writes.md names as open for v1 ("shell, MCP, human, and OS-level writes
  * remain outside v1") — this module is the deterministic backstop for it.
  *
- * Measured against the real corpus (32 axis files / 39 Target blocks, 2026-07): six of these checks
+ * Measured against the real corpus (32 axis files / 39 Target blocks, 2026-07): six of the first seven
  * fire 0/32 or 0/39 — zero grandfathering pain, safe to gate immediately. The seventh
  * (retarget-missing-evidence-change) fires 1/39 blocks: a genuine, narrow, actionable finding
  * (overlay-self-heal's 2026-07-14 re-target), not systemic noise. None of the checks that fired on
  * more than a handful of records made it in here — those are reported by the design survey, never
  * gated (duplicate-ruling similarity, unscoped multi-Target-without-Supersedes, note relation tags,
  * `// DECISION:` markers — every one either forbidden outright or 100% false-positive on this corpus).
+ *
+ * target-out-of-date-order (2026-11) fired on 2 of 117 axes, both reconciled in the same change.
  *
  * Zero LLM calls, zero network, pure string/AST work over already-loaded text — cheap enough to run
  * on every commit touching docs/decisions/**.
@@ -41,6 +43,7 @@ export const INTEGRITY_CHECK_IDS = [
   'retarget-missing-evidence-change',
   'note-amends-unresolvable',
   'target-missing-required-field',
+  'target-out-of-date-order',
 ] as const;
 
 export type IntegrityCheckId = (typeof INTEGRITY_CHECK_IDS)[number];
@@ -307,6 +310,26 @@ export function checkIndexStale(axis: AxisDoc, indexRow: IndexRow | undefined): 
   ];
 }
 
+/** #10 — readers take the last Target as current, so it must be the newest. Interior order is history
+ * and never flagged: a restating Target appended today clears the finding. */
+export function checkTargetDateOrder(axis: AxisDoc): IntegrityFinding[] {
+  const dates = realTargetBlocks(axis.body).map((b) => b.date);
+  const last = dates.at(-1);
+  const newest = dates.slice(0, -1).reduce((max, d) => (d > max ? d : max), '');
+  if (!last || newest <= last) return [];
+  return [
+    {
+      check: 'target-out-of-date-order',
+      slug: axis.slug,
+      block: last,
+      detail:
+        `the last Target is dated ${last} but an earlier one is dated ${newest}, so readers serve the ` +
+        `older ruling as current (a merge put it last). Restate the true current ruling with ` +
+        `guard-decisions add ${axis.slug} --target … --evidence-change "…" (no --supersedes)`,
+    },
+  ];
+}
+
 /** #8 — a note's `**Amends:**` must name a note that exists and predates it. The marker asserts THIS
  * note supersedes THAT one; an assertion nothing can resolve is the same dangling-pointer defect
  * drift already reports for a Target's `**Supersedes:**`, one level down. The pointer is DECLARED by
@@ -341,6 +364,7 @@ export function checkAxis(
     ...checkDuplicateFieldText(axis),
     ...checkTargetRequiredFields(axis),
     ...checkRetargetEvidenceChange(axis),
+    ...checkTargetDateOrder(axis),
     ...checkNoteAmends(axis, foreignNoteIds),
     ...checkIndexStale(axis, indexRow),
   ];

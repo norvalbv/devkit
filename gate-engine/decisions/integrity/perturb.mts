@@ -176,6 +176,25 @@ export function mutateMissingRequiredField(f: Fixture): Fixture {
   };
 }
 
+/** #10 — swap the dates of the last two Target headings, so the last block is older than the one
+ * before it: the shape a merge leaves when a branch's older Target lands after a newer one. */
+export function mutateTargetDateOrder(f: Fixture): Fixture {
+  const heads = [...f.axis.body.matchAll(TARGET_DATE_RE)];
+  const [prev, last] = heads.slice(-2);
+  if (!last || prev[1] >= last[1])
+    throw new Error('fixture needs two ascending Target dates to put out of order');
+  // Both dates are ISO, so equal length: splicing one over the other leaves every offset valid.
+  let body = f.axis.body;
+  for (const [head, date] of [
+    [prev, last[1]],
+    [last, prev[1]],
+  ] as const) {
+    const at = (head.index ?? 0) + head[0].length - date.length;
+    body = body.slice(0, at) + date + body.slice(at + date.length);
+  }
+  return { indexRow: f.indexRow, axis: { ...f.axis, body } };
+}
+
 /** Every mutation, keyed by the check id it is designed to trip — one name-to-function map so a test
  * or the bench can drive "apply the mutation for check X" generically. */
 export const MUTATIONS = {
@@ -188,4 +207,5 @@ export const MUTATIONS = {
   'retarget-missing-evidence-change': mutateMissingEvidenceChange,
   'note-amends-unresolvable': mutateBreakNoteAmends,
   'target-missing-required-field': mutateMissingRequiredField,
+  'target-out-of-date-order': mutateTargetDateOrder,
 } as const;

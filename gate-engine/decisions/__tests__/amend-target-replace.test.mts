@@ -264,3 +264,42 @@ describe('amend --target-replace', () => {
     expect(readFileSync(index, 'utf8')).toContain('Pipes are refused');
   });
 });
+
+describe('amend --target rewrites only its own INDEX row', () => {
+  // `fork` ends on an older Target, the shape a merge leaves; its INDEX row names the newer ruling
+  // and carries a hand-kept why-cell. Rebuilding INDEX from every file would flip that row.
+  const FORK =
+    '---\nslug: fork\ncreated: 2026-01-01\n---\n\n# fork\n\n' +
+    '## Target · 2026-03-01 — newest\n\n**Context:** c.\n**Ruling:** the newest ruling.\n\n' +
+    '## Target · 2026-02-01 — older\n\n**Context:** c.\n**Ruling:** the older ruling.\n';
+  const FORK_ROW = '| [fork](fork.md) | the newest ruling | a hand-kept why | 2026-03-01 |';
+
+  function otherRows() {
+    return readFileSync(index, 'utf8')
+      .split('\n')
+      .filter((line) => !line.startsWith('| [axis]'));
+  }
+
+  it.each([
+    ['--target-replace', ['--target-replace', 'Redirections', 'Pipes']],
+    [
+      '--target',
+      [
+        '--target',
+        ...['--context', 'c', '--ruling', 'Pipes are refused', '--consequences', 'k'],
+        ...['--tradeoff', 't', '--vision-fit', 'v'],
+      ],
+    ],
+  ])('%s leaves every other row byte-identical', (_mode, args) => {
+    addTarget();
+    writeFileSync(join(dir, 'fork.md'), FORK);
+    writeFileSync(index, `${readFileSync(index, 'utf8')}${FORK_ROW}\n`);
+    const before = otherRows();
+
+    const amended = run(['amend', 'axis', ...args]);
+
+    expect(amended.status, amended.stderr).toBe(0);
+    expect(otherRows()).toEqual(before);
+    expect(readFileSync(index, 'utf8')).toContain('Pipes are refused');
+  });
+});
