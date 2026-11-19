@@ -213,11 +213,11 @@ export function relatedTestsReason(
 export function timingLine(report: string, spawnedAt: number, files: number, now = Date.now()) {
   const s = (ms: number) => `${Math.max(0, Math.round(ms / 1000))}s`;
   const head = `${s(spawnedAt - now + process.uptime() * 1000)} selecting · `;
-  if (!report) return `${head}${s(now - spawnedAt)} since launching vitest (start not recorded)`;
-  const began = readStarted(dirname(report));
+  // A missing stamp is no proof vitest never began: the reporter may not have run or written.
+  const began = report ? readStarted(dirname(report)) : 0;
   return began
     ? `${head}${s(began - spawnedAt)} before vitest began · ${s(now - began)} running ${files} test file(s)`
-    : `${head}vitest had not begun after ${s(now - spawnedAt)}`;
+    : `${head}${s(now - spawnedAt)} since launching vitest, no start recorded`;
 }
 
 /** A private directory for vitest's json report; '' when none can be made, and the run goes unnarrated. */

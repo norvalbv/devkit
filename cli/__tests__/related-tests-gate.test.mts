@@ -538,7 +538,7 @@ describe('relatedTestsReason', () => {
   });
 
   it('says where a stopped run spent its time, unless vitest never spawned', () => {
-    const timing = '3s selecting · vitest had not begun after 9s';
+    const timing = '3s selecting · 9s since launching vitest, no start recorded';
     expect(relatedTestsReason({ status: null, timing }, null, '/repo')).toEqual([timing]);
     const error = new Error('spawn ENOENT');
     expect(relatedTestsReason({ status: null, error, timing }, null, '/repo')).toEqual([
@@ -563,20 +563,15 @@ describe('timingLine', () => {
     expect(`related-tests(timed-out:3000s): ${line}`.length).toBeLessThanOrEqual(140);
   });
 
-  it('says vitest had not begun when its reporter left no stamp, or wrote an unreadable one', () => {
+  // No stamp is no proof vitest never began: no report dir, a skipped reporter or a failed write.
+  it('claims no start either way when no readable stamp exists', () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'related-tests-timing-')));
     dirs.push(dir);
-    const pattern = /^\d+s selecting · vitest had not begun after 2990s$/;
+    const pattern = /^\d+s selecting · 2990s since launching vitest, no start recorded$/;
     expect(timingLine(join(dir, 'results.json'), now - 2_990_000, 3, now)).toMatch(pattern);
+    expect(timingLine('', now - 2_990_000, 3, now)).toMatch(pattern);
     writeFileSync(join(dir, 'started'), 'garbage');
     expect(timingLine(join(dir, 'results.json'), now - 2_990_000, 3, now)).toMatch(pattern);
-  });
-
-  // With no report dir vitest runs without devkit's reporter, so silence is not evidence.
-  it('claims nothing about the start when no report dir could be made', () => {
-    expect(timingLine('', now - 2_990_000, 3, now)).toMatch(
-      /^\d+s selecting · 2990s since launching vitest \(start not recorded\)$/,
-    );
   });
 
   it('never prints a negative wait when the wall clock stepped back between spawn and start', () => {
@@ -663,13 +658,13 @@ describe('runRelatedTests failure reason', () => {
     ]);
   });
 
-  it('a run stopped before vitest began says so', async () => {
+  it('a run stopped with no start recorded says only that', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const file = reasonFile();
     const exec = fakeExec(143, true);
     await runRelatedTests('/repo', { staged: ['cli/a.mts'], list, exec });
     expect(readGateReason(file)).toEqual([
-      expect.stringMatching(/^\d+s selecting · vitest had not begun after \d+s$/),
+      expect.stringMatching(/^\d+s selecting · \d+s since launching vitest, no start recorded$/),
     ]);
   });
 
