@@ -9,11 +9,8 @@ const corpus = 'gate-engine/review/eval/reviewers/cases-correctness.jsonl';
 const preparation = 'docs/benchmarks/experiments/2026-09-13-source-qualification';
 
 it('accepts append-only growth without changing the frozen roster, and rejects historical edits', () => {
-  const { root, protocol, cleanup } = comparisonFixture();
-  const original = execFileSync('git', ['show', `${protocol.sourceRevision}:${corpus}`], {
-    cwd: ROOT,
-    encoding: 'utf8',
-  });
+  const { root, snapshot, cleanup } = comparisonFixture();
+  const original = snapshot[corpus];
   try {
     const dest = path.join(root, corpus);
     writeFileSync(dest, original);
@@ -78,7 +75,7 @@ it('binds the admitted pair to the source-qualified inputs and executes all twel
 });
 
 it('keeps historical arm instructions pinned when current reviewer instructions evolve', () => {
-  const { root, protocol, cleanup } = comparisonFixture();
+  const { root, snapshot, cleanup } = comparisonFixture();
   try {
     const before = loadComparison(root);
     for (const file of ['agents/correctness-reviewer.md', 'skills/correctness/SKILL.md']) {
@@ -88,10 +85,7 @@ it('keeps historical arm instructions pinned when current reviewer instructions 
     expect(after.rows).toEqual(before.rows);
     expect(after.assets).toEqual(before.assets);
     for (const file of ['agents/correctness-reviewer.md', 'skills/correctness/SKILL.md']) {
-      const pinned = execFileSync('git', ['show', `${protocol.sourceRevision}:${file}`], {
-        cwd: ROOT,
-        encoding: 'utf8',
-      });
+      const pinned = snapshot[file];
       for (const arm of ['B', 'C'])
         expect(after.assets[arm].overrides[`.claude/${file}`]).toBe(pinned);
     }
