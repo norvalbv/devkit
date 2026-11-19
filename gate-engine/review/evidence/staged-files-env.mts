@@ -37,8 +37,13 @@ export function withStagedFiles(
   const {
     DEVKIT_REVIEW_STAGED_FILES: _inline,
     DEVKIT_REVIEW_STAGED_FILES_PATH: _file,
+    DEVKIT_CORRECTNESS_LENS: _lens,
+    DEVKIT_CORRECTNESS_CHUNK: _chunk,
     ...rest
   } = env;
+  // Pins a lens judge's checklist scope, so a dropped or foreign --lens cannot miss or clobber it.
+  if (reviewer.lens) rest.DEVKIT_CORRECTNESS_LENS = [...reviewer.lens].sort().join(',');
+  if (reviewer.chunk !== undefined) rest.DEVKIT_CORRECTNESS_CHUNK = String(reviewer.chunk);
   const serialized = JSON.stringify(files);
   // BYTES, not UTF-16 units: the spawn limit is byte-counted, and non-ASCII paths are multi-byte.
   const bytes = Buffer.byteLength(serialized, 'utf8');

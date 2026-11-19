@@ -88,9 +88,7 @@ export function deriveLensReviewer(
   // the identical `+c<n>` suffix. Absent chunk → today's paths, byte-for-byte.
   const suffix = chunk === undefined ? '' : ` --chunk ${chunk}`;
   const arg = `--lens ${[...group].sort().join(',')}${suffix}`;
-  // SAFETY: a spread of a ChecklistReviewer overriding only lens/stateFile/cmds keeps the shape;
-  // Object.freeze widens the literal, so the assertion restores the input's own type.
-  return Object.freeze({
+  const derived: ChecklistReviewer = {
     ...reviewer,
     lens: group,
     stateFile: `.claude/.correctness-review-${lensGroupId(group)}${chunk === undefined ? '' : `+c${chunk}`}.json`,
@@ -99,5 +97,7 @@ export function deriveLensReviewer(
       check: `${reviewer.cmds.check} ${arg}`,
       fin: `${reviewer.cmds.fin ?? 'finalize'} ${arg}`,
     }),
-  }) as ChecklistReviewer;
+  };
+  if (chunk !== undefined) derived.chunk = chunk;
+  return Object.freeze(derived);
 }

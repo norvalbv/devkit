@@ -123,6 +123,8 @@ export const TEST_ONLY_ADDITIONS = [
   'FRINK_AI_STRICT',
   'DEVKIT_REVIEW_STAGED_FILES',
   'DEVKIT_REVIEW_STAGED_FILES_PATH',
+  'DEVKIT_CORRECTNESS_LENS',
+  'DEVKIT_CORRECTNESS_CHUNK',
   // The coverage gate runs this suite inside a 'gate'-marked process. Kept out of INHERITED_RUN_ENV
   // because `devkit review` must keep an inherited 'bench'.
   'DEVKIT_RUN_ORIGIN',

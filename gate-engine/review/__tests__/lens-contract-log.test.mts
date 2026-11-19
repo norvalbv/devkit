@@ -1,5 +1,7 @@
+import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FOUR_WAY_LENS_GROUPS, lensGroupId } from '../lens/split.mts';
 import { runReviewGate } from '../run-review.mts';
@@ -98,5 +100,33 @@ describe('guard-review contract-miss log lines name the lens', () => {
     const lines = errLines(err).filter((l) => l.includes('checklist contract not satisfied'));
     expect(lines.length).toBeGreaterThan(0);
     for (const l of lines) expect(l).toContain('guard-review: correctness-reviewer — ');
+  });
+});
+
+const CORRECTNESS_SCRIPT = fileURLToPath(
+  new URL('../../../skills/correctness/scripts/checklist.mjs', import.meta.url),
+);
+
+describe('a lens judge that runs the checklist without --lens', () => {
+  it("still leaves the artifact the gate verifies, so every lens's PASS stands", async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async ({ label, env }) => {
+      if (label !== 'review:correctness-reviewer') {
+        writeArtifact(repo, label);
+        return 'VERDICT: PASS';
+      }
+      const run = (...args: string[]) =>
+        execFileSync('node', [CORRECTNESS_SCRIPT, ...args], { cwd: repo, env, encoding: 'utf8' });
+      const items = [...run('generate').matchAll(/^ {2}- \[[^\]]+\] (\S+)$/gm)].map((m) => m[1]);
+      for (const item of items) run('check-item', item, '--pass');
+      run('finalize');
+      return 'VERDICT: PASS';
+    });
+
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    const lensSpawns = exec.mock.calls.filter(([o]) => o.label === 'review:correctness-reviewer');
+    expect(lensSpawns).toHaveLength(FOUR_WAY_LENS_GROUPS.length);
   });
 });
