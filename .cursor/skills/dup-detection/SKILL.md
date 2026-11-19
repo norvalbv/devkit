@@ -132,6 +132,11 @@ In a linked or ship worktree the gate cannot re-index the primary checkout's ind
 edited symbol is re-judged instead of dropped. `{staged-csv}` in `indexCommand` expands to the staged
 files as one already-quoted comma-joined word, so leave it unquoted:
 `search-code index --seed-files {staged-csv}` re-embeds them first.
+`devkit init --search-code` writes the bounded default
+(`search-code index --timeout 45s --no-wait --seed-files {staged-csv}`) when the key is absent, and
+`devkit doctor` flags a populated index without one as `search-code refresh`; write
+`"indexCommand": null` to opt out. In search-code's remote mode each refresh spends describe calls on
+the changed chunks.
 If the refresh stops short, the gate names the symbols it left unembedded (`have no embedding yet`).
 A same-tree re-ship replays the cached PASS with that note; run `guard-prefix clear` to re-judge.
 
