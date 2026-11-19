@@ -2,6 +2,7 @@
 /**
  * The files a Codex `apply_patch` call touches. Codex runs devkit's Edit|Write hooks for it but sends
  * the patch text instead of a file_path, so each edit hook adds these paths to its own extraction.
+ * `bashWrites` does the same for a Claude Bash call, from git status after it ran.
  *
  * Only `*** Add File:` / `Update File:` / `Delete File:` / `Move to:` header lines are read; hunk lines
  * always start with a space, `+` or `-`, so they never match. Anything unreadable yields [] (fail-open).
@@ -10,7 +11,7 @@
  * with `tool_input` replaced by `{ file_path }`, for a shell hook that handles one file per run.
  */
 import { spawnSync } from 'node:child_process';
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -85,6 +86,61 @@ export function workspaceRoot(input, project = projectRoot()) {
 export function hookRoots(input) {
   const project = projectRoot();
   return [...new Set([workspaceRoot(input, project), project].map((root) => path.resolve(root)))];
+}
+
+/** Git that ignores an inherited GIT_* and never takes the optional index lock a commit needs. */
+function quietGit(dir, args) {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')),
+  );
+  const run = spawnSync(
+    'git',
+    ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', dir, ...args],
+    {
+      encoding: 'utf8',
+      env,
+      timeout: 5000,
+      maxBuffer: 256 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    },
+  );
+  if (run.status !== 0) throw new Error(`git ${args[0]} failed in ${dir}`);
+  return run.stdout;
+}
+
+/** ctime, not mtime: `mv` and `cp -p` keep the old mtime, but any write, move or copy moves ctime. */
+function changedAt(file) {
+  try {
+    return statSync(file).ctimeMs;
+  } catch {
+    return Number.NEGATIVE_INFINITY; // deleted by the call: nothing left to act on
+  }
+}
+
+/**
+ * Paths under `root`, relative to it, that a Claude Bash call wrote. It names no file, so they are the
+ * dirty files changed in its window: duration_ms, plus 2 s for coarse timestamps, before this
+ * hook process started. `--files` lists are comma-separated, so a path holding a comma is dropped.
+ */
+export function bashWrites(input, root) {
+  if (input?.tool_name !== 'Bash' || !Number.isFinite(input.duration_ms)) return [];
+  try {
+    const real = realpathSync(root);
+    const top = realpathSync(quietGit(real, ['rev-parse', '--show-toplevel']).trim());
+    const since = performance.timeOrigin - input.duration_ms - 2000;
+    const status = ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames'];
+    return quietGit(top, status)
+      .split('\0')
+      .filter((record) => record.length > 3 && !/U|AA|DD/.test(record.slice(0, 2)))
+      .map((record) => path.join(top, record.slice(3)))
+      .filter((abs) => changedAt(abs) >= since)
+      .map((abs) => path.relative(real, abs))
+      .filter(
+        (rel) => rel && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !/[,\n]/.test(rel),
+      );
+  } catch {
+    return [];
+  }
 }
 
 /** The first of `roots` holding `file`, in whichever spelling (as given or physical) `file` uses. */

@@ -111,6 +111,18 @@
       }
     },
     {
+      "registrationId": "decisions:scope-brief-bash",
+      "ownerId": "decisions",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "PostToolUse",
+        "matcher": "Bash",
+        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/decision-scope-brief.mjs\""
+      }
+    },
+    {
       "registrationId": "fanout:new-file-brief",
       "ownerId": "fanout",
       "provider": "claude",

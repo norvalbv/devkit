@@ -123,6 +123,19 @@ describe('trusted provider-native hook projection', () => {
     expect(ids('cursor')).toEqual(['anti-slop:preflight']);
   });
 
+  it('projects the Bash scope brief to Claude only, the one provider that sends duration_ms', () => {
+    const projection = projectHookRegistrations(
+      ['decisions'],
+      ['claude', 'codex', 'cursor'],
+      'shared',
+    );
+    const has = (provider: AgentProvider) =>
+      providerEntries(projection, provider).some(
+        (entry) => entry.registrationId === 'decisions:scope-brief-bash',
+      );
+    expect([has('claude'), has('codex'), has('cursor')]).toEqual([true, false, false]);
+  });
+
   it('rejects a caller-forged projection at the destructive boundary', () => {
     expect(() =>
       installProjectedHookRegistrations({}, { entries: [] }, null, 'claude', 'shared'),

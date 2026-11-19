@@ -118,6 +118,10 @@
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/anti-slop-preflight.sh\" --bash-writes"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/decision-scope-brief.mjs\""
           }
         ]
       }

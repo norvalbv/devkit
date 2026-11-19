@@ -268,7 +268,7 @@ Every piece of code that loads scoped Targets, the hook stage it runs in, and wh
 | `gate-engine/review/completeness.mts` | commit-msg, and pre-commit on the ship path (review guard only) | `guard-review completeness --gate` | yes: top 6 Targets, a contradicted one is a finding |
 | `gate-engine/review/cli.mts` | on-demand | `guard-review scan` | no |
 | `gate-engine/decisions/scoped-targets.mts` | on-demand (feature-critique) | `guard-decisions scoped-targets` | no |
-| `agents-hooks/decision-scope-brief.mjs` | pre-edit | `guard-decisions scoped-targets` | no |
+| `agents-hooks/decision-scope-brief.mjs` | pre-edit, and after a Claude Bash call that wrote a file | `guard-decisions scoped-targets` | no |
 | `gate-engine/decisions/check-alignment.mts` | on-demand | `guard-decisions check-alignment --gate` | no |
 | `gate-engine/decisions/drift.mts` | on-demand | `guard-decisions drift` | no |
 

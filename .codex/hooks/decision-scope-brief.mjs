@@ -16,12 +16,15 @@
  * threshold, no model, and no network. 33 of 34 axes in this repo declare one.
  *
  * ADVISORY, AND FAIL-SAFE BY CONSTRUCTION. It emits `additionalContext` and deliberately NO
- * `permissionDecision`. Claude Code's docs currently disagree about whether PreToolUse honours
- * `additionalContext` (the hooks reference shows it; the SDK reference calls it PostToolUse-only), so
- * this is written to be correct either way: if the platform surfaces it, the agent gets the ruling; if
- * it ignores it, the hook is a silent no-op. What it must never do is block an edit or return
- * `permissionDecision: "allow"` — the latter would auto-approve every write and quietly strip the
- * user's permission prompts, which is a far worse outcome than a missed hint.
+ * `permissionDecision`. Claude Code places PreToolUse and PostToolUse `additionalContext` next to the
+ * tool result, so either way the agent reads the ruling right after its write. What it must never do
+ * is block an edit or return `permissionDecision: "allow"` — the latter would auto-approve every
+ * write and quietly strip the user's permission prompts, which is a far worse outcome than a missed
+ * hint.
+ *
+ * BASH WRITES (Claude, PostToolUse). A Bash call names no file, so its writes come from git status
+ * (`bashWrites`). They share the Edit path's per-(session, file) stamp, so a file is briefed once
+ * whichever channel wrote it; an ungoverned file is marked, so it costs one retrieval per session.
  *
  * Repetition is the other way an advisory dies: a brief re-shown on all thirty edits to one file is
  * noise an agent learns to skip. Each (session, file) is briefed at most once.
@@ -30,7 +33,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { patchTargets } from './edit-targets-lib.mjs';
+import { bashWrites, patchTargets } from './edit-targets-lib.mjs';
 
 const MUTATING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'apply_patch']);
 // Claude and Cursor send `file_path`; the wider set costs nothing and covers a provider that does not.
@@ -42,8 +45,10 @@ const MAX_AXES = 3;
 const MAX_BRIEF_CHARS = 10_000;
 const TIMEOUT_MS = 10_000;
 const STDERR_CHARS = 200;
-/** One retrieval spawn per file runs before the edit, so a large Codex patch is briefed on its first few. */
+/** One retrieval spawn per file, so a large Codex patch or Bash call is briefed on its first few. */
 const MAX_FILES = 5;
+/** Set by the first outage, so one call under load costs a single spawn timeout, not one per file. */
+let retrievalDown = false;
 
 function readInput() {
   try {
@@ -146,22 +151,37 @@ function outageCause(run, bin) {
 }
 
 /** The ONLY output channel, written once per run. Advisory: additionalContext, never permissionDecision. */
-function emit(texts) {
+function emit(texts, hookEventName = 'PreToolUse') {
   const brief = texts.filter(Boolean).join('\n\n');
   if (!brief) return;
   const text = brief.length > MAX_BRIEF_CHARS ? `${brief.slice(0, MAX_BRIEF_CHARS - 1)}…` : brief;
   process.stdout.write(
-    `${JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: text } })}\n`,
+    `${JSON.stringify({ hookSpecificOutput: { hookEventName, additionalContext: text } })}\n`,
   );
 }
 
 function main() {
   const input = readInput();
-  if (!input || !MUTATING_TOOLS.has(input.tool_name)) return;
-  const file = filePathOf(input);
-  const files = file ? [file] : patchTargets(input).slice(0, MAX_FILES);
+  const bash = input?.tool_name === 'Bash';
+  if (!input || (!bash && !MUTATING_TOOLS.has(input.tool_name))) return;
   const root = workspaceRoot(input);
-  emit(files.map((f) => briefFor(input, root, f)));
+  const file = bash ? null : filePathOf(input);
+  const candidates = bash ? unbriefedBashWrites(input, root) : patchTargets(input);
+  const texts = [];
+  for (const f of file ? [file] : candidates.slice(0, MAX_FILES)) {
+    // A brief past the cap is never read, so its file stays unstamped for a later write.
+    if (retrievalDown || texts.join('\n\n').length >= MAX_BRIEF_CHARS) break;
+    texts.push(briefFor(input, root, f));
+  }
+  emit(texts, bash ? 'PostToolUse' : 'PreToolUse');
+}
+
+/** The Bash call's writes not yet briefed or found ungoverned this session; returns go unrecorded. */
+function unbriefedBashWrites(input, root) {
+  return bashWrites(input, root).filter((rel) => {
+    const stamp = stampPath(input.session_id, root, rel);
+    return claimedAt(stamp) === null && claimedAt(`${stamp}.none`) === null;
+  });
 }
 
 /** Briefed already, so no retrieval. Only the first return to the file is recorded, with its age. */
@@ -218,6 +238,7 @@ function briefFor(input, root, file) {
   // the failure this hook exists to prevent.
   const axes = axesFrom(run);
   if (axes === null) {
+    retrievalDown = true;
     // A sentinel key, never a relative path: the notice fires once per session WITHOUT burning this
     // file's brief slot, so the first governed edit after the tool is fixed is still briefed.
     if (claimed(stampPath(input.session_id, root, '\u0000retrieval-unavailable'))) return null;
@@ -230,7 +251,10 @@ function briefFor(input, root, file) {
         `again, so silence then is not a clean answer. Cause: ${outageCause(run, bin)}.`
     );
   }
-  if (axes.length === 0) return null; // nothing governs this file — stay quiet
+  if (axes.length === 0) {
+    if (tool === 'Bash') claimed(`${stamp}.none`); // a Bash call re-touching it skips the retrieval
+    return null; // nothing governs this file — stay quiet
+  }
 
   if (claimed(stamp)) return null;
 
