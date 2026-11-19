@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -17,6 +17,8 @@ import {
   SYNCED_ASSET_EXCLUDES,
 } from '../evidence/scope.mts';
 import { selectReviewers } from '../reviewers.mts';
+import { runReviewGate } from '../run-review.mts';
+import { cleanupReviewFixtures, consumerRepo, mkExec } from './run-review-fixtures.mts';
 
 const REPO_ROOT = join(import.meta.dirname, '../../..');
 
@@ -40,6 +42,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   if (sinkDir) rmSync(sinkDir, { recursive: true, force: true });
   sinkDir = '';
+  cleanupReviewFixtures();
 });
 
 describe('domainsDisabledByEmptyRoots', () => {
@@ -133,6 +136,35 @@ describe('reportNonRuns', () => {
       'guard-review: SKIPPED — no domain reviewer ran; none of the 2 staged file(s) is in review scope ' +
         '(scanRoots, review roots and review.paths in guard.config.json)',
     ]);
+  });
+
+  it('names every reviewer it selected, so a reader can tell which domains judged the commit', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const staged = ['src/server/db.ts'];
+    reportNonRuns(staged, inverted, selectReviewers(staged, inverted), new Set());
+
+    const roster = spy.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('selected:'));
+    expect(roster).toHaveLength(1);
+    expect(roster[0]).toMatch(/^guard-review: \d+ reviewer\(s\) selected: [a-z-]+(, [a-z-]+)*$/);
+    expect(roster[0]).toContain('correctness-reviewer');
+  });
+
+  it("ends a docs-only commit's reviewer gate on one SKIPPED line, spawning no judge", async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const repo = consumerRepo();
+    mkdirSync(join(repo, 'docs'));
+    writeFileSync(join(repo, 'docs', 'guide.md'), '# Guide\n');
+    execFileSync('git', ['add', 'docs/guide.md'], { cwd: repo });
+    const exec = mkExec(async () => 'VERDICT: FAIL — no judge should run');
+
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+
+    const lines = spy.mock.calls.map((c) => String(c[0]));
+    expect(exec).not.toHaveBeenCalled();
+    expect(
+      lines.filter((l) => l.startsWith('guard-review: SKIPPED — no domain reviewer ran')),
+    ).toHaveLength(1);
+    expect(lines.some((l) => l.includes(' selected: '))).toBe(false);
   });
 
   it('stays quiet when another line already named why a reviewer did not run', () => {
@@ -449,7 +481,8 @@ describe('filesUnseenByCorrectness', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const selection = selectReviewers(staged, cfg);
     reportNonRuns(staged, cfg, selection, new Set(), new Set(), selection);
-    return spy.mock.calls.map((c) => String(c[0]));
+    // The routing lines only: the roster names what DID run, and has its own test.
+    return spy.mock.calls.map((c) => String(c[0])).filter((l) => !l.includes(' selected: '));
   };
 
   it('names code that reached no reviewer at all, on one line', () => {

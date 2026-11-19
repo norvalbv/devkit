@@ -618,8 +618,8 @@ describe('runReviewGate — cascade + exit contract', () => {
       expect(exec).not.toHaveBeenCalled(); // proves the early return was taken
       expect(lines(spy)).toEqual(
         expect.arrayContaining([
-          'guard-review: frontend-security-reviewer skipped (review.frontendRoots is empty in guard.config.json)',
-          'guard-review: frontend-performance-reviewer skipped (review.frontendRoots is empty in guard.config.json)',
+          'guard-review: frontend-security-reviewer SKIPPED (review.frontendRoots is empty in guard.config.json)',
+          'guard-review: frontend-performance-reviewer SKIPPED (review.frontendRoots is empty in guard.config.json)',
         ]),
       );
       expect(lines(spy).some((l) => l.includes('1 staged frontend file(s) went unreviewed'))).toBe(
@@ -1057,7 +1057,7 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(exec.mock.calls.map(([o]) => o.label)).not.toContain('review:api-security-reviewer');
     expect(exec).toHaveBeenCalledTimes(4); // backend-performance + commit-guard + correctness + conventions still ran
     expect(err.mock.calls.flat().join('\n')).toContain(
-      'api-security-reviewer skipped (GUARD_REVIEW_SKIP)',
+      'api-security-reviewer SKIPPED (GUARD_REVIEW_SKIP)',
     );
   });
 

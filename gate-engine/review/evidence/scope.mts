@@ -155,7 +155,7 @@ export function reportNonRuns(
   reportUnroutedFiles(routing, cfg, staged, new Set(disabled[0]?.evidence), readStaged);
   for (const d of disabled) {
     console.error(
-      `guard-review: ${d.reviewer} skipped (${d.rootsKey} is empty in guard.config.json)`,
+      `guard-review: ${d.reviewer} SKIPPED (${d.rootsKey} is empty in guard.config.json)`,
     );
     alreadyReported.add(d.reviewer);
     emitReviewSkipped(d.reviewer, 'empty_roots');
@@ -172,6 +172,9 @@ export function reportNonRuns(
       `guard-review: SKIPPED — no domain reviewer ran; none of the ${staged.length} staged file(s) is in review scope ` +
         '(scanRoots, review roots and review.paths in guard.config.json)',
     );
+  const names = selected.map((s) => s.reviewer.name);
+  if (names.length > 0)
+    console.error(`guard-review: ${names.length} reviewer(s) selected: ${names.join(', ')}`);
   emitUnselected(selected, alreadyReported);
 }
 

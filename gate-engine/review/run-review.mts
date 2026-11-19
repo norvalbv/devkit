@@ -219,7 +219,7 @@ export async function runReviewGate(
     if (skip.size > 0) {
       // never a silent cap: name what the knob dropped
       for (const d of selected.filter((s) => skip.has(s.reviewer.name))) {
-        console.error(`guard-review: ${d.reviewer.name} skipped (GUARD_REVIEW_SKIP)`);
+        console.error(`guard-review: ${d.reviewer.name} SKIPPED (GUARD_REVIEW_SKIP)`);
         knobDropped.add(d.reviewer.name);
         emitReviewSkipped(d.reviewer.name, 'GUARD_REVIEW_SKIP');
       }

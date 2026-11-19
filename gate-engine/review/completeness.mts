@@ -458,6 +458,7 @@ export async function runCompleteness(
     };
     // Names the snapshot the judge was shown; absent (no snapshot formed) never vouches.
     if (stagedIdentity) meta.diff_sha = stagedIdentity;
+    if (process.env.DEVKIT_SHIP_ID) meta.ship_id = process.env.DEVKIT_SHIP_ID;
     if (mcpCause) meta.mcp_degraded_cause = mcpCause;
     if (findings.length) meta.advisories = findings;
     // Both identities: the exact byte key (any caller, any order) and the branch+message sticky

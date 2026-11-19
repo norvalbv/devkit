@@ -256,7 +256,7 @@ export function gateVerdictLine(
   degraded: boolean,
 ): string {
   if (failure) return `  ✗ ${label} ${failure.verdict ? 'failed' : 'could not run'}`;
-  if (optedOut) return `  ⚠ ${label} opted out — did NOT run`;
+  if (optedOut) return `  ⚠ ${label} SKIPPED — opted out, did NOT run`;
   if (selfBypassed(label.replace(GUARD_PREFIX_RE, '')))
     return `  ⚠ ${label} BYPASSED — verified nothing`;
   return degraded ? `  ⚠ ${label} passed (DEGRADED)` : `  ✓ ${label} passed`;

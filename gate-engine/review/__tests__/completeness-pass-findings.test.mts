@@ -105,6 +105,22 @@ describe('a completeness PASS with findings', () => {
     expect(advisoryRows()).toHaveLength(6); // three live, three replayed
   });
 
+  // The ship's parallel pre-commit judge and its commit-msg replay share one DEVKIT_SHIP_ID.
+  it.each([
+    [SHIP, 'judged earlier in this ship run'],
+    ['a-later-ship', 'judged in an earlier ship run'],
+  ])('names which ship run judged a replayed PASS (replayed under %s)', async (run, source) => {
+    const repo = consumerRepo({ backend: true });
+    const msg = messageFile(repo, 'fix(ship): pin the --base');
+    await runCompleteness(msg, repo, { exec: judge(PASSED) });
+    vi.stubEnv('DEVKIT_SHIP_ID', run);
+    vi.mocked(console.error).mockClear();
+
+    expect(await runCompleteness(msg, repo, { exec: judge('VERDICT: FAIL — not asked') })).toBe(0);
+
+    expect(printed().find((l) => l.includes('cached PASS'))).toMatch(new RegExp(` · ${source}$`));
+  });
+
   it('stays at one line with the ref, and emits nothing advisory, when it found nothing', async () => {
     const repo = consumerRepo({ backend: true });
     const clean = 'ISSUES: 0 critical, 0 important, 0 low\nVERDICT: PASS — complete';
