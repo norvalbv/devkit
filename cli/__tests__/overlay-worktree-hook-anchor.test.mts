@@ -1,6 +1,7 @@
 // An unflagged session in a linked worktree reads the overlay home's settings.local.json while
 // $CLAUDE_PROJECT_DIR names the worktree, so only a home-anchored command reaches the script.
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -54,7 +55,7 @@ function runInWorktree(command: string) {
     hook_event_name: 'PreToolUse',
     tool_name: 'Agent',
     tool_input: { subagent_type: 'feature-critique', prompt: 'critique the plan' },
-    session_id: `wt-${Date.now()}`,
+    session_id: `wt-${randomUUID()}`,
     cwd: worktree,
   };
   return testSpawnSync('sh', ['-c', command], {

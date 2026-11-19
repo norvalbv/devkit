@@ -19,6 +19,7 @@ import {
   hookRegistrationDestination,
 } from './codec.mts';
 import { reconcileLegacyHookCommands } from './legacy-commands.mts';
+import { recoverProjectionHome } from './projection.mts';
 import {
   checkProjectedHookRegistrations,
   projectHookRegistrations,
@@ -333,6 +334,19 @@ export function release(
   return entries.filter((entry) => !keys.has(ownedKey(entry)));
 }
 
+/** Homes the document's handlers are anchored at, each proved by re-rendering a registration. */
+function anchoredHomes(documentText: string, componentIds: string[], provider: AgentProvider) {
+  const registrations = componentIds.flatMap((id) =>
+    Object.hasOwn(HOOK_REGISTRATIONS, id) ? HOOK_REGISTRATIONS[id] : [],
+  );
+  return [...documentText.matchAll(/"command":("(?:[^"\\]|\\.)*")/g)].flatMap(([, literal]) =>
+    registrations.flatMap(
+      (registration) =>
+        recoverProjectionHome(provider, registration, String(JSON.parse(literal))) ?? [],
+    ),
+  );
+}
+
 export function adoptExactLegacy(
   entries: HookRegistrationOwnershipV1[],
   document: unknown,
@@ -342,8 +356,13 @@ export function adoptExactLegacy(
   home: string,
 ) {
   if (!componentIds || !LEGACY_AGENT_PROVIDERS.includes(provider as never)) return entries;
-  // A pre-ledger install is unanchored; a lost ledger leaves the current anchor. Reconcile re-anchors.
-  return [home, null].reduce((adopted, anchor) => {
+  // A pre-ledger install is unanchored; a lost ledger leaves an anchor, moved or not. Reconcile re-anchors.
+  const homes = [
+    home,
+    null,
+    ...anchoredHomes(JSON.stringify(document ?? {}), componentIds, provider),
+  ];
+  return [...new Set(homes)].reduce((adopted, anchor) => {
     const projection = projectHookRegistrations(componentIds, [provider], scope, anchor);
     const exact = checkProjectedHookRegistrations(
       document,

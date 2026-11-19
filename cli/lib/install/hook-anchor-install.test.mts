@@ -199,6 +199,24 @@ describe('overlay hook commands anchor at the overlay home', () => {
     expect(read(root, LOCAL)).not.toContain('$CLAUDE_PROJECT_DIR');
   });
 
+  it('re-anchors a moved clone whose ledger was lost, leaving no handler at the old path', () => {
+    const root = repo();
+    installHookRegistrations(root, ['agentHooks'], overlay());
+    const before = realpathSync.native(root);
+    const count = commands(root, LOCAL).length;
+    rmSync(join(root, HOOK_REGISTRATION_LEDGER_REL));
+    const moved = join(root, '..', 'moved');
+    renameSync(root, moved);
+
+    installHookRegistrations(moved, ['agentHooks'], {
+      ...overlay(),
+      legacyOwnedComponentIds: ['agentHooks'],
+    });
+
+    expect(commands(moved, LOCAL)).toHaveLength(count);
+    expect(read(moved, LOCAL)).not.toContain(before);
+  });
+
   it('switches Codex between scopes in its one hooks file, leaving exactly one spelling', () => {
     const root = repo();
     installHookRegistrations(root, ['priorArtGate'], { targets: ['codex'] });
