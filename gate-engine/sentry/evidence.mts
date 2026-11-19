@@ -34,7 +34,7 @@ import {
 // Test files never instrument production error paths: a test asserting `captureContained` was called
 // is evidence about the TEST, not about the surface. Excluded from the inventory (but NOT from hunk
 // relevance — the judge should still see the test hunk as part of the commit's shape).
-const TEST_PATH_RE = /(?:^|\/)__tests__\/|\.(?:test|spec)\.[cm]?[jt]sx?$/;
+export const TEST_PATH_RE = /(?:^|\/)__tests__\/|\.(?:test|spec)\.[cm]?[jt]sx?$/;
 
 // ─── The capture inventory ──────────────────────────────────────────────────────
 
@@ -154,7 +154,7 @@ export interface PackedEvidence {
 // one had the same consequence: a capture it could not see let the cap drop a capture-bearing hunk
 // while `capturesComplete` stayed true, so the gate hard-blocked on evidence it never showed. This
 // test cannot be wrong in that direction. Over-firing only withholds a block, which is safe.
-const CAPTURE_TOKEN_RE = /\bcapture[A-Z]/;
+export const CAPTURE_TOKEN_RE = /\bcapture[A-Z]/;
 
 export const TRUNCATION_MARKER =
   '[EVIDENCE TRUNCATED — later hunks omitted; a swallow whose capture is not shown here may still be ' +
@@ -255,7 +255,7 @@ const DIFF_EVIDENCE_CAP = 6000;
 // wrappers (`captureContained`) the old inline identifier list could not and rejects look-alikes
 // (`Error.captureStackTrace`). Keeping them separate is what closed sc-1984: a hunk whose only signal
 // was a wrapper capture used to be dropped as a distractor, and the gate then blocked on its absence.
-const ERROR_HUNK_RE =
+export const ERROR_HUNK_RE =
   /\b(?:try|catch|throw|reject)\b|\.catch\s*\(|(?:log|logger|console)\.(?:warn|error)/;
 
 /**

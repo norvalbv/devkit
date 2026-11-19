@@ -67,6 +67,7 @@
 
 import { execSync } from 'node:child_process';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
+import { mergeInProgress } from '../ratchets/git-index.mts';
 import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -77,6 +78,7 @@ import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { markGateRun } from '../judge/run-context.mts';
 import { execJudge } from '../judge/run-judge.mts';
 import { resolveSentryModel } from '../review/reviewers.mts';
+import { sentrySkipCause, skipLine, subjectOf } from './admission.mts';
 import { buildEvidence, degradeCause, renderInventory, type SentryEvidence } from './evidence.mts';
 import { judgeSentryWithCache } from './verdict-cache.mts';
 import {
@@ -161,24 +163,6 @@ export function buildPrompt(shots = 4) {
 export const SENTRY_JUDGE_PROMPT = buildPrompt(4);
 
 // ─── Pure logic (testable without git / claude) ─────────────────────────────────
-
-// Only behaviour-bearing commit types reach the LLM. Everything else (docs/chore/style/test/build/ci/
-// bump + non-conventional one-liners) free-skips with zero tokens — the dominant token-economy lever.
-export const SENTRY_JUDGE_TYPE_RE = /^(fix|feat|perf|refactor)(\([^)]*\))?!?:/i;
-
-/** First non-comment, non-blank line of a commit message — the subject. */
-export function subjectOf(message: string): string {
-  return (
-    String(message)
-      .split('\n')
-      .find((l) => l.trim() && !l.startsWith('#'))
-      ?.trim() ?? ''
-  );
-}
-
-export function shouldJudge(message: string): boolean {
-  return SENTRY_JUDGE_TYPE_RE.test(subjectOf(message));
-}
 
 /** Build the stdin payload for the judge.
  *   message : commit subject/body only (the tuned default).
@@ -321,17 +305,17 @@ function stagedNameStatus() {
 
 // The staged diff for the `diff` context tier. Prefixes forced OFF-config (like the decisions detect
 // judge) so a consumer's diff.noprefix/mnemonicPrefix can't reshape what the judge reads. Best-effort:
-// a git failure OR a hang (timeout) returns '' → buildContext falls back to message-only for this run
+// a git failure OR a hang (timeout) returns null → judged message-only for this run
 // (fail toward judging). The timeout matters: this runs INSIDE the commit-msg hook, so a wedged
 // `git diff` (index lock, a slow textconv/external diff driver) must not block the commit forever.
-function stagedDiff() {
+function stagedDiff(): string | null {
   try {
     return stagedGit('git -c diff.noprefix=false -c diff.mnemonicPrefix=false diff --cached', {
       maxBuffer: 64 * 1024 * 1024,
       timeout: 10000,
     });
   } catch {
-    return '';
+    return null;
   }
 }
 
@@ -440,15 +424,26 @@ export function effectiveHard(
   return evidence?.sufficient === true;
 }
 
-/** Why the gate should bypass judging (env override, no LLM, or trivial type), or null to proceed. */
-export function skipReason(message: string): string | null {
+/** The env-override bypass line (no git I/O), or null to go on to the content decision. */
+export function skipReason(): string | null {
   const flag = ['NO_SENTRY_JUDGE', 'SENTRY_NO_LLM'].find((name) => envVar(name));
-  if (flag) {
-    emitGateBypass('sentry', `GUARD_${flag}`);
-    return `⚠️  Sentry gate BYPASSED for this run (GUARD_${flag}=1).`;
-  }
-  if (!shouldJudge(message)) return 'sentry-judge: SKIP (trivial commit type / empty — not judged)';
-  return null;
+  if (!flag) return null;
+  emitGateBypass('sentry', `GUARD_${flag}`);
+  return `⚠️  Sentry gate BYPASSED for this run (GUARD_${flag}=1).`;
+}
+
+/** Why this commit skips the judge (named on stderr AND in telemetry), or null to judge it. */
+function contentSkip(message: string, diff: string | null): string | null {
+  const cause = sentrySkipCause(message, diff, mergeInProgress(CWD));
+  if (!cause) return null;
+  emitGateEvent({ type: 'judge_skipped', judge: 'sentry-advisory', reason: cause });
+  return skipLine(cause);
+}
+
+/** Print the skip line on the mode's channel and exit 0 — a skip never blocks. */
+function exitSkipped(gate: boolean, line: string): never {
+  (gate ? console.error : console.log)(line);
+  process.exit(0);
 }
 
 export function run(gate: boolean): void {
@@ -457,13 +452,13 @@ export function run(gate: boolean): void {
     // skipped) — even though this gate reads only `cwd` from it today.
     resolveGuardConfig(CWD);
     const message = readMessage();
-    const skip = skipReason(message);
-    if (skip) {
-      (gate ? console.error : console.log)(skip);
-      process.exit(0);
-    }
+    const bypass = skipReason();
+    if (bypass) exitSkipped(gate, bypass);
+    const staged = stagedDiff();
+    const skip = contentSkip(message, staged);
+    if (skip) exitSkipped(gate, skip);
     const nameStatus = CONTEXT_TIER === 'names' ? stagedNameStatus() : '';
-    const diff = CONTEXT_TIER === 'diff' ? stagedDiff() : '';
+    const diff = CONTEXT_TIER === 'diff' ? (staged ?? '') : '';
     // Evidence FIRST: it decides both what the judge sees and whether this run may block, so it must
     // exist before `hard` — and `hard` before `samples`, which follows the confidence contract.
     const evidence = CONTEXT_TIER === 'diff' && diff.trim() ? buildEvidence(diff) : null;

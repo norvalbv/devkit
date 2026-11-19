@@ -6,7 +6,7 @@
  * SHARED prompt/parser/voting against a labelled set of commit subjects so the cheapest config that
  * classifies correctly can be LOCKED, not guessed (the token-economy goal).
  *
- * It imports the judge pieces FROM THE GATE (buildPrompt / shouldJudge / buildContext / judge), so the
+ * It imports the judge pieces FROM THE GATE (buildPrompt / sentrySkipCause / buildContext / judge), so the
  * benchmark exercises the exact path the gate runs — prompt and logic never drift.
  *
  * SEED corpus: cases.jsonl ships a 127-case starter set — 104 derived from real commits (paths/
@@ -17,7 +17,7 @@
  * Each row in cases.jsonl: { id, message, nameStatus?, diff?, expected:"MONITOR"|"SKIP", category, note }.
  * `diff` (the staged diff) is only read by the `diff` context tier; the self-clear rows (a MONITOR-worthy
  * message whose diff ALREADY adds the capture → expected SKIP) exist to score exactly that tier.
- * A row whose type free-skips (shouldJudge=false) is scored deterministically as SKIP with NO claude
+ * A row the gate's admission skips (sentrySkipCause over its message + diff) is scored SKIP with NO claude
  * call — so the bench only spends tokens on the judged set, exactly like the gate.
  *
  * Sweeps (the token-economy validation — pick the cheapest cell that clears the F1 target):
@@ -37,7 +37,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isolateBenchTelemetry } from '../../judge/run-context.mts';
-import { buildContext, buildPrompt, judge, shouldJudge } from '../check-sentry.mts';
+import { sentrySkipCause } from '../admission.mts';
+import { buildContext, buildPrompt, judge } from '../check-sentry.mts';
 
 isolateBenchTelemetry();
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -74,7 +75,7 @@ function loadCasesOrExit() {
 
 /** Classify one case → its verdict. Free-skips score deterministically (no claude, no tokens). */
 function classify(c) {
-  if (!shouldJudge(c.message)) return { got: 'SKIP', judged: false };
+  if (sentrySkipCause(c.message, c.diff ?? '', false)) return { got: 'SKIP', judged: false };
   const input = buildContext(c.message, c.nameStatus, c.diff, CONTEXT);
   const result = judge(input, { model: MODEL, samples: SAMPLES, prompt: buildPrompt(SHOTS) });
   if (!result) return process.exit(2); // claude unavailable → can't benchmark

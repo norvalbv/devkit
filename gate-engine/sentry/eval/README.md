@@ -5,7 +5,7 @@ judge's behaviour is set by its prompt + context tier; a prompt edit is unverifi
 measurable check. This scores the judge against a labelled set of commit subjects so the **cheapest
 config that classifies correctly** can be locked, not guessed.
 
-It imports the judge pieces **from the gate** (`buildPrompt`, `shouldJudge`, `buildContext`,
+It imports the judge pieces **from the gate** (`buildPrompt`, `sentrySkipCause`, `buildContext`,
 `judge`), so the bench exercises the exact path the gate runs — prompt and logic never drift.
 
 ## SEED corpus (`cases.jsonl`) — replace it with your own
@@ -24,8 +24,9 @@ node bench.mjs --baseline   # write this run as the new baseline (results.baseli
 node bench.mjs --fail       # exit 1 if F1 or accuracy regressed vs baseline
 ```
 
-Each `claude -p` call pays a cold-start (~20–40s); only `fix|feat|perf|refactor` rows reach the
-model — the rest free-skip with zero tokens, exactly like the gate. Budget the judged-row count ×
+Each `claude -p` call pays a cold-start (~20–40s); only rows the gate admits reach the model (a
+source change that touches error handling, or a `fix|feat|perf|refactor` subject on a source change)
+— the rest free-skip with zero tokens, exactly like the gate. Budget the judged-row count ×
 ~30s per config.
 
 > **Run with a clean tree.** If your repo has a `claude -p` auto-fix Stop hook that rewrites the
