@@ -186,7 +186,11 @@ index carries no `raw_code`/`id` (or its paths don't resolve here), so the pairs
 unchecked — eyeball the ranges before approving. A `Could not check N side(s) above` block names the
 sides of a reported pair whose indexed body was too short or missing to compare: the stale-index block
 can still happen for exactly those, so open the named file and re-index if the symbol is gone.
-`GUARD_DUP_VERIFY_TREE=0` disables the check.
+`GUARD_DUP_VERIFY_TREE=0` disables the check. A run that withheld anything ends with `No new
+duplication among the compared files` and, under `--gate`, records one `gate_degraded` event that the
+ship digest shows as unverified. In a linked or ship worktree with an `indexCommand`, the gate copies
+the primary's index and refreshes the copy (`{staged-csv}` names the staged files), so an edited symbol
+is re-judged; a refresh that stops short names the symbols it left unembedded.
 
 ## `devkit doctor` reports `search-code index: DRIFT` or `MISSING`
 

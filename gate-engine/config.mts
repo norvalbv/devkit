@@ -30,6 +30,7 @@ import { LIGHT_JUDGE_MODEL } from './judge/judge-isolation.mts';
 import { isAbsolute, resolve } from 'node:path';
 import { normalizeReviewPaths, type ReviewPaths } from '../skills/_devkit/review-roots.mjs';
 import { parseJsonObject } from './config-json.mts';
+import { z } from 'zod';
 
 // ── Shared config types ──────────────────────────────────────────────────────
 /** Matcher/clone tier + size thresholds (DEFAULTS.thresholds; a consumer tunes any subset). */
@@ -199,10 +200,10 @@ export const DEFAULTS = Object.freeze({
   indexPath: null,
   // Optional indexer refresh run before the matcher scans, so the gate judges the code being
   // committed rather than the last indexed state. null = never run one. It is ONLY run when an
-  // index already EXISTS in the PRIMARY checkout — never to cold-build one (a from-scratch index
+  // index this checkout owns already EXISTS — never to cold-build one (a from-scratch index
   // is minutes-to-hours and would read as a hung commit) and never through a worktree's linked
   // index (the indexer keys chunks repo-relative, so it would overwrite the primary's rows with
-  // the worktree's code). See matcher.mts refreshIndex.
+  // the worktree's code); a linked worktree refreshes its own copy (index-refresh.mts).
   indexCommand: null,
   // Hard wall-clock ceiling on indexCommand. Bounding ATTEMPTS is not enough — one attempt can
   // itself run for hours when the describe cache misses (a model/prompt-version change).
@@ -242,9 +243,12 @@ export const DEFAULTS = Object.freeze({
   noLlm: false,
 });
 
+const POSITIVE_MS = z.number().positive();
+
 /** Whole ms, rounded up (Node rejects a fractional child_process timeout); else undefined. */
 function positiveMs(v: unknown): number | undefined {
-  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.ceil(v) : undefined;
+  const ms = POSITIVE_MS.safeParse(v);
+  return ms.success ? Math.ceil(ms.data) : undefined;
 }
 
 export function envVar(name: string): string | undefined {

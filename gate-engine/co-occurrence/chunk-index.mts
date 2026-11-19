@@ -110,6 +110,8 @@ const MAX_FILE_BYTES = 2_000_000;
 const CRLF_RE = /\r\n/g;
 // Trailing blank lines — stripped before any tail window is taken (see chunkBody).
 const TRAILING_BLANK_RE = /\s*\n\s*$/;
+// Index paths are normalized to '/' at the read boundary (a Windows index stores backslashes).
+const BACKSLASH_RE = /\\/g;
 
 /** fresh = the code is on disk · stale = it is not · unverifiable = no usable evidence either way. */
 export type Freshness = 'fresh' | 'stale' | 'unverifiable';
@@ -294,6 +296,31 @@ export function usableChunkCount(db: SqlDb): number | null {
     return Number(row?.n ?? 0);
   } catch {
     return null;
+  }
+}
+
+/** A chunked symbol still waiting for its embeddings, so no pair can include it. */
+export interface PendingChunk {
+  id: number;
+  file: string;
+  symbol: string;
+}
+
+/** Chunks with a symbol but no embedding (an index run that stopped short); [] on any DB error. */
+export function pendingChunks(db: SqlDb): PendingChunk[] {
+  try {
+    return db
+      .prepare(
+        'SELECT rowid AS id, file_path, symbol_name FROM chunks WHERE symbol_name IS NOT NULL AND (embedding IS NULL OR code_embedding IS NULL)',
+      )
+      .all()
+      .map((r) => ({
+        id: Number(r.id),
+        file: String(r.file_path).replace(BACKSLASH_RE, '/'),
+        symbol: String(r.symbol_name),
+      }));
+  } catch {
+    return [];
   }
 }
 
