@@ -28,7 +28,7 @@ import {
   rmSync,
   statSync,
 } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pendingChunks, usableChunkCount } from './chunk-index.mts';
 import { processIsAlive } from '../judge/process/identity.mts';
 
@@ -145,7 +145,7 @@ export function seedSource(cfg: {
 /** `path` resolves to `cwd` itself or somewhere beneath it, through any symlinks. */
 function resolvesInside(path: string, cwd: string): boolean {
   const rel = relative(realpathSync(cwd), realpathSync(path));
-  return !rel.startsWith('..') && !isAbsolute(rel);
+  return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
 /** Remove seed temp files a killed gate left behind; a live pid may still be writing its own. */

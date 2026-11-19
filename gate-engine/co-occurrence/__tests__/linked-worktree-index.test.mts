@@ -354,6 +354,21 @@ describe('guard-dup in a linked worktree with an indexCommand', () => {
     expect(sha(join(primary, INDEX))).toBe(before);
   });
 
+  // No index behind the link, so only the directory check stands between the seed and that folder.
+  it('never writes a seed into an index directory linked outside the worktree', () => {
+    const { primary, linked } = edited();
+    const outside = tmp('linked-copy-outside-');
+    symlinkSync(outside, join(linked, '.search-code'));
+    seedIndexCopy(join(linked, INDEX), join(primary, INDEX), linked);
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it('seeds into a directory whose name merely starts with two dots', () => {
+    const { primary, linked } = edited();
+    seedIndexCopy(join(linked, '..search', 'index.db'), join(primary, INDEX), linked);
+    expect(lstatSync(join(linked, '..search', 'index.db')).isFile()).toBe(true);
+  });
+
   // A byte copy would adopt a torn or foreign file as this worktree's own index; VACUUM INTO refuses it.
   it('a source that is not a database leaves no index behind', () => {
     const { linked } = checkouts();

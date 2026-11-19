@@ -268,32 +268,8 @@ function runGates(
       console.log(`▶ deterministic: ${gate.label}`);
       const rc = runArgv(cwd, gate.argv, exec, reasonFile, timeoutMs, gate.label);
       const [nFailed, nSkipped] = [out.failed.length, out.skipped.length];
-      // Its own outcome, not an exit code: no rcLabel, opt-out or strict rule applies to it.
-      if (rc === TIMED_OUT) {
-        recordFailure(
-          out,
-          gate,
-          `(timed-out:${timeoutMs / 1000}s)`,
-          false,
-          timeoutReason(timeoutMs),
-        );
-        emitGateStep(gate.label, rc, startedAt, out.failed[nFailed], false);
-        return;
-      }
-      // Not an exit code, so no rcLabel, opt-out or strict rule applies: it blocks as could-not-run.
-      const exit = EXIT_CODE.safeParse(rc);
-      if (!exit.success) {
-        const failure = String(rc);
-        const next = failure.startsWith('killed:')
-          ? 'Re-run it.'
-          : `${gate.argv[0]} did not start: check that it exists, is executable and is on PATH.`;
-        recordFailure(out, gate, `(${failure})`, false, [
-          `${failure}: the gate never reached a verdict, so this is not a code finding. ${next}`,
-        ]);
-        emitGateStep(gate.label, failure, startedAt, out.failed[nFailed], false);
-        return;
-      }
-      const code = exit.data;
+      const code = exitCodeOrBlock(out, gate, rc, timeoutMs, startedAt);
+      if (code === null) return;
       const failRc = (suffix = '') =>
         recordFailure(out, gate, suffix, undefined, readGateReason(reasonFile));
       // failOpen2 belongs to the GATE (exit 2 = opt-out), strict to the RUN: so an `--extra`'s
@@ -306,10 +282,7 @@ function runGates(
           if (deterministicStrict()) failRc(COULD_NOT_RUN);
           else out.skipped.push(gate.label);
         } else if (code !== 0) failRc(`(unexpected:${code})`);
-        else if (gate.id) {
-          const note = readGateReason(reasonFile).join(' ');
-          if (note) out.degraded.push({ judge: gate.id, detail: note });
-        }
+        else if (gate.id) noteDegraded(out, gate.id, reasonFile);
       } finally {
         emitGateStep(
           gate.label,
@@ -322,6 +295,39 @@ function runGates(
     });
   });
   return out;
+}
+
+/** The gate's exit code, or null after recording a gate that never reached one (timed out, killed,
+ * did not spawn): no rcLabel, opt-out or strict rule applies, so it blocks as could-not-run. */
+function exitCodeOrBlock(
+  out: GateOutcome,
+  gate: Gate,
+  rc: number | string,
+  timeoutMs: number,
+  startedAt: number,
+): number | null {
+  const exit = EXIT_CODE.safeParse(rc);
+  if (exit.success) return exit.data;
+  const failure = String(rc);
+  const nFailed = out.failed.length;
+  if (rc === TIMED_OUT) {
+    recordFailure(out, gate, `(timed-out:${timeoutMs / 1000}s)`, false, timeoutReason(timeoutMs));
+  } else {
+    const next = failure.startsWith('killed:')
+      ? 'Re-run it.'
+      : `${gate.argv?.[0]} did not start: check that it exists, is executable and is on PATH.`;
+    recordFailure(out, gate, `(${failure})`, false, [
+      `${failure}: the gate never reached a verdict, so this is not a code finding. ${next}`,
+    ]);
+  }
+  emitGateStep(gate.label, failure, startedAt, out.failed[nFailed], false);
+  return null;
+}
+
+/** A passing registry gate's withheld note (its reason file on exit 0), kept for the prefix cache. */
+function noteDegraded(out: GateOutcome, judge: string, reasonFile: string): void {
+  const note = readGateReason(reasonFile).join(' ');
+  if (note) out.degraded.push({ judge, detail: note });
 }
 
 // A green run records its prefix key, unless a gate opted out: a later hit would replay a verdict
