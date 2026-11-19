@@ -16,6 +16,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import {
   decide,
   hereEntry,
+  mergeBlobs,
   resolveBaseRef,
   stageAppend,
   stripBase,
@@ -30,6 +31,7 @@ import { manifestOf } from './_ship-branch-fixture.mts';
 // copy was taken: it merges that change in, or refuses naming the commit.
 
 const scriptPath = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
+const anchorPath = fileURLToPath(new URL('../lib/ship/reship/anchor.mts', import.meta.url));
 const GENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 const WT_RE = /worktree kept at (.+?)\. Remove/;
 const LINES = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`);
@@ -202,8 +204,77 @@ function stageRepo(tipEdit: (dir: string) => void = () => {}) {
   /** "<mode> <blob>" of the staged entry, or '' when the path is staged as absent. */
   const staged = (path: string) => git(wt, ['ls-files', '-s', '--', path]).split(' 0\t')[0];
   const diff = () => git(wt, ['diff', '--cached', '--name-status']);
-  return { dir, wt, git, run, staged, diff };
+  /** anchor as reship.sh runs it, with every `git <killOn>` it spawns killed by SIGTERM. */
+  const spawn = (paths: string[], killOn: string) => {
+    const bin = tmp('reship-anchor-shim-');
+    const real = execFileSync('/bin/sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    const shim = `#!/bin/sh\nfor a; do [ "$a" = "${killOn}" ] && kill -TERM $$; done\nexec ${real} "$@"\n`;
+    writeFileSync(join(bin, 'git'), shim);
+    chmodSync(join(bin, 'git'), 0o755);
+    const args = ['--root', dir, '--wt', wt, '--branch', 'pr', '--tip', tip, '--head', head];
+    return spawnSync(
+      process.execPath,
+      [anchorPath, ...args, '--out', join(dir, 'anchors'), '--', ...paths],
+      {
+        encoding: 'utf8',
+        env: { ...env, PATH: `${bin}:${process.env.PATH}` },
+      },
+    );
+  };
+  return { dir, wt, git, run, staged, diff, spawn };
 }
+
+describe('reship-anchor — a git call that does not finish fails the run, naming the path', () => {
+  // hash-object fails while planning a path, update-index while staging it.
+  it.each(['hash-object', 'update-index'])(
+    'a killed %s refuses with the path and stages nothing',
+    (cmd) => {
+      const r = stageRepo();
+      writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine' }));
+      const out = r.spawn(['a.ts'], cmd);
+      expect(out.status, out.stderr).toBe(1);
+      expect(out.stderr).toContain(`a.ts: git ${cmd} did not finish (SIGTERM)`);
+      expect(r.diff()).toBe('');
+    },
+  );
+
+  it('a killed ls-tree is not read as "absent", which would stage a delete of the tip\'s file', () => {
+    const r = stageRepo((dir) => writeFileSync(join(dir, 'b.ts'), 'tip only\n'));
+    const out = r.spawn(['b.ts'], 'ls-tree');
+    expect(out.status, out.stderr).toBe(1);
+    expect(out.stderr).toContain('b.ts: git ls-tree did not finish (SIGTERM)');
+    expect(r.diff()).toBe('');
+  });
+});
+
+describe('reship-anchor — hashing a temp copy gives the blob the stdin form gave', () => {
+  it('cleans a file as if at its path, and stores merged blobs and symlink targets unfiltered', () => {
+    const dir = tmp('reship-anchor-attrs-');
+    const env = { ...process.env, ...GENV };
+    const git = (a: string[], input?: string) =>
+      execFileSync('git', ['-C', dir, ...a], { env, input, encoding: 'utf8' }).trim();
+    git(['init', '-q']);
+    writeFileSync(join(dir, '.gitattributes'), '* text\nf.txt -text\n'); // the temp copy's name is filtered, f.txt is not
+    const crlf = (edits: Record<number, string> = {}) => text(edits).replaceAll('\n', '\r\n');
+    writeFileSync(join(dir, 'f.txt'), crlf());
+    expect(hereEntry(dir, 'f.txt')?.blob).toBe(
+      git(['hash-object', '--stdin', '--path', 'f.txt'], crlf()),
+    );
+    symlinkSync('t\r\nx', join(dir, 'link'));
+    expect(hereEntry(dir, 'link')?.blob).toBe(git(['hash-object', '--stdin'], 't\r\nx'));
+    const blob = (s: string) => ({
+      blob: git(['hash-object', '-w', '--stdin'], s),
+      mode: '100644',
+    });
+    const merged = mergeBlobs(
+      dir,
+      blob(crlf({ 0: 'mine' })),
+      blob(crlf()),
+      blob(crlf({ 9: 'tip' })),
+    );
+    expect(merged).toBe(git(['hash-object', '--stdin'], crlf({ 0: 'mine', 9: 'tip' })));
+  });
+});
 
 describe("resolveBaseRef — the strip base is gh's PR base, else the recorded one, never a guess", () => {
   it("prefers gh's name even when only the recorded base resolves, and names a skip", () => {
@@ -216,16 +287,20 @@ describe("resolveBaseRef — the strip base is gh's PR base, else the recorded o
 });
 
 describe('reship-anchor — stageAppend stages what the copy loop staged', () => {
-  it('stages a nested new file, a symlink, an edit and a deletion over an unmoved tip', () => {
+  it('stages a nested new file, a symlink, an edit, a deletion and an 80 KB file over an unmoved tip', () => {
     const r = stageRepo();
     mkdirSync(join(r.dir, 'deep/er'), { recursive: true });
     writeFileSync(join(r.dir, 'deep/er/new.ts'), 'new\n');
     symlinkSync('a.ts', join(r.dir, 'link'));
     writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'edited' }));
     rmSync(join(r.dir, 'old.ts'));
+    const big = 'x'.repeat(80 * 1024);
+    writeFileSync(join(r.dir, 'big.md'), big);
 
-    expect(r.run(['deep/er/new.ts', 'link', 'a.ts', 'old.ts'])).toBe(0);
+    expect(r.run(['deep/er/new.ts', 'link', 'a.ts', 'old.ts', 'big.md'])).toBe(0);
+    expect(readFileSync(join(r.wt, 'big.md'), 'utf8')).toBe(big);
     expect(r.diff().split('\n').sort()).toEqual([
+      'A\tbig.md',
       'A\tdeep/er/new.ts',
       'A\tlink',
       'D\told.ts',
