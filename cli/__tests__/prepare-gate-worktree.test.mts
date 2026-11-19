@@ -861,6 +861,30 @@ describe('prepare_gate_worktree — the worktree must have a hook chain git will
     expect(linkTarget(join(wt, '.husky/pre-commit'))).toBeNull();
   });
 
+  it('links the runner into the worktree for an absolute hooksPath into the main checkout', () => {
+    const { main, linked, wt, git } = seedRepoWithLinkedWorktree();
+    git(['-C', main, 'config', 'core.hooksPath', join(main, '.husky/_')]);
+
+    const r = prepareInRepo(wt, linked, main, git);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(linkTarget(join(wt, '.husky/_'))).toBe(join(main, '.husky/_'));
+  });
+
+  it("fails closed on the branch's non-executable hook rather than run main's", () => {
+    const { main, linked, wt, git } = seedRepoWithLinkedWorktree();
+    writeFileSync(join(main, '.husky/pre-commit'), '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+    git(['-C', main, 'add', '.husky/pre-commit']);
+    git(['-C', main, 'commit', '-qm', 'hook without the exec bit']);
+    chmodSync(join(main, '.husky/pre-commit'), 0o755); // main's working copy WOULD run
+    git(['-C', main, 'config', 'core.hooksPath', join(main, '.husky')]);
+
+    const r = prepareInRepo(wt, linked, main, git);
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain(`no executable pre-commit hook at ${wt}/.husky/pre-commit`);
+  });
+
   it('does not newly fail a repo that configures no hooksPath at all', () => {
     const { main, linked, wt, git } = seedRepoWithLinkedWorktree();
 

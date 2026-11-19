@@ -18,7 +18,7 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 /** Trimmed stdout of a git command run against `gitRoot`; '' when git fails for any reason. */
 export function gitOut(gitRoot: string, args: string[]): string {
@@ -156,6 +156,29 @@ function checkouts(gitRoot: string): string[] {
     .split('\0')
     .filter((field) => field.startsWith('worktree '))
     .map((field) => field.slice('worktree '.length));
+}
+
+/** `target` relative to its ancestor that IS `root` (sameDir), else null. Realpath only identifies the
+ * ancestor; the rel is lexical, so it keeps the configured spelling of the tail. */
+function relativeTo(root: string, target: string): string | null {
+  for (let dir = target; ; dir = dirname(dir)) {
+    if (sameDir(root, dir)) return relative(dir, target);
+    if (dirname(dir) === dir) return null;
+  }
+}
+
+/** An absolute hooks dir relative to the deepest checkout of this repo holding it ('.' for a checkout
+ * root). null when relative, outside every checkout, or inside the git dir that checkouts share. */
+export function ownedHooksRel(gitRoot: string, value: string): string | null {
+  if (!isAbsolute(value)) return null;
+  const dir = resolve(value); // `..` segments resolve as git resolves them, before any checkout claims them
+  const native = nativeHooksDir(gitRoot);
+  if (native && isInsideResolved(dirname(native), dir)) return null;
+  const rels = checkouts(gitRoot)
+    .map((wt) => relativeTo(wt, dir))
+    .filter((rel) => rel !== null);
+  if (rels.length === 0) return null;
+  return rels.reduce((a, b) => (b.length < a.length ? b : a)) || '.';
 }
 
 export interface ForeignPin {

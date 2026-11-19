@@ -223,6 +223,28 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     });
   }
 
+  // A repo-wide absolute hooksPath into the main checkout must not gate the branch with main's copy.
+  it.each([
+    ['a standalone .husky', '.husky'],
+    ['a husky runner', '.husky/_'],
+  ])('runs the shipped branch’s own hook for an absolute hooksPath into %s', (_, rel) => {
+    const { root, wt } = fixture(true, "echo 'BRANCH_HOOK' >&2\n");
+    chmodSync(join(root, '.husky/pre-commit'), 0o755);
+    git(root, 'add', '.husky/pre-commit');
+    git(root, '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'executable hook');
+    const base = git(root, 'rev-parse', 'HEAD');
+    git(wt, 'checkout', '-q', '--detach', base);
+    writeFileSync(join(root, '.husky/pre-commit'), "echo 'MAIN_HOOK' >&2\n"); // main's stale copy
+    git(root, 'config', 'core.hooksPath', join(root, rel));
+
+    const result = runCommit(root, wt, base);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain('BRANCH_HOOK');
+    expect(result.stderr).not.toContain('MAIN_HOOK');
+    expect(git(wt, 'rev-parse', 'HEAD^')).toBe(base);
+  });
+
   it('fails closed before committing when no executable pre-commit hook resolves', () => {
     const { root, wt, base } = fixture(false);
 
@@ -641,6 +663,7 @@ describe('commit_with_gate_capture — executable hook proof', () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toMatch(/NO gate output captured/);
+    expect(result.stderr).toContain('Hook that ran: .husky/pre-commit — '); // $wt is deleted after
     expect(git(wt, 'rev-parse', 'HEAD')).toBe(base);
     const events = readFileSync(join(root, 'telemetry/gate-events.jsonl'), 'utf8')
       .trim()

@@ -252,9 +252,9 @@ commit_with_gate_capture() {
      && ! grep -q 'devkit-gates: chain start' "$log"; then
     [ "$ship_dry_gates" -eq 1 ] || git -C "$wt" reset --soft HEAD~1 2>/dev/null || true
     {
-      echo "⚠️  ship: NO gate output captured — devkit's pre-commit block never started. Ship aborted; nothing pushed."
+      echo "⚠️  ship: NO gate output captured — devkit's pre-commit block never printed its start sentinel. Ship aborted; nothing pushed."
       echo "    HUSKY=0 (in the env or ~/.config/husky/init.sh) makes husky skip it: unset HUSKY or delete that line."
-      echo "    A hook that predates this check: run \`devkit init --force\` (or \`devkit upgrade\`). Log: $log"
+      echo "    Hook that ran: $(h=${husky_script:-$real_pre_commit}; printf %s "${h#"$wt"/}") — predates this check? Run \`devkit init --force\` (or \`devkit upgrade\`) in your checkout and commit the regenerated hook. Log: $log"
     } >&2
     rc=1
     blocked_override='"gate_no_output"'
