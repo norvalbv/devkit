@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -295,5 +295,30 @@ describe('stdoutDrained', () => {
     child.stdout.pause();
     const [code] = await once(child, 'exit');
     expect(code).toBe(0);
+  });
+});
+
+describe('exitWhenDrained', () => {
+  const REASON = join(import.meta.dirname, '..', 'reason.mts');
+  const child = (body: string) =>
+    spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `import { exitWhenDrained } from ${JSON.stringify(REASON)}; ${body}`,
+      ],
+      { maxBuffer: 1e8 },
+    );
+
+  it('ends with its code once every queued stdout byte reached the pipe', () => {
+    const result = child("process.stdout.write('x'.repeat(5e6)); exitWhenDrained(3);");
+    expect(result.status).toBe(3);
+    expect(result.stdout.length).toBe(5e6);
+  });
+
+  it('forces the exit with its code when a handle keeps the event loop alive', () => {
+    const result = child('setInterval(() => {}, 1000); exitWhenDrained(4, 50);');
+    expect(result.status).toBe(4);
   });
 });

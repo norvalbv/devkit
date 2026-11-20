@@ -97,6 +97,16 @@ export function exitGate(code: number, lines: readonly string[]): never {
 /** Bound on waiting for stdout: a reader that never drains the pipe must not hang the exit. */
 const DRAIN_MS = 10_000;
 
+/** How long a CLI whose event loop still holds a handle may run before it is forced out. */
+const EXIT_GRACE_MS = 1_000;
+
+/** Ends with `code` when the event loop drains, forcing process.exit only after `graceMs`. Node 24's
+ * process.exit can deadlock joining a V8 compile thread parked on a GC (nodejs/node#64274). */
+export function exitWhenDrained(code: number, graceMs = EXIT_GRACE_MS): void {
+  process.exitCode = code;
+  setTimeout(() => process.exit(code), graceMs).unref();
+}
+
 /** Resolves once stdout has handed every queued write to the OS, or after `ms`. process.exit drops
  * a pipe's unflushed tail (about 64 KB survives on macOS), so a piped --json answer would be cut. */
 export function stdoutDrained(ms = DRAIN_MS): Promise<void> {
