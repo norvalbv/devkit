@@ -268,20 +268,15 @@ ship_origin_branch_oid() {
   printf '%s\n' "$line"
 }
 
-# ship_origin_default_still <repo> <default> [oid]
-# Is <default> STILL origin's default, AND (when <oid> is given) still at it -- else merely present?
-# Both read from ONE ls-remote advertisement, so a HEAD repointed to another branch, or the default
-# force-pushed, since it was judged cannot pass as the same answer. Anything that fails to read is "no".
+# ship_origin_default_still <repo> <default> <oid>
+# Is <default> STILL origin's default, AND still at <oid>? Both read from ONE ls-remote advertisement,
+# so a HEAD repointed or a default force-pushed since it was judged cannot pass. A failed read is "no".
+# Matched in-shell, never piped into `grep -q`: under pipefail its early exit SIGPIPEs the writer.
 ship_origin_default_still() {
-  local repo=$1 def=$2 oid=${3-} out= tab
-  tab=$(printf '\t')
+  local repo=$1 def=$2 oid=$3 out= nl=$'\n' tab=$'\t'
   out=$(git -C "$repo" ls-remote --symref origin HEAD "refs/heads/$def" 2>/dev/null) || return 1
-  printf '%s\n' "$out" | grep -qxF "ref: refs/heads/$def${tab}HEAD" || return 1
-  if [ -n "$oid" ]; then
-    printf '%s\n' "$out" | grep -qxF "$oid${tab}refs/heads/$def"
-  else
-    printf '%s\n' "$out" | cut -f2 | grep -qxF "refs/heads/$def"
-  fi
+  case "$nl$out$nl" in *"${nl}ref: refs/heads/$def${tab}HEAD$nl"*) ;; *) return 1 ;; esac
+  case "$nl$out$nl" in *"$nl$oid${tab}refs/heads/$def$nl"*) return 0 ;; *) return 1 ;; esac
 }
 
 # ship_origin_default_contains <repo> <default> <oid>
