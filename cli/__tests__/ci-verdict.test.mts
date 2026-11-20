@@ -100,7 +100,9 @@ describe('devkit ci-verdict', () => {
       throw Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' });
     };
     expect(await ciVerdict(['985'], '/r', { exec, wait: fastWait() })).toBe(2);
-    expect(out).toEqual(['ship: ci-outcome=unavailable pr=985 reason=gh-missing']);
+    expect(out).toEqual([
+      'ship: ci-outcome=unavailable pr=985 reason=gh-missing detail=the `gh` CLI is not on PATH',
+    ]);
   });
 
   it('prints the attributed failed verdict on stdout and exits 0', async () => {
@@ -168,6 +170,8 @@ describe('devkit ci-verdict', () => {
       return args[1] === 'view' ? PR_JSON : JSON.stringify([pass]);
     };
     expect(await ciVerdict(['985'], '/r', { exec, wait: fastWait() })).toBe(2);
-    expect(out).toEqual(['ship: ci-outcome=unavailable pr=985 reason=merge-conflict']);
+    expect(out).toEqual([
+      'ship: ci-outcome=unavailable pr=985 reason=merge-conflict detail=the PR has a merge conflict, so GitHub starts no pull_request run on abc',
+    ]);
   });
 });

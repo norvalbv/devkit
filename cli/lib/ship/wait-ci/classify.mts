@@ -1,4 +1,5 @@
 /** Maps a failed `gh pr checks` exec to the PollResult the wait loop in `wait.mts` reads. */
+import { redactSecrets } from '../redact-secrets.mts';
 import type { PollResult } from './wait.mts';
 
 /** What `execFileSync` throws. Every field optional: this is read to CLASSIFY, never to trust. */
@@ -51,3 +52,10 @@ export function classifyChecksFailure(e: ExecFailure): PollResult {
     return { kind: 'unavailable', reason: 'gh-unreachable', message: msg };
   return { kind: 'unavailable', reason: 'gh-failed', message: msg };
 }
+
+/** gh's words for a failed poll, one line, redacted before the ONLY cap (callers pass it uncut)
+ *  so no half-token leaks; the cap counts code points, so an emoji is never split. */
+export const failureDetail = (message: string): string =>
+  Array.from(redactSecrets(message.replace(/\s+/g, ' ').trim()))
+    .slice(0, 200)
+    .join('');

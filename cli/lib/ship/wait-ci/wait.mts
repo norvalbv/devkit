@@ -18,7 +18,7 @@ import {
 } from './checks-json.mts';
 
 export { CHECK_BUCKETS, CHECKS_JSON_FIELDS, parseChecksJson, type CheckBucket, type CheckRow };
-import { classifyChecksFailure, type ExecFailure } from './classify.mts';
+import { classifyChecksFailure, type ExecFailure, failureDetail } from './classify.mts';
 import { headRunsPoller } from './head-runs.mts';
 import { requiredSetPoller } from './required.mts';
 import { withFailedSteps } from './steps.mts';
@@ -162,8 +162,11 @@ export function verdictLine(result: WaitCiResult, pr: string): string {
       return `${head} cancelled=${linked(result.cancelled)}`;
     case 'timed-out':
       return `${head} pending=${named(result.pending)} waited=${Math.round(result.elapsedMs / 1000)}s`;
-    case 'unavailable':
-      return `${head} reason=${result.unavailableReason ?? 'gh-failed'}`;
+    case 'unavailable': {
+      // Free text, so it goes last: a token-wise reader of reason= never sees it.
+      const detail = failureDetail(result.unavailableMessage ?? '');
+      return `${head} reason=${result.unavailableReason ?? 'gh-failed'}${detail ? ` detail=${detail}` : ''}`;
+    }
     default:
       return `${head} checks=${Object.values(result.counts).reduce((a, b) => a + b, 0)}`;
   }
@@ -277,9 +280,10 @@ export async function waitForChecks(options: WaitCiOptions): Promise<WaitCiResul
       const unreachable = result.reason === 'gh-unreachable';
       if (PERMANENT.has(result.reason) || (!unreachable && ++transient >= transientBudget))
         return done('unavailable', result);
-      if (!unreachable) say(`ci: ${result.reason} — retrying (${transient}/${transientBudget})`);
-      else if (failStreak === 1)
-        say(`ci: gh unreachable (${oneLine(result.message).slice(0, 120)})`);
+      const detail = failureDetail(result.message);
+      if (!unreachable)
+        say(`ci: ${result.reason} — retrying (${transient}/${transientBudget}): ${detail}`);
+      else if (failStreak === 1) say(`ci: gh unreachable (${detail})`);
       else say('ci: gh unreachable — retrying until the deadline');
     } else {
       transient = 0;
@@ -358,7 +362,7 @@ export function ghChecksPoller(options: ChecksPollerOptions): () => PollResult {
     return {
       kind: 'unavailable',
       reason: 'gh-json-unparseable',
-      message: `gh pr checks returned JSON this reader cannot use: ${raw.slice(0, 200)}`,
+      message: `gh pr checks returned JSON this reader cannot use: ${raw}`,
     };
   };
   return () => {
