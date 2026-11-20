@@ -404,6 +404,18 @@ describe('origin-base.sh — ship_suggested_base prefers a default that contains
     expect(suggestedOf(dir)).toMatchObject({ status: 0, out: 'default main' });
   });
 
+  it('still answers the default when grep -q would exit before the advertisement is written', () => {
+    // Piped into `grep -q` under pipefail, a writer still mid-advertisement took SIGPIPE: "default moved".
+    // A 3-line advertisement lost that race under load; refs/heads/*/HEAD (ls-remote tail-matches) force it.
+    const { dir, bare } = seedAdvancedDefault();
+    const tip = execFileSync('git', ['-C', bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
+    const pads = Array.from({ length: 3000 }, (_, i) => `create refs/heads/pad${i}/HEAD ${tip}\n`);
+    execFileSync('git', ['-C', bare, 'update-ref', '--stdin'], { input: pads.join('') });
+    execFileSync('git', ['-C', bare, 'pack-refs', '--all']);
+
+    expect(suggestedOf(dir)).toMatchObject({ status: 0, out: 'default main' });
+  });
+
   it('fetches an unseen default commit to judge it, without writing any ref', () => {
     const { dir, git, bare } = seedAdvancedDefault();
     git(['update-ref', '-d', 'refs/remotes/origin/main']);
