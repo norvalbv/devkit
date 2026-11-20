@@ -202,6 +202,8 @@ export interface ReviewOutcome {
   /** Refused tool calls of the spawn behind a checklist contract miss; unset when unmeasured or
    * the artifact holds a FAILED item, which is a candidate violation rather than a judge-side miss. */
   refusedCalls?: number;
+  /** The judge said PASS while its own checklist held a FAILED item (this attempt or a voided one). */
+  failedUnderPass?: true;
   transcript?: string;
   /** Both passes of an escalated run, each labelled with its model; archived instead of `transcript`. */
   fullTranscript?: string;

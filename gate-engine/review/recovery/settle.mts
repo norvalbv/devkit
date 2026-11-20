@@ -165,6 +165,7 @@ export function settleReviewOutcome(
     // the fix would erase the field rate of the very failure mode it schedules around. NEVER in
     // any cache key or salt — a recovered PASS must serve the next run's hit.
     ...(retried ? { retried: true, retry_phase: 'deferred' } : {}),
+    failed_under_pass: res.failedUnderPass, // dropped by JSON when unset
     ...(res.waivers?.length ? { waivers: res.waivers } : {}),
     // The per-lens vector, passes included; empty when the judge left no artifact (see
     // evidence/items.mts for the shape and the spill rule).
@@ -226,6 +227,8 @@ export interface ParkedRecovery {
   task: ReviewTask;
   reason: string;
   index: number;
+  /** The voided attempt held a FAILED item, so its retry's row can show a FAILED→PASS flip. */
+  failedUnderPass?: true;
 }
 
 /**
@@ -251,6 +254,7 @@ export async function runDeferredRecoveries(
         reason: `recovery deferred, budget exhausted — re-run to converge (${p.reason})`,
         inconclusiveCause: 'timeout',
         escalated: false,
+        failedUnderPass: p.failedUnderPass,
       };
       // NOT marked retried: no deferred judge ran. The flag measures attempts that happened, so
       // counting a skip would inflate the very recovery rate it exists to report — the reason
@@ -263,6 +267,7 @@ export async function runDeferredRecoveries(
     );
     const t0 = Date.now();
     const res = await runOne(p.task, p.reason, remaining - RECOVERY_SETTLE_MARGIN_MS);
+    if (p.failedUnderPass) res.failedUnderPass = true;
     results[p.index] = settleReviewOutcome(ctx, p.task, res, Date.now() - t0, true);
   }
 }

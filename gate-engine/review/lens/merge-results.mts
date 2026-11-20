@@ -32,6 +32,7 @@ type LensPartRow = {
   chunk_files_sha: string | null;
   model?: string;
   retried?: true;
+  failed_under_pass?: true;
   cached?: true;
 } & CoverageFields;
 
@@ -49,6 +50,7 @@ type MergedLensRow = {
   lens_parts: LensPartRow[];
   retried?: true;
   retry_phase?: 'deferred';
+  failed_under_pass?: true;
   waivers?: unknown[];
   transcript_ref?: string;
 };
@@ -97,6 +99,7 @@ export function emitMergedLensResults(
       };
       if (p.res.model) row.model = p.res.model;
       if (p.retried) row.retried = true;
+      if (p.res.failedUnderPass) row.failed_under_pass = true;
       if (p.cached) row.cached = true;
       return row;
     });
@@ -118,6 +121,7 @@ export function emitMergedLensResults(
       event.retried = true;
       event.retry_phase = 'deferred';
     }
+    if (parts.some((p) => p.res.failedUnderPass)) event.failed_under_pass = true;
     if (merged.waivers?.length) event.waivers = merged.waivers;
     // SAFETY: `merged` carries the ReviewOutcome item fields mergeItemVectors just rebuilt.
     const items = itemFields(merged as never);

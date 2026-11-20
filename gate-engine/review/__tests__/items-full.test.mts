@@ -87,7 +87,7 @@ describe('attachItems itemsFull', () => {
         stateFile,
         JSON.stringify({
           items: [
-            { name: 'state-transitions', status: 'fail', issues: [text] },
+            { name: 'state-transitions', status: 'pass', issues: [text] },
             { name: 'concurrency-races', status: 'pending' },
           ],
         }),
