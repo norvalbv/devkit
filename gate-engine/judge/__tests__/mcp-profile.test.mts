@@ -23,14 +23,15 @@ import {
   spawnDegradedCause,
   withNamedAgentMcpTools,
 } from '../mcp/profile.mts';
+import { codebaseRegisterCommand, codebaseRemedy } from '../mcp/registration-remedy.mts';
 
 const root = mkdtempSync(path.join(tmpdir(), 'judge-mcp-profile-'));
 const repo = path.join(root, 'repo');
 const registry = path.join(root, 'registry.json');
 mkdirSync(repo);
 
-const remedy = (registryPath: string) =>
-  ` — to restore it, add or re-enable the \`codebase\` MCP server for this project in ${realpathSync(registryPath)}, or point DEVKIT_JUDGE_MCP_CONFIG at a registry that defines it`;
+const remedy = (registryPath: string, at = repo) =>
+  ` — to restore it, ${codebaseRemedy(realpathSync(at), realpathSync(registryPath))}, or point DEVKIT_JUDGE_MCP_CONFIG at a registry that defines it`;
 
 interface RegistryFixtureOverrides {
   projects?: {
@@ -324,6 +325,47 @@ describe('missing-server resolution and reporting (sc-2837)', () => {
     expect(stderr).toEqual([
       `⚠️  guard-review: named-agent MCP profile missing codebase — continuing with the configured subset under strict isolation — DEGRADED${remedy(registryPath)}`,
     ]);
+  });
+
+  it('the remedy registers codebase at the primary checkout, not the linked worktree', () => {
+    spyStderr();
+    const home = mkdtempSync(path.join(root, 'home-'));
+    const registryPath = path.join(home, '.claude.json');
+    writeFileSync(registryPath, '{"mcpServers":{}}', { mode: 0o600 });
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('DEVKIT_JUDGE_MCP_CONFIG', undefined);
+    const worktree = mkdtempSync(path.join(root, 'worktree-'));
+    writeFileSync(path.join(repo, 'search-code.config.json'), '{}\n');
+    try {
+      const resolution = judgeMcpMissingServers(namedAgentMcpProfile(), {
+        cwd: worktree,
+        projectRoots: [worktree, repo],
+      });
+      reportMissingMcpServers(resolution, ['correctness-reviewer']);
+      expect(stderr[0].endsWith(remedy(registryPath, repo))).toBe(true);
+    } finally {
+      rmSync(path.join(repo, 'search-code.config.json'));
+      vi.unstubAllEnvs();
+    }
+    expect(stderr[0]).toContain(`run \`${codebaseRegisterCommand(realpathSync(repo))}\``);
+    expect(stderr[0]).not.toContain(realpathSync(worktree));
+  });
+
+  it('a second checkout with the same registry state still prints its own command', () => {
+    spyStderr();
+    const registryPath = withServers('context7', 'autonomous_bugs');
+    const other = mkdtempSync(path.join(root, 'other-'));
+    for (const at of [repo, other])
+      reportMissingMcpServers(
+        judgeMcpMissingServers(namedAgentMcpProfile(), {
+          cwd: at,
+          registryPath,
+          projectRoots: [at],
+        }),
+        ['correctness-reviewer'],
+      );
+    expect(stderr).toHaveLength(2);
+    expect(stderr[1].endsWith(remedy(registryPath, other))).toBe(true);
   });
 
   it('a registry edited mid-process to lose a DIFFERENT server warns again (new state, new key)', () => {

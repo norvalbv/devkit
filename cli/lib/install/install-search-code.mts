@@ -10,14 +10,19 @@ import { appendFileSync, existsSync, readFileSync, realpathSync, rmSync, statSyn
 import { join } from 'node:path';
 import {
   indexToInspect,
+  primaryCheckout,
   usableChunksAt,
 } from '../../../gate-engine/co-occurrence/index-refresh.mts';
+import {
+  codebaseRegisterCommand,
+  SEARCH_CODE_CONFIG,
+} from '../../../gate-engine/judge/mcp/registration-remedy.mts';
 import { withGitignoreLock } from './gitignore-cache.mts';
 import { writeFileAtomic } from '../atomic-write.mts';
 import { type CheckResult, check } from '../doctor/check-result.mts';
 import { readJson, writeIfAbsent } from '../fs-helpers.mts';
 
-export const SEARCH_CODE_CONFIG = 'search-code.config.json';
+export { SEARCH_CODE_CONFIG };
 const INDEX_LINE = '.search-code/';
 const INDEX_PATH = '.search-code/index.db';
 /** What an overlay install git-excludes instead of writing the tracked `.gitignore`. */
@@ -159,6 +164,18 @@ export function installSearchCode(
   console.log('  ℹ needs the search-code engine + Ollama. Install once, then index this repo:');
   console.log('      bun add -g git+ssh://git@github.com/norvalbv/search-code.git');
   console.log('      search-code index');
+  const primary = realpathSync(primaryCheckout(cwd) ?? cwd);
+  // Gates register and search the primary checkout, so a linked worktree's opt-in alone is not enough.
+  if (primary !== realpathSync(cwd) && !existsSync(join(primary, SEARCH_CODE_CONFIG))) {
+    console.log(
+      `  ℹ gate reviewers search the primary checkout: run this there too, in ${primary}`,
+    );
+    return;
+  }
+  console.log(
+    '  ℹ gate reviewers search the index only once the codebase MCP server is registered (skip if it is):',
+  );
+  console.log(`      ${codebaseRegisterCommand(primary)}`);
 }
 
 // clean reversal: remove the devkit-written opt-in config. The `.search-code/` gitignore line is

@@ -1,8 +1,17 @@
-import fs, { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import fs, {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { codebaseRegisterCommand } from '../../gate-engine/judge/mcp/registration-remedy.mts';
 import { DEFAULT_INDEX_COMMAND, installSearchCode } from '../lib/install/install-search-code.mts';
 import { tmpRepos } from './_helpers.mts';
 
@@ -90,6 +99,43 @@ describe('search-code opt-in component', () => {
     expect(readFileSync(join(root, 'search-code.config.json'), 'utf8')).toBe('{"mine":true}\n');
     expect(log.mock.calls.flat().join('\n')).toContain('• kept search-code.config.json');
     log.mockRestore();
+  });
+
+  it('prints the command that registers the codebase MCP server for this repo', () => {
+    const root = tmpRepo();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    installSearchCode(root, false);
+    expect(log.mock.calls.flat()).toContain(`      ${codebaseRegisterCommand(realpathSync(root))}`);
+    log.mockRestore();
+  });
+
+  it.each([
+    ['not opted in: it says to opt the primary in, and prints no command', false],
+    ['opted in: it registers the primary checkout, which outlives the worktree', true],
+  ])('run from a linked worktree whose primary is %s', (_name, primaryOptedIn) => {
+    const root = tmpRepo();
+    const worktree = `${root}-wt`;
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: root });
+    git('init', '-q');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'base');
+    git('worktree', 'add', '-q', '--detach', worktree);
+    if (primaryOptedIn) writeFileSync(join(root, 'search-code.config.json'), '{}\n');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      installSearchCode(worktree, false);
+      const out = log.mock.calls.flat().map(String);
+      const primary = realpathSync(root);
+      expect(out.find((l) => l.includes('claude mcp add'))).toBe(
+        primaryOptedIn ? `      ${codebaseRegisterCommand(primary)}` : undefined,
+      );
+      if (!primaryOptedIn)
+        expect(out).toContain(
+          `  ℹ gate reviewers search the primary checkout: run this there too, in ${primary}`,
+        );
+    } finally {
+      log.mockRestore();
+      rmSync(worktree, { recursive: true, force: true });
+    }
   });
 
   it('is off by default (no --search-code → no config)', () => {
