@@ -104,7 +104,7 @@ const EXIT_GRACE_MS = 1_000;
  * process.exit can deadlock joining a V8 compile thread parked on a GC (nodejs/node#64274). */
 export function exitWhenDrained(code: number, graceMs = EXIT_GRACE_MS): void {
   process.exitCode = code;
-  setTimeout(() => process.exit(code), graceMs).unref();
+  setTimeout(() => process.exit(), graceMs).unref();
 }
 
 /** Resolves once stdout has handed every queued write to the OS, or after `ms`. process.exit drops

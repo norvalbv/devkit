@@ -321,4 +321,11 @@ describe('exitWhenDrained', () => {
     const result = child('setInterval(() => {}, 1000); exitWhenDrained(4, 50);');
     expect(result.status).toBe(4);
   });
+
+  it('honours a later exitCode write on the forced path, as a natural drain does', () => {
+    const result = child(
+      'setInterval(() => {}, 1000); exitWhenDrained(0, 200); setTimeout(() => { process.exitCode = 5; }, 20);',
+    );
+    expect(result.status).toBe(5);
+  });
 });
