@@ -44,6 +44,14 @@ export async function enforceChecklistContract(
   const initialState = readChecklistState(cwd, selection.reviewer);
   const hole = verifyChecklist(initialState, 'PASS', denied);
   if (hole) reportFailedItems(selection.reviewer, initialState);
+  const failed = failedItems(initialState);
+  if (failed.length > 0) result.failedUnderPass = true;
+  // A pinned judge's own FAILED item is the verdict (a re-sample could erase it); the override
+  // valve then drops out-of-charter lenses, honours waivers and writes the reason.
+  if (failed.length > 0 && selection.reviewer.model) {
+    result.status = 'fail';
+    return result;
+  }
   const refused = refusedCalls(initialState, denied);
   if (hole && recoveryScheduled) {
     // No "retrying" here: the callback runs no judge, and the solo phase announces itself.
@@ -67,6 +75,28 @@ export async function enforceChecklistContract(
     markContractMiss(result, refused);
   }
   return result;
+}
+
+/** A waived or dropped FAILED item leaves the judge's pending items: they recover as any pending
+ * hole does, so an unfinished artifact never reads as a PASS. */
+export async function settleUnfinished(
+  res: ReviewOutcome,
+  state: ChecklistState | null,
+  recoveryScheduled: boolean,
+  retry: (reason: string) => Promise<ReviewOutcome>,
+): Promise<ReviewOutcome> {
+  const items = state?.items ?? state?.files;
+  if (!res.failedUnderPass || res.status !== 'pass' || !Array.isArray(items)) return res;
+  if (!items.some((i) => i.status === 'pending')) return res;
+  const hole = verifyChecklist(state, 'PASS') ?? 'checklist incomplete';
+  // The FAILED item was waived or dropped, not erased: a retry PASS here is no FAILED→PASS flip.
+  delete res.failedUnderPass;
+  const out = recoveryScheduled
+    ? await retry(hole)
+    : { ...res, status: 'inconclusive' as const, reason: hole };
+  if (out.status === 'inconclusive' && out.inconclusiveCause === undefined)
+    markContractMiss(out, undefined);
+  return out;
 }
 
 function markContractMiss(result: ReviewOutcome, refused: number | undefined): void {

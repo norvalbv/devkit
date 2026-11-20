@@ -541,8 +541,8 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
     expect(remedies[0]).toContain('re-run devkit ship, and if it repeats move that judge');
   });
 
-  // A FAILED item is a candidate violation, so a refused sibling lens must not reword its remedy.
-  it('a refused lens beside a FAILED-item lens keeps both remedies', async () => {
+  // A pinned lens's FAILED item blocks on its own; a refused sibling must not soften that block.
+  it('a FAILED-item lens beside a refused lens blocks on its finding', async () => {
     delete process.env.GUARD_CORRECTNESS_SPLIT;
     const repo = consumerRepo({ backend: true });
     shipEnv(repo);
@@ -562,11 +562,10 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
       }
       return 'VERDICT: PASS';
     });
-    expect(await runReviewGate(repo, { exec })).toBe(3);
-    const remedies = err.mock.calls.flat().filter((l) => String(l).startsWith('   Remedy:'));
-    expect(remedies).toHaveLength(2);
-    expect(remedies.join('\n')).toContain('if it repeats move that judge');
-    expect(remedies.join('\n')).toContain('fix a real violation if present');
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain(`[${lensGroupId(failing)}] — FAILED checklist item under a PASS verdict`);
+    expect(out).not.toContain('fix a real violation if present');
   });
 
   it('a lens refused on the wave that skips again with no refusal fails closed on the same model', async () => {
@@ -1253,5 +1252,199 @@ describe('runReviewGate — a voided PASS prints its FAILED items (sc-5720)', ()
     await runReviewGate(repo, { exec: judgeContradicting(repo, (a) => a === 1, issues) });
     expect(failedLines(err)).toHaveLength(3);
     expect(err).toHaveBeenCalledWith('⚠️  guard-review: api-security-reviewer — (+2 more)');
+  });
+});
+
+describe("runReviewGate — a pinned reviewer's FAILED item under a PASS verdict blocks (sc-8592)", () => {
+  const CORRECTNESS = 'review:correctness-reviewer';
+  const ITEM_LINE = 'FAILED checklist item under a PASS verdict: error-and-edge-classification';
+  const shipEnv = (repo: string) => {
+    process.env.GUARD_AI_STRICT = '1';
+    process.env.DEVKIT_GATE_EVENTS = join(repo, 'events.jsonl');
+    process.env.DEVKIT_SHIP_ID = 'ship-sc-8592';
+  };
+  const reviewResult = (repo: string, reviewer: string) =>
+    readFileSync(join(repo, 'events.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .findLast((e) => e.type === 'review_result' && e.reviewer === reviewer);
+  // correctness says PASS over `items` on its first attempt and a clean artifact on any retry.
+  const contradicting = (repo: string, items: object[], target = CORRECTNESS) => {
+    let attempt = 0;
+    return mkExec(async ({ label }) => {
+      writeArtifact(repo, label);
+      if (label === target && ++attempt === 1)
+        writeFileSync(join(repo, reviewerFromLabel(label).stateFile), JSON.stringify({ items }));
+      return 'VERDICT: PASS';
+    });
+  };
+  const edgeFail = {
+    name: 'error-and-edge-classification',
+    status: 'fail',
+    issues: ['0 read as absent'],
+  };
+
+  it('the incident replay blocks on the first sample: no retry, flagged on the merged row', async () => {
+    delete process.env.GUARD_CORRECTNESS_SPLIT; // the shipped four-way default
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const group = FOUR_WAY_LENS_GROUPS.find((g) => g.includes('error-and-edge-classification'))!;
+    const groupCalls: string[] = [];
+    const exec = mkExec(async ({ label, args }) => {
+      writeArtifact(repo, label);
+      if (label !== CORRECTNESS || !args[1].includes(`--lens ${[...group].sort().join(',')}`))
+        return 'VERDICT: PASS';
+      groupCalls.push(args[1]);
+      writeFileSync(
+        join(repo, `.claude/.correctness-review-${lensGroupId(group)}.json`),
+        JSON.stringify({ items: groupCalls.length === 1 ? [edgeFail] : [] }),
+      );
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    expect(groupCalls).toHaveLength(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain(`[${lensGroupId(group)}] — ${ITEM_LINE}`);
+    expect(out).toContain('• error-and-edge-classification ['); // the findings block names it
+    const row = reviewResult(repo, 'correctness-reviewer');
+    expect(row).toMatchObject({ status: 'fail', failed_under_pass: true });
+    const part = row.lens_parts.find((p) => p.lens === lensGroupId(group));
+    expect(part).toMatchObject({ status: 'fail', failed_under_pass: true });
+    expect(row.lens_parts.filter((p) => p.failed_under_pass)).toHaveLength(1);
+  });
+
+  it('plain git commit blocks at exit 1 instead of failing open at exit 2', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await runReviewGate(repo, { exec: contradicting(repo, [edgeFail]) })).toBe(1);
+  });
+
+  it('a waiver on the flipped lens turns it into a PASS', async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await runReviewGate(repo, { exec: contradicting(repo, [edgeFail]) })).toBe(1);
+    const fp = reviewResult(repo, 'correctness-reviewer').blocking[0].fp;
+    process.env[`OVERRIDE_${fp}_RATIONALE`] = 'absent and zero are the same state here';
+    try {
+      expect(await runReviewGate(repo, { exec: contradicting(repo, [edgeFail]) })).toBe(0);
+    } finally {
+      delete process.env[`OVERRIDE_${fp}_RATIONALE`];
+    }
+  });
+
+  it('an out-of-charter FAILED item is dropped, not blocked on', async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const sqli = {
+      name: 'writer-reader-contracts',
+      status: 'fail',
+      issues: ['sql injection via the query string'],
+    };
+    expect(await runReviewGate(repo, { exec: contradicting(repo, [sqli]) })).toBe(0);
+    expect(reviewResult(repo, 'correctness-reviewer')).toMatchObject({
+      status: 'pass',
+      failed_under_pass: true,
+    });
+  });
+
+  // Waiving the FAILED item leaves only the pending hole, which takes the ordinary solo recovery.
+  const pendingWithWaivedFail = async (repo: string, retries: number) => {
+    const items = [edgeFail, { name: 'state-transitions', status: 'pending', issues: [] }];
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await runReviewGate(repo, { exec: contradicting(repo, items) })).toBe(1);
+    const fp = err.mock.calls
+      .flat()
+      .join('\n')
+      .match(/• error-and-edge-classification \[(\w+)\]/)?.[1];
+    process.env[`OVERRIDE_${fp}_RATIONALE`] = 'absent and zero are the same state here';
+    let attempt = 0;
+    const exec = mkExec(async ({ label }) => {
+      writeArtifact(repo, label);
+      if (label === CORRECTNESS && ++attempt <= 1 + retries)
+        writeFileSync(join(repo, reviewerFromLabel(label).stateFile), JSON.stringify({ items }));
+      return 'VERDICT: PASS';
+    });
+    try {
+      return { code: await runReviewGate(repo, { exec }), calls: () => attempt };
+    } finally {
+      delete process.env[`OVERRIDE_${fp}_RATIONALE`];
+    }
+  };
+
+  it('a waived FAILED item beside a pending one retries the pending hole solo', async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { code, calls } = await pendingWithWaivedFail(repo, 0);
+    expect(code).toBe(0);
+    expect(calls()).toBe(2);
+    const row = reviewResult(repo, 'correctness-reviewer');
+    expect(row).toMatchObject({ status: 'pass', retried: true });
+    expect(row.failed_under_pass).toBeUndefined(); // waived, not erased by the retry
+  });
+
+  it('a pending hole the retry leaves open fails the ship closed, never a PASS', async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect((await pendingWithWaivedFail(repo, 1)).code).toBe(3);
+    const row = reviewResult(repo, 'correctness-reviewer');
+    expect(row).toMatchObject({ status: 'inconclusive', inconclusive_cause: 'response-contract' });
+    expect(row.reason).toContain('1 item(s) never resolved: state-transitions');
+  });
+
+  it('plain git commit keeps a pending hole beside a waived FAILED item fail-open, never a PASS', async () => {
+    const repo = consumerRepo({ backend: true });
+    const { code, calls } = await pendingWithWaivedFail(repo, 0);
+    expect(code).toBe(2);
+    expect(calls()).toBe(1);
+  });
+
+  it('review mode reports an exhausted pending hole as a REVIEW ERROR, not inconclusive', async () => {
+    const repo = unprojected(consumerRepo({ backend: true }));
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_ASSET_ROOT = reviewAssets();
+    process.env.GUARD_AI_STRICT = '1'; // review runs under the same strict shell as ship
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { code, calls } = await pendingWithWaivedFail(repo, 1);
+    expect(code).toBe(1);
+    expect(calls()).toBe(2);
+    expect(err.mock.calls.flat().join('\n')).toContain('checklist contract failed after one retry');
+  });
+
+  it('an unpinned reviewer still retries solo, and its row counts the FAILED→PASS flip', async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const target = 'review:api-security-reviewer';
+    const exec = contradicting(
+      repo,
+      [{ name: 'input-validation', status: 'fail', issues: [] }],
+      target,
+    );
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec.mock.calls.filter(([o]) => o.label === target)).toHaveLength(2);
+    expect(reviewResult(repo, 'api-security-reviewer')).toMatchObject({
+      status: 'pass',
+      retried: true,
+      failed_under_pass: true,
+    });
+  });
+
+  it('a budget-skipped retry still records that the voided attempt held a FAILED item', async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.DEVKIT_GATE_DEADLINE_MS = String(Date.now() + 5_000);
+    const target = 'review:api-security-reviewer';
+    const exec = contradicting(repo, [{ name: 'input-validation', status: 'fail' }], target);
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    const row = reviewResult(repo, 'api-security-reviewer');
+    expect(row).toMatchObject({ status: 'inconclusive', failed_under_pass: true });
+    expect(row.retried).toBeUndefined();
   });
 });

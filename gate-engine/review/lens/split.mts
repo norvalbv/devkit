@@ -167,6 +167,7 @@ export type LensPart = {
     model?: string;
     items?: unknown[];
     mcpDegraded?: { cause: string; cached?: true }; // cached: replayed, not judged this run
+    failedUnderPass?: true;
   };
   secs: number;
   /** The task this part ran. Carries the diff AND the derived reviewer, whose `lens` is the only

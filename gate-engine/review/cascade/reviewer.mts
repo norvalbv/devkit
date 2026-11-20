@@ -32,6 +32,7 @@ import {
   enforceChecklistContract,
   reportDeniedCalls,
   retrievalDegradation,
+  settleUnfinished,
   type SpawnDenials,
 } from '../contracts/checklist.mts';
 import {
@@ -155,34 +156,30 @@ export async function runCascade(
     // Recovery below only schedules/classifies; it deletes this attempt's artifact without
     // running another judge. Keep its exact private evidence for the resulting inconclusive row.
     const captureState = opts.fullItems ? readChecklistState(cwd, sel.reviewer) : null;
-    res = await enforceChecklistContract(
-      sel,
-      res,
-      cwd,
-      opts.recovery !== undefined,
-      async (reason) => {
-        if (opts.recovery === 'defer')
-          return { ...res, status: 'inconclusive', reason, retryable: reason } as CascadeResult;
-        // Exhausted recovery: review blocks at exit 1 (REVIEW ERROR); ship stays inconclusive at
-        // exit 3, its strict retry/fail-closed contract. `assetRoot` is set only by review mode.
-        if (opts.recovery === 'final') {
-          const exhausted = `reviewer checklist contract failed after one retry — ${reason}`;
-          const terminal: CascadeResult = opts.assetRoot
-            ? { ...res, status: 'error', reason: exhausted }
-            : { ...res, status: 'inconclusive', inconclusiveCause: undefined, reason: exhausted };
-          return terminal;
-        }
-        // Unreachable from the three direct callers (the reviewer/conventions/scale benches): they
-        // schedule no recovery, so enforceChecklistContract never invokes this callback at all.
-        throw new Error(`checklist recovery has no scheduling mode — ${reason}`);
-      },
-      spawn.denied,
-    );
+    const recover = async (reason: string): Promise<CascadeResult> => {
+      if (opts.recovery === 'defer')
+        return { ...res, status: 'inconclusive', reason, retryable: reason } as CascadeResult;
+      // Exhausted recovery: review blocks at exit 1 (REVIEW ERROR); ship stays inconclusive at
+      // exit 3, its strict retry/fail-closed contract. `assetRoot` is set only by review mode.
+      if (opts.recovery === 'final') {
+        const exhausted = `reviewer checklist contract failed after one retry — ${reason}`;
+        const terminal: CascadeResult = opts.assetRoot
+          ? { ...res, status: 'error', reason: exhausted }
+          : { ...res, status: 'inconclusive', inconclusiveCause: undefined, reason: exhausted };
+        return terminal;
+      }
+      // Unreachable from the three direct callers (the reviewer/conventions/scale benches): they
+      // schedule no recovery, so enforceChecklistContract never invokes this callback at all.
+      throw new Error(`checklist recovery has no scheduling mode — ${reason}`);
+    };
+    const scheduled = opts.recovery !== undefined;
+    res = await enforceChecklistContract(sel, res, cwd, scheduled, recover, spawn.denied);
     const disposition = applyOverrideValve(sel, res, cwd, {
       readState: () => readChecklistState(cwd, sel.reviewer),
       stagedDiff: () => gitCached(cwd, [], sel.files),
     });
     const finalState = readChecklistState(cwd, sel.reviewer) ?? captureState;
+    res = await settleUnfinished(res, finalState, scheduled, recover);
     if (!retryableReason(res)) reportDeniedCalls(sel.reviewer, res, spawn.denied, finalState);
     // A FAIL keeps the uncut issue text so the findings block can print what the author must fix.
     attachItems(res, finalState, disposition, { full: opts.fullItems || res.status === 'fail' });

@@ -767,7 +767,7 @@ describe('runReviewGate — cascade + exit contract', () => {
         const rows = Array.from({ length: 60 }, (_, i) => ({
           [key === 'files' ? 'path' : 'name']:
             `src/main/deeply/nested/module-${i}/implementation.ts`,
-          status: 'fail',
+          status: reviewer.model ? 'pass' : 'fail', // a pinned reviewer's FAILED item blocks
           issues: [`issue A ${'x'.repeat(240)}`, `issue B ${'y'.repeat(240)}`],
         }));
         writeFileSync(join(repo, reviewer.stateFile), JSON.stringify({ [key]: rows }));
@@ -792,7 +792,7 @@ describe('runReviewGate — cascade + exit contract', () => {
       // The counts and the per-status tally survive the spill — otherwise "did these lenses fire"
       // would be unanswerable exactly on the widest commits.
       expect(r.item_count).toBe(60);
-      expect(r.item_tally.fail).toBe(40); // the 40-item cap, all non-passing
+      expect(r.item_tally.fail ?? r.item_tally.pass).toBe(40); // the 40-item cap, one status
     }
   });
 
@@ -1117,16 +1117,16 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(err.mock.calls.flat().join('\n')).toContain('2 item(s) never resolved');
   });
 
-  it('PASS verdict but the checklist recorded FAILED items → inconclusive (mismatch), not cached', async () => {
+  it('PASS verdict over FAILED items: the pinned reviewer blocks, the rest void; none cached', async () => {
     const repo = consumerRepo({ backend: true });
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const exec = mkExec(async ({ label }) => {
       writeArtifact(repo, label, { failed: 1 });
       return 'VERDICT: PASS';
     });
-    expect(await runReviewGate(repo, { exec })).toBe(2);
+    expect(await runReviewGate(repo, { exec })).toBe(1);
     // conventions-reviewer has no checklist artifact to mismatch against — its PASS caches (1);
-    // the 4 checklist-driven reviewers void to inconclusive on the FAILED-item mismatch.
+    // correctness blocks on its own FAILED item; the cascade reviewers void to inconclusive.
     expect(Object.keys(loadCache(repo)).length).toBe(1);
   });
 

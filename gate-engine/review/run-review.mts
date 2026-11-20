@@ -429,7 +429,7 @@ export async function runReviewGate(
       .then((outcome) => {
         const res = settleReviewOutcome(sctx, t, outcome, Date.now() - t0);
         const reason = retryableReason(res);
-        if (reason) parked.push({ task: t, reason, index });
+        if (reason) parked.push({ task: t, reason, index, failedUnderPass: res.failedUnderPass });
         return res;
       });
   });
