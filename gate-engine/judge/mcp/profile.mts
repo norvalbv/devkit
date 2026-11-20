@@ -20,6 +20,7 @@ import {
   type JsonValue,
 } from '../../comment-firewall/types.mts';
 import { withoutGitEnv } from '../judge-isolation.mts';
+import { codebaseRemedy } from './registration-remedy.mts';
 
 const BASELINE_SERVER_NAMES = ['codebase', 'context7', 'autonomous_bugs'] as const;
 // Claude Code matches server-wide MCP permissions with the explicit `__*` suffix.
@@ -228,6 +229,8 @@ export interface JudgeMcpResolution {
   missing: string[];
   /** One warning identity per registry state, shared by every caller in this process. */
   warnKey: string;
+  /** Where a registration belongs: the primary checkout, else cwd (read registries only). */
+  root?: string;
 }
 
 function resolveJudgeMcp(
@@ -256,21 +259,17 @@ function resolveJudgeMcp(
       missing: [...serverNames],
       warnKey: `registry-json:${registryPath}`,
     };
-  const servers =
-    serverNames.length === 0
-      ? {}
-      : selectedServers(
-          registry,
-          serverNames,
-          projectCandidates(options.cwd, env, options.projectRoots),
-        );
+  const roots = projectCandidates(options.cwd, env, options.projectRoots);
+  const servers = serverNames.length === 0 ? {} : selectedServers(registry, serverNames, roots);
   const missing = serverNames.filter((name) => !Object.hasOwn(servers, name));
+  const root = roots.at(-1) ?? options.cwd;
   return {
     kind: 'resolved',
     registryPath,
     servers,
     missing,
-    warnKey: `missing:${registryPath}:${missing.join(',')}`,
+    warnKey: `missing:${registryPath}:${root}:${missing.join(',')}`,
+    root,
   };
 }
 
@@ -296,9 +295,9 @@ function missingReason(resolution: JudgeMcpResolution): string {
 
 /** How to restore a verdict-bearing server a readable registry lacks; empty otherwise. */
 function registryRemedy(resolution: JudgeMcpResolution): string {
-  const lost = verdictBearingMissing(resolution).join(', ');
-  if (resolution.kind !== 'resolved' || !lost) return '';
-  return ` — to restore it, add or re-enable the \`${lost}\` MCP server for this project in ${resolution.registryPath}, or point ${REGISTRY_ENV} at a registry that defines it`;
+  const { kind, registryPath, root } = resolution;
+  if (kind !== 'resolved' || !root || verdictBearingMissing(resolution).length === 0) return '';
+  return ` — to restore it, ${codebaseRemedy(root, registryPath)}, or point ${REGISTRY_ENV} at a registry that defines it`;
 }
 
 /** One-line cause a DEGRADED reviewer verdict carries, or undefined when nothing verdict-bearing is
