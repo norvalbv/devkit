@@ -100,7 +100,7 @@ export function runManagedPackagedScript(
       finished = true;
       resolve(status);
     };
-    // The CLI calls process.exit() immediately after awaiting this promise. Keep the handlers and
+    // The CLI ends through exitWhenDrained after awaiting this promise. Keep the handlers and
     // finalization lock alive through that boundary so a last-moment signal cannot change only the
     // process status after Bash has emitted terminal telemetry.
     // Do not unregister the signal handlers in the exit listener: native termination happens only
