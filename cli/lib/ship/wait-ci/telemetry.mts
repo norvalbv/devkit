@@ -1,6 +1,7 @@
 /** The `ship_ci` telemetry row `wait.mts` appends after its verdict line. */
 import { devkitVersion } from '../../../../gate-engine/devkit-version.mts';
 import { appendShipRow } from '../telemetry/row.mts';
+import { failureDetail } from './classify.mts';
 import type { WaitCiResult } from './wait.mts';
 
 /**
@@ -22,6 +23,7 @@ export function recordCiEvent(result: WaitCiResult, pr: string, env = process.en
     waited_s: Math.round(result.elapsedMs / 1000),
     polls: result.polls,
     reason: result.unavailableReason ?? null,
+    detail: result.unavailableMessage ? failureDetail(result.unavailableMessage) : null,
     required: result.required ?? false,
     required_contexts: result.requiredContexts ?? null,
     attribution: result.attribution?.token ?? null,

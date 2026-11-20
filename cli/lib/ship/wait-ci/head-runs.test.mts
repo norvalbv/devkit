@@ -199,7 +199,7 @@ describe('headRunsPoller — a head with no workflow run', () => {
       polls: 1,
     });
     expect(verdictLine(result, '42')).toBe(
-      'ship: ci-outcome=unavailable pr=42 reason=merge-conflict',
+      'ship: ci-outcome=unavailable pr=42 reason=merge-conflict detail=the PR has a merge conflict, so GitHub starts no pull_request run on abc123def456',
     );
   });
 

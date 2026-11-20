@@ -287,7 +287,10 @@ describe('ship-branch.sh — --wait-ci', () => {
     const log = argvLog();
     const { r } = ship(['feat/badjson', 't', '--wait-ci', 'note.txt'], log, 'not json');
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).toContain('ci-outcome=unavailable pr=42 reason=gh-json-unparseable');
+    // gh's own words ride the verdict line, so a gh-failed on a green PR names the failing call.
+    expect(r.stderr).toContain(
+      'ci-outcome=unavailable pr=42 reason=gh-json-unparseable detail=gh pr checks returned JSON this reader cannot use: not json',
+    );
   });
 });
 

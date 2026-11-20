@@ -20,6 +20,7 @@ import {
   verdictLines,
   waitForChecks,
 } from './wait.mts';
+import { failureDetail } from './classify.mts';
 import { recordCiEvent } from './telemetry.mts';
 
 const row = (bucket: CheckBucket, name: string, link = ''): CheckRow => ({
@@ -694,5 +695,104 @@ describe('attribute', () => {
       fresh: null,
       line: 'attribution=unknown reason=run-in-progress',
     });
+  });
+});
+
+describe('gh failure detail', () => {
+  const ghFailed: PollResult = {
+    kind: 'unavailable',
+    reason: 'gh-failed',
+    message: 'GraphQL: Could not resolve to a node\n(statusCheckRollup)',
+  };
+
+  it('stays unavailable on a green set the settle grace never confirmed, and names gh’s words', async () => {
+    // Greens at 0s and 10s, then three failures: no poll observed the set after the 30s grace.
+    const harness = drive([rows(row('pass', 'gate')), rows(row('pass', 'gate')), ghFailed], {
+      intervalMs: 10_000,
+      settleGraceMs: 30_000,
+      timeoutMs: 3_600_000,
+    });
+    const result = await harness.run();
+    expect(result).toMatchObject({ outcome: 'unavailable', unavailableReason: 'gh-failed' });
+    expect(verdictLine(result, '1389')).toBe(
+      'ship: ci-outcome=unavailable pr=1389 reason=gh-failed detail=GraphQL: Could not resolve to a node (statusCheckRollup)',
+    );
+    expect(harness.lines.filter((l) => l.startsWith('ci: gh-failed'))).toEqual([
+      'ci: gh-failed — retrying (1/3): GraphQL: Could not resolve to a node (statusCheckRollup)',
+      'ci: gh-failed — retrying (2/3): GraphQL: Could not resolve to a node (statusCheckRollup)',
+    ]);
+  });
+
+  it('keeps the verdict one line, redacts secrets and caps the detail, last on the line', () => {
+    const token = `ghp_${'a'.repeat(36)}`;
+    const line = verdictLine(
+      {
+        polls: 3,
+        elapsedMs: 1_000,
+        counts: summarise([]).counts,
+        failures: [],
+        pending: [],
+        cancelled: [],
+        outcome: 'unavailable',
+        unavailableReason: 'gh-failed',
+        unavailableMessage: `HTTP 401\nAuthorization: token ${token}\n${'x'.repeat(500)}`,
+      },
+      '7',
+    );
+    expect(line).not.toContain('\n');
+    expect(line).not.toContain(token);
+    const [head, detail] = line.split(' detail=');
+    expect(head).toBe('ship: ci-outcome=unavailable pr=7 reason=gh-failed');
+    expect(detail).toMatch(/^HTTP 401 Authorization: token \[REDACTED\] x+$/);
+    expect(detail).toHaveLength(200);
+  });
+
+  it('redacts a token that sits past 200 chars of unparseable gh output', () => {
+    // Cutting gh's stdout to 200 chars BEFORE redaction left ghp_ + 35 chars unmatched, and the
+    // indentation of pretty-printed output collapses so that stub lands inside the capped detail.
+    const token = `ghp_${'a'.repeat(40)}`;
+    const raw = `${' '.repeat(100)}${'x'.repeat(60)} ${token}`;
+    const poll = ghChecksPoller({ pr: '7', cwd: '/r', exec: () => raw });
+    const result = poll();
+    expect(result.kind).toBe('unavailable');
+    const line = verdictLine(
+      {
+        polls: 1,
+        elapsedMs: 0,
+        counts: summarise([]).counts,
+        failures: [],
+        pending: [],
+        cancelled: [],
+        outcome: 'unavailable',
+        unavailableReason: 'gh-json-unparseable',
+        unavailableMessage: result.kind === 'unavailable' ? result.message : '',
+      },
+      '7',
+    );
+    expect(line).not.toMatch(/ghp_a/);
+  });
+
+  it('never splits an emoji at the cap', () => {
+    const detail = failureDetail(`${'x'.repeat(199)}🚀 deploy`);
+    expect(detail).toBe(`${'x'.repeat(199)}🚀`);
+    expect(detail.isWellFormed()).toBe(true);
+  });
+
+  it('adds no detail when gh said nothing', () => {
+    const line = verdictLine(
+      {
+        polls: 1,
+        elapsedMs: 0,
+        counts: summarise([]).counts,
+        failures: [],
+        pending: [],
+        cancelled: [],
+        outcome: 'unavailable',
+        unavailableReason: 'gh-failed',
+        unavailableMessage: ' \n ',
+      },
+      '7',
+    );
+    expect(line).toBe('ship: ci-outcome=unavailable pr=7 reason=gh-failed');
   });
 });

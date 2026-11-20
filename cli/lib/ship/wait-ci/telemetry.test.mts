@@ -126,3 +126,36 @@ describe('recordCiEvent attribution', () => {
     expect(none).toMatchObject({ attribution: null, inherited: null, new_failures: null });
   });
 });
+
+describe('recordCiEvent detail', () => {
+  it('records gh’s redacted words on an unavailable verdict, and null otherwise', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'ci-events-')), 'events.jsonl');
+    const env = { DEVKIT_GATE_EVENTS: file, DEVKIT_SHIP_ID: 'ship-1' };
+    const base = {
+      polls: 3,
+      elapsedMs: 1_000,
+      counts: summarise([]).counts,
+      failures: [],
+      pending: [],
+      cancelled: [],
+    };
+    const token = `ghp_${'b'.repeat(36)}`;
+    recordCiEvent(
+      {
+        ...base,
+        outcome: 'unavailable',
+        unavailableReason: 'gh-failed',
+        unavailableMessage: `HTTP 403\n${token}`,
+      },
+      '1',
+      env,
+    );
+    recordCiEvent({ ...base, outcome: 'passed' }, '2', env);
+    const [unavailable, passed] = readFileSync(file, 'utf8')
+      .trimEnd()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    expect(unavailable).toMatchObject({ reason: 'gh-failed', detail: 'HTTP 403 [REDACTED]' });
+    expect(passed).toMatchObject({ reason: null, detail: null });
+  });
+});

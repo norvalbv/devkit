@@ -182,6 +182,8 @@ Usage:
                       a head with no pull_request run passes only when mergeable, not stacked, and run-free.
                       A red that ends the wait while any check still runs says attribution=unknown
                       reason=run-in-progress: the unfinished run may still add failures.
+                      On unavailable, a trailing detail=<…> carries gh's error (one line, secrets
+                      redacted, 200 chars at most), so the failing call is named.
                       The verdict NEVER reaches the exit code (unless --wait-ci-strict): a red PR is
                       not a failed ship, and an agent reading non-zero would retry --resume against a
                       record the push deleted.

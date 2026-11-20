@@ -119,7 +119,7 @@ function readApi<T>(
   }
   const parsed = schema.safeParse(json);
   if (parsed.success) return { ok: true, value: parsed.data };
-  const message = `gh ${args.join(' ')} returned JSON this reader cannot use: ${raw.slice(0, 200)}`;
+  const message = `gh ${args.join(' ')} returned JSON this reader cannot use: ${raw}`;
   return { ok: false, result: { kind: 'unavailable', reason: 'gh-json-unparseable', message } };
 }
 
