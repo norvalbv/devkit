@@ -31,6 +31,19 @@ function gateCalls(text: string): string[] {
   return [...new Set(text.replace(WHITESPACE_RE, ' ').match(GATE_CALL_RE) ?? [])];
 }
 
+// Never called: declares sourceDocs() to vitest's graph, so `vitest related` selects this file.
+void (() =>
+  import.meta.glob(
+    [
+      '../../AGENTS.md',
+      '../../CLAUDE.md',
+      '../../docs/troubleshooting.md',
+      '../../skills/*/SKILL.md',
+      '../../agents/*.md',
+    ],
+    { query: '?raw' },
+  ));
+
 /** The source docs an agent reads, not the `.claude` / `.cursor` projections of them. */
 function sourceDocs(): string[] {
   const skills = readdirSync(join(ROOT, 'skills'))

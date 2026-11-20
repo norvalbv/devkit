@@ -19,6 +19,17 @@ const ROOT = join(import.meta.dirname, '..', '..', '..');
 const agent = readFileSync(join(ROOT, 'agents', 'feature-critique.md'), 'utf8');
 const skill = readFileSync(join(ROOT, 'skills', 'feature-critique', 'SKILL.md'), 'utf8');
 const brainstorming = readFileSync(join(ROOT, 'skills', 'brainstorming', 'SKILL.md'), 'utf8');
+// Never called: declares every doc read below to vitest's graph, so `vitest related` selects this file.
+void (() =>
+  import.meta.glob(
+    [
+      '../../../agents/**/*.md',
+      '../../../skills/**/*.md',
+      '../../../.claude/agents/*.md',
+      '../../../.cursor/agents/*.md',
+    ],
+    { query: '?raw' },
+  ));
 const EDGE_CASES_ARTIFACT_MARKERS = {
   EDGE_CASES_ID: /\bEDGE_CASES_ID\b/u,
   flowId: /\bflowId\b/u,

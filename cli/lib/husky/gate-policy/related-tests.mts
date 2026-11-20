@@ -6,7 +6,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, extname, isAbsolute, join, relative } from 'node:path';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { runVitestDetailed, type VitestRun } from '../../../../gate-engine/coverage/vitest-cli.mts';
@@ -25,7 +25,6 @@ import {
   writeGateReason,
 } from '../../../../gate-engine/deterministic/reason.mts';
 import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mts';
-import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mts';
 import { type Comparison, label, renderComparison } from '../../baseline-status/compare.mts';
 import {
   assertVitestReport,
@@ -36,6 +35,7 @@ import {
 import { type BaselineAnswer, resolveRef } from '../../baseline-status/query.mts';
 import {
   forcedTests,
+  noteUnmapped,
   previousSelection,
   recordSelection,
   relatedDrivers,
@@ -53,76 +53,6 @@ const NAMED_TESTS = 5;
 
 // Source modules whose reachability the reach test guards.
 const SOURCE_RE = /\.[cm]?[jt]sx?$/;
-
-// Extensions vite can hold in its module graph; any other staged path never selects a test.
-const MODULE_RE = /\.[cm]?[jt]sx?$|\.json$/;
-
-/** Staged paths `vitest related` cannot map to a test, such as shell scripts and templates. */
-export function unmappedPaths(paths: string[]): string[] {
-  return paths.filter((p) => !MODULE_RE.test(p));
-}
-
-type Grep = (root: string, needles: string[]) => ReadonlyMap<string, Iterable<string>>;
-
-// `reship.test.mts` first, then `reship-*.test.mts`, then any other test naming reship.sh.
-function nameRank(test: string, stem: string): number {
-  if (test === `${stem}.test.mts`) return 0;
-  return test.startsWith(stem) ? 1 : 2;
-}
-
-/** The commit-index test files naming each needle: one ls-files and one grep however many there are. */
-function gitGrepTests(root: string, needles: string[]): Map<string, Set<string>> {
-  const env = commitIndexEnv(root);
-  const ls = spawnSync('git', ['ls-files', '--cached', '-z'], { cwd: root, env, encoding: 'utf8' });
-  const counts = new Map<string, number>();
-  for (const f of ls.stdout.split('\0')) {
-    if (f && !f.startsWith('dist/')) counts.set(basename(f), (counts.get(basename(f)) ?? 0) + 1);
-  }
-  // A basename several sources share (README.md, check.sh) names none of them; dist/ only mirrors.
-  const named = needles.filter((n) => (counts.get(n) ?? 0) < 2);
-  const hits = new Map<string, Set<string>>();
-  if (!named.length) return hits;
-  // -o prints `file\0match` per hit; -w keeps a test naming reship.sh from naming ship.sh.
-  const args = ['grep', '--cached', '-zowF', ...named.flatMap((n) => ['-e', n])];
-  const r = spawnSync('git', [...args, '--', ':(glob)**/*.test.mts'], {
-    cwd: root,
-    env,
-    encoding: 'utf8',
-  });
-  if (r.status === 1) return hits;
-  if (r.status !== 0) throw new Error(r.stderr || 'git grep failed');
-  for (const [file, match] of r.stdout.split('\n').map((l) => l.split('\0'))) {
-    if (match) hits.set(match, (hits.get(match) ?? new Set()).add(file));
-  }
-  return hits;
-}
-
-/** Names each unmapped staged path and the tests that mention it, since vitest related ran none. */
-export function noteUnmapped(root: string, paths: string[], grep: Grep = gitGrepTests): void {
-  try {
-    const unmapped = unmappedPaths(paths);
-    if (!unmapped.length) return;
-    const hits = grep(root, [...new Set(unmapped.map((p) => basename(p)))]);
-    const forced = new Set(forcedTests(paths));
-    const lines = unmapped.flatMap((p) => {
-      const stem = basename(p, extname(p));
-      const tests = [...(hits.get(basename(p)) ?? [])]
-        .filter((t) => !forced.has(t))
-        .map((t) => basename(t))
-        .sort((a, b) => nameRank(a, stem) - nameRank(b, stem));
-      if (!tests.length) return [];
-      const more = tests.length > 3 ? ` (+${tests.length - 3})` : '';
-      return [`  ${p} ← ${tests.slice(0, 3).join(', ')}${more}`];
-    });
-    if (!lines.length) return;
-    console.log(
-      `related-tests: ${lines.length} staged path(s) have no import-graph tests — not run here, CI will:`,
-    );
-    console.log(lines.join('\n'));
-  } catch {
-    // Disclosure only: a failed lookup never changes the gate's verdict.
-  }
-}
 
 interface SpawnResult {
   status: number | null;
@@ -416,7 +346,10 @@ const runGrouped: Exec = (bin, args, cwd, env) =>
   runVitestDetailed(bin, args, cwd, env, { group: true });
 
 /** The related-tests run: code 0 when nothing is selected, vitest's outcome otherwise. */
-export async function runRelatedTests(root: string, opts: RunOpts): Promise<VitestRun> {
+export async function runRelatedTests(
+  root: string,
+  opts: RunOpts,
+): Promise<VitestRun & { ran: string[] }> {
   const staged = [...opts.staged];
   const paths = relatedPaths(staged);
   // From the raw set: relatedPaths drops vitest.setup.mjs, which the env-scrub test binds.
@@ -424,21 +357,22 @@ export async function runRelatedTests(root: string, opts: RunOpts): Promise<Vite
   const trigger = triggerLine(staged);
   if (trigger) console.log(trigger);
   // The entrypoint rejects an empty staged set, so here every staged path is a trigger it named.
-  if (!paths.length && !forced.length) return { code: 0, interrupted: false };
+  if (!paths.length && !forced.length) return { code: 0, interrupted: false, ran: [] };
   let files: string[] = [];
   try {
     if (paths.length) files = await (opts.list ?? listRelated)(root, paths);
   } catch (err) {
     console.error(`✗ related-tests could not list related tests: ${errorMessage(err)}`);
-    return { code: 1, interrupted: false };
+    return { code: 1, interrupted: false, ran: [] };
   }
   // The reach test only answers for source modules, so a config-only commit skips the queue.
   if (!files.length && !forced.length && !paths.some((p) => SOURCE_RE.test(p))) {
     console.log(`related-tests: no test relates to the ${paths.length} staged path(s)`);
-    return { code: 0, interrupted: false };
+    return { code: 0, interrupted: false, ran: [] };
   }
   // listRelated returns absolute paths, so absolutise the rest for the set to dedupe.
   const tests = [...new Set([...files, ...[...forced, REACH_TEST].map((t) => join(root, t))])];
+  const ran = tests.map((t) => relative(root, t));
   console.log(
     `related-tests: ${tests.length} test file(s) for ${paths.length} staged path(s)${forced.length ? `, ${forced.length} forced` : ''}`,
   );
@@ -469,7 +403,7 @@ export async function runRelatedTests(root: string, opts: RunOpts): Promise<Vite
       const timing = timingLine(report, spawnedAt, tests.length);
       await narrate({ status, timing }, report, root, env, opts.attribute ?? attributeToCi);
     }
-    return { ...run, code };
+    return { ...run, code, ran };
   } finally {
     try {
       if (dir) rmSync(dir, { recursive: true, force: true });
@@ -489,8 +423,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     process.exitCode = 1;
   } else {
     const run = await runRelatedTests(process.cwd(), { staged });
-    // The raw set, not relatedPaths: a staged vitest.setup.mjs must still mark its forced test as run.
-    if (!run.interrupted) noteUnmapped(process.cwd(), staged);
+    // The raw set, not relatedPaths: a staged vitest.setup.mjs still lists the tests naming it.
+    if (!run.interrupted) noteUnmapped(process.cwd(), staged, run.ran);
     process.exitCode = run.code;
   }
 }

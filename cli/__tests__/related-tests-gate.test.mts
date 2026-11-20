@@ -11,7 +11,8 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { createVitest } from 'vitest/node';
 import { UNHANDLED_REPORTER } from '../../gate-engine/coverage/failures.mts';
 import type { UnhandledError } from '../../gate-engine/coverage/unhandled-reporter.mts';
 import {
@@ -23,11 +24,9 @@ import {
 import { configExtraGates } from '../../gate-engine/deterministic/command-gates.mts';
 import {
   listRelated,
-  noteUnmapped,
   relatedTestsReason,
   runRelatedTests,
   timingLine,
-  unmappedPaths,
 } from '../lib/husky/gate-policy/related-tests.mts';
 import { triggerLine } from '../lib/husky/gate-policy/related-tests-selection.mts';
 
@@ -79,7 +78,7 @@ describe('runRelatedTests', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const list = vi.fn(async () => ['/repo/a.test.mts']);
     const exec = fakeExec(0);
-    const none = { code: 0, interrupted: false };
+    const none = { code: 0, interrupted: false, ran: [] };
     expect(await runRelatedTests('/repo', { staged: [], list, exec })).toEqual(none);
     expect(list).not.toHaveBeenCalled();
     expect(exec).not.toHaveBeenCalled();
@@ -94,6 +93,7 @@ describe('runRelatedTests', () => {
     expect(await runRelatedTests('/repo', { staged: ['package.json'], list, exec })).toEqual({
       code: 0,
       interrupted: false,
+      ran: [],
     });
     expect(list).not.toHaveBeenCalled();
     expect(exec).not.toHaveBeenCalled();
@@ -217,6 +217,7 @@ describe('runRelatedTests', () => {
     expect(await runRelatedTests('/repo', { staged: ['cli/a.mts'], list, exec })).toEqual({
       code: 143,
       interrupted: true,
+      ran: ['cli/a.test.mts', REACH],
     });
   });
 
@@ -227,85 +228,8 @@ describe('runRelatedTests', () => {
     expect(await runRelatedTests('/repo', { staged: ['cli/a.mts'], list, exec })).toEqual({
       code: 1,
       interrupted: true,
+      ran: ['cli/a.test.mts', REACH],
     });
-  });
-});
-
-describe('unmappedPaths', () => {
-  it('keeps the paths vite cannot hold in its module graph', () => {
-    expect(
-      unmappedPaths([
-        'cli/lib/ship/reship.sh',
-        'docs/x.md',
-        'templates/x.hbs',
-        'cli/a.mts',
-        'src/b.ts',
-        'dist/c.mjs',
-        'src/d.tsx',
-        'fixtures/e.json',
-      ]),
-    ).toEqual(['cli/lib/ship/reship.sh', 'docs/x.md', 'templates/x.hbs']);
-  });
-});
-
-describe('noteUnmapped', () => {
-  type Hits = ReadonlyMap<string, Iterable<string>>;
-  function logged(paths: string[], grep: (root: string, needles: string[]) => Hits): string[] {
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    noteUnmapped('/repo', paths, grep);
-    return log.mock.calls.map((c) => String(c[0]));
-  }
-
-  it('names each unmapped path with the tests that mention it, capped at three', () => {
-    const tests = ['a/w.test.mts', 'x.test.mts', 'reship-anchor.test.mts', 'b/reship.test.mts'];
-    const grep = vi.fn(
-      (_root: string, _needles: string[]): Hits => new Map([['reship.sh', tests]]),
-    );
-    expect(logged(['cli/a.mts', 'cli/lib/ship/reship.sh', 'docs/x.md'], grep)).toEqual([
-      'related-tests: 1 staged path(s) have no import-graph tests — not run here, CI will:',
-      '  cli/lib/ship/reship.sh ← reship.test.mts, reship-anchor.test.mts, w.test.mts (+1)',
-    ]);
-  });
-
-  it('does not report a forced test as not run', () => {
-    const grep = vi.fn(
-      (_root: string, _needles: string[]): Hits =>
-        new Map([['reship.sh', [SCRUB, 'cli/__tests__/reship.test.mts']]]),
-    );
-    expect(logged(['cli/lib/ship/reship.sh'], grep)).toEqual([
-      'related-tests: 1 staged path(s) have no import-graph tests — not run here, CI will:',
-      '  cli/lib/ship/reship.sh ← reship.test.mts',
-    ]);
-  });
-
-  // A nested script forces nothing, so a test naming it really was not run and stays listed.
-  it('still lists the scrub test for a staged path that did not force it', () => {
-    const grep = vi.fn((_root: string, _needles: string[]): Hits => new Map([['x.sh', [SCRUB]]]));
-    expect(logged(['cli/lib/ship/review/x.sh'], grep)).toEqual([
-      'related-tests: 1 staged path(s) have no import-graph tests — not run here, CI will:',
-      '  cli/lib/ship/review/x.sh ← vitest-setup-env-scrub.test.mts',
-    ]);
-  });
-
-  // One git lookup per run, however many paths: a docs commit stages dozens.
-  it('looks every unmapped basename up in one batch, once each', () => {
-    const grep = vi.fn((_root: string, _needles: string[]): Hits => new Map());
-    logged(['cli/lib/ship/reship.sh', 'dist/cli/lib/ship/reship.sh', 'docs/x.md'], grep);
-    expect(grep.mock.calls).toEqual([['/repo', ['reship.sh', 'x.md']]]);
-  });
-
-  it('prints nothing for module paths or for paths no test names', () => {
-    const grep = vi.fn((_root: string, _needles: string[]): Hits => new Map());
-    expect(logged(['cli/a.mts', 'src/b.json'], grep)).toEqual([]);
-    expect(grep).not.toHaveBeenCalled();
-    expect(logged(['docs/x.md'], grep)).toEqual([]);
-  });
-
-  it('stays silent when the lookup fails', () => {
-    const grep = (): Hits => {
-      throw new Error('git grep failed');
-    };
-    expect(logged(['cli/lib/ship/reship.sh'], grep)).toEqual([]);
   });
 });
 
@@ -406,6 +330,62 @@ describe('listRelated', () => {
   it('selects a staged test file itself', async () => {
     const root = graphRepo();
     expect(await listRelated(root, ['a.test.mts'])).toEqual([join(root, 'a.test.mts')]);
+  }, 60_000);
+
+  // Pins the vitest behaviour the doc tests' never-run raw globs rely on, under the native runner.
+  it('selects a test whose never-run raw glob names a staged doc, new files included', async () => {
+    const root = graphRepo();
+    writeFileSync(
+      join(root, 'vitest.config.mjs'),
+      'export default { test: { experimental: { viteModuleRunner: false } } };\n',
+    );
+    writeFileSync(join(root, 'doc.md'), '# doc\n');
+    writeFileSync(
+      join(root, 'doc.test.mts'),
+      "import { it } from 'vitest';\nvoid (() => import.meta.glob(['./doc.md', './skills/*/SKILL.md'], { query: '?raw' }));\nit('d', () => {});\n",
+    );
+    expect(await listRelated(root, ['doc.md'])).toEqual([join(root, 'doc.test.mts')]);
+    mkdirSync(join(root, 'skills', 'new'), { recursive: true });
+    writeFileSync(join(root, 'skills', 'new', 'SKILL.md'), '# new\n');
+    expect(await listRelated(root, ['skills/new/SKILL.md'])).toEqual([join(root, 'doc.test.mts')]);
+  }, 60_000);
+
+  it("selects devkit's own doc tests for a staged AGENTS.md or SKILL.md", async () => {
+    const root = join(import.meta.dirname, '..', '..');
+    // One context for every path, as relatedDrivers walks it: a whole-repo walk costs seconds each.
+    const ctx = await createVitest({ root, related: [], watch: false, run: true });
+    onTestFinished(() => ctx.close());
+    const rel = async (path: string) => {
+      ctx.config.related = [join(root, path)];
+      const specs = await ctx.getRelevantTestSpecifications();
+      return specs.map((s) => s.moduleId.slice(root.length + 1));
+    };
+    expect(await rel('AGENTS.md')).toEqual(
+      expect.arrayContaining([
+        'cli/__tests__/command-skill-routing.test.mts',
+        'cli/__tests__/doc-gate-claims.test.mts',
+        'cli/__tests__/root-routing-doc.test.mts',
+      ]),
+    );
+    expect(await rel('skills/commit-gates/SKILL.md')).toEqual(
+      expect.arrayContaining([
+        'cli/__tests__/command-skill-routing.test.mts',
+        'cli/__tests__/doc-gate-claims.test.mts',
+      ]),
+    );
+    expect(await rel('agents/feature-critique.md')).toEqual(
+      expect.arrayContaining([
+        'cli/__tests__/doc-gate-claims.test.mts',
+        'gate-engine/critique/__tests__/feature-critique-guidance.test.mts',
+      ]),
+    );
+    // Each edge covers every file its test reads, not only the doc it opens by name.
+    const guidance = 'gate-engine/critique/__tests__/feature-critique-guidance.test.mts';
+    expect(await rel('skills/testing/SKILL.md')).toContain(guidance);
+    expect(await rel('.claude/agents/feature-critique.md')).toContain(guidance);
+    expect(await rel('cli/lib/ship/commit-with-gate-capture.sh')).toContain(
+      'cli/__tests__/command-skill-routing.test.mts',
+    );
   }, 60_000);
 });
 
