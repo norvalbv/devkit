@@ -14,6 +14,19 @@ import { CLI, testSpawnSync } from './_helpers.mts';
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const COMMANDS_DIR = join(ROOT, 'cli', 'commands');
 const SKILLS_DIR = join(ROOT, 'skills');
+// Never called: declares the docs read below to vitest's graph, so `vitest related` selects this file.
+void (() =>
+  import.meta.glob(
+    [
+      '../../skills/**/*.md',
+      '../../AGENTS.md',
+      '../../CLAUDE.md',
+      '../../cli/lib/ship/commit-with-gate-capture.sh',
+    ],
+    {
+      query: '?raw',
+    },
+  ));
 
 /**
  * Lower bound on the registry, so a parse that silently matches nothing cannot make this whole

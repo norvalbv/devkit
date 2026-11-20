@@ -21,6 +21,8 @@ import {
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const ROUTING_DOCS = ['CLAUDE.md', 'AGENTS.md'] as const;
+// Never called: declares the docs to vitest's graph, so `vitest related` selects this file.
+void (() => import.meta.glob(['../../CLAUDE.md', '../../AGENTS.md'], { query: '?raw' }));
 
 /** The KEYWORD arm of conventions-reviewer's bar (agents/conventions-reviewer.md:34-35). Its other
  * arm — a flat imperative like "use X, not Y" — has no mechanical detector here. */

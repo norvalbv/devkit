@@ -14,12 +14,14 @@ import { GATE_REASON_ENV } from '../../gate-engine/deterministic/reason.mts';
 import { runRelatedTests } from '../lib/husky/gate-policy/related-tests.mts';
 import {
   forcedTests,
+  noteUnmapped,
   previousSelection,
   recordSelection,
   relatedDrivers,
   relatedPaths,
   selectionLines,
   triggerLine,
+  unmappedPaths,
 } from '../lib/husky/gate-policy/related-tests-selection.mts';
 
 const dirs: string[] = [];
@@ -321,10 +323,127 @@ describe('forcedTests', () => {
     expect(forcedTests(['vitest.setup.mjs', '.claude/hooks/x.mjs'])).toEqual([SCRUB, PARITY]);
   });
 
+  // No other commit gate checks agent projections; skill projections have their own gate.
+  it('forces the parity test for an agent source, projection or manifest, not for skills', () => {
+    expect(forcedTests(['agents/correctness-reviewer.md'])).toEqual([PARITY]);
+    expect(forcedTests(['.cursor/agents/correctness-reviewer.md'])).toEqual([PARITY]);
+    expect(forcedTests(['.devkit/agents-manifest.json'])).toEqual([PARITY]);
+    expect(forcedTests(['.devkit/agent-hooks-manifest.json'])).toEqual([PARITY]);
+    expect(forcedTests(['.devkit/skills-manifest.json'])).toEqual([]);
+    expect(
+      forcedTests(['dist/agents/x.md', 'skills/a/SKILL.md', '.claude/skills/a/SKILL.md']),
+    ).toEqual([]);
+  });
+
   it('names forced tests that exist, so a rename cannot silently select nothing', () => {
     const root = join(import.meta.dirname, '..', '..');
     const tests = forcedTests(['cli/lib/ship/reship.sh', 'agents-hooks/prior-art-gate.mjs']);
     expect(tests).toEqual([SCRUB, PARITY]);
     for (const test of tests) expect(existsSync(join(root, test)), test).toBe(true);
+  });
+});
+
+const REACH = 'cli/__tests__/test-graph-reach.test.mts';
+
+describe('unmappedPaths', () => {
+  it('keeps the paths vite cannot hold in its module graph', () => {
+    expect(
+      unmappedPaths([
+        'cli/lib/ship/reship.sh',
+        'docs/x.md',
+        'templates/x.hbs',
+        'cli/a.mts',
+        'src/b.ts',
+        'dist/c.mjs',
+        'src/d.tsx',
+        'fixtures/e.json',
+      ]),
+    ).toEqual(['cli/lib/ship/reship.sh', 'docs/x.md', 'templates/x.hbs']);
+  });
+});
+
+describe('noteUnmapped', () => {
+  type Hits = ReadonlyMap<string, Iterable<string>>;
+  function logged(
+    paths: string[],
+    grep: (root: string, needles: string[]) => Hits,
+    ran: string[] = [],
+  ): string[] {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    noteUnmapped('/repo', paths, ran, grep);
+    return log.mock.calls.map((c) => String(c[0]));
+  }
+
+  it('names each unmapped path with the tests that mention it, capped at three', () => {
+    const tests = ['a/w.test.mts', 'x.test.mts', 'reship-anchor.test.mts', 'b/reship.test.mts'];
+    const grep = vi.fn(
+      (_root: string, _needles: string[]): Hits => new Map([['reship.sh', tests]]),
+    );
+    expect(logged(['cli/a.mts', 'cli/lib/ship/reship.sh', 'docs/x.md'], grep)).toEqual([
+      'related-tests: 1 staged path(s) have no import-graph tests — not run here, CI will:',
+      '  cli/lib/ship/reship.sh ← reship.test.mts, reship-anchor.test.mts, w.test.mts (+1)',
+    ]);
+  });
+
+  it('does not report a forced test as not run', () => {
+    const grep = vi.fn(
+      (_root: string, _needles: string[]): Hits =>
+        new Map([['reship.sh', [SCRUB, 'cli/__tests__/reship.test.mts']]]),
+    );
+    expect(logged(['cli/lib/ship/reship.sh'], grep, [SCRUB, REACH])).toEqual([
+      'related-tests: 1 staged path(s) have no import-graph tests — not run here, CI will:',
+      '  cli/lib/ship/reship.sh ← reship.test.mts',
+    ]);
+  });
+
+  // A doc test selected through its glob edge ran, so only the tests naming it that did not stay.
+  it('does not report a graph-selected doc test as not run', () => {
+    const doc = 'cli/__tests__/root-routing-doc.test.mts';
+    const other = 'gate-engine/judge/__tests__/codex-home.test.mts';
+    const grep = vi.fn(
+      (_root: string, _needles: string[]): Hits => new Map([['AGENTS.md', [doc, other]]]),
+    );
+    expect(logged(['AGENTS.md'], grep, [doc, REACH])).toEqual([
+      'related-tests: 1 staged path(s) have no import-graph tests — not run here, CI will:',
+      '  AGENTS.md ← codex-home.test.mts',
+    ]);
+  });
+
+  it('prints nothing when every test naming the path ran', () => {
+    const doc = 'cli/__tests__/root-routing-doc.test.mts';
+    const grep = vi.fn(
+      (_root: string, _needles: string[]): Hits => new Map([['AGENTS.md', [doc]]]),
+    );
+    expect(logged(['AGENTS.md'], grep, [doc, REACH])).toEqual([]);
+  });
+
+  // A nested script forces nothing, so a test naming it really was not run and stays listed.
+  it('still lists the scrub test for a staged path that did not force it', () => {
+    const grep = vi.fn((_root: string, _needles: string[]): Hits => new Map([['x.sh', [SCRUB]]]));
+    expect(logged(['cli/lib/ship/review/x.sh'], grep)).toEqual([
+      'related-tests: 1 staged path(s) have no import-graph tests — not run here, CI will:',
+      '  cli/lib/ship/review/x.sh ← vitest-setup-env-scrub.test.mts',
+    ]);
+  });
+
+  // One git lookup per run, however many paths: a docs commit stages dozens.
+  it('looks every unmapped basename up in one batch, once each', () => {
+    const grep = vi.fn((_root: string, _needles: string[]): Hits => new Map());
+    logged(['cli/lib/ship/reship.sh', 'dist/cli/lib/ship/reship.sh', 'docs/x.md'], grep);
+    expect(grep.mock.calls).toEqual([['/repo', ['reship.sh', 'x.md']]]);
+  });
+
+  it('prints nothing for module paths or for paths no test names', () => {
+    const grep = vi.fn((_root: string, _needles: string[]): Hits => new Map());
+    expect(logged(['cli/a.mts', 'src/b.json'], grep)).toEqual([]);
+    expect(grep).not.toHaveBeenCalled();
+    expect(logged(['docs/x.md'], grep)).toEqual([]);
+  });
+
+  it('stays silent when the lookup fails', () => {
+    const grep = (): Hits => {
+      throw new Error('git grep failed');
+    };
+    expect(logged(['cli/lib/ship/reship.sh'], grep)).toEqual([]);
   });
 });

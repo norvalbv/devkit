@@ -1,12 +1,15 @@
 /**
  * What the related-tests gate prints about its selection before vitest starts: the staged paths that
  * pull in the most test files, the change against the previous attempt, and the slowest selected files.
+ * After the run it names the staged paths no selected test covers.
  */
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { basename, extname, join, relative } from 'node:path';
 import { z } from 'zod';
 import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mts';
 import { telemetrySink } from '../../../../gate-engine/judge/run-context.mts';
+import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mts';
 import { scanBackward } from '../../ship/digest/tail.mts';
 
 const SELECTION_EVENT = 'related_tests_selection';
@@ -136,10 +139,11 @@ export function recordSelection(report: string, root: string, files: number): vo
 const SCRUB_TEST = 'cli/__tests__/vitest-setup-env-scrub.test.mts';
 const SCRUB_INPUT_RE =
   /^cli\/lib\/ship\/[^/]+\.sh$|^vitest\.setup\.mjs$|^vitest(\.e2e)?\.config\.mjs$/;
-// The agent-asset parity test reads hook sources, their projections and the selection from disk.
+// The agent-asset parity test reads agent and hook sources, their projections and the selection
+// from disk. Skill projections are left to the skill-projection gate.
 const PARITY_TEST = 'cli/__tests__/agent-asset-projection-parity.test.mts';
 const PARITY_INPUT_RE =
-  /^agents-hooks\/|^\.(claude|codex|cursor)\/hooks\/|^\.devkit\/config\.json$/;
+  /^agents(-hooks)?\/|^\.(claude|codex|cursor)\/(hooks|agents)\/|^\.devkit\/(config|agents-manifest|agent-hooks-manifest)\.json$/;
 
 const FORCED: readonly (readonly [RegExp, string])[] = [
   [SCRUB_INPUT_RE, SCRUB_TEST],
@@ -150,4 +154,79 @@ const FORCED: readonly (readonly [RegExp, string])[] = [
 export function forcedTests(staged: Iterable<string>): string[] {
   const paths = [...staged];
   return FORCED.filter(([re]) => paths.some((p) => re.test(p))).map(([, test]) => test);
+}
+
+// Extensions vite can hold in its module graph; any other staged path never selects a test.
+const MODULE_RE = /\.[cm]?[jt]sx?$|\.json$/;
+
+/** Staged paths `vitest related` cannot map to a test, such as shell scripts and templates. */
+export function unmappedPaths(paths: string[]): string[] {
+  return paths.filter((p) => !MODULE_RE.test(p));
+}
+
+type Grep = (root: string, needles: string[]) => ReadonlyMap<string, Iterable<string>>;
+
+// `reship.test.mts` first, then `reship-*.test.mts`, then any other test naming reship.sh.
+function nameRank(test: string, stem: string): number {
+  if (test === `${stem}.test.mts`) return 0;
+  return test.startsWith(stem) ? 1 : 2;
+}
+
+/** The commit-index test files naming each needle: one ls-files and one grep however many there are. */
+function gitGrepTests(root: string, needles: string[]): Map<string, Set<string>> {
+  const env = commitIndexEnv(root);
+  const ls = spawnSync('git', ['ls-files', '--cached', '-z'], { cwd: root, env, encoding: 'utf8' });
+  const counts = new Map<string, number>();
+  for (const f of ls.stdout.split('\0')) {
+    if (f && !f.startsWith('dist/')) counts.set(basename(f), (counts.get(basename(f)) ?? 0) + 1);
+  }
+  // A basename several sources share (README.md, check.sh) names none of them; dist/ only mirrors.
+  const named = needles.filter((n) => (counts.get(n) ?? 0) < 2);
+  const hits = new Map<string, Set<string>>();
+  if (!named.length) return hits;
+  // -o prints `file\0match` per hit; -w keeps a test naming reship.sh from naming ship.sh.
+  const args = ['grep', '--cached', '-zowF', ...named.flatMap((n) => ['-e', n])];
+  const r = spawnSync('git', [...args, '--', ':(glob)**/*.test.mts'], {
+    cwd: root,
+    env,
+    encoding: 'utf8',
+  });
+  if (r.status === 1) return hits;
+  if (r.status !== 0) throw new Error(r.stderr || 'git grep failed');
+  for (const [file, match] of r.stdout.split('\n').map((l) => l.split('\0'))) {
+    if (match) hits.set(match, (hits.get(match) ?? new Set()).add(file));
+  }
+  return hits;
+}
+
+/** Names each unmapped staged path and the tests that mention it, minus the repo-relative `ran`. */
+export function noteUnmapped(
+  root: string,
+  paths: string[],
+  ran: Iterable<string>,
+  grep: Grep = gitGrepTests,
+): void {
+  try {
+    const unmapped = unmappedPaths(paths);
+    if (!unmapped.length) return;
+    const hits = grep(root, [...new Set(unmapped.map((p) => basename(p)))]);
+    const done = new Set(ran);
+    const lines = unmapped.flatMap((p) => {
+      const stem = basename(p, extname(p));
+      const tests = [...(hits.get(basename(p)) ?? [])]
+        .filter((t) => !done.has(t))
+        .map((t) => basename(t))
+        .sort((a, b) => nameRank(a, stem) - nameRank(b, stem));
+      if (!tests.length) return [];
+      const more = tests.length > 3 ? ` (+${tests.length - 3})` : '';
+      return [`  ${p} ← ${tests.slice(0, 3).join(', ')}${more}`];
+    });
+    if (!lines.length) return;
+    console.log(
+      `related-tests: ${lines.length} staged path(s) have no import-graph tests — not run here, CI will:`,
+    );
+    console.log(lines.join('\n'));
+  } catch {
+    // Disclosure only: a failed lookup never changes the gate's verdict.
+  }
 }
