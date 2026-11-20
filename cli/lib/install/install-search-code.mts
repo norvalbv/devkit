@@ -164,8 +164,12 @@ export function installSearchCode(
   console.log('  ℹ needs the search-code engine + Ollama. Install once, then index this repo:');
   console.log('      bun add -g git+ssh://git@github.com/norvalbv/search-code.git');
   console.log('      search-code index');
+  printCodebaseRegistration(cwd);
+}
+
+/** Gates register and search the primary checkout, so a linked worktree's opt-in alone is not enough. */
+function printCodebaseRegistration(cwd: string): void {
   const primary = realpathSync(primaryCheckout(cwd) ?? cwd);
-  // Gates register and search the primary checkout, so a linked worktree's opt-in alone is not enough.
   if (primary !== realpathSync(cwd) && !existsSync(join(primary, SEARCH_CODE_CONFIG))) {
     console.log(
       `  ℹ gate reviewers search the primary checkout: run this there too, in ${primary}`,
